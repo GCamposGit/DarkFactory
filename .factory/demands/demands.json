@@ -9918,5 +9918,317 @@
     "dependencies": [],
     "created_at": "2026-10-22T01:44:02.483405Z",
     "updated_at": "2026-10-22T01:44:02.483405Z"
+  },
+  {
+    "id": "USR-342",
+    "project_id": "darkfac",
+    "title": "Investigar perda de worker remoto durante portao oficial de merge",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "infra",
+      "harness"
+    ],
+    "problem_statement": "Em 2026-10-22, candidato 29b2d2bc: worker 100.77.130.5:8080 nao estabilizou /health; worker 100.78.181.90:8080 recebeu job caf5dce36de94dc684199a038d146280, passou syntax_and_types em 6.7s e ficou inacessivel durante unit_and_integration_tests_parallel. REMOTE_JOB_LOST: worker_unreachable, 3 sondagens falharam, remote_elapsed_sec=724.2. Investigar indisponibilidade e recuperacao sem atribuir falha ao candidato.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar causa da indisponibilidade com evidencia do worker e conectividade.",
+      "Executar portao oficial completo em worker saudavel e comprovar resultado.",
+      "Verificar que perda do worker encerra ou recupera o job sem execucao duplicada."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T02:22:30.838263Z",
+    "updated_at": "2026-10-22T02:22:30.838270Z"
+  },
+  {
+    "id": "USR-343",
+    "project_id": "darkfac",
+    "title": "Publicacao de protegidos por aprovacao no Hub (fim do ritual manual de portao+push)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21-22/10 cinco OAs (041/045/046/050/052) exigiram do owner o mesmo ritual: worktree, git apply de patch, portao local de 30-90 min, push direto ou merge --admin. Houve 3 tentativas falhas (runner apontando para o checkout sujo, timeout local por concorrencia, worker travado). O USR-228 ja criou o registro de autorizacao do owner (.factory/governance/authorizations/<id>.json na base confiavel) que o guard aceita. Falta o fluxo: agente abre PR com o patch protegido; o Hub mostra botao 'Aprovar publicacao protegida' que grava o registro vinculado a ticket, caminhos exatos e sha do candidato; a esteira roda o portao remoto e mergeia sozinha.",
+    "core_journey": [
+      "Em 21-22/10 cinco OAs (041/045/046/050/052) exigiram do owner o mesmo ritual: worktree, git apply de patch, portao local de 30-90 min, push direto ou merge --admin. Houve 3 tentativas falhas (runner apontando para o checkout sujo, timeout local por concorrencia, worker travado). O USR-228 ja criou o registro de autorizacao do owner (.factory/governance/authorizations/<id>.json na base confiavel) que o guard aceita. Falta o fluxo: agente abre PR com o patch protegido; o Hub mostra botao 'Aprovar publicacao protegida' que grava o registro vinculado a ticket, caminhos exatos e sha do candidato; a esteira roda o portao remoto e mergeia sozinha."
+    ],
+    "non_goals": [
+      "Nao relaxar o guard nem permitir autoaprovacao por agente"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "OA de protegido vira um unico clique de aprovacao no Hub com diff visivel",
+      "Registro de autorizacao amarrado a ticket, caminhos e sha; sha diferente invalida",
+      "Portao roda em worker remoto e merge acontece sem comando do owner",
+      "Teste prova que flag de ambiente sozinha continua nao autorizando",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:19:41.449353Z",
+    "updated_at": "2026-10-22T09:19:41.449353Z"
+  },
+  {
+    "id": "USR-344",
+    "project_id": "darkfac",
+    "title": "Worker de teste se auto-recupera quando fica busy com CPU ociosa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10 o grokbox respondeu busy=True, active_runs=1, queue_length=1 por mais de 45 min com CPU 2,4%; o portao do owner falhou como 'unstable/unreachable' ate o owner chamar /system/update e /system/restart manualmente. Mesma familia do incidente de 15/10 (OA-023).",
+    "core_journey": [
+      "Em 21/10 o grokbox respondeu busy=True, active_runs=1, queue_length=1 por mais de 45 min com CPU 2,4%; o portao do owner falhou como 'unstable/unreachable' ate o owner chamar /system/update e /system/restart manualmente. Mesma familia do incidente de 15/10 (OA-023)."
+    ],
+    "non_goals": [
+      "Nao matar job com progresso real"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Worker com job ativo sem progresso (CPU < 5% e sem saida de log) por 10 min marca o job como perdido e se reinicia sozinho",
+      "O dispatcher reenfileira o job perdido no mesmo ou em outro worker com [REMOTE_RETRY]",
+      "Evento registrado na telemetria e alerta no Telegram ops",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:22:06.495119Z",
+    "updated_at": "2026-10-22T09:22:06.495119Z"
+  },
+  {
+    "id": "USR-345",
+    "project_id": "darkfac",
+    "title": "Hub: health do projeto quebra com RoadmapHealth sem atributo status",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10 GET https://darkhub.ggcampos.com/api/portfolio/projects/pilot-hello devolveu health_status=healthy com health_details.error informando que o objeto RoadmapHealth nao tem atributo status: o calculo de saude do portfolio acessa um atributo inexistente e mascara o erro como healthy.",
+    "core_journey": [
+      "Em 22/10 GET https://darkhub.ggcampos.com/api/portfolio/projects/pilot-hello devolveu health_status=healthy com health_details.error informando que o objeto RoadmapHealth nao tem atributo status: o calculo de saude do portfolio acessa um atributo inexistente e mascara o erro como healthy."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "GET /api/portfolio/projects/ID nao traz erro de atributo em health_details",
+      "Falha real no calculo de saude nao vira healthy (teste de regressao)",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:36:39.681403Z",
+    "updated_at": "2026-10-22T09:36:39.681403Z"
+  },
+  {
+    "id": "USR-346",
+    "project_id": "darkfac",
+    "title": "Runs parados por falta de cota nunca retomam sozinhos (pedido infra sem probe_cmd)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10 madrugada 7 runs (USR-279 e marcos M3-M7 do piloto: dem-6f1d432a760f, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30, dem-173a2aa6f995; e o canario dem-e365b0bd6553) estouraram o limite de 6h esperando cota em development e foram para waiting_human com OA-HR-run-*-development no Hub. core/line/route_wait.py RouteWaiter cria HumanRequest(kind=infra) sem probe_cmd, e core/orchestrator/cloud_worker.py sweep de probes (linha ~1119) pula pedidos sem probe_cmd: nada retoma o job quando a cota volta (em 22/10 codex 36%% e grok 19,6%% ja dariam rota). O owner viu 13 itens duplicados no Hub (OA-HR + waiting_human por marco). O OA-HR do canario segue aberto mesmo com o run cancelado.",
+    "core_journey": [
+      "Em 21/10 madrugada 7 runs (USR-279 e marcos M3-M7 do piloto: dem-6f1d432a760f, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30, dem-173a2aa6f995; e o canario dem-e365b0bd6553) estouraram o limite de 6h esperando cota em development e foram para waiting_human com OA-HR-run-*-development no Hub. core/line/route_wait.py RouteWaiter cria HumanRequest(kind=infra) sem probe_cmd, e core/orchestrator/cloud_worker.py sweep de probes (linha ~1119) pula pedidos sem probe_cmd: nada retoma o job quando a cota volta (em 22/10 codex 36%% e grok 19,6%% ja dariam rota). O owner viu 13 itens duplicados no Hub (OA-HR + waiting_human por marco). O OA-HR do canario segue aberto mesmo com o run cancelado."
+    ],
+    "non_goals": [
+      "Nao relaxar o piso de 15%% de cota"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "HumanRequest infra de no_route_available leva probe_cmd deterministico que passa quando pick() devolve rota para a etapa",
+      "O sweep retoma o job sozinho quando a cota volta e fecha o espelho OA-HR (teste)",
+      "Runs ja parados (lista do problema) sao retomados ou fechados por migracao/varredura unica, sem acao do owner",
+      "OA-HR de run cancelado e fechado automaticamente",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:52:45.740519Z",
+    "updated_at": "2026-10-22T09:52:45.740519Z"
+  },
+  {
+    "id": "USR-347",
+    "project_id": "darkfac",
+    "title": "Roteador sem rota com Grok a 17,4%% e probe Anthropic ok mas snapshot parado ha 32h",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10 06:55 python run_ticket.py USR-346 saiu com 'Nenhuma rota disponivel'. Log: codex pulado (codex_headless_visible_windows); 'Snapshot for anthropic is stale (115537.9 s)... probe provider=anthropic outcome=ok' seguido de 'Quota data for anthropic is older than 3600.0s (probe_unavailable); failing closed' -- o probe teve sucesso mas o snapshot nao foi atualizado; grok com 17,4%% restante (acima do piso de 15%%) nem foi avaliado/registrado no log. Resultado: fila de desenvolvimento parada no Notebook com conta saudavel.",
+    "core_journey": [
+      "Em 22/10 06:55 python run_ticket.py USR-346 saiu com 'Nenhuma rota disponivel'. Log: codex pulado (codex_headless_visible_windows); 'Snapshot for anthropic is stale (115537.9 s)... probe provider=anthropic outcome=ok' seguido de 'Quota data for anthropic is older than 3600.0s (probe_unavailable); failing closed' -- o probe teve sucesso mas o snapshot nao foi atualizado; grok com 17,4%% restante (acima do piso de 15%%) nem foi avaliado/registrado no log. Resultado: fila de desenvolvimento parada no Notebook com conta saudavel."
+    ],
+    "non_goals": [
+      "Nao relaxar o piso de 15%%"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Probe Anthropic com outcome=ok grava snapshot novo e o roteador usa o valor medido",
+      "Grok acima do piso e elegivel para development no Notebook, ou o log diz o motivo exato da exclusao",
+      "Teste reproduz o caso do log de 22/10",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:56:47.415028Z",
+    "updated_at": "2026-10-22T09:56:47.415028Z"
+  },
+  {
+    "id": "USR-348",
+    "project_id": "darkfac",
+    "title": "Hub mostra acoes do owner desatualizadas: redeploy pula merge so de dados mas o ledger vive na imagem",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10, apos os merges #569 (fecha OA-047/052) e #573 (cria OA-053), /api/interventions/priority ainda listava OA-047 e OA-052 e nao listava OA-053; /health seguia em 40861ee4. scripts/dokploy_redeploy.py (plan_darkhub_deploy, core/infra/deploy_classifier.py da USR-207) classifica .factory/** como so dados e nao redeploya, mas o Hub le .factory/owner_actions/owner_actions.json embutido na imagem. O owner ve fila errada no Hub.",
+    "core_journey": [
+      "Em 22/10, apos os merges #569 (fecha OA-047/052) e #573 (cria OA-053), /api/interventions/priority ainda listava OA-047 e OA-052 e nao listava OA-053; /health seguia em 40861ee4. scripts/dokploy_redeploy.py (plan_darkhub_deploy, core/infra/deploy_classifier.py da USR-207) classifica .factory/** como so dados e nao redeploya, mas o Hub le .factory/owner_actions/owner_actions.json embutido na imagem. O owner ve fila errada no Hub."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Merge que altera .factory/owner_actions ou .factory/demands aparece no Hub em ate 5 min sem rebuild completo (leitura do ledger da origin/main, volume ou deploy leve)",
+      "Teste cobre: merge so de ledger atualiza a fila do Hub",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T10:03:36.429409Z",
+    "updated_at": "2026-10-22T10:03:36.429409Z"
+  },
+  {
+    "id": "USR-349",
+    "project_id": "darkfac",
+    "title": "CI vermelho no main @9876a57: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-validation",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #578 (created_by da OA-053 sem hifen; catraca 52/52)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 9876a57179027ca71df2374a92324feb337243ef) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/39759732091. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "core_journey": [
+      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 9876a57179027ca71df2374a92324feb337243ef) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/39759732091. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O workflow 'DarkFac CI' volta a ficar verde em main (novo run concluido com sucesso depois de 9876a57).",
+      "A causa raiz esta corrigida ou coberta por teste de regressao."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T10:09:25.903124Z",
+    "updated_at": "2026-10-22T11:49:28.291319Z"
+  },
+  {
+    "id": "USR-350",
+    "project_id": "darkfac",
+    "title": "trusted-pr-policy quebra com ModuleNotFoundError pydantic ao avaliar governanca",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No PR #576 (USR-342) o job DarkFac CI / trusted-pr-policy falhou com traceback: trusted/core/orchestrator/guard.py linha 212 is_governance_evolution_authorized importa core.governance.authorization, que importa pydantic, ausente no ambiente do job. O guard deveria rejeitar com mensagem de caminho protegido, nao quebrar. Evidencia: https://github.com/GCamposGit/DarkFactory/pull/576",
+    "core_journey": [
+      "No PR #576 (USR-342) o job DarkFac CI / trusted-pr-policy falhou com traceback: trusted/core/orchestrator/guard.py linha 212 is_governance_evolution_authorized importa core.governance.authorization, que importa pydantic, ausente no ambiente do job. O guard deveria rejeitar com mensagem de caminho protegido, nao quebrar. Evidencia: https://github.com/GCamposGit/DarkFactory/pull/576"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Job trusted-pr-policy instala pydantic ou o guard nao depende dele no caminho de autorizacao",
+      "PR que toca caminho protegido sem autorizacao falha com mensagem clara do guard, sem traceback",
+      "Teste cobrindo a ausencia do traceback"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T11:44:53.262016Z",
+    "updated_at": "2026-10-22T11:44:53.262016Z"
+  },
+  {
+    "id": "USR-351",
+    "project_id": "darkfac",
+    "title": "CI vermelho no main @382e234: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-validation",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "duplicado do USR-349; CI da main verde em fcbb10a1 apos PR #578",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 382e23429e5ddb38e74d30b8557dab5bb671a348) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/39773066466. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "core_journey": [
+      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 382e23429e5ddb38e74d30b8557dab5bb671a348) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/39773066466. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O workflow 'DarkFac CI' volta a ficar verde em main (novo run concluido com sucesso depois de 382e234).",
+      "A causa raiz esta corrigida ou coberta por teste de regressao."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T11:55:43.494908Z",
+    "updated_at": "2026-10-22T12:00:17.088981Z"
   }
 ]
