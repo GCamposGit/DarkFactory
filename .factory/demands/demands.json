@@ -10319,5 +10319,38 @@
     "dependencies": [],
     "created_at": "2026-10-22T14:27:55.521220Z",
     "updated_at": "2026-10-22T14:27:55.521220Z"
+  },
+  {
+    "id": "USR-355",
+    "project_id": "darkfac",
+    "title": "Run retomado apos o limite de 6h volta a waiting_human na primeira falta de rota (USR-346 parte 2)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10, apos o deploy do USR-346 (#588) o sweep retomou os runs do piloto entre 11:53 e 12:08 (OA-HR fecharam), mas USR-279, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30 e dem-173a2aa6f995 voltaram a waiting_human(no_route_available) em minutos: o run ja passou de run_caps.wall_clock_hours, entao RouteWaiter estaciona de imediato em vez de retry com not_before. So dem-6f1d432a760f (M3) pegou rota. O OA-HR do canario cancelado (run-aebc0411b972, dem-e365b0bd6553) segue aberto, contrariando o criterio do USR-346.",
+    "core_journey": [
+      "Em 22/10, apos o deploy do USR-346 (#588) o sweep retomou os runs do piloto entre 11:53 e 12:08 (OA-HR fecharam), mas USR-279, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30 e dem-173a2aa6f995 voltaram a waiting_human(no_route_available) em minutos: o run ja passou de run_caps.wall_clock_hours, entao RouteWaiter estaciona de imediato em vez de retry com not_before. So dem-6f1d432a760f (M3) pegou rota. O OA-HR do canario cancelado (run-aebc0411b972, dem-e365b0bd6553) segue aberto, contrariando o criterio do USR-346."
+    ],
+    "non_goals": [
+      "Nao relaxar o piso de 15%%"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Run retomado por probe ganha novo orcamento de espera (ou retry com not_before) antes de estacionar de novo",
+      "Runs do piloto avancam sem aparecer como waiting_human no Hub enquanto ha cota em algum harness",
+      "OA-HR de run cancelado fecha na varredura (teste com o caso run-aebc0411b972)",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T15:13:08.756648Z",
+    "updated_at": "2026-10-22T15:13:08.756648Z"
   }
 ]
