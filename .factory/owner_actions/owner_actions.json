@@ -2159,6 +2159,47 @@
       "created_at": "2026-10-21T18:28:29Z",
       "created_by": "claude-opus-5.5",
       "resolved_at": "2026-10-21T18:32:08Z"
+    },
+    {
+      "id": "OA-052",
+      "kind": "action",
+      "title": "Publicar workflow hub-image e ativar imagem GHCR do Hub (USR-339)",
+      "priority": "high",
+      "status": "open",
+      "why": "O workflow .github/workflows/hub-image.yml e protegido; so o owner publica. Sem imagem no GHCR a chave DARKHUB_IMAGE_SOURCE=ghcr quebraria o deploy do Hub.",
+      "blocks": [
+        "USR-339"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Criar worktree limpa: git fetch e git worktree add .worktrees\\hub-image-publish a partir de origin/main",
+          "command": "git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\hub-image-publish -b chore/hub-image-workflow origin/main"
+        },
+        {
+          "text": "Aplicar o patch do workflow",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\hub-image-publish apply C:\\dev\\DarkFac\\docs\\proposals\\USR-207-ghcr-build.patch"
+        },
+        {
+          "text": "Rodar o portao dentro da worktree",
+          "command": "python C:\\dev\\DarkFac\\.worktrees\\hub-image-publish\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Commit e push da branch, abrir e mesclar o PR",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\hub-image-publish push -u origin chore/hub-image-workflow"
+        },
+        {
+          "text": "Conferir a primeira imagem: Actions (Hub image GHCR verde) e Packages darkhub com tag igual ao sha de main"
+        },
+        {
+          "text": "So entao definir DARKHUB_IMAGE_SOURCE=ghcr (variavel de usuario) e redeployar o Hub; para voltar, remover a variavel",
+          "command": "python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py --only Darkhub --wait"
+        }
+      ],
+      "verify": "Pacote darkhub no GHCR com tag do sha; redeploy imprime Waiting for ghcr.io/... e /health responde o sha novo",
+      "created_at": "2026-10-22T00:20:04Z",
+      "created_by": "claude-sonnet",
+      "resolved_at": null
     }
   ]
 }

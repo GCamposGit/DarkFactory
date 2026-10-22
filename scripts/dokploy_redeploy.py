@@ -60,8 +60,12 @@ from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     SHA_PATTERN,
+    GHCR_IMAGE_REPOSITORY,
+    IMAGE_SOURCE_GHCR,
     ComposeRenderError,
+    ghcr_image_ref,
     render_darkhub_compose as _shared_render_darkhub_compose,
+    resolve_hub_image_source,
 )
 
 DEFAULT_PROJECT = "darkfac-core"
@@ -620,25 +624,80 @@ def get_origin_main_compose(sha: str, repo_root: Path = REPO_ROOT) -> str:
     return result.stdout
 
 
-def render_darkhub_compose(source: str, sha: str) -> str:
+def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = None) -> str:
     """Bind both the Git build context and container environment to one SHA.
 
     Thin wrapper over the render shared with the line's deployment adapter
     (``core.orchestrator.compose_render``, USR-144).
     """
     try:
-        return _shared_render_darkhub_compose(source, sha)
+        return _shared_render_darkhub_compose(source, sha, image_source)
     except ComposeRenderError as exc:
         raise DokployUsageError(str(exc)) from None
 
 
-def set_compose_git_sha(transport: Transport, service: Service, payload: Dict[str, Any], sha: str, source: str) -> None:
+GHCR_TAG_TIMEOUT_SECONDS = 900.0
+GHCR_TAG_POLL_SECONDS = 15.0
+# (repository, tag) -> HTTP status of the manifest lookup (200 = exists, 404 = not yet).
+GhcrManifestProbe = Callable[[str, str], int]
+
+
+def _default_ghcr_probe(repository: str, tag: str) -> int:
+    """HEAD the GHCR manifest; needs GHCR_TOKEN or GITHUB_PAT (read:packages) for the private package."""
+    import base64
+
+    token = (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
+    headers = {
+        "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + base64.b64encode(token.encode()).decode()
+    request = urllib.request.Request(
+        f"https://ghcr.io/v2/{repository}/manifests/{tag}", headers=headers, method="HEAD"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
+def wait_for_ghcr_tag(
+    sha: str, *, probe: Optional[GhcrManifestProbe] = None, timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
+    interval: float = GHCR_TAG_POLL_SECONDS, sleep_fn: Callable[[float], None] = time.sleep,
+    clock_fn: Callable[[], float] = time.monotonic,
+) -> None:
+    """Block until ``ghcr.io/<repo>:<sha>`` exists. Raises DokployUsageError on timeout; never falls back to build."""
+    check = probe or _default_ghcr_probe
+    deadline = clock_fn() + timeout
+    last: object = "no response"
+    while True:
+        try:
+            status = check(GHCR_IMAGE_REPOSITORY, sha)
+            if status == 200:
+                return
+            last = f"HTTP {status}"
+        except Exception as exc:
+            last = type(exc).__name__
+        remaining = deadline - clock_fn()
+        if remaining <= 0:
+            raise DokployUsageError(
+                f"GHCR image {ghcr_image_ref(sha)} not published within {int(timeout)}s (last: {last}); "
+                "deploy refused, no fallback to build (check the hub-image workflow)"
+            )
+        sleep_fn(min(interval, remaining))
+
+
+def set_compose_git_sha(
+    transport: Transport, service: Service, payload: Dict[str, Any], sha: str, source: str,
+    image_source: Optional[str] = None,
+) -> None:
     """Install a raw compose file from main; preserve Dokploy's existing env."""
     if service.kind != "compose" or service.name.lower() != "darkhub":
         return
     if not isinstance(payload.get("env"), str):
         raise DokployUsageError("Darkhub compose.one has no string env; refusing to replace its settings")
-    compose_file = render_darkhub_compose(source, sha)
+    compose_file = render_darkhub_compose(source, sha, image_source)
     transport("POST", "/api/compose.update", {
         "composeId": service.service_id,
         "sourceType": "raw",
@@ -958,6 +1017,7 @@ def _run_main(
     err: Any,
     disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     ops_notifier: Optional[Callable[[str], bool]] = None,
+    ghcr_probe: Optional[GhcrManifestProbe] = None,
 ) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -996,11 +1056,16 @@ def _run_main(
         print("Darkhub deploy requires --wait so /health can prove the origin/main SHA", file=err, flush=True)
         return EXIT_USAGE_ERROR
     darkhub_compose = None
+    image_source = "build"
     if darkhub_selected:
         try:
             darkhub_compose = get_origin_main_compose(expected_sha)
-            render_darkhub_compose(darkhub_compose, expected_sha)
-        except DokployUsageError as exc:
+            image_source = resolve_hub_image_source(env)
+            render_darkhub_compose(darkhub_compose, expected_sha, image_source)
+            if image_source == IMAGE_SOURCE_GHCR:
+                print(f"Waiting for {ghcr_image_ref(expected_sha)} on GHCR...", file=out, flush=True)
+                wait_for_ghcr_tag(expected_sha, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn)
+        except (DokployUsageError, ComposeRenderError) as exc:
             print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
     if local_subject:
@@ -1084,7 +1149,7 @@ def _run_main(
                     triggered.append(svc)
                     baselines[svc.name] = None
                     continue
-                set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose)
+                set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
@@ -1328,6 +1393,7 @@ def main(
     check_main_runner: Optional[Callable[[], Tuple[int, Dict[str, Any]]]] = None,
     disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     ops_notifier: Optional[Callable[[str], bool]] = None,
+    ghcr_probe: Optional[GhcrManifestProbe] = None,
     stdout: Any = None,
     stderr: Any = None,
 ) -> int:
@@ -1361,6 +1427,7 @@ def main(
             err=err,
             disk_hygiene_runner=disk_hygiene_runner,
             ops_notifier=ops_notifier,
+            ghcr_probe=ghcr_probe,
         )
     except DokployUsageError as exc:
         print(str(exc), file=err, flush=True)

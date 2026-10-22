@@ -14,10 +14,11 @@ closed and never deploy a compose they could not read at the merged SHA.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import sys
-from typing import Callable, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,55 @@ class ComposeSourceError(RuntimeError):
     """The compose source could not be read at the requested commit."""
 
 
-def render_darkhub_compose(source: str, sha: str) -> str:
-    """Bind both the Git build context and container environment to one SHA."""
+IMAGE_SOURCE_ENV = "DARKHUB_IMAGE_SOURCE"
+IMAGE_SOURCE_BUILD = "build"
+IMAGE_SOURCE_GHCR = "ghcr"
+GHCR_IMAGE_REPOSITORY = "gcamposgit/darkhub"
+GHCR_IMAGE_PREFIX = f"ghcr.io/{GHCR_IMAGE_REPOSITORY}"
+
+_BUILD_BLOCK_RE = re.compile(
+    r"^    build:\n(?:      .*\n)+    image: darkhub:v2\.1\n    pull_policy: build\n", re.M
+)
+_CONTAINER_NAME_RE = re.compile(r"^    container_name: .*\n", re.M)
+_DEPLOY_RE = re.compile(r"^    deploy:\n", re.M)
+_START_FIRST = (
+    "    deploy:\n"
+    "      # USR-339: start-first only takes effect under Swarm/Stack mode; plain `docker compose`\n"
+    "      # ignores update_config. The healthcheck gates the traffic cut-over.\n"
+    "      update_config:\n"
+    "        order: start-first\n"
+    "        parallelism: 1\n"
+    "        monitor: 20s\n"
+    "        failure_action: rollback\n"
+    "      rollback_config:\n"
+    "        order: start-first\n"
+)
+
+
+def resolve_hub_image_source(env: Optional[Mapping[str, str]] = None) -> str:
+    """``build`` (default) or ``ghcr``, from ``DARKHUB_IMAGE_SOURCE``. Unknown values fail closed."""
+    raw = ((env if env is not None else os.environ).get(IMAGE_SOURCE_ENV) or "").strip().lower()
+    if not raw:
+        return IMAGE_SOURCE_BUILD
+    if raw not in (IMAGE_SOURCE_BUILD, IMAGE_SOURCE_GHCR):
+        raise ComposeRenderError(f"{IMAGE_SOURCE_ENV} must be 'build' or 'ghcr'")
+    return raw
+
+
+def ghcr_image_ref(sha: str) -> str:
+    return f"{GHCR_IMAGE_PREFIX}:{sha}"
+
+
+def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = None) -> str:
+    """Bind the Hub image (Git build context or GHCR tag) and container environment to one SHA.
+
+    ``image_source`` defaults to :func:`resolve_hub_image_source` (``build`` unless the owner flipped it).
+    """
     if not SHA_PATTERN.fullmatch(sha):
         raise ComposeRenderError("Darkhub build requires a full origin/main SHA")
+    mode = image_source if image_source is not None else resolve_hub_image_source()
+    if mode not in (IMAGE_SOURCE_BUILD, IMAGE_SOURCE_GHCR):
+        raise ComposeRenderError("image source must be 'build' or 'ghcr'")
     if (
         _GIT_CONTEXT not in source
         or source.count(_SHA_PLACEHOLDER) != 3
@@ -57,7 +103,15 @@ def render_darkhub_compose(source: str, sha: str) -> str:
         or "pull_policy: build" not in source
     ):
         raise ComposeRenderError("Darkhub compose lacks the pinned Git build and SHA contract")
-    return source.replace(_SHA_PLACEHOLDER, sha)
+    if mode == IMAGE_SOURCE_BUILD:
+        return source.replace(_SHA_PLACEHOLDER, sha)
+    image_lines = f"    image: {GHCR_IMAGE_PREFIX}:{_SHA_PLACEHOLDER}\n    pull_policy: always\n"
+    transformed, n_build = _BUILD_BLOCK_RE.subn(lambda _m: image_lines, source, count=1)
+    transformed, n_deploy = _DEPLOY_RE.subn(lambda _m: _START_FIRST, transformed, count=1)
+    if n_build != 1 or n_deploy != 1:
+        raise ComposeRenderError("Darkhub compose cannot be converted to the GHCR image layout")
+    transformed = _CONTAINER_NAME_RE.sub("", transformed)
+    return transformed.replace(_SHA_PLACEHOLDER, sha)
 
 
 def repository_from_url(repo_url: Optional[str]) -> Optional[str]:
@@ -128,6 +182,13 @@ def fetch_compose_at_sha(
 
 
 __all__ = [
+    "GHCR_IMAGE_PREFIX",
+    "GHCR_IMAGE_REPOSITORY",
+    "IMAGE_SOURCE_BUILD",
+    "IMAGE_SOURCE_ENV",
+    "IMAGE_SOURCE_GHCR",
+    "ghcr_image_ref",
+    "resolve_hub_image_source",
     "ComposeFetcher",
     "ComposeRenderError",
     "ComposeSourceError",

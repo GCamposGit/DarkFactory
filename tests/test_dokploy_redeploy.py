@@ -1219,7 +1219,7 @@ def test_darkhub_build_pinned_before_deploy_and_health_converges(monkeypatch: py
     ]))
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
-        ["--only", "Darkhub", "--skip-backup"], env=_ENV,
+        ["--only", "Darkhub", "--skip-backup"], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry, transport_factory=lambda url, key: transport,
         health_client=lambda: {"git_sha": "a" * 40}, stdout=out, stderr=err,
     )
@@ -1816,3 +1816,63 @@ def test_ops_notifier_redacts_secrets() -> None:
     fake_key = "sk-" + "ant-api03-" + "abcdefghijklmnopqrstuvwxyz0123456789"
     assert notify(f"Desktop token={fake_key} divergente") is True
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in sent[0]
+
+
+def _ghcr_run(monkeypatch: pytest.MonkeyPatch, probe: Any, timeout: str = "900"):
+    from core.infra import node_sync
+
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_hub", [[old], [new]])
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+        node_sync.NodeStatus(name=name, state="converged", git_sha="a" * 40)
+        for name in ("Notebook", "Desktop", "VPS")
+    ]))
+    clock = FakeClock()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--timeout", timeout], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": "a" * 40}, ghcr_probe=probe,
+        sleep_fn=clock.sleep, clock_fn=clock.now, stdout=out, stderr=err,
+    )
+    return code, transport, out.getvalue(), err.getvalue()
+
+
+def test_darkhub_ghcr_mode_waits_for_tag_then_installs_image_start_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    statuses = iter([404, 404, 200])
+    seen: List[Any] = []
+
+    def probe(repository: str, tag: str) -> int:
+        seen.append((repository, tag))
+        return next(statuses)
+
+    code, transport, _out, err = _ghcr_run(monkeypatch, probe)
+    assert code == mod.EXIT_OK, err
+    assert seen == [("gcamposgit/darkhub", "a" * 40)] * 3
+    compose = transport.post_calls[0][2]["composeFile"]
+    assert "image: ghcr.io/gcamposgit/darkhub:" + "a" * 40 in compose
+    assert "pull_policy: always" in compose
+    assert "order: start-first" in compose
+    assert "container_name:" not in compose
+    assert "build:" not in compose and "DarkFactory.git" not in compose
+    assert "DARKFAC_GIT_SHA=" + "a" * 40 in compose
+    assert transport.post_calls[1][1] == "/api/compose.deploy"
+
+
+def test_darkhub_ghcr_tag_timeout_refuses_without_build_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    code, transport, _out, err = _ghcr_run(monkeypatch, lambda repo, tag: 404)
+    assert code != mod.EXIT_OK
+    assert "not published" in err and "no fallback to build" in err
+    assert transport.post_calls == []
+
+
+def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:
+    clock = FakeClock()
+
+    def boom(repo: str, tag: str) -> int:
+        raise OSError("down")
+
+    with pytest.raises(mod.DokployUsageError, match="OSError"):
+        mod.wait_for_ghcr_tag("a" * 40, probe=boom, timeout=30, interval=10, sleep_fn=clock.sleep, clock_fn=clock.now)
