@@ -9918,5 +9918,35 @@
     "dependencies": [],
     "created_at": "2026-10-22T01:44:02.483405Z",
     "updated_at": "2026-10-22T01:44:02.483405Z"
+  },
+  {
+    "id": "USR-342",
+    "project_id": "darkfac",
+    "title": "Investigar perda de worker remoto durante portao oficial de merge",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "infra",
+      "harness"
+    ],
+    "problem_statement": "Em 2026-10-22, candidato 29b2d2bc: worker 100.77.130.5:8080 nao estabilizou /health; worker 100.78.181.90:8080 recebeu job caf5dce36de94dc684199a038d146280, passou syntax_and_types em 6.7s e ficou inacessivel durante unit_and_integration_tests_parallel. REMOTE_JOB_LOST: worker_unreachable, 3 sondagens falharam, remote_elapsed_sec=724.2. Investigar indisponibilidade e recuperacao sem atribuir falha ao candidato.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar causa da indisponibilidade com evidencia do worker e conectividade.",
+      "Executar portao oficial completo em worker saudavel e comprovar resultado.",
+      "Verificar que perda do worker encerra ou recupera o job sem execucao duplicada."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T02:22:30.838263Z",
+    "updated_at": "2026-10-22T02:22:30.838270Z"
   }
 ]
