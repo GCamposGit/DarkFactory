@@ -92,6 +92,7 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_context_policy.py": "'eval-2026-09-07' e um identificador de versao de avaliacao, armazenado verbatim; nao e uma data lida do relogio",
     "tests/test_dokploy_real_api_transport.py": "createdAt dos deployments simulados so e comparado como string com o baseline (outro createdAt fixo) em deployment_adapter; sem leitura do relogio real nessa comparacao",
     "tests/test_waiting_human_consultation.py": "linhas de seed SQL para um teste de dashboard de waiting_human; sem filtro por idade",
+    "tests/test_pilot_m3_verify.py": "CREATED_AT e 'since' em test_since_excludes_older_tickets sao comparados so entre si (ambos fixos); pilot_m3_verify.verify_m3 so le o relogio real para preencher M3Report.checked_at, campo nunca comparado a CREATED_AT em nenhum teste deste arquivo",
 }
 
 
