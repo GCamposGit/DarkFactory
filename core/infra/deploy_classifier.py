@@ -12,14 +12,19 @@ from __future__ import annotations
 from typing import Iterable
 
 REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/")
-REBUILD_FILES: frozenset[str] = frozenset(
-    {"requirements.txt", "harness.config.json", "run_hub.py"}
-)
+# ``run_hub.py`` is not copied by deploy/dokploy/Dockerfile.hub, so changing
+# this local launcher does not change the runtime shipped in the Hub image.
+REBUILD_FILES: tuple[str, ...] = ("requirements.txt", "harness.config.json")
 
 REASON_NO_DIFF = "diff desconhecido"
 REASON_RUNTIME = "toca caminho embutido na imagem"
 REASON_DATA_ONLY = "somente ledger/docs/testes (imagem inalterada)"
 REASON_SAME_SHA = "sha ja implantado"
+
+
+def image_trigger_paths() -> list[str]:
+    """Return the canonical GitHub Actions path filters for Hub image builds."""
+    return [*[f"{prefix}**" for prefix in REBUILD_PREFIXES], *REBUILD_FILES]
 
 
 def _norm(path: str) -> str:

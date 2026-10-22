@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import pytest
+import yaml
 
 from core.infra import availability_probe as probe_mod
 from core.infra import deploy_classifier as dc
@@ -47,6 +48,42 @@ def test_classify_same_sha_never_rebuilds_and_windows_paths_normalised() -> None
     assert dc.classify(A, A, None) == (False, dc.REASON_SAME_SHA)
     assert dc.classify(A, B, ["core\\x.py"])[0] is True
     assert dc.classify(A, B, [".factory\\demands\\demands.json"])[0] is False
+
+
+def test_run_hub_change_does_not_rebuild() -> None:
+    assert "run_hub.py" not in dc.runtime_paths(["run_hub.py"])
+    assert dc.needs_rebuild(["run_hub.py"]) is False
+
+
+def test_image_trigger_paths_are_the_canonical_runtime_filter() -> None:
+    triggers = dc.image_trigger_paths()
+    assert triggers == ["core/**", "hub/**", "scripts/**", "deploy/**", "requirements.txt", "harness.config.json"]
+    assert not any(path.startswith(("docs/", ".factory/")) for path in triggers)
+    assert all(path in triggers for path in (*[f"{prefix}**" for prefix in dc.REBUILD_PREFIXES], *dc.REBUILD_FILES))
+
+
+def test_workflow_patch_matches_canonical_triggers_and_parses_as_yaml(tmp_path: Path) -> None:
+    patch = (ROOT / "docs/proposals/USR-207-ghcr-build.patch").read_text(encoding="utf-8")
+    lines = patch.splitlines()
+    hunk_start = next(i for i, line in enumerate(lines) if line.startswith("@@ "))
+    match = re.fullmatch(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@ on:", lines[hunk_start])
+    assert match, "expected a counted workflow path-filter hunk"
+    hunk_lines = lines[hunk_start + 1 :]
+    assert sum(line.startswith((" ", "-")) for line in hunk_lines) == int(match.group(2))
+    assert sum(line.startswith((" ", "+")) for line in hunk_lines) == int(match.group(4))
+    workflow_path = tmp_path / ".github/workflows/hub-image.yml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text((ROOT / ".github/workflows/hub-image.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    applied = subprocess.run(["git", "apply", str(ROOT / "docs/proposals/USR-207-ghcr-build.patch")], cwd=tmp_path, capture_output=True, text=True)
+    assert applied.returncode == 0, applied.stderr
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert workflow["on"]["push"]["paths"] == dc.image_trigger_paths()
+
+
+def test_live_workflow_covers_every_runtime_trigger() -> None:
+    workflow = yaml.load((ROOT / ".github/workflows/hub-image.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    paths = workflow["on"]["push"]["paths"]
+    assert all(trigger in paths for trigger in dc.image_trigger_paths())
 
 
 # --------------------------------------------------------------------------- plan

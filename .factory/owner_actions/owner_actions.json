@@ -2343,6 +2343,46 @@
       "created_at": "2026-10-22T19:20:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-057",
+      "kind": "action",
+      "title": "Publicar filtro estreito do workflow Hub image (USR-207 T2)",
+      "priority": "medium",
+      "status": "open",
+      "why": "O workflow .github/workflows/hub-image.yml e protegido e atualmente ainda dispara para docs/** e .factory/**. A definicao canonica image_trigger_paths() remove esses caminhos e mantem os caminhos que alteram o runtime do Hub. Somente o owner pode publicar a mudanca no workflow protegido.",
+      "blocks": [
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell no Desktop e crie uma worktree limpa a partir de origin/main.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin; git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\hub-image-filter -b chore/hub-image-filter origin/main"
+        },
+        {
+          "text": "Aplique o patch versionado, que atualiza o workflow existente.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\hub-image-filter apply C:\\dev\\DarkFac\\docs\\proposals\\USR-207-ghcr-build.patch"
+        },
+        {
+          "text": "Execute o portao oficial no candidato da worktree e prossiga somente com [HARNESS_PASS].",
+          "command": "python C:\\dev\\DarkFac\\.worktrees\\hub-image-filter\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Adicione o workflow, faca commit e publique a branch para abrir e mesclar o PR.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\hub-image-filter add .github/workflows/hub-image.yml; git -C C:\\dev\\DarkFac\\.worktrees\\hub-image-filter commit -m \"ci: restringe gatilho da imagem Hub [USR-207]\"; git -C C:\\dev\\DarkFac\\.worktrees\\hub-image-filter push -u origin chore/hub-image-filter"
+        },
+        {
+          "text": "No GitHub, abra o PR da branch chore/hub-image-filter contra main, confira que a alteracao remove apenas docs/** e .factory/** do filtro paths e mescle o PR."
+        },
+        {
+          "text": "Depois do merge, confira Actions: uma mudanca em core/** executa Hub image (GHCR), enquanto um merge que altera somente docs/ledger nao cria execucao nem nova imagem GHCR."
+        }
+      ],
+      "verify": "O workflow vivo continua cobrindo core/**, hub/**, scripts/**, deploy/**, requirements.txt e harness.config.json; um merge somente de docs/ledger nao dispara o workflow Hub image nem publica tag GHCR.",
+      "created_at": "2026-10-22T22:45:48Z",
+      "created_by": "codex",
+      "resolved_at": null
     }
   ]
 }

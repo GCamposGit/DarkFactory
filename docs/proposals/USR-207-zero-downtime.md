@@ -7,7 +7,7 @@ Estado: parte entregue no repositorio, parte proposta (exige acao do owner no Do
 | Item | Onde |
 | --- | --- |
 | Todo `fetch` do frontend passa por um unico helper com retry/backoff e banner "Hub atualizando, reconectando..." | `hub/frontend/hub_net.js` (`hubNetFetch`), carregado primeiro em `index.html`; teste estatico `tests/test_hub_deploy_usr207.py::test_no_raw_fetch_outside_the_helper` |
-| Classificador de caminhos alterados (ledger/docs/testes nao reconstroem a imagem) | `core/infra/deploy_classifier.py` |
+| Classificador canonico dos caminhos que publicam imagem (`core/`, `hub/`, `scripts/`, `deploy/`, `requirements.txt`, `harness.config.json`) | `core/infra/deploy_classifier.py::image_trigger_paths`; `run_hub.py` nao e copiado por `deploy/dokploy/Dockerfile.hub` |
 | Um merge => no maximo um deploy: pula se o sha ja esta no ar, pula merge so de dados, junta-se a um deploy `running` iniciado pelo autoDeploy do Dokploy; `--force` ignora | `scripts/dokploy_redeploy.py` (`plan_darkhub_deploy`) |
 | `node_sync` nao trata VPS em sha antigo como divergente quando a imagem nao mudou (evita redeploy em loop) | `core/infra/node_sync.py` (`verify`) |
 | Sonda externa de `/health` com alerta no Telegram ops apos 120 s e aviso de recuperacao | `core/infra/availability_probe.py` |
@@ -36,13 +36,13 @@ Causa raiz: `docker compose up` recria o container parando o antigo antes de sub
 
 ### 2.1 Imagem construida fora da VPS
 
-Aplicar `docs/proposals/USR-207-ghcr-build.patch` (cria `.github/workflows/hub-image.yml`, protegido pelo guard):
+O workflow `.github/workflows/hub-image.yml` ja foi publicado pelo owner (OA-052). O arquivo protegido ainda aceita `docs/**` e `.factory/**`, embora esses caminhos nao alterem a imagem. O patch ao lado agora atualiza o workflow existente para usar a mesma lista canonica de `image_trigger_paths()`; merges so de ledger/docs deixam de construir imagem:
 
 ```powershell
 git -C C:\dev\DarkFac apply docs/proposals/USR-207-ghcr-build.patch
 ```
 
-Depois o compose passa a usar a imagem (sem `build:`), diff exato do servico `darkhub`:
+O compose ja usa a imagem GHCR (OA-053 confirmou `DARKHUB_IMAGE_SOURCE=ghcr` ativo e `/health` no SHA novo), sem `build:`; diff exato do servico `darkhub`:
 
 ```diff
 -    build:
@@ -59,27 +59,27 @@ Depois o compose passa a usar a imagem (sem `build:`), diff exato do servico `da
      hostname: darkhub-cloud-247
 ```
 
-Efeitos em codigo que hoje exige `build:`: `core/orchestrator/compose_render.py` (`render_darkhub_compose` valida o contexto Git fixado) e o teste `test_darkhub_build_pinned_before_deploy_and_health_converges` precisam ser adaptados na mesma entrega; o redeploy deve esperar o workflow publicar a tag do sha antes de acionar o Dokploy. O pacote GHCR precisa ficar privado com credencial de pull no Dokploy (registry).
+O redeploy usa a tag do SHA publicado no GHCR. A credencial de pull do registry GHCR no Dokploy e a sonda agendada no Notebook foram verificadas na OA-044; a credencial do runner `GHCR_TOKEN` foi configurada na OA-053.
 
 ### 2.1b Chave de ativacao (USR-339)
 
 O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOURCE` (ambiente de quem roda `scripts/dokploy_redeploy.py` e do `DokployDeploymentAdapter`):
 
 - `build` (padrao): comportamento de hoje, build do contexto Git na VPS.
-- `ghcr`: `render_darkhub_compose` troca `build:`/`pull_policy: build` por `image: ghcr.io/gcamposgit/darkhub:<sha>` + `pull_policy: always`, remove `container_name` e injeta `deploy.update_config.order: start-first` (+ `rollback_config`). O redeploy espera a tag do sha no GHCR (HEAD no manifesto; token em `GHCR_TOKEN` ou `GITHUB_PAT` com `read:packages`; timeout `--timeout`, padrao 900 s) e, se nao existir, recusa com erro explicito, sem voltar para build.
+- `ghcr`: `render_darkhub_compose` troca `build:`/`pull_policy: build` por `image: ghcr.io/gcamposgit/darkhub:<sha>` + `pull_policy: always`, remove `container_name` e injeta `deploy.update_config.order: start-first` (+ `rollback_config`). O redeploy espera a tag do sha no GHCR (HEAD no manifesto; token em `GHCR_TOKEN` ou `GITHUB_PAT` com `read:packages`; timeout `--timeout`, padrao 900 s) e, se nao existir, recusa com erro explicito, sem voltar para build. A espera compartilhada pelo adapter da linha ainda e lacuna de codigo acompanhada no ticket de implementacao.
 - Valor desconhecido falha fechado. `start-first` so vale em modo Stack/Swarm; no Compose simples o Dokploy ignora `update_config` (rota 2 da secao 2.2 cobre isso).
 - Limite conhecido: a espera da tag esta no CLI `dokploy_redeploy.py`; o adapter da linha apenas renderiza.
 
-### 2.1c Ativacao passo a passo (owner, OA registrada no DarkHub)
+### 2.1c Publicacao do filtro estreito (owner, OA-057 no DarkHub)
 
-1. Abra o PowerShell e crie uma worktree limpa:
-   `git -C C:\dev\DarkFac fetch origin` e `git -C C:\dev\DarkFac worktree add C:\dev\DarkFac\.worktrees\hub-image-publish -b chore/hub-image-workflow origin/main`
-2. Aplique o patch: `git -C C:\dev\DarkFac\.worktrees\hub-image-publish apply C:\dev\DarkFac\docs\proposals\USR-207-ghcr-build.patch`
-3. Rode o portao: `python C:\dev\DarkFac\core\harness\runner.py --quick` (dentro da worktree, ajustando o caminho).
-4. Commit e push: `git -C C:\dev\DarkFac\.worktrees\hub-image-publish add .github/workflows/hub-image.yml`, `git -C ... commit -m "ci: publica imagem do Hub no GHCR [USR-207]"`, `git -C ... push -u origin chore/hub-image-workflow` e abra/mescle o PR.
-5. Verifique: aba Actions do GitHub, workflow "Hub image (GHCR)" verde; em github.com/GCamposGit > Packages deve existir `darkhub` com a tag igual ao sha do commit em `main`.
-6. So depois de a primeira imagem existir: defina `DARKHUB_IMAGE_SOURCE=ghcr` (Variaveis de Ambiente de Usuario do Windows, ou no ambiente do runner/orquestrador) e rode `python C:\dev\DarkFac\scripts\dokploy_redeploy.py --only Darkhub --wait`.
-7. Volte para `build` removendo a variavel se algo falhar.
+1. Abra o PowerShell e crie uma worktree limpa a partir de `origin/main`:
+   `git -C C:\dev\DarkFac fetch origin` e `git -C C:\dev\DarkFac worktree add C:\dev\DarkFac\.worktrees\hub-image-filter -b chore/hub-image-filter origin/main`.
+2. Aplique o patch de atualizacao do workflow existente: `git -C C:\dev\DarkFac\.worktrees\hub-image-filter apply C:\dev\DarkFac\docs\proposals\USR-207-ghcr-build.patch`.
+3. Rode o portao na worktree candidata: `python C:\dev\DarkFac\.worktrees\hub-image-filter\core\harness\runner.py --quick`.
+4. Faca commit e push da branch: `git -C C:\dev\DarkFac\.worktrees\hub-image-filter add .github/workflows/hub-image.yml`, `git -C C:\dev\DarkFac\.worktrees\hub-image-filter commit -m "ci: restringe gatilho da imagem Hub [USR-207]"` e `git -C C:\dev\DarkFac\.worktrees\hub-image-filter push -u origin chore/hub-image-filter`; abra e mescle o PR.
+5. Verifique no GitHub Actions que o workflow "Hub image (GHCR)" ainda publica em merges que alteram runtime e que um merge somente de `docs/` ou `.factory/` nao dispara nova imagem GHCR. O modo GHCR ja esta ativo; nao e necessario reconfigura-lo.
+
+Estado owner verificado em 22/10/2026: OA-044 concluiu autoDeploy desligado e sonda agendada com `pythonw.exe` absoluto; OA-052 publicou o workflow protegido; OA-053 gravou `GHCR_TOKEN` e confirmou modo GHCR ativo. OA-057 registra somente a publicacao deste filtro estreito.
 
 ### 2.2 Start-first gated por healthcheck
 
