@@ -1932,7 +1932,7 @@
         "USR-279"
       ],
       "depends_on": [
-        "OA-043"
+        "USR-340"
       ],
       "steps": [
         {
@@ -1958,6 +1958,11 @@
           "at": "2026-10-22T00:20:00Z",
           "outcome": "evidence:keep_open",
           "note": "Dependencia OA-043 concluida; aguardando aviso do agente apos deploy do Hub com pilot-hello registrado."
+        },
+        {
+          "at": "2026-10-22T00:40:00Z",
+          "outcome": "evidence:keep_open",
+          "note": "Owner enviou o /demand em 21/10; bot recusou (Hub cria TelegramGateway sem intake_service). Bloqueada pelo USR-340; reenviar a mesma mensagem depois do deploy dele."
         }
       ]
     },
