@@ -1,0 +1,120 @@
+[
+  {
+    "id": "T1",
+    "title": "Espera da imagem GHCR compartilhada entre o CLI e o adapter da linha (fail-closed)",
+    "goal": "Tirar wait_for_ghcr_tag do CLI e colocar em core/orchestrator/compose_render.py, usar no DokployDeploymentAdapter antes de qualquer compose.update/compose.deploy e falhar na hora quando o manifesto responder 401/403.",
+    "files_hint": [
+      "core/orchestrator/compose_render.py",
+      "core/orchestrator/deployment_adapter.py",
+      "scripts/dokploy_redeploy.py",
+      "tests/test_compose_render.py",
+      "tests/test_dokploy_redeploy.py",
+      "tests/test_dokploy_release_identity.py"
+    ],
+    "acceptance": [
+      "wait_for_ghcr_tag, GhcrManifestProbe e a sonda padrao do manifesto vivem em core/orchestrator/compose_render.py; scripts/dokploy_redeploy.py reexporta os mesmos nomes e parametros (--timeout, ghcr_probe, sleep_fn, clock_fn) sem mudanca de comportamento observavel",
+      "Em modo ghcr, DokployDeploymentAdapter._render_compose_at_sha resolve o image_source explicitamente e espera a tag ghcr.io/gcamposgit/darkhub:<sha completo> antes de instalar o compose; tag ausente devolve o codigo de erro curto release_identity_image_missing e nao ha nenhuma chamada compose.update nem compose.deploy",
+      "Nem o CLI nem o adapter voltam para build na VPS quando a imagem nao existe (nenhum caminho de fallback), e nenhuma mensagem de erro imprime token, env ou corpo de compose",
+      "Manifesto respondendo 401 ou 403 aborta imediatamente, sem consumir o timeout, com mensagem que aponta GHCR_TOKEN/GITHUB_PAT com read:packages",
+      "Timeout e intervalo da espera do adapter sao injetaveis e o padrao usado nos testes nao dorme tempo real",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_dokploy_release_identity.py: adapter em modo ghcr com tag ausente -> release_identity_image_missing e transporte sem nenhum POST",
+      "tests/test_dokploy_release_identity.py: adapter em modo ghcr com tag presente -> compose.update recebe image: ghcr.io/gcamposgit/darkhub:<sha>, pull_policy: always, order: start-first e sem container_name",
+      "tests/test_compose_render.py: wait_for_ghcr_tag retorna em 200, tolera excecao da sonda, expira sem fallback e aborta de imediato em 401/403",
+      "tests/test_dokploy_redeploy.py: os testes ghcr existentes continuam verdes apontando para o nome reexportado"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Uma unica imagem GHCR por merge: fonte unica dos caminhos de runtime do Hub",
+    "goal": "Fazer core/infra/deploy_classifier.py ser a definicao unica de 'merge que altera o runtime do Hub', alinhar o patch do workflow a essa definicao e travar a consistencia por teste estatico; registrar a OA para o owner publicar o gatilho estreito.",
+    "files_hint": [
+      "core/infra/deploy_classifier.py",
+      "docs/proposals/USR-207-ghcr-build.patch",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py",
+      ".factory/owner_actions/owner_actions.json"
+    ],
+    "acceptance": [
+      "core/infra/deploy_classifier.py expoe image_trigger_paths() devolvendo o gatilho canonico derivado de REBUILD_PREFIXES/REBUILD_FILES (core/**, hub/**, scripts/**, deploy/**, requirements.txt, harness.config.json), sem docs/** e sem .factory/**",
+      "run_hub.py sai de REBUILD_FILES com comentario citando que deploy/dokploy/Dockerfile.hub nao o copia; os testes parametrizados de needs_rebuild/classify sao atualizados e seguem verdes",
+      "docs/proposals/USR-207-ghcr-build.patch e regerado com o gatilho de image_trigger_paths(), cabecalho de hunk coerente com o numero de linhas adicionadas, e o corpo do workflow continua YAML valido",
+      "Teste estatico garante que o workflow vivo .github/workflows/hub-image.yml cobre todos os caminhos de runtime (nenhum merge de runtime fica sem imagem) sem exigir igualdade exata, ja que o arquivo e protegido pelo guard",
+      "OA registrada em .factory/owner_actions/owner_actions.json, prioridade medium, com passo a passo absoluto para o owner publicar o gatilho estreito (worktree, git apply do patch, portao, push, PR) e criterio de verificacao: merge so de docs/ledger nao dispara o workflow Hub image (GHCR)",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: image_trigger_paths() nao contem docs/** nem .factory/** e cobre todo prefixo/arquivo de rebuild",
+      "tests/test_hub_deploy_usr207.py: o bloco paths do patch docs/proposals/USR-207-ghcr-build.patch e exatamente image_trigger_paths() e o patch parseia como YAML valido com contagem de linhas do hunk correta",
+      "tests/test_hub_deploy_usr207.py: o workflow vivo cobre todos os caminhos de runtime",
+      "tests/test_hub_deploy_usr207.py: merge que toca apenas run_hub.py nao pede rebuild"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Ler o modo do compose no Dokploy antes de prometer troca sem queda",
+    "goal": "Em modo ghcr, extrair composeType do payload de compose.one, reportar se start-first vale (stack/swarm) ou e inerte (docker-compose) e registrar a decisao de rota do owner com ticket de implementacao enfileirado.",
+    "files_hint": [
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/compose_render.py",
+      "core/orchestrator/deployment_adapter.py",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_dokploy_redeploy.py",
+      ".factory/owner_actions/owner_actions.json",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "Funcao pura nova (ex. zero_downtime_capable/compose_swap_mode) classifica o payload de compose.one em stack/swarm (start-first efetivo), docker-compose (update_config inerte) e desconhecido, sem recusar o deploy em nenhum dos casos",
+      "O CLI imprime o modo observado e, em modo ghcr fora de stack/swarm, um aviso explicito de que a troca pode ter queda e que a evidencia de 1 s vai registrar isso; o adapter loga o mesmo sinal sem expor payload",
+      "docs/proposals/USR-207-zero-downtime.md secao 2.2 atualizada com o modo realmente observado e o que cada rota exige (incluindo que em Swarm os rotulos Traefik precisam ir para deploy.labels)",
+      "OA de decisao registrada (rota 1 Stack/Swarm x rota 2 blue/green) com opcoes, impacto e verificacao; ticket queue-only aberto em .factory/demands/demands.json para implementar a rota escolhida depois da resposta",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_dokploy_redeploy.py: classificacao do modo para stack, docker-compose, campo ausente e valor desconhecido",
+      "tests/test_dokploy_redeploy.py: deploy Darkhub em modo ghcr com composeType docker-compose avisa sobre start-first inerte, segue instalando a imagem e sai com EXIT_OK",
+      "tests/test_dokploy_redeploy.py: nenhuma saida do CLI vaza env/segredo ao imprimir o modo"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Sonda de 1 s durante a troca real e conferencia da secao de agendamento da proposta",
+    "goal": "Criar core/infra/deploy_downtime_watch.py, acionar a amostragem de 1 s a partir do proprio dokploy_redeploy.py em volta do deploy do Hub, gravar e imprimir a evidencia, e travar por teste estatico o comando de agendamento da proposta (Register-ScheduledTask com pythonw.exe absoluto, sem schtasks).",
+    "files_hint": [
+      "core/infra/deploy_downtime_watch.py",
+      "scripts/dokploy_redeploy.py",
+      "core/infra/availability_probe.py",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "core/infra/deploy_downtime_watch.py amostra /health a cada 1 s (intervalo e duracao configuraveis), registra status HTTP e git_sha de cada amostra, resume total de amostras, nao-200, maior sequencia consecutiva ruim e sha final, e grava JSON em core.paths.state_root()/hub_downtime/<sha>.json",
+      "Sampler, clock e sleep sao injetaveis; os testes rodam sem rede, sem thread real e sem dormir tempo real",
+      "scripts/dokploy_redeploy.py, ao redeployar o Darkhub com espera, inicia a medicao antes do compose.deploy, encerra depois da convergencia do sha e imprime o resumo; falha ou excecao da medicao nunca altera o codigo de saida do deploy, apenas marca a evidencia como incompleta",
+      "Modo autonomo documentado na proposta com comando PowerShell absoluto colavel (python C:\\dev\\DarkFac\\-m core.infra.deploy_downtime_watch equivalente valido) para medir de um no fora da VPS",
+      "Teste estatico da proposta: nenhuma ocorrencia de schtasks, o bloco de agendamento usa Register-ScheduledTask, New-ScheduledTaskAction e caminho absoluto para pythonw.exe, e nenhuma aspas quebrada no argumento",
+      "docs/proposals/USR-207-zero-downtime.md atualizada com o estado real (OA-044/052/053 concluidas, DARKHUB_IMAGE_SOURCE=ghcr ja ativo, imagem privada por SHA) e com o lugar onde a evidencia de 1 s fica gravada",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: janela de amostragem com todas as respostas 200 -> resumo sem nao-200 e evidencia marcada como aprovada",
+      "tests/test_hub_deploy_usr207.py: janela com 502 no meio -> contagem de nao-200, maior sequencia ruim e evidencia reprovada",
+      "tests/test_hub_deploy_usr207.py: amostra que lanca excecao de rede conta como nao-200 e nao propaga",
+      "tests/test_hub_deploy_usr207.py: teste estatico do bloco de agendamento da proposta (sem schtasks, com Register-ScheduledTask e pythonw.exe absoluto)",
+      "tests/test_dokploy_redeploy.py: deploy do Darkhub imprime o resumo da medicao e mantem o codigo de saida mesmo quando a medicao falha"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  }
+]
