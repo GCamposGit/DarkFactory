@@ -184,6 +184,12 @@ def get_next_dispatchable_task() -> dict[str, Any] | None:
             run_daily_discovery()
         except Exception as exc:
             print(f"[WARN] Daily model discovery skipped: {exc}")
+        try:
+            from core.models.autopilot import daily_hook_async
+
+            daily_hook_async()  # daemon thread: dispatch never waits; once per UTC day; PR via its own worktree
+        except Exception as exc:
+            print(f"[WARN] Daily model autopilot skipped: {exc}")
     ledger = _load_ledger()
     priorities = (
         {TaskStatus.NEEDS_FIX},

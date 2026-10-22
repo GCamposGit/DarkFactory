@@ -119,13 +119,16 @@ def promote(
     docs_root: Optional[Path] = None,
     precheck: Optional[Precheck] = None,
     grill_handler: Optional[Callable[[str, Optional[str], list[str]], Any]] = None,
+    grill_approved: bool = False,
 ) -> dict[str, Any]:
     """candidate -> active (qualification approved/grandfathered required), optionally binding ``role``.
 
     A Grill block still raises ``LifecycleError`` (nothing written) but first registers a real WAITING_HUMAN pending
     (``core.models.pending``: owner action + Telegram with recommendation and guide). ``grill_handler(model_id, role,
     reasons)`` replaces that default; with no handler the default only runs against the default registry path, so
-    isolated registries (tests, scratch worktrees) never notify anyone.
+    isolated registries (tests, scratch worktrees) never notify anyone. ``grill_approved`` is the owner's recorded
+    approval of exactly this pending (``pending.consume_decision``): it lifts only the Grill block, never the
+    forbidden-model, qualification or ``precheck`` checks, and is written to the ledger.
     """
     path = registry_path or DEFAULT_REGISTRY_PATH
     ledger = ledger_path or LEDGER_PATH
@@ -148,7 +151,7 @@ def promote(
         ModelChange(kind="promote_candidate", model_id=model_id, role=role),
         parse_registry(raw),
     )
-    if decision.required:
+    if decision.required and not grill_approved:
         _register_grill(model_id, role, list(decision.reasons), now, path, grill_handler)
         reasons = "; ".join(decision.reasons)
         raise LifecycleError(f"promotion requires WAITING_HUMAN (Grill): {reasons}")
@@ -167,7 +170,7 @@ def promote(
         ledger, now, actor, "promote",
         model_id=model_id, from_status="candidate", to_status="active",
         role=role, from_model=previous, to_model=model_id if role else None,
-        reason="qualification_approved",
+        reason="qualification_approved+grill_approved" if decision.required else "qualification_approved",
     )
 
 
