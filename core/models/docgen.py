@@ -6,6 +6,7 @@ Only the text between the markers is rewritten; everything else in the file is l
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,14 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "docs/MODEL_SELECTION_GUIDE.md": ("roles", "catalog", "grill_thresholds"),
     ".agents/skills/03-model-router/SKILL.md": ("roles_skill",),
     ".claude/skills/03-model-router/SKILL.md": ("roles_skill",),
+    ".agents/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
+    ".claude/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
+    ".agents/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
+    ".claude/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
+    ".claude/agents/test-runner.md": ("test_subagent_model",),
 }
+
+SUBAGENT_ROUTING_PATH = ".factory/config/subagent_model_routing.json"
 
 _MARKER_RE = re.compile(
     r"(?P<begin><!-- BEGIN model-registry:(?P<name>[a-z0-9_-]+) -->)\r?\n(?P<body>.*?)(?P<end><!-- END model-registry:(?P=name) -->)",
@@ -96,11 +104,46 @@ def render_roles_skill(reg: ModelRegistry) -> str:
     return render_roles(reg, skip_gateway=True)
 
 
+def _alias(reg: ModelRegistry, role: str) -> str:
+    model_id = reg.roles[role]
+    entry = next(m for m in reg.models if m.id == model_id)
+    return entry.aliases[0] if entry.aliases else model_id
+
+
+def render_test_subagent_model(reg: ModelRegistry) -> str:
+    return (f"Modelo do subagente de teste no Claude Code: `{reg.roles['subagent.haiku']}` "
+            f"(alias `{_alias(reg, 'subagent.haiku')}`, papel `subagent.haiku`), sem *extended thinking*.")
+
+
+def render_dev_subagent_models(reg: ModelRegistry) -> str:
+    return "\n".join([
+        f"- **Padrao**: subagente {_alias(reg, 'subagent.sonnet').capitalize()} (`{reg.roles['subagent.sonnet']}`) para todo codigo; "
+        f"planning usa {_alias(reg, 'subagent.opus').capitalize()} (`{reg.roles['subagent.opus']}`).",
+        f"- **Haiku** (`{reg.roles['subagent.haiku']}`): elegivel apenas pelas regras abaixo.",
+    ])
+
+
+def render_haiku_rules(reg: ModelRegistry) -> str:
+    cfg = json.loads((REPO_ROOT / SUBAGENT_ROUTING_PATH).read_text(encoding="utf-8"))
+    lim = cfg["limits"]
+    types = "; ".join(f"`{t}` ({'/'.join(c)})" for t, c in cfg["eligible_task_types"].items())
+    return "\n".join([
+        f"- Tipos elegiveis (complexidade): {types}.",
+        f"- Limites: ate {lim['max_files']} arquivos e {lim['max_changed_lines']} linhas; {lim['max_haiku_attempts']} tentativa(s) Haiku, "
+        f"depois Sonnet (`{reg.roles['subagent.sonnet']}`).",
+        "- Tags proibidas: " + ", ".join(f"`{t}`" for t in cfg["forbidden_tags"]) + ".",
+        "- Estagios proibidos: " + ", ".join(f"`{t}`" for t in cfg["forbidden_stages"]) + ".",
+    ])
+
+
 RENDERERS: dict[str, Callable[[ModelRegistry], str]] = {
     "roles": render_roles,
     "roles_skill": render_roles_skill,
     "catalog": render_catalog,
     "grill_thresholds": render_grill_thresholds,
+    "test_subagent_model": render_test_subagent_model,
+    "dev_subagent_models": render_dev_subagent_models,
+    "haiku_rules": render_haiku_rules,
 }
 
 
