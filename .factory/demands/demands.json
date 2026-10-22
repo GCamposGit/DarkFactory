@@ -10290,5 +10290,34 @@
     "dependencies": [],
     "created_at": "2026-10-22T12:48:49.279487Z",
     "updated_at": "2026-10-22T12:48:49.279487Z"
+  },
+  {
+    "id": "USR-354",
+    "project_id": "darkfac",
+    "title": "Entrega com host desktop cai para portao local no Notebook quando o Desktop esta ocupado e estoura 3000 s",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10/2026 USR-350 e USR-341 entregues com deliver_parallel.py host=desktop: Desktop busy (job de outra sessao), remote_attempts busy_timeout em 52 s, path=local_after_remote, portao rodou no Notebook (4 GiB livres, 1 worker xdist) e estourou o limite (exit 124) apos 3008 s; entrega marcada infra e reenfileirada. Perde ~50 min por tentativa.",
+    "core_journey": [
+      "Em 22/10/2026 USR-350 e USR-341 entregues com deliver_parallel.py host=desktop: Desktop busy (job de outra sessao), remote_attempts busy_timeout em 52 s, path=local_after_remote, portao rodou no Notebook (4 GiB livres, 1 worker xdist) e estourou o limite (exit 124) apos 3008 s; entrega marcada infra e reenfileirada. Perde ~50 min por tentativa."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Slot desktop espera o Desktop liberar (ou reenfileira imediatamente) em vez de cair para portao local quando a RAM do Notebook nao suporta 2+ workers",
+      "Teste cobrindo busy_timeout no slot desktop sem fallback local"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T14:27:55.521220Z",
+    "updated_at": "2026-10-22T14:27:55.521220Z"
   }
 ]
