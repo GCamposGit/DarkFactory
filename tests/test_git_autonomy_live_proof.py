@@ -90,7 +90,9 @@ def test_deploy_live_ticket_completed_when_live_verifier_succeeds(test_remote_pa
     assert ":live_converged" in (updated.delivery_evidence or "")
 
 
-def test_deploy_live_ticket_reverts_to_planned_and_opens_defect_on_failure(test_remote_pair: tuple[Path, Path]) -> None:
+def test_deploy_live_ticket_reverts_to_planned_and_opens_defect_on_failure(
+    test_remote_pair: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     local, _ = test_remote_pair
     store_file = local / ".factory" / "demands" / "demands.json"
     store = DemandsStore(store_file)
@@ -110,6 +112,27 @@ def test_deploy_live_ticket_reverts_to_planned_and_opens_defect_on_failure(test_
         acceptance_criteria=["Live proof on all nodes"],
     )
     store.save_ticket(ticket)
+    original_problem = ticket.problem_statement
+
+    requeue_calls: list[tuple[str, str, bool, DeliveryStatus | None]] = []
+    original_requeue = DemandsStore.requeue_ticket
+
+    def observe_requeue(
+        self: DemandsStore, ticket_id: str, reason: str = "", *, reopen: bool = False,
+    ):
+        current = self.get_ticket(ticket_id)
+        requeue_calls.append((ticket_id, reason, reopen, current.status if current else None))
+        return original_requeue(self, ticket_id, reason=reason, reopen=reopen)
+
+    status_updates: list[str] = []
+    original_update_status = DemandsStore.update_status
+
+    def observe_status_update(self: DemandsStore, ticket_id: str, *args, **kwargs):
+        status_updates.append(ticket_id)
+        return original_update_status(self, ticket_id, *args, **kwargs)
+
+    monkeypatch.setattr(DemandsStore, "requeue_ticket", observe_requeue)
+    monkeypatch.setattr(DemandsStore, "update_status", observe_status_update)
 
     # Add implementation change
     (local / "infra_impl.py").write_text("# implementation\n", encoding="utf-8")
@@ -127,12 +150,28 @@ def test_deploy_live_ticket_reverts_to_planned_and_opens_defect_on_failure(test_
     assert report.ok is False
     assert "Live convergence proof failed" in report.message
 
+    assert len(requeue_calls) == 1
+    called_id, reason, reopen, status_before_requeue = requeue_calls[0]
+    assert called_id == "USR-201"
+    assert reopen is True
+    assert "[LIVE_CONVERGENCE_FAILURE]" in reason
+    assert "Desktop divergent" in reason
+    assert status_before_requeue == DeliveryStatus.COMPLETED
+    assert status_updates == []
+
     # Ticket reverted to planned
-    reverted = store.get_ticket("USR-201")
+    reverted = DemandsStore(store_file).get_ticket("USR-201")
     assert reverted is not None
     assert reverted.status == DeliveryStatus.PLANNED
     assert reverted.delivery_evidence is None
+    assert reverted.problem_statement.startswith(original_problem)
     assert "[LIVE_CONVERGENCE_FAILURE]" in reverted.problem_statement
+    recorded_history = reverted.problem_statement
+    requeued_again, changed_again = DemandsStore(store_file).requeue_ticket(
+        "USR-201", reason=reason, reopen=True
+    )
+    assert changed_again is False
+    assert requeued_again.problem_statement == recorded_history
 
     # Defect ticket opened automatically
     all_tickets = store.list_tickets()
