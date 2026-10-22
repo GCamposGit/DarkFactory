@@ -1747,7 +1747,7 @@
       "kind": "action",
       "title": "Liberar acessos do piloto USR-279: gh com escopo repo, projeto Dokploy e webhook",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O bootstrap (USR-274) cria o repositorio privado com o gh da sua conta e o deploy (M5) precisa de um projeto separado no Dokploy; so o owner concede esses acessos.",
       "blocks": [
         "USR-279"
@@ -1772,12 +1772,17 @@
       "verify": "gh auth status mostra 'repo' nos escopos; projeto do piloto existe no Dokploy; webhook entrega 200 no primeiro push.",
       "created_at": "2026-10-20T10:24:32Z",
       "created_by": "claude-code",
-      "resolved_at": null,
+      "resolved_at": "2026-10-22T00:20:00Z",
       "history": [
         {
           "at": "2026-10-21T18:00:00Z",
           "outcome": "evidence:keep_open",
           "note": "Passos 1-2 cumpridos: gh com escopo repo. Faltam projeto Dokploy e webhook."
+        },
+        {
+          "at": "2026-10-22T00:20:00Z",
+          "outcome": "resolved",
+          "note": "Verificado: gh com escopo repo; projeto pilot-hello existe no Dokploy (ambiente production vazio); repo GCamposGit/pilot-hello privado. O webhook depende do servico criado no M5 do USR-279 e fica com o agente (token Dokploy + gh repo bastam)."
         }
       ]
     },
@@ -1947,7 +1952,14 @@
       "verify": "Existe ticket do projeto pilot-hello (prefixo PH) vinculado a demanda enviada; nenhum ticket novo USR- foi criado para ela.",
       "created_at": "2026-10-20T15:39:28Z",
       "created_by": "claude-session-43f612c4",
-      "resolved_at": null
+      "resolved_at": null,
+      "history": [
+        {
+          "at": "2026-10-22T00:20:00Z",
+          "outcome": "evidence:keep_open",
+          "note": "Dependencia OA-043 concluida; aguardando aviso do agente apos deploy do Hub com pilot-hello registrado."
+        }
+      ]
     },
     {
       "id": "OA-046",
