@@ -10230,5 +10230,35 @@
     "dependencies": [],
     "created_at": "2026-10-22T11:55:43.494908Z",
     "updated_at": "2026-10-22T12:00:17.088981Z"
+  },
+  {
+    "id": "USR-352",
+    "project_id": "darkfac",
+    "title": "Artefatos de runtime (.factory/executions/active, hub_availability.json, evidencias de OA) sujam o checkout e bloqueiam run_ticket",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10 python run_ticket.py USR-346 recusou rodar com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao' listando apenas arquivos gerados pela propria fabrica: .factory/executions/active/exec-*.json (hook de execucao), .factory/hub_availability.json (sonda USR-207 agendada no Notebook), evidencias .factory/owner_actions/OA-*-*.png/.jsonl/.ps1 e .factory/reports/*. Isso obriga --allow-dirty-shared-checkout e esconde sujeira real.",
+    "core_journey": [
+      "Em 22/10 python run_ticket.py USR-346 recusou rodar com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao' listando apenas arquivos gerados pela propria fabrica: .factory/executions/active/exec-*.json (hook de execucao), .factory/hub_availability.json (sonda USR-207 agendada no Notebook), evidencias .factory/owner_actions/OA-*-*.png/.jsonl/.ps1 e .factory/reports/*. Isso obriga --allow-dirty-shared-checkout e esconde sujeira real."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Arquivos de runtime da fabrica ficam fora do git status (gitignore ou diretorio de estado fora do repo)",
+      "run_ticket no checkout compartilhado so recusa por alteracao rastreada ou nao-runtime",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T12:34:30.263515Z",
+    "updated_at": "2026-10-22T12:34:30.263515Z"
   }
 ]
