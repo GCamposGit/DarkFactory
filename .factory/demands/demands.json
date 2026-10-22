@@ -10171,5 +10171,35 @@
     "dependencies": [],
     "created_at": "2026-10-22T10:09:25.903124Z",
     "updated_at": "2026-10-22T10:09:25.903124Z"
+  },
+  {
+    "id": "USR-350",
+    "project_id": "darkfac",
+    "title": "trusted-pr-policy quebra com ModuleNotFoundError pydantic ao avaliar governanca",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No PR #576 (USR-342) o job DarkFac CI / trusted-pr-policy falhou com traceback: trusted/core/orchestrator/guard.py linha 212 is_governance_evolution_authorized importa core.governance.authorization, que importa pydantic, ausente no ambiente do job. O guard deveria rejeitar com mensagem de caminho protegido, nao quebrar. Evidencia: https://github.com/GCamposGit/DarkFactory/pull/576",
+    "core_journey": [
+      "No PR #576 (USR-342) o job DarkFac CI / trusted-pr-policy falhou com traceback: trusted/core/orchestrator/guard.py linha 212 is_governance_evolution_authorized importa core.governance.authorization, que importa pydantic, ausente no ambiente do job. O guard deveria rejeitar com mensagem de caminho protegido, nao quebrar. Evidencia: https://github.com/GCamposGit/DarkFactory/pull/576"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Job trusted-pr-policy instala pydantic ou o guard nao depende dele no caminho de autorizacao",
+      "PR que toca caminho protegido sem autorizacao falha com mensagem clara do guard, sem traceback",
+      "Teste cobrindo a ausencia do traceback"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T11:44:53.262016Z",
+    "updated_at": "2026-10-22T11:44:53.262016Z"
   }
 ]
