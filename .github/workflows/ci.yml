@@ -34,8 +34,6 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
-      - name: Install guard dependencies
-        run: python -m pip install "pydantic>=2"
       - name: Enforce base-owned governance policy
         working-directory: candidate
         run: python ../trusted/core/orchestrator/guard.py ${{ github.event.pull_request.base.sha }}
