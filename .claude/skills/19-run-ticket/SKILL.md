@@ -93,8 +93,17 @@ Regra do owner: se o usuário opera a fábrica por um harness específico, esse 
 
 Ligada à seção 2b: a preferência pelo harness de operação decide QUEM escreve o ticket; o modelo do SUBAGENTE que executa cada fatia segue a política de `core/line/subagent_routing.py` (parâmetros em `.factory/config/subagent_model_routing.json`, tabela completa na skill 03-model-router, seção 2b).
 
-- **Padrão**: subagente Sonnet (`claude-sonnet-5-5`) para todo código; planning usa Opus (`claude-opus-5-5`).
-- **Haiku 5.5** (`claude-haiku-5-5`) só em fatias mecânicas: editar, sincronizar docs, testes a partir de especificação, config/dados, boilerplate de template, destilar testes, atualizar ledger; até 3 arquivos e 150 linhas, com aceite executável pré-definido e ambiguidade já resolvida. Nunca em caminho protegido, tag de risco, grill, review ou integration.
+<!-- BEGIN model-registry:dev_subagent_models -->
+- **Padrao**: subagente Sonnet (`claude-sonnet-5-5`) para todo codigo; planning usa Opus (`claude-opus-5-5`).
+- **Haiku** (`claude-haiku-5-5`): elegivel apenas pelas regras abaixo.
+<!-- END model-registry:dev_subagent_models -->
+- **Haiku 5.5**: mecanico, ambiguidade resolvida, aceite executavel pre-definido; nunca em caminho protegido nem em grill/review/integration. Regras geradas do registro e da politica:
+<!-- BEGIN model-registry:haiku_rules -->
+- Tipos elegiveis (complexidade): `mechanical_edit` (low); `docs_sync` (low/medium); `test_from_spec` (low); `config_data` (low); `boilerplate_from_template` (low); `test_run_distill` (low/medium); `ledger_update` (low).
+- Limites: ate 3 arquivos e 150 linhas; 1 tentativa(s) Haiku, depois Sonnet (`claude-sonnet-5-5`).
+- Tags proibidas: `security`, `credentials`, `auth`, `payments`, `concurrency`, `locking`, `transactions`, `migration`, `data_deletion`, `public_contract`, `routing`, `quota`, `flaky_test`, `root_cause_debug`, `architecture`.
+- Estagios proibidos: `planning`, `grill`, `review`, `integration`.
+<!-- END model-registry:haiku_rules -->
 - **Escalonamento**: uma única tentativa Haiku; falha do portão focado ou defeito apontado na revisão leva a nova tentativa com Sonnet. Cota, revisão em outra família e o portão único não mudam.
 
 ---

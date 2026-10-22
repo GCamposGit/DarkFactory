@@ -111,3 +111,8 @@ Agendamento: chamado em `get_next_dispatchable_task` (mesmo ponto do benchmark d
 
 Entregue: `core/models/telemetry.py` (agrega por modelo falhas, escalonamentos e custo do ledger de chamadas `core.usage.ledger`, a unica fonte com modelo, resultado e custo por chamada; `evaluate_post_promotion` chama `lifecycle.rollback` acima de `rollback_thresholds`, com `min_samples`), `core/models/pending.py` (Grill vira WAITING_HUMAN real: `HumanRequest` + espelho em acoes do owner + Telegram injetavel, com recomendacao e passo a passo; `promote(grill_handler=...)` segue bloqueando), `core/models/pr.py` (worktree propria + `deliver_branch(kind="implementation")`, PR `chore(models): ...`) e `core/models/autopilot.py` (`run_daily`, idempotente, sem agendamento; a 9a agenda).
 Chave nova `rollback_thresholds` no `model_registry.json` (validada por `RollbackThresholds`). Teste: `tests/test_model_autopilot_usr185.py`.
+## Fatia 11 (ENTREGUE em 22/10/2026)
+
+Marcadores e secoes geradas (`test_subagent_model`, `dev_subagent_models`, `haiku_rules`) nas skills 17 e 19 (`.agents` e `.claude`, espelhos identicos) e em `.claude/agents/test-runner.md` (o `model:` do frontmatter segue literal, validado contra o papel `subagent.haiku` pelo teste de deriva). As regras do Haiku saem de `.factory/config/subagent_model_routing.json`.
+`core/benchmarks/data/benchmark_catalog.json` NAO e derivado: e dado de benchmark observado (precos, notas) lido com esquema estrito por `core/benchmarks/fetcher.py`; JSON nao aceita comentario e injetar chave derivada arriscaria o parse. Teste garante que fica fora dos alvos.
+`python scripts/generate_model_docs.py --check` sai com 0.

@@ -53,3 +53,39 @@ def test_missing_and_unknown_markers_flagged(tmp_path: Path) -> None:
     _, res = render_text("<!-- BEGIN model-registry:zzz -->\n<!-- END model-registry:zzz -->\n", reg, ("roles",))
     assert res.missing_sections == ("roles",) and res.unknown_sections == ("zzz",)
     assert has_problems(process(tmp_path, reg, {"absent.md": ("roles",)}))
+
+
+_SLICE11 = {
+    ".agents/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
+    ".claude/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
+    ".agents/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
+    ".claude/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
+    ".claude/agents/test-runner.md": ("test_subagent_model",),
+}
+
+
+def test_slice11_targets_registered_and_in_sync() -> None:
+    for rel, sections in _SLICE11.items():
+        assert TARGETS.get(rel) == sections
+    results = process(REPO_ROOT, get_registry(), dict(_SLICE11))
+    assert not has_problems(results), results
+
+
+def test_skill_mirrors_identical() -> None:
+    for name in ("17-specialized-test-subagent", "19-run-ticket"):
+        a = (REPO_ROOT / ".agents/skills" / name / "SKILL.md").read_bytes()
+        c = (REPO_ROOT / ".claude/skills" / name / "SKILL.md").read_bytes()
+        assert a == c
+
+
+def test_test_runner_frontmatter_model_matches_registry() -> None:
+    text = (REPO_ROOT / ".claude/agents/test-runner.md").read_text(encoding="utf-8")
+    assert f"model: {get_registry().roles['subagent.haiku']}" in text
+
+
+def test_benchmark_catalog_is_data_not_derived() -> None:
+    # The benchmark catalog is observed provider data (prices, scores) read with a strict schema by
+    # core/benchmarks/fetcher.py; it is deliberately NOT a registry-derived doc and carries no markers.
+    assert "core/benchmarks/data/benchmark_catalog.json" not in TARGETS
+    raw = (REPO_ROOT / "core/benchmarks/data/benchmark_catalog.json").read_text(encoding="utf-8")
+    assert "model-registry:" not in raw

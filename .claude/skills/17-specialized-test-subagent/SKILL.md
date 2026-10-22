@@ -30,7 +30,10 @@ O **Specialized Test Subagent** isola a execução de testes em subagentes efici
    - **Antigravity**: `invoke_subagent(TypeName="self", Role="Specialized Test Runner", Model="flash_lite", Prompt=...)`.
    - **OpenAI / Codex**: Modelo com `reasoning_effort: "low"` para testes rotineiros; escala para `max` apenas em falhas assíncronas complexas.
    - **Grok Build**: `grok build --reasoning-effort low --exec "python ... "`.
-   - **Claude Code**: Subagente declarativo com `claude-haiku-5-5` sem *extended thinking*.
+   - **Claude Code**: Subagente declarativo (modelo gerado do registro):
+<!-- BEGIN model-registry:test_subagent_model -->
+Modelo do subagente de teste no Claude Code: `claude-haiku-5-5` (alias `haiku`, papel `subagent.haiku`), sem *extended thinking*.
+<!-- END model-registry:test_subagent_model -->
 3. **Persistência de Logs em Disco**:
    - O log integral é gravado em `.factory/test_logs/<run_id>.log`.
    - O subagente sintetiza um relatório condensado (`DistilledTestReport`).
