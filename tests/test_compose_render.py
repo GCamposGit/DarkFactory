@@ -126,3 +126,31 @@ def test_fetch_rejects_malformed_arguments_without_running_gh(repository: str, s
 )
 def test_repository_from_url(url: Any, expected: Any) -> None:
     assert repository_from_url(url) == expected
+
+
+def test_build_mode_is_default_and_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(cr.IMAGE_SOURCE_ENV, raising=False)
+    source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
+    assert cr.resolve_hub_image_source({}) == "build"
+    assert render_darkhub_compose(source, SHA) == render_darkhub_compose(source, SHA, "build")
+    assert "pull_policy: build" in render_darkhub_compose(source, SHA)
+    assert "container_name: darkhub-cloud-247" in render_darkhub_compose(source, SHA)
+
+
+def test_ghcr_mode_emits_image_start_first_without_container_name() -> None:
+    source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
+    rendered = render_darkhub_compose(source, SHA, "ghcr")
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in rendered
+    assert "pull_policy: always" in rendered
+    assert "order: start-first" in rendered
+    assert "container_name:" not in rendered
+    assert "build:" not in rendered and "no_cache" not in rendered
+    assert "hostname: darkhub-cloud-247" in rendered
+    assert "${DARKFAC_GIT_SHA}" not in rendered
+    assert rendered.count(SHA) == 2
+
+
+def test_image_source_env_fails_closed_on_unknown_value() -> None:
+    assert cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "GHCR"}) == "ghcr"
+    with pytest.raises(ComposeRenderError):
+        cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "registry"})

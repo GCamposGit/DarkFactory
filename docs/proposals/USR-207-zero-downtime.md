@@ -22,8 +22,13 @@ Notas:
 ### Agendar a sonda (Notebook ou Desktop, NUNCA a VPS)
 
 ```powershell
-schtasks /Create /TN "DarkFac-Hub-Availability" /SC MINUTE /MO 1 /F /TR "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Set-Location C:\dev\DarkFac; python -m core.infra.availability_probe\""
+$py = "C:\Users\guigc\AppData\Local\Programs\Python\Python312\pythonw.exe"
+$action = New-ScheduledTaskAction -Execute $py -Argument "-m core.infra.availability_probe" -WorkingDirectory "C:\dev\DarkFac"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "DarkFac-Hub-Availability" -Action $action -Trigger $trigger -Force
 ```
+
+(`pythonw.exe` nao abre janela. Nao executar a partir de agentes; o owner cola no PowerShell ja feito na OA-044.)
 
 ## 2. Proposto: troca sem downtime (fase 2)
 
@@ -55,6 +60,26 @@ Depois o compose passa a usar a imagem (sem `build:`), diff exato do servico `da
 ```
 
 Efeitos em codigo que hoje exige `build:`: `core/orchestrator/compose_render.py` (`render_darkhub_compose` valida o contexto Git fixado) e o teste `test_darkhub_build_pinned_before_deploy_and_health_converges` precisam ser adaptados na mesma entrega; o redeploy deve esperar o workflow publicar a tag do sha antes de acionar o Dokploy. O pacote GHCR precisa ficar privado com credencial de pull no Dokploy (registry).
+
+### 2.1b Chave de ativacao (USR-339)
+
+O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOURCE` (ambiente de quem roda `scripts/dokploy_redeploy.py` e do `DokployDeploymentAdapter`):
+
+- `build` (padrao): comportamento de hoje, build do contexto Git na VPS.
+- `ghcr`: `render_darkhub_compose` troca `build:`/`pull_policy: build` por `image: ghcr.io/gcamposgit/darkhub:<sha>` + `pull_policy: always`, remove `container_name` e injeta `deploy.update_config.order: start-first` (+ `rollback_config`). O redeploy espera a tag do sha no GHCR (HEAD no manifesto; token em `GHCR_TOKEN` ou `GITHUB_PAT` com `read:packages`; timeout `--timeout`, padrao 900 s) e, se nao existir, recusa com erro explicito, sem voltar para build.
+- Valor desconhecido falha fechado. `start-first` so vale em modo Stack/Swarm; no Compose simples o Dokploy ignora `update_config` (rota 2 da secao 2.2 cobre isso).
+- Limite conhecido: a espera da tag esta no CLI `dokploy_redeploy.py`; o adapter da linha apenas renderiza.
+
+### 2.1c Ativacao passo a passo (owner, OA registrada no DarkHub)
+
+1. Abra o PowerShell e crie uma worktree limpa:
+   `git -C C:\dev\DarkFac fetch origin` e `git -C C:\dev\DarkFac worktree add C:\dev\DarkFac\.worktrees\hub-image-publish -b chore/hub-image-workflow origin/main`
+2. Aplique o patch: `git -C C:\dev\DarkFac\.worktrees\hub-image-publish apply C:\dev\DarkFac\docs\proposals\USR-207-ghcr-build.patch`
+3. Rode o portao: `python C:\dev\DarkFac\core\harness\runner.py --quick` (dentro da worktree, ajustando o caminho).
+4. Commit e push: `git -C C:\dev\DarkFac\.worktrees\hub-image-publish add .github/workflows/hub-image.yml`, `git -C ... commit -m "ci: publica imagem do Hub no GHCR [USR-207]"`, `git -C ... push -u origin chore/hub-image-workflow` e abra/mescle o PR.
+5. Verifique: aba Actions do GitHub, workflow "Hub image (GHCR)" verde; em github.com/GCamposGit > Packages deve existir `darkhub` com a tag igual ao sha do commit em `main`.
+6. So depois de a primeira imagem existir: defina `DARKHUB_IMAGE_SOURCE=ghcr` (Variaveis de Ambiente de Usuario do Windows, ou no ambiente do runner/orquestrador) e rode `python C:\dev\DarkFac\scripts\dokploy_redeploy.py --only Darkhub --wait`.
+7. Volte para `build` removendo a variavel se algo falhar.
 
 ### 2.2 Start-first gated por healthcheck
 
