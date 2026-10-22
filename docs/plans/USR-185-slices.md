@@ -102,3 +102,8 @@ Entregue: `lifecycle.promote()` integra `requires_grill()`: toda promocao consul
 decisao for obrigatoria, recusa com `WAITING_HUMAN` e os motivos antes de escrever no registro ou no ledger. O caminho
 limpo segue autonomo e tem testes de bloqueio, promocao limpa e invariantes de registro. O docgen tambem publica a
 secao `grill_thresholds` no guia de selecao de modelos.
+
+## Fatia 9a (ENTREGUE em 22/10/2026)
+
+Entregue (diario nunca escreve arquivos versionados: candidatos vao para `<state_root>/model_discovery/candidates-<dia>.json`; `pending_candidates()`/`apply_candidates(registry_path)` aplicam numa worktree, uso da 9b): `core/models/discovery_sources.py` com adaptadores das Models API de Anthropic, OpenAI, xAI e Gemini (HTTP injetavel, prazo via `run_with_deadline`, chave so de env, sem chave a fonte e pulada com motivo, nunca logada) e `run_daily_discovery()` (uma vez por dia UTC; marcador em `<state_root>/model_discovery/last_run.json`, fora do versionamento). Dedupe entre fontes e com o OpenRouter pelo pipeline da fatia 5; so `candidate`.
+Agendamento: chamado em `get_next_dispatchable_task` (mesmo ponto do benchmark diario), ignorado sob pytest. Falha de uma fonte nao afeta as demais. Teste: `tests/test_model_discovery_sources_usr185.py`.
