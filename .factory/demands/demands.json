@@ -9924,8 +9924,8 @@
     "project_id": "darkfac",
     "title": "Investigar perda de worker remoto durante portao oficial de merge",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ed58f6e76bd99fe0fc7c2ae366bf52eb2c4f2772",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9947,7 +9947,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T02:22:30.838263Z",
-    "updated_at": "2026-10-22T02:22:30.838270Z"
+    "updated_at": "2026-10-22T11:43:04.472654Z"
   },
   {
     "id": "USR-343",
