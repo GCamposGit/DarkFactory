@@ -1,0 +1,2 @@
+- [base_red not_before=2026-10-22T12:07:36+00:00] Validar saude do CI e integridade da branch base antes de submeter alteracoes de integracao para evitar atrasos por base_red.
+- [validate_exhausted] Garantir que os testes e comandos de validacao passem localmente antes do estagio 'development'.
