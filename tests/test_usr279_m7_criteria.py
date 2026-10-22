@@ -84,3 +84,32 @@ def test_verifier_rejects_criterion_one_claim_not_confirmed_by_report() -> None:
 
     problems = verify_report(report, root=ROOT, demand=ticket)
     assert any("criterio 1" in problem.lower() for problem in problems)
+
+
+def test_verifier_rejects_pending_ticket_criterion_without_existing_blocker() -> None:
+    demands = json.loads((ROOT / ".factory/demands/demands.json").read_text(encoding="utf-8"))
+    ticket = next(item for item in demands if item["id"] == "USR-279")
+    ticket["delivery_evidence"] = (
+        "Criterio 1: confirmado por docs/plans/USR-279-greenfield-pilot.md. "
+        "Criterio 2: pendente; bloqueador OA-999. "
+        "Criterio 3: pendente; bloqueador USR-999."
+    )
+    report = (ROOT / "docs/evidence/USR-279-M7.md").read_text(encoding="utf-8")
+
+    problems = verify_report(report, root=ROOT, demand=ticket)
+
+    assert any("bloqueador" in problem.lower() and "criterio 2" in problem.lower() for problem in problems)
+    assert any("bloqueador" in problem.lower() and "criterio 3" in problem.lower() for problem in problems)
+
+
+def test_verifier_requires_each_ticket_criterion_to_cite_the_m7_report() -> None:
+    demands = json.loads((ROOT / ".factory/demands/demands.json").read_text(encoding="utf-8"))
+    ticket = next(item for item in demands if item["id"] == "USR-279")
+    ticket["delivery_evidence"] = ticket["delivery_evidence"].replace(
+        "docs/evidence/USR-279-M7.md", "docs/plans/USR-279-greenfield-pilot.md", 1
+    )
+    report = (ROOT / "docs/evidence/USR-279-M7.md").read_text(encoding="utf-8")
+
+    problems = verify_report(report, root=ROOT, demand=ticket)
+
+    assert any("criterio 1" in problem.lower() and "m7" in problem.lower() for problem in problems)

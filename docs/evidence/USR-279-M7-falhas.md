@@ -1,6 +1,6 @@
 # USR-279 M7 - Inventario de falhas e lacunas de M1-M6
 
-Inventario levantado em 2026-10-20 a partir do plano, das evidencias M1/M2, da fila de demandas e do backlog de acoes do owner. O inventario registra lacunas ainda abertas; M1 e M2 permanecem confirmados apenas nos limites descritos em suas evidencias. Nenhum marco M3-M6 e declarado concluido aqui.
+Inventario atualizado em 2026-10-22 a partir do plano, das evidencias M1/M2, da fila de demandas e do backlog de acoes do owner. O inventario registra lacunas ainda abertas; M1 e M2 permanecem confirmados apenas nos limites descritos em suas evidencias. Nenhum marco M3-M6 e declarado concluido aqui.
 
 | Marco | Falha ou lacuna | Evidencia | Vinculo de resolucao |
 | --- | --- | --- | --- |

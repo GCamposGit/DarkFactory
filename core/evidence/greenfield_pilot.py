@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -154,10 +155,34 @@ def verify_report(
             problems.append(f"criterio {number} pendente sem bloqueador")
     if demand is not None:
         evidence = str(demand.get("delivery_evidence") or "").lower()
+        known_refs: set[str] = set()
+        for relative_path, key in (
+            (".factory/demands/demands.json", "id"),
+            (".factory/owner_actions/owner_actions.json", "id"),
+        ):
+            try:
+                records = json.loads((repo / relative_path).read_text(encoding="utf-8"))
+                if isinstance(records, dict):
+                    records = records.get("actions", [])
+                if isinstance(records, list):
+                    known_refs.update(str(item[key]).lower() for item in records if isinstance(item, dict) and key in item)
+            except (OSError, json.JSONDecodeError, TypeError):
+                continue
+        criterion_clauses = {
+            int(match.group(1)): match.group(2)
+            for match in re.finditer(
+                r"criterio\s*(\d+)\s*:\s*(.*?)(?=criterio\s*\d+\s*:|$)",
+                evidence,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        }
         for number in (1, 2, 3):
             item = criteria.get(number)
             if item is None:
                 continue
+            clause = criterion_clauses.get(number, "")
+            if "docs/evidence/usr-279-m7.md" not in clause:
+                problems.append(f"criterio {number} no ticket sem referencia ao relatorio M7")
             claimed_confirmed = bool(re.search(rf"criterio\s*{number}\s*:\s*confirmado", evidence))
             claimed_pending = bool(re.search(rf"criterio\s*{number}\s*:\s*pendente", evidence))
             if not claimed_confirmed and not claimed_pending:
@@ -170,4 +195,11 @@ def verify_report(
                 problems.append(f"criterio {number} pendente no relatorio mas nao no ticket")
             if item.status == "confirmado" and claimed_pending:
                 problems.append(f"criterio {number} pendente no ticket apesar de confirmado no relatorio")
+            if item.status == "pendente":
+                blockers = {
+                    match.group(0).lower()
+                    for match in re.finditer(r"\b(?:usr|ph)-\d+\b|\boa-\d+\b", clause, re.IGNORECASE)
+                }
+                if not blockers.intersection(known_refs):
+                    problems.append(f"criterio {number} pendente sem bloqueador existente no backlog")
     return problems

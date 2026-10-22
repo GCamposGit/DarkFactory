@@ -8257,7 +8257,7 @@
     "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
     "origin": "agent",
     "status": "planned",
-    "delivery_evidence": "M7 2026-10-20. Criterio 1: confirmado por docs/evidence/USR-279-M7.md, que lista o criterio como confirmado com referencia ao plano docs/plans/USR-279-greenfield-pilot.md (secoes 1-6), aprovado em OA-042. Criterio 2: pendente; docs/evidence/USR-279-M7.md confirma que M3, M4 e M5 seguem pendentes. Bloqueadores existentes: OA-043 (acessos, projeto Dokploy e webhook) e OA-047 (envio da demanda Telegram, dependente de OA-043); depois sao necessarios ticket do produto e evidencias de M4/M5. Criterio 3: pendente; docs/evidence/USR-279-M7.md confirma que M6 nao tem prova completa; M1/M2 sao evidencias parciais, sem wheel provada em clone novo. Bloqueadores: M3-M6 de USR-279, OA-043 e OA-047 para os marcos anteriores; ver lacunas em docs/evidence/USR-279-M7-falhas.md. D4 manter arquivado: decisao OA-042 e acao do owner OA-051 aberta; arquivamento nao executado. Relatorio: docs/evidence/USR-279-M7.md. USR-279 permanece planned ate haver evidencia da cadeia completa.",
+    "delivery_evidence": "Atualizacao M7 2026-10-22. Criterio 1: confirmado por docs/evidence/USR-279-M7.md, que lista o criterio como confirmado com referencia verificavel a docs/plans/USR-279-greenfield-pilot.md (secoes 1-6), aprovado na decisao OA-042. Criterio 2: pendente; docs/evidence/USR-279-M7.md lista M3, M4 e M5 como pendentes, sem SHA/PR/CI/deploy/smoke do produto. Bloqueadores existentes OA-043 (acessos, projeto Dokploy e webhook) e OA-047 (demanda Telegram, dependente de OA-043); a cadeia M3-M5 ainda requer ticket do produto e evidencias de M4/M5. Criterio 3: pendente; docs/evidence/USR-279-M7.md lista M6 como pendente e registra apenas provas parciais M1/M2, sem clone novo com build de wheel e smoke independente completos. Bloqueadores existentes OA-043 e OA-047; os marcos M3-M6 sao dependencias ainda sem evidencia, nao confirmacoes. D4 manter arquivado: decisao OA-042; acao do owner OA-051 aberta, sem arquivamento executado. Relatorio de auditoria: docs/evidence/USR-279-M7.md; inventario: docs/evidence/USR-279-M7-falhas.md. USR-279 permanece planned; nao declarar concluido ate a cadeia completa estar comprovada.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8286,7 +8286,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-20T23:18:08.143465Z"
+    "updated_at": "2026-10-22T21:41:19.336080Z"
   },
   {
     "id": "USR-277",
