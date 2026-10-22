@@ -16,9 +16,10 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 import pytest
 
+from core.infra.ghcr import GhcrTagUnavailableError
 from core.orchestrator.build_artifacts import (
     ArtifactRef,
     BuildHashMismatchError,
@@ -26,6 +27,7 @@ from core.orchestrator.build_artifacts import (
     BuildService,
     compute_bytes_digest,
 )
+from core.orchestrator.compose_render import GHCR_IMAGE_REPOSITORY, HUB_COMPOSE_PATH, render_darkhub_compose
 from core.orchestrator.deployment_adapter import (
     DeploymentOperation,
     DeploymentStatus,
@@ -35,6 +37,18 @@ from core.orchestrator.deployment_adapter import (
     TargetConfig,
 )
 from hub.backend.webhooks import DokployDeployClient
+from tests.test_dokploy_release_identity import (
+    OLD_SHA,
+    SHA,
+    TEMPLATE_A,
+    _artifact,
+    _hub_adapter,
+    _hub_target,
+    _install_urlopen,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REAL_HUB_COMPOSE_SOURCE = (_REPO_ROOT / HUB_COMPOSE_PATH).read_text(encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -277,3 +291,57 @@ def test_dokploy_deploy_client_webhooks_integration() -> None:
 
     status = client.reconcile_deployment(op.operation_id)
     assert status in (DeploymentStatus.IN_PROGRESS, DeploymentStatus.SUCCEEDED)
+
+
+# ---------------------------------------------------------------------------
+# 7. USR-339: GHCR tag gate shared with scripts/dokploy_redeploy.py
+# ---------------------------------------------------------------------------
+
+
+def test_ghcr_mode_waits_for_tag_then_installs_image_with_start_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    # What Dokploy stores today: the build-mode render of the previous release.
+    stored = render_darkhub_compose(_REAL_HUB_COMPOSE_SOURCE, OLD_SHA)
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": stored},
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    waited: List[str] = []
+    adapter, fetcher = _hub_adapter({SHA: _REAL_HUB_COMPOSE_SOURCE})
+    adapter.ghcr_wait = lambda sha: waited.append(sha)
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    assert waited == [SHA]
+    body = calls[1]["body"]
+    assert body["composeId"] == "compose_hub" and body["sourceType"] == "raw"
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in body["composeFile"]
+    assert "pull_policy: always" in body["composeFile"]
+    assert "order: start-first" in body["composeFile"]
+    assert "container_name:" not in body["composeFile"]
+
+
+def test_ghcr_tag_missing_fails_closed_before_any_dokploy_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+
+    def _never_published(sha: str) -> None:
+        raise GhcrTagUnavailableError(f"ghcr.io/{GHCR_IMAGE_REPOSITORY}:{sha} not published")
+
+    adapter, fetcher = _hub_adapter({SHA: TEMPLATE_A})
+    adapter.ghcr_wait = _never_published
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_ghcr_image_missing"
+    assert calls == []  # no compose.one, no compose.update, no compose.deploy

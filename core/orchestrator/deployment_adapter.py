@@ -28,13 +28,18 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Union, runtime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.infra.ghcr import GhcrTagUnavailableError
+from core.infra.ghcr import wait_for_tag as _wait_for_ghcr_tag
 from core.orchestrator.build_artifacts import ArtifactRef, Claim
 from core.orchestrator.compose_render import (
+    GHCR_IMAGE_REPOSITORY,
     HUB_COMPOSE_PATH,
+    IMAGE_SOURCE_GHCR,
     ComposeFetcher,
     ComposeRenderError,
     fetch_compose_at_sha,
     render_darkhub_compose,
+    resolve_hub_image_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +68,17 @@ def forbidden_deploy_ids() -> frozenset[str]:
 def is_forbidden_deploy_target(service_name: Optional[str]) -> bool:
     """True when `service_name` is a Dokploy id the line must never deploy (self-restart)."""
     return bool(service_name) and str(service_name).strip() in forbidden_deploy_ids()
+
+
+def _default_ghcr_wait(sha: str) -> None:
+    """Production default for `DokployDeploymentAdapter.ghcr_wait` (USR-339).
+
+    Blocks on the real GHCR manifest (shared with scripts/dokploy_redeploy.py
+    via core.infra.ghcr) until ``ghcr.io/<GHCR_IMAGE_REPOSITORY>:<sha>``
+    exists. Raises GhcrTagUnavailableError on timeout -- callers must fail
+    closed, never fall back to ``build``.
+    """
+    _wait_for_ghcr_tag(GHCR_IMAGE_REPOSITORY, sha)
 
 
 class DeploymentStatus(str, Enum):
@@ -196,6 +212,7 @@ class DokployDeploymentAdapter:
         api_key: Optional[str] = None,
         transport: Optional[Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Dict[str, Any]]] = None,
         compose_fetcher: Optional[ComposeFetcher] = None,
+        ghcr_wait: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.api_url = api_url or os.getenv("DOKPLOY_API_URL", "")
         self.api_key = api_key or os.getenv("DOKPLOY_API_KEY", "")
@@ -203,6 +220,10 @@ class DokployDeploymentAdapter:
         # (repository, sha, path) -> compose text at that commit; defaults to
         # `gh api` (compose_render.fetch_compose_at_sha). Injected by tests.
         self.compose_fetcher = compose_fetcher
+        # sha -> None, or raises GhcrTagUnavailableError (USR-339). Defaults to
+        # the real GHCR manifest wait shared with scripts/dokploy_redeploy.py;
+        # injected by tests to avoid a real network probe/timeout.
+        self.ghcr_wait = ghcr_wait or _default_ghcr_wait
         self._lock = threading.Lock()
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
@@ -313,6 +334,13 @@ class DokployDeploymentAdapter:
         The repository comes from ``deploy.params.compose_repo`` (``owner/name``;
         the release stage derives it from the project's ``repo_url``). Never
         logs or returns compose bodies.
+
+        USR-339: the image mode (``build``/``ghcr``) is resolved explicitly here
+        rather than left to ``render_darkhub_compose``'s own default, because in
+        ``ghcr`` mode this must first block on ``self.ghcr_wait(sha)`` -- before
+        any Dokploy call (``compose.one``/``compose.update``) is ever made. A
+        missing/timed-out tag fails closed (``release_identity_ghcr_image_missing``)
+        with no fallback to ``build``.
         """
         repository = str(params.get("compose_repo") or "").strip()
         if not repository:
@@ -329,7 +357,20 @@ class DokployDeploymentAdapter:
         if not isinstance(source, str) or not source.strip():
             return None, "release_identity_compose_unreadable"
         try:
-            return render_darkhub_compose(source, sha), None
+            image_source = resolve_hub_image_source()
+        except ComposeRenderError:
+            return None, "release_identity_image_source_invalid"
+        if image_source == IMAGE_SOURCE_GHCR:
+            try:
+                self.ghcr_wait(sha)
+            except GhcrTagUnavailableError as exc:
+                logger.warning(
+                    "Dokploy GHCR image not published at %s: %s; refusing deploy, no fallback to build",
+                    sha[:12], type(exc).__name__,
+                )
+                return None, "release_identity_ghcr_image_missing"
+        try:
+            return render_darkhub_compose(source, sha, image_source), None
         except ComposeRenderError:
             return None, "release_identity_compose_contract_invalid"
 
