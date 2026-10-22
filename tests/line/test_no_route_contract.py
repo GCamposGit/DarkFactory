@@ -43,6 +43,10 @@ NOT_A_ROUTE_PARK: dict[str, str] = {
         "USR-304: optional admission quota gate (DARKFAC_FEEDER_QUOTA_GATE) only asks whether ANY harness is above "
         "the 15% floor before admitting tickets; it never runs or parks a stage, so there is no route to wait for."
     ),
+    "route_probe.py": (
+        "USR-346: standalone health probe asks whether normal routing can currently elect a route so the cloud-worker "
+        "sweeper can resume an already parked infra request; it never runs or parks a stage."
+    ),
 }
 
 

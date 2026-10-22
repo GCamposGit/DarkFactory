@@ -59,6 +59,12 @@ _HEALTHY_PROBE_INTERVAL_SEC = 3600.0
 # Delay before a job this worker cannot serve (no authenticated harness) is retried.
 _NO_HARNESS_RETRY_MINUTES = 10
 
+
+def _job_is_waiting_human(job: dict[str, Any]) -> bool:
+    """Keep status classification separate from the legacy route-cause check."""
+    return str(job.get("status") or "").lower() == "waiting_human"
+
+
 DEFAULT_CAPABILITIES: tuple[str, ...] = (
     "grill_engine",
     "planner",
@@ -1092,7 +1098,7 @@ class CloudWorker:
         for job in snapshot.get("jobs", []):
             if job.get("stage") != stage or job.get("stage") != blocking_stage:
                 continue
-            if str(job.get("status") or "").lower() != "waiting_human":
+            if not _job_is_waiting_human(job):
                 continue
             cause = str(job.get("cause_code") or "")
             if cause == NO_ROUTE_CAUSE or cause.startswith(f"{NO_ROUTE_CAUSE} "):
