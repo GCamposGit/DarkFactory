@@ -1,8 +1,9 @@
 {
-  "harness": "codex",
-  "model": "gpt-6-luna",
-  "effort": "high",
+  "harness": "claude",
+  "model": "sonnet",
+  "effort": null,
   "tickets_done": [
-    "T1"
+    "T1",
+    "fix-validation-559521225ac3"
   ]
 }
