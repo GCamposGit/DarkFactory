@@ -45,6 +45,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(tmp_path / "harness_state"))
     monkeypatch.setenv("DARKFAC_WORKER_STATE_DIR", str(tmp_path / "worker_state"))
     monkeypatch.setenv("DARKFAC_SUITE_LOCK", "off")
+    monkeypatch.setattr(remote_dispatch, "_job_status", lambda *a, **k: "failed")  # no real HTTP
     remote_dispatch.DISPATCH_ATTEMPTS.clear()  # module-level list: other tests in the same worker leave entries
     for key in (
         "CI",
@@ -81,8 +82,8 @@ def _call_retry(clock: _Clock) -> Any:
 # --- dispatch ----------------------------------------------------------------------
 
 
-def test_defaults_are_180s_and_2_retries() -> None:
-    assert remote_dispatch.worker_restart_grace_sec() == 180.0
+def test_defaults_are_1200s_and_2_retries() -> None:
+    assert remote_dispatch.worker_restart_grace_sec() == 1200.0
     assert remote_dispatch.worker_restart_retries() == 2
 
 
@@ -93,7 +94,7 @@ def test_env_overrides_and_invalid_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert remote_dispatch.worker_restart_retries() == 0
     monkeypatch.setenv("DARKFAC_WORKER_RESTART_GRACE_SEC", "-5")
     monkeypatch.setenv("DARKFAC_WORKER_RESTART_RETRIES", "lixo")
-    assert remote_dispatch.worker_restart_grace_sec() == 180.0
+    assert remote_dispatch.worker_restart_grace_sec() == 1200.0
     assert remote_dispatch.worker_restart_retries() == 2
 
 
@@ -186,8 +187,8 @@ def test_worker_that_never_returns_is_given_up_after_the_grace(
         _call_retry(clock)
 
     assert calls == ["http://w1:8080"]  # no resubmission to a worker that never came back
-    assert clock.now - 1000.0 == pytest.approx(180.0)  # waited exactly the grace, virtually
-    assert "did not return within 180s" in capsys.readouterr().out
+    assert clock.now - 1000.0 == pytest.approx(1200.0)  # waited exactly the grace, virtually
+    assert "did not return within 1200s" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("code", ["worker_silent", "worker_internal_error", "client_deadline_exceeded"])
@@ -224,7 +225,84 @@ def test_worker_restarted_payload_is_infrastructure_not_a_harness_fail(capsys: p
     assert "worker_restarted" in remote_dispatch.RESTART_RETRY_ERROR_CODES
 
 
+def test_usr342_worker_back_after_600s_with_worker_restarted_resubmits_once_without_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock()
+    calls: list[dict[str, Any]] = []
+    outcomes: list[Any] = [_lost("worker_unreachable"), (True, None)]
+
+    def _one_job(base_url: str, **kw: object) -> Any:
+        calls.append(dict(kw))
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def _probe(*_a: object, **_k: object) -> Any:
+        return dict(HEALTHY) if clock.now - 1000.0 >= 600 else None
+
+    monkeypatch.setattr(remote_dispatch, "probe_health", _probe)
+    monkeypatch.setattr(remote_dispatch, "is_self_dispatch", lambda *a, **k: False)
+    monkeypatch.setattr(remote_dispatch, "_dispatch_one_job", _one_job)
+    monkeypatch.setattr(remote_dispatch, "_job_status", lambda *a, **k: "failed")  # worker_restarted: terminal
+
+    assert _call_retry(clock) == (True, None)
+    assert len(calls) == 2 and "resume_job_id" not in calls[1]  # one resubmit, no resume
+    assert 600 <= clock.now - 1000.0 < 1200  # waited past the old 180 s grace
+
+
+def test_usr342_worker_back_with_job_still_running_resumes_without_second_submit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock()
+    calls: list[dict[str, Any]] = []
+    outcomes: list[Any] = [_lost("worker_unreachable", job_id="old-job"), (True, None)]
+
+    def _one_job(base_url: str, **kw: object) -> Any:
+        calls.append(dict(kw))
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    busy = {**HEALTHY, "busy": True}  # the worker is busy running our own job
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **k: dict(busy))
+    monkeypatch.setattr(remote_dispatch, "is_self_dispatch", lambda *a, **k: False)
+    monkeypatch.setattr(remote_dispatch, "_dispatch_one_job", _one_job)
+    monkeypatch.setattr(remote_dispatch, "_job_status", lambda _u, job_id: "running" if job_id == "old-job" else None)
+
+    assert _call_retry(clock) == (True, None)
+    assert calls[1].get("resume_job_id") == "old-job"  # resumes streaming; _dispatch_one_job skips submit
+    assert remote_dispatch.dispatch_attempts()[0]["resumed_same_job"] is True
+
+
+def test_usr342_dead_confirmation_window_spans_at_least_30s(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = _Clock()
+    monkeypatch.setattr(remote_dispatch.time, "sleep", clock.sleep)
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **k: None)
+    assert remote_dispatch._confirm_worker_unreachable("http://w1:8080") == (None, 3)
+    assert sum(clock.slept) >= 30.0
+
+
 # --- worker ------------------------------------------------------------------------
+
+
+def test_usr342_duplicate_submit_with_same_key_returns_the_live_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _manager(tmp_path)
+    job = _job("f" * 32)
+    job.client_dispatch_key = "k1"
+    manager._register(job)
+    manager._set_status(job, "running")
+    # the worker thread would otherwise pick up queued jobs; only the dedup path is exercised
+    code, body = manager.submit(b"", {"candidate_sha": "c" * 40, "client_dispatch_key": "k1"})
+    assert code == 200 and body["job_id"] == job.job_id and body["deduplicated"] is True
+    assert len(manager.jobs) == 1
+    # a terminal job with the same key is NOT reused
+    manager._set_status(job, "failed", error_code=ERROR_CODE_WORKER_RESTARTED)
+    assert manager._live_job_for_key("k1") is None
 
 
 def _job(job_id: str) -> HarnessJob:

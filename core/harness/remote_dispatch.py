@@ -131,7 +131,7 @@ SLOW_WORKER_PROBE_INTERVAL_SEC = 10.0
 #: confirmation probes that follow the first failed ``/health`` probe.
 DEFAULT_WORKER_DEAD_PROBES = 3
 MAX_WORKER_DEAD_PROBES = 10
-DEAD_PROBE_GAP_SEC = 0.5
+DEAD_PROBE_GAP_SEC = 15.0  # USR-342: 3 probes span >= 30 s (a VM freeze/restore blip is not death)
 #: USR-178: a job abandoned for one of these causes is cancelled on the worker
 #: (best effort), so a half-alive worker is not left grinding a run nobody
 #: waits for while the local fallback starts.
@@ -144,7 +144,7 @@ INFRASTRUCTURE_ERROR_CODES = frozenset(
     {"worker_restarted", "worker_internal_error", "worker_setup_failed", "worker_signal_killed"}
 )
 #: Default of ``DARKFAC_WORKER_RESTART_GRACE_SEC`` / ``DARKFAC_WORKER_RESTART_RETRIES``.
-DEFAULT_WORKER_RESTART_GRACE_SEC = 180.0
+DEFAULT_WORKER_RESTART_GRACE_SEC = 1200.0  # USR-342: a lost worker took ~17 min to return
 DEFAULT_WORKER_RESTART_RETRIES = 2
 MAX_WORKER_RESTART_RETRIES = 5
 #: Gap between ``/health`` probes while waiting for a restarted worker to come back.
@@ -290,7 +290,7 @@ def dead_probe_confirmations() -> int:
 
 
 def worker_restart_grace_sec() -> float:
-    """Seconds the same worker is awaited after a restart (``DARKFAC_WORKER_RESTART_GRACE_SEC``, default 180)."""
+    """Seconds the same worker is awaited after a restart (``DARKFAC_WORKER_RESTART_GRACE_SEC``, default 1200)."""
 
     return _positive_float_env(ENV_WORKER_RESTART_GRACE_SEC, DEFAULT_WORKER_RESTART_GRACE_SEC)
 
@@ -423,6 +423,22 @@ def _poll_job(base_url: str, job_id: str, offset: int) -> dict[str, Any]:
     req = urllib.request.Request(url, headers=_auth_headers())
     with urllib.request.urlopen(req, timeout=POLL_HTTP_TIMEOUT_SEC) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _job_status(base_url: str, job_id: str) -> str | None:
+    """USR-342: current status of ``job_id`` on the worker (``GET /harness/jobs/<id>``), or ``None`` when the
+    worker does not know it / does not answer. The offset is past the log so no log is transferred."""
+
+    try:
+        payload = _poll_job(base_url, job_id, 2**40)
+    except Exception:  # noqa: BLE001 - unknown job (404) or unreachable: caller resubmits
+        return None
+    status = payload.get("status") if isinstance(payload, dict) else None
+    return str(status) if status else None
+
+
+def _job_is_live(base_url: str, job_id: str | None) -> bool:
+    return bool(job_id) and _job_status(base_url, str(job_id)) in ("queued", "running")
 
 
 def _cancel_job(base_url: str, job_id: str) -> None:
@@ -859,7 +875,20 @@ def _dispatch_one_job(
     include_holdout: bool,
     config_path: Path,
     total_timeout_sec: float,
+    resume_job_id: str | None = None,
 ) -> tuple[bool, HarnessResult | None] | None:
+    if resume_job_id:
+        # USR-342: the same worker came back and still runs our job: resume streaming, no new submit.
+        print(f"[REMOTE] {base_url}: resuming job {resume_job_id} (no new submit)")
+        return _stream_and_finalize(
+            base_url,
+            resume_job_id,
+            health=health,
+            candidate_sha=candidate_sha,
+            config_hash=config_hash,
+            total_timeout_sec=total_timeout_sec,
+            submitted_instance_id=health.get("instance_id"),
+        )
     known_shas = [str(sha) for sha in (health.get("known_shas") or []) if sha]
     try:
         bundle_path = _create_bundle(project_root, base_shas=known_shas)
@@ -875,6 +904,8 @@ def _dispatch_one_job(
         "config_path": _relative_config_path(config_path, project_root),
         "requesting_host": socket.gethostname(),
         "config_hash": config_hash,
+        # USR-342: lets the worker return the live job instead of creating a duplicate.
+        "client_dispatch_key": f"{candidate_sha}:{config_hash}",
     }
 
     try:
@@ -899,8 +930,29 @@ def _dispatch_one_job(
         return None
 
     print(f"[REMOTE] dispatched suite to {base_url} (job {job_id})")
-    deadline = time.monotonic() + total_timeout_sec
     submitted_instance_id = submit_response["body"].get("worker_instance_id") or health.get("instance_id")
+    return _stream_and_finalize(
+        base_url,
+        job_id,
+        health=health,
+        candidate_sha=candidate_sha,
+        config_hash=config_hash,
+        total_timeout_sec=total_timeout_sec,
+        submitted_instance_id=submitted_instance_id,
+    )
+
+
+def _stream_and_finalize(
+    base_url: str,
+    job_id: str,
+    *,
+    health: dict[str, Any],
+    candidate_sha: str,
+    config_hash: str,
+    total_timeout_sec: float,
+    submitted_instance_id: Any,
+) -> tuple[bool, HarnessResult | None] | None:
+    deadline = time.monotonic() + total_timeout_sec
     try:
         payload = _stream_job(base_url, job_id, deadline=deadline, submitted_instance_id=submitted_instance_id)
     except KeyboardInterrupt:
@@ -924,8 +976,10 @@ def _wait_for_worker_back(
     *,
     sleep: Callable[[float], None] | None = None,
     monotonic: Callable[[], float] | None = None,
+    live_job_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Probe ``/health`` until the worker answers and is idle, up to ``grace_sec``.
+    A busy worker also counts as back when ``live_job_id`` (our own job) is still queued/running on it.
 
     Returns the health payload, or ``None`` when the grace elapsed (or the URL turned out to be
     this very host). ``sleep``/``monotonic`` are injectable so tests never really wait."""
@@ -939,7 +993,7 @@ def _wait_for_worker_back(
         if health is not None:
             if is_self_dispatch(base_url, health):
                 return None
-            if not health.get("busy"):
+            if not health.get("busy") or _job_is_live(base_url, live_job_id):
                 return health
         remaining = deadline - clock()
         if remaining <= 0:
@@ -1030,7 +1084,11 @@ def _dispatch_with_restart_retry(
             retry += 1
             reason = f"{error_code}: {str(exc)[:200]}"
             print(f"{MARKER_REMOTE_RETRY} worker={base_url} attempt={retry}/{max_retries} reason={reason}")
-            back = _wait_for_worker_back(base_url, grace_sec, sleep=sleep, monotonic=monotonic)
+            lost_job_id = exc.details.get("job_id")
+            back = _wait_for_worker_back(
+                base_url, grace_sec, sleep=sleep, monotonic=monotonic, live_job_id=lost_job_id
+            )
+            resume_job_id = str(lost_job_id) if back is not None and _job_is_live(base_url, lost_job_id) else None
             DISPATCH_ATTEMPTS.append(
                 {
                     "worker_url": base_url,
@@ -1040,6 +1098,7 @@ def _dispatch_with_restart_retry(
                     "elapsed_sec": round(clock() - attempt_started, 1),
                     "retry": retry,
                     "worker_back": back is not None,
+                    "resumed_same_job": resume_job_id is not None,
                 }
             )
             if back is None:
@@ -1048,6 +1107,11 @@ def _dispatch_with_restart_retry(
                     f"reason=worker did not return within {grace_sec:.0f}s; giving up on it"
                 )
                 raise
+            if resume_job_id:
+                health = back
+                job_kwargs["resume_job_id"] = resume_job_id
+                continue
+            job_kwargs.pop("resume_job_id", None)
             stable = _await_worker_stable(base_url, back, sleep=sleep)
             if stable is None:
                 print(

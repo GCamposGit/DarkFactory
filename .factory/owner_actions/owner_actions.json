@@ -2276,6 +2276,33 @@
       "created_at": "2026-10-22T11:50:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-054",
+      "kind": "action",
+      "title": "Desktop: descobrir por que o worker morreu em 22/10 ~02:10Z e desligar suspensao",
+      "priority": "medium",
+      "status": "open",
+      "why": "USR-342: o processo do remote_worker (pid 5480) no darkfac-desktop morreu no meio do portao e so voltou ~17 min depois. Log de eventos e energia so sao acessiveis no proprio Desktop.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Desktop, abrir PowerShell e listar eventos de energia/falha entre 21/10 23:00 e 23:35 (horario local)",
+          "command": "Get-WinEvent -FilterHashtable @{LogName='System','Application'; StartTime='2026-10-21 23:00'; EndTime='2026-10-21 23:35'} | ? { $_.Id -in 41,6008,1074,42,1000,1001,2004 } | fl TimeCreated,Id,ProviderName,Message > C:\\dev\\DarkFac\\.factory\\owner_actions\\OA-054-events.txt"
+        },
+        {
+          "text": "Desligar suspensao na tomada",
+          "command": "powercfg /change standby-timeout-ac 0"
+        },
+        {
+          "text": "Avisar no chat que o arquivo de eventos foi gerado"
+        }
+      ],
+      "verify": "Arquivo OA-054-events.txt existe; powercfg /q mostra standby AC = 0",
+      "created_at": "2026-10-22T12:00:00Z",
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }

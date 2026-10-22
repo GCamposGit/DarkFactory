@@ -628,6 +628,9 @@ class HarnessJob:
     include_holdout: bool
     requesting_host: str
     ref_name: str
+    #: USR-342: optional client-chosen idempotency key (candidate_sha + config_hash); a live job with the
+    #: same key is returned by ``submit`` instead of creating a duplicate.
+    client_dispatch_key: str = ""
     status: str = "queued"  # queued | running | done | failed | cancelled
     log_chunks: list[str] = dataclass_field(default_factory=list)
     result_json: Optional[Dict[str, Any]] = None
@@ -677,6 +680,7 @@ class HarnessJob:
             "include_holdout": self.include_holdout,
             "requesting_host": self.requesting_host,
             "ref_name": self.ref_name,
+            "client_dispatch_key": self.client_dispatch_key,
             "status": self.status,
             "result_json": self.result_json,
             "returncode": self.returncode,
@@ -704,6 +708,7 @@ class HarnessJob:
             include_holdout=bool(record.get("include_holdout", False)),
             requesting_host=str(record.get("requesting_host", "unknown")),
             ref_name=str(record.get("ref_name", "")),
+            client_dispatch_key=str(record.get("client_dispatch_key") or ""),
             status=str(record.get("status", "failed")),
             result_json=record.get("result_json"),
             returncode=record.get("returncode"),
@@ -924,6 +929,11 @@ class JobManager:
         if not re.fullmatch(r"[0-9a-f]{7,64}", candidate_sha or ""):
             return 400, {"error": "invalid or missing candidate_sha"}
 
+        dispatch_key = str(metadata.get("client_dispatch_key") or "").strip()[:200]
+        existing = self._live_job_for_key(dispatch_key)
+        if existing is not None:
+            return 200, self._submit_body(existing, deduplicated=True)
+
         bundle_path = self.state_dir / f"bundle-{uuid.uuid4().hex}.bundle"
         bundle_path.write_bytes(bundle_bytes)
         try:
@@ -992,18 +1002,48 @@ class JobManager:
             include_holdout=bool(metadata.get("include_holdout", False)),
             requesting_host=str(metadata.get("requesting_host", "unknown")),
             ref_name=ref_name,
+            client_dispatch_key=dispatch_key,
         )
-        self._register(job)
+        with self._jobs_lock:
+            existing = self._live_job_for_key(dispatch_key, locked=True)
+            if existing is None:
+                self.jobs[job.job_id] = job
+        if existing is not None:
+            return 200, self._submit_body(existing, deduplicated=True)
+        self._persist(job)
         self._queue.put(job.job_id)
         logger.info(
             "Queued harness job %s for candidate %s (from %s)",
             job.job_id, candidate_sha[:12], job.requesting_host,
         )
-        return 200, {
+        return 200, self._submit_body(job)
+
+    def _submit_body(self, job: HarnessJob, *, deduplicated: bool = False) -> Dict[str, Any]:
+        body: Dict[str, Any] = {
             "job_id": job.job_id,
             "worker_instance_id": self.instance_id,
             "worker_started_at": self.started_at,
         }
+        if deduplicated:
+            body["deduplicated"] = True
+        return body
+
+    def _live_job_for_key(self, key: str, *, locked: bool = False) -> Optional[HarnessJob]:
+        """USR-342: the queued/running job submitted with ``key``, if any (``None`` for an empty key)."""
+
+        if not key:
+            return None
+
+        def _find() -> Optional[HarnessJob]:
+            for candidate in self.jobs.values():
+                if candidate.client_dispatch_key == key and candidate.status in ("queued", "running"):
+                    return candidate
+            return None
+
+        if locked:
+            return _find()
+        with self._jobs_lock:
+            return _find()
 
     def status(self, job_id: str, offset: int) -> Optional[Dict[str, Any]]:
         """Read-only snapshot of a job. Takes only that job's own (short-held)

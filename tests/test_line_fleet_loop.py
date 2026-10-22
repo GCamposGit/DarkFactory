@@ -88,6 +88,16 @@ def _accept_intake_ticket(
     return receipt.demand_id, receipt.run_id
 
 
+@pytest.fixture(autouse=True)
+def _fixed_local_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The coordinator measures the real host's free RAM; pin it so admission does not depend on the machine.
+    import types
+
+    import core.line.gate_ram as gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda *a, **k: types.SimpleNamespace(workers=4))
+
+
 @pytest.fixture
 def fleet_store(tmp_path: Path) -> PostgresControlStore:
     db_file = tmp_path / "fleet_control.db"

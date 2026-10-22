@@ -156,8 +156,8 @@ def test_dead_worker_needs_three_failed_probes_and_is_abandoned_before_the_ceili
     assert 60.0 < details["silent_for_sec"] < 180.0  # fast fall-through is kept for a truly dead worker
     assert details["last_step_started"] == "unit_and_integration_tests_parallel"
     assert cancelled == [("http://w", "job-dead")]
-    # the confirmation probes are back to back, not spread over the 180 s ceiling
-    assert len(probes) >= 3 and probes[-1] - probes[-3] < 5.0
+    # USR-342: the confirmation probes span >= 30 s (a blip is not a death) but stay under the 180 s ceiling
+    assert len(probes) >= 3 and 30.0 <= probes[-1] - probes[-3] < 180.0
 
 
 def test_a_single_lost_health_probe_is_a_blip_not_a_dead_worker(
