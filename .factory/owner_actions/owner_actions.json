@@ -2228,7 +2228,7 @@
       "kind": "action",
       "title": "Gravar GHCR_TOKEN (read:packages) no Notebook para o redeploy usar a imagem GHCR do Hub",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "Em 22/10 a primeira imagem ghcr.io/gcamposgit/darkhub:bf0dd10 foi publicada, mas scripts/dokploy_redeploy.py recusou o deploy com HTTP 401 ao conferir o manifest: o pacote e privado e o script so le GHCR_TOKEN ou GITHUB_PAT. O modo GHCR (DARKHUB_IMAGE_SOURCE) foi desligado de novo; o Hub segue no build local ate o token existir. Segredo: so o owner grava.",
       "blocks": [
         "USR-339"
@@ -2249,7 +2249,14 @@
       "verify": "Num PowerShell novo, [Environment]::GetEnvironmentVariable('GHCR_TOKEN','User').Length maior que 0; o redeploy imprime Waiting for ghcr.io/... e termina sem HTTP 401; /health responde o sha da main.",
       "created_at": "2026-10-22T10:10:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-22T12:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-22T12:45:00Z",
+          "outcome": "resolved",
+          "note": "Owner gravou GHCR_TOKEN (token read:packages reaproveitado); HEAD do manifest respondeu 200; DARKHUB_IMAGE_SOURCE=ghcr ligado e o redeploy subiu o Hub pela imagem ghcr.io/gcamposgit/darkhub:871ac717 (/health com o sha)."
+        }
+      ]
     },
     {
       "id": "OA-055",
