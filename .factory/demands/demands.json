@@ -9853,5 +9853,38 @@
     "dependencies": [],
     "created_at": "2026-10-21T23:53:15.560129Z",
     "updated_at": "2026-10-21T23:53:15.560129Z"
+  },
+  {
+    "id": "USR-340",
+    "project_id": "darkfac",
+    "title": "Telegram do Hub recusa /demand de projeto nao-darkfac (intake_service nao ligado)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10 o owner enviou '/demand pilot-hello: ...' (OA-047, M3 do USR-279) e o bot respondeu 'Este canal nao encaminha demandas ao projeto pilot-hello: nada foi registrado.' O roteamento (core/intake/project_routing.resolve_demand) reconheceu o projeto, mas hub/backend/service.py _build_telegram_gateway cria TelegramGateway sem intake_service; core/integrations/telegram.py:790 entao recusa todo projeto diferente de darkfac. Passar intake_service ingenuamente desviaria tambem as demandas darkfac do demand_handler atual para o intake autonomo (mudanca de comportamento). Corrigir de forma que projetos nao-darkfac usem get_autonomous_intake_service() e darkfac mantenha o fluxo atual.",
+    "core_journey": [
+      "Em 21/10 o owner enviou '/demand pilot-hello: ...' (OA-047, M3 do USR-279) e o bot respondeu 'Este canal nao encaminha demandas ao projeto pilot-hello: nada foi registrado.' O roteamento (core/intake/project_routing.resolve_demand) reconheceu o projeto, mas hub/backend/service.py _build_telegram_gateway cria TelegramGateway sem intake_service; core/integrations/telegram.py:790 entao recusa todo projeto diferente de darkfac. Passar intake_service ingenuamente desviaria tambem as demandas darkfac do demand_handler atual para o intake autonomo (mudanca de comportamento). Corrigir de forma que projetos nao-darkfac usem get_autonomous_intake_service() e darkfac mantenha o fluxo atual."
+    ],
+    "non_goals": [
+      "Nao mudar o fluxo de demandas darkfac"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "'/demand pilot-hello: <texto>' pelo webhook do Hub cria demanda/ticket do projeto pilot-hello (prefixo PH) e nenhum USR-",
+      "'/demand <texto>' sem projeto continua indo pelo demand_handler atual (teste de regressao)",
+      "Intake indisponivel responde erro explicito sem registrar nada",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T00:09:32.852759Z",
+    "updated_at": "2026-10-22T00:09:32.852759Z"
   }
 ]
