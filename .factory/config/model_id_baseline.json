@@ -1,5 +1,5 @@
 {
-  "total": 511,
+  "total": 512,
   "files": {
     ".agents/rules/FACTORY_GOVERNANCE.md": 1,
     ".agents/rules/GEMINI.md": 1,
@@ -18,6 +18,7 @@
     ".claude/skills/07-build-dark-factory/templates/FACTORY_RULES.md": 3,
     ".claude/skills/17-specialized-test-subagent/SKILL.md": 2,
     ".claude/skills/19-run-ticket/SKILL.md": 3,
+    ".factory/config/model_id_baseline.json": 1,
     ".factory/demands/demands.json": 29,
     ".factory/evolution_report.md": 1,
     ".factory/experiments/jev-routing-20260919/candidate_probes.py": 15,
