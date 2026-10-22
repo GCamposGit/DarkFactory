@@ -1,0 +1,129 @@
+[
+  {
+    "id": "T1",
+    "title": "Espera da tag GHCR compartilhada entre CLI e DokployDeploymentAdapter",
+    "goal": "Extrair a espera da tag do sha no GHCR para core/infra/ghcr.py e usa-la no DokployDeploymentAdapter antes de instalar o compose em modo ghcr, falhando fechado sem fallback para build.",
+    "files_hint": [
+      "core/infra/ghcr.py",
+      "core/orchestrator/deployment_adapter.py",
+      "scripts/dokploy_redeploy.py",
+      "tests/test_real_deployment_adapter.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "core/infra/ghcr.py expoe a espera da tag (probe HEAD do manifesto, token GHCR_TOKEN ou GITHUB_PAT, timeout e intervalo configuraveis, erros de probe tolerados ate o deadline) e scripts/dokploy_redeploy.py passa a reexportar/consumir esse helper sem mudanca de comportamento do CLI",
+      "DokployDeploymentAdapter resolve o modo de imagem explicitamente e, em modo ghcr, espera a tag ghcr.io/gcamposgit/darkhub:<sha> antes de qualquer compose.update",
+      "Tag ausente/timeout no adapter devolve codigo de erro curto (release_identity_ghcr_image_missing), sem compose.update, sem trigger de deploy e sem voltar para build",
+      "Nenhum log ou retorno expoe token, env ou corpo do compose",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_real_deployment_adapter.py: modo ghcr com tag presente instala compose com image ghcr.io/... e start-first, sem container_name",
+      "tests/test_real_deployment_adapter.py: tag ausente devolve release_identity_ghcr_image_missing e nao faz nenhum POST de mutacao",
+      "tests/test_dokploy_redeploy.py: o CLI continua esperando a tag e os testes existentes de timeout/erro de probe seguem verdes usando o helper compartilhado"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Verificar modo Stack/Swarm antes de deploy em modo ghcr (fail-closed)",
+    "goal": "Antes de qualquer mutacao, confirmar que o compose do Hub esta em modo Stack/Swarm quando DARKHUB_IMAGE_SOURCE=ghcr, porque start-first e ignorado no Compose simples; recusar com remediacao explicita e registrar o passo do owner.",
+    "files_hint": [
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      ".factory/owner_actions/owner_actions.json",
+      "tests/test_dokploy_redeploy.py",
+      "tests/test_real_deployment_adapter.py"
+    ],
+    "acceptance": [
+      "Funcao pura que classifica o tipo do compose do payload de compose.one (stack/swarm, compose simples, desconhecido) com leitura defensiva do campo",
+      "Em modo ghcr e tipo diferente de stack (inclusive ausente ou desconhecido) o CLI sai com EXIT_DEPLOY_FAILED antes de qualquer POST, citando as duas saidas: trocar o compose para Stack no Dokploy ou remover DARKHUB_IMAGE_SOURCE",
+      "Mesma recusa no DokployDeploymentAdapter, com codigo de erro curto e sem mutacao",
+      "Modo build (padrao) nao e afetado por nenhum valor de tipo de compose",
+      "OA-052 atualizada (ou nova OA registrada) com o passo tela a tela de trocar o compose Darkhub para Stack e o criterio de verificacao",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_dokploy_redeploy.py: ghcr + compose simples recusa sem POSTs; ghcr + stack segue o fluxo normal; build ignora o tipo",
+      "tests/test_dokploy_redeploy.py: tipo ausente/desconhecido em modo ghcr falha fechado",
+      "tests/test_real_deployment_adapter.py: adapter em ghcr sem Stack devolve codigo de erro e nao chama compose.update"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Sonda de 1 s na janela do deploy com evidencia gravada",
+    "goal": "Dar a core/infra/availability_probe.py um modo watch que amostra /health a cada 1 s durante a troca e grava a evidencia (amostras, respostas != 200, maior janela fora do ar, convergencia do sha), acionado automaticamente pelo redeploy do Darkhub.",
+    "files_hint": [
+      "core/infra/availability_probe.py",
+      "scripts/dokploy_redeploy.py",
+      "tests/test_hub_deploy_usr207.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "Modo watch com intervalo (padrao 1 s), duracao maxima, sha esperado e parada antecipada na convergencia; clock, prober e escrita sao injetaveis",
+      "Evidencia em JSON (amostras, nao-200 com instantes, maior janela consecutiva fora do ar, sha inicial/final, veredito) gravada em .factory/metrics/hub_deploy_windows/<sha>.json",
+      "CLI: python -m core.infra.availability_probe --watch --interval 1 --expect-sha <sha> documentado com caminho absoluto no PowerShell",
+      "scripts/dokploy_redeploy.py liga o amostrador na janela do deploy do Darkhub e imprime o resumo de uma linha; qualquer falha do amostrador e registrada e nunca derruba o deploy",
+      "A sonda de 1 minuto ja agendada (tick/alerta de 120 s) continua funcionando sem mudanca de comportamento",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: watch com prober falso conta nao-200, calcula a maior janela fora do ar e para na convergencia do sha",
+      "tests/test_hub_deploy_usr207.py: evidencia JSON escrita em tmp_path com o veredito correto (zero nao-200 => ok)",
+      "tests/test_dokploy_redeploy.py: deploy do Darkhub imprime o resumo da janela e uma excecao do amostrador nao altera o codigo de saida"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Patch do workflow hub-image: uma unica imagem por merge de runtime",
+    "goal": "Corrigir docs/proposals/USR-207-ghcr-build.patch para disparar so em caminhos embutidos na imagem (contrato de deploy_classifier), com concurrency por sha e workflow_dispatch, e amarrar isso com teste estatico (o workflow em si continua sendo publicado pelo owner na OA-052).",
+    "files_hint": [
+      "docs/proposals/USR-207-ghcr-build.patch",
+      "tests/test_hub_deploy_usr207.py",
+      ".factory/owner_actions/owner_actions.json",
+      "core/infra/deploy_classifier.py"
+    ],
+    "acceptance": [
+      "Paths do trigger do patch iguais ao contrato de core/infra/deploy_classifier.py (core/**, hub/**, scripts/**, deploy/**, requirements.txt, harness.config.json, run_hub.py), sem docs/** nem .factory/**",
+      "Patch tem concurrency por sha (sem cancelar imagem ja publicada) e workflow_dispatch para a primeira imagem da OA-052, e mantem a tag do sha completo",
+      "Patch aplica limpo sobre a arvore atual (verificado com git apply --check) e nenhum arquivo em .github/workflows e commitado pelo ticket",
+      "Teste estatico le o patch e, quando .github/workflows/hub-image.yml existir, tambem o arquivo publicado, falhando se os paths divergirem do classificador",
+      "OA-052 atualizada para reaplicar o patch corrigido e verificar que um merge so de docs/ledger nao gera imagem",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: paths do trigger do patch == contrato de deploy_classifier e ausencia de docs/.factory",
+      "tests/test_hub_deploy_usr207.py: patch declara concurrency, workflow_dispatch e tag com o sha completo; se o workflow publicado existir, vale o mesmo contrato"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Sincronizar a proposta USR-207 e o agendamento colavel no PowerShell",
+    "goal": "Atualizar docs/proposals/USR-207-zero-downtime.md para o estado entregue (chave de imagem, espera da tag no CLI e no adapter, exigencia de Stack, evidencia da janela de 1 s) e deixar o comando de agendamento da sonda colavel sem caminho de usuario fixo.",
+    "files_hint": [
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "Secao 1: snippet de agendamento usa Register-ScheduledTask com pythonw.exe em caminho absoluto resolvido sem usuario fixo (LOCALAPPDATA com fallback por Get-Command), aspas que sobrevivem ao paste e uma linha de verificacao (Get-ScheduledTaskInfo)",
+      "Secoes 2.1/2.1b/2.1c refletem o entregue: render alternado por DARKHUB_IMAGE_SOURCE, espera da tag no CLI e no adapter, recusa fora de Stack, evidencia em .factory/metrics/hub_deploy_windows/<sha>.json e o comando --watch",
+      "Proposta aponta o que resta na OA-052 (publicar o workflow, primeira imagem, Stack, prova real da sonda de 1 s) sem pedir nada ao usuario no chat",
+      "Todos os comandos PowerShell citados usam caminho absoluto",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: teste estatico da secao de agendamento (Register-ScheduledTask, pythonw.exe, sem caminho de usuario fixo, aspas balanceadas, linha de verificacao)",
+      "tests/test_hub_deploy_usr207.py: proposta menciona a espera da tag no adapter, a exigencia de Stack e o caminho da evidencia da janela"
+    ],
+    "smoke": []
+  }
+]
