@@ -459,7 +459,7 @@
       "kind": "action",
       "title": "Limpar as 22 entradas travadas por ACL da lixeira de worktrees (PowerShell elevado)",
       "priority": "low",
-      "status": "open",
+      "status": "done",
       "why": "Causa confirmada no USR-224: o .pytest_cache de worktrees antigas foi criado com ACL restrita (so SYSTEM/Administradores), entao a limpeza automatica sem elevacao nao consegue apagar 22 entradas em .factory/backups/trash. Elas ocupam disco e repetem uma linha de aviso por varredura. Nao bloqueia entregas.",
       "blocks": [],
       "depends_on": [],
@@ -475,7 +475,7 @@
       "verify": "Get-ChildItem C:\\dev\\DarkFac\\.factory\\backups\\trash -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Measure-Object deve mostrar Count : 0. Depois marque esta acao como feita no DarkHub.",
       "created_at": "2026-10-11T19:15:29Z",
       "created_by": "claude-code",
-      "resolved_at": null,
+      "resolved_at": "2026-10-22T12:00:00Z",
       "history": [
         {
           "at": "2026-10-20T01:57:28Z",
@@ -486,6 +486,11 @@
           "at": "2026-10-20T01:57:35Z",
           "outcome": "evidence:keep_open",
           "note": "Ainda necessaria: 17 entradas com mais de 7 dias em .factory/backups/trash na verificacao de 20/10/2026 (esperado: 0)."
+        },
+        {
+          "at": "2026-10-22T12:00:00Z",
+          "outcome": "resolved",
+          "note": "Lixeira com 0 entradas >7d; tarefa elevada semanal DarkFac-Trash-ACL-Cleanup criada (SYSTEM) para nao reabrir."
         }
       ]
     },
@@ -640,7 +645,7 @@
       "kind": "action",
       "title": "Liberar CPU e RAM para o portao: indexador do Segundo Cerebro no Desktop e Chrome no Notebook estao dobrando o tempo da suite",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Em 13/10/2026 o passo paralelo do portao rodou 3004 s no Desktop (antes 1450-1870 s) e estourou o limite de 3000 s. Medicao no Desktop (worker /metrics/hardware e lista de processos): CPU 86% e RAM 86,5% com busy=False, causados pelo processo 'segundocerebro.index.indexer --base bain' (~3,9 GB, 7684 s de CPU, prioridade Normal). No Notebook o runner so libera 1 worker de teste porque ha ~3 GB de RAM livre (Chrome ~4,7 GB); com 1 worker a suite local leva ~50 min. Nao e defeito de codigo. Esses dois processos sao seus: a fabrica nao mexe neles.",
       "blocks": [],
       "depends_on": [],
@@ -669,12 +674,17 @@
       "verify": "Invoke-RestMethod http://100.78.181.90:8080/metrics/hardware mostra cpu_percent abaixo de 40 com busy False; no Notebook, FreeGB 10 ou mais.",
       "created_at": "2026-10-13T00:30:06Z",
       "created_by": "claude-session-2026-10-13-v0",
-      "resolved_at": null,
+      "resolved_at": "2026-10-22T12:00:00Z",
       "history": [
         {
           "at": "2026-10-20T01:57:28Z",
           "outcome": "obsolete_blocker:update_blocks",
           "note": "Todos os tickets bloqueados ja terminaram (USR-249=completed, USR-250=completed, USR-246=completed, USR-247=completed, USR-222=completed, USR-239=completed); a lista de bloqueios sera esvaziada. Se os passos ainda forem uma acao real do owner, a OA segue aberta; fechar exige julgamento."
+        },
+        {
+          "at": "2026-10-22T12:00:00Z",
+          "outcome": "resolved",
+          "note": "Owner criou no Desktop a tarefa DarkFac-Indexer-Idle (SYSTEM, a cada 15 min) que baixa o indexador para Idle; portoes passam a usar o grokbox, Chrome do Notebook deixa de importar."
         }
       ]
     },
@@ -1926,7 +1936,7 @@
       "kind": "action",
       "title": "Piloto USR-279 M3: enviar pelo Telegram a demanda do pilot-hello (depois do deploy)",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "O marco M3 do piloto greenfield exige que o owner envie a demanda real do produto pelo Telegram, para provar que o roteamento por projeto (USR-278) cai no projeto pilot-hello e nao em darkfac. So o owner pode enviar mensagem como owner no bot.",
       "blocks": [
         "USR-279"
@@ -1952,7 +1962,7 @@
       "verify": "Existe ticket do projeto pilot-hello (prefixo PH) vinculado a demanda enviada; nenhum ticket novo USR- foi criado para ela.",
       "created_at": "2026-10-20T15:39:28Z",
       "created_by": "claude-session-43f612c4",
-      "resolved_at": null,
+      "resolved_at": "2026-10-22T12:00:00Z",
       "history": [
         {
           "at": "2026-10-22T00:20:00Z",
@@ -1963,6 +1973,11 @@
           "at": "2026-10-22T00:40:00Z",
           "outcome": "evidence:keep_open",
           "note": "Owner enviou o /demand em 21/10; bot recusou (Hub cria TelegramGateway sem intake_service). Bloqueada pelo USR-340; reenviar a mesma mensagem depois do deploy dele."
+        },
+        {
+          "at": "2026-10-22T12:00:00Z",
+          "outcome": "resolved",
+          "note": "Owner reenviou /demand apos USR-340 no ar; nasceu PH-01 no projeto pilot-hello (nenhum USR)."
         }
       ]
     },
@@ -2165,7 +2180,7 @@
       "kind": "action",
       "title": "Publicar workflow hub-image e ativar imagem GHCR do Hub (USR-339)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O workflow .github/workflows/hub-image.yml e protegido; so o owner publica. Sem imagem no GHCR a chave DARKHUB_IMAGE_SOURCE=ghcr quebraria o deploy do Hub.",
       "blocks": [
         "USR-339"
@@ -2199,7 +2214,14 @@
       "verify": "Pacote darkhub no GHCR com tag do sha; redeploy imprime Waiting for ghcr.io/... e /health responde o sha novo",
       "created_at": "2026-10-22T00:20:04Z",
       "created_by": "subagente sonnet",
-      "resolved_at": null
+      "resolved_at": "2026-10-22T12:00:00Z",
+      "history": [
+        {
+          "at": "2026-10-22T12:00:00Z",
+          "outcome": "resolved",
+          "note": "Workflow hub-image.yml publicado no main (13f5d81f) pelo owner com HARNESS_PASS. Primeira imagem dispara no proximo push com paths do filtro; troca DARKHUB_IMAGE_SOURCE=ghcr fica com o agente."
+        }
+      ]
     }
   ]
 }
