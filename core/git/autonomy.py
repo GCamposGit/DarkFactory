@@ -240,6 +240,34 @@ class StagedInspectError(RuntimeError):
         )
 
 
+_REGISTRY_LEDGER_FILES = frozenset({".factory/config/model_registry.json", ".factory/models/lifecycle_ledger.jsonl"})
+
+
+def registry_allowlist() -> frozenset[str]:
+    """Paths a ``registry`` delivery may change: the registry, the model ledger and the docgen targets."""
+    from core.models.docgen import TARGETS
+
+    return _REGISTRY_LEDGER_FILES | frozenset(TARGETS)
+
+
+def registry_disallowed(changed: "Sequence[str] | set[str]") -> list[str]:
+    allowed = registry_allowlist()
+    return sorted(p for p in (c.replace("\\", "/").strip() for c in changed) if p and p not in allowed)
+
+
+def _registry_title(title: str) -> str:
+    text = title.strip().replace(chr(10), " ")
+    return text if text.startswith("chore(models):") else f"chore(models): {text}"
+
+
+def _delivery_pr_title(kind: str, ticket_id: str, title: str) -> str:
+    if kind == "queue":
+        return f"chore(backlog): registrar {ticket_id} - {title.strip()}"
+    if kind == "registry":
+        return _registry_title(title)
+    return f"feat(core): {title.strip()} [{ticket_id}]"
+
+
 class GitAutonomyManager:
     """Manages autonomous Git operations for the Dark Factory."""
 
@@ -429,7 +457,7 @@ class GitAutonomyManager:
         paths: Optional[Sequence[str | Path]] = None,
         cwd: Optional[Path] = None,
         custom_message: Optional[str] = None,
-        kind: Literal["queue", "implementation"] = "implementation",
+        kind: Literal["queue", "implementation", "registry"] = "implementation",
     ) -> Optional[str]:
         """Stage changes and produce a deterministic atomic commit bound to the ticket.
 
@@ -472,10 +500,12 @@ class GitAutonomyManager:
         if custom_message:
             commit_msg = custom_message
         else:
-            subject = (
-                f"chore(backlog): registrar {ticket_id} - {clean_title}"
-                if kind == "queue" else f"feat({scope}): {clean_title} [{ticket_id}]"
-            )
+            if kind == "registry":
+                subject = _registry_title(clean_title)
+            elif kind == "queue":
+                subject = f"chore(backlog): registrar {ticket_id} - {clean_title}"
+            else:
+                subject = f"feat({scope}): {clean_title} [{ticket_id}]"
             commit_msg = (
                 f"{subject}\n\n"
                 f"DarkFac-Ticket: {ticket_id}\n"
@@ -888,7 +918,7 @@ class GitAutonomyManager:
 
     def _ci_gate(
         self, number: int, pr_url: str, branch: str, base: str, cwd: Path, runner: GhRunner,
-        kind: Literal["queue", "implementation"] = "implementation",
+        kind: Literal["queue", "implementation", "registry"] = "implementation",
     ) -> tuple[Optional[DeliveryReport], str]:
         """Decide whether the PR may be merged (USR-85).
 
@@ -964,7 +994,7 @@ class GitAutonomyManager:
         base: str = "main",
         gh_runner: Optional[GhRunner] = None,
         merge: bool = True,
-        kind: Literal["queue", "implementation"] = "implementation",
+        kind: Literal["queue", "implementation", "registry"] = "implementation",
         *,
         supervise_queue: bool = True,
     ) -> DeliveryReport:
@@ -981,7 +1011,7 @@ class GitAutonomyManager:
             # USR-238: every registration also reports queue PRs that stayed open too long.
             queue_registration.check_stalled_queue_prs(target, runner, manager_factory=self._child_manager)
         try:
-            if kind not in ("queue", "implementation"):
+            if kind not in ("queue", "implementation", "registry"):
                 raise ValueError(f"Unknown delivery kind: {kind}")
             report = self._deliver(ticket_id, title, target, base, runner, merge, kind)
         except Exception as exc:  # fail-closed report instead of crashing the pipeline
@@ -997,10 +1027,22 @@ class GitAutonomyManager:
 
     def _deliver(
         self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool,
-        kind: Literal["queue", "implementation"],
+        kind: Literal["queue", "implementation", "registry"],
     ) -> DeliveryReport:
         # (a) commit if dirty
-        if kind == "implementation":
+        if kind == "registry":
+            changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
+            outside = registry_disallowed(changed)
+            if outside:
+                return DeliveryReport(
+                    ok=False, action="error",
+                    message=f"Registry delivery refused: files outside the model allowlist: {', '.join(outside[:5])}",
+                )
+            if not changed:
+                return DeliveryReport(ok=False, action="no_changes", message="Registry delivery has no changes.")
+            if self.is_dirty(cwd=cwd):  # never touches the demands ledger: no ticket is completed
+                self.commit_ticket(ticket_id, title, cwd=cwd, kind="registry")
+        elif kind == "implementation":
             changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
             if is_ledger_only(list(changed)):
                 return DeliveryReport(ok=False, action="no_changes", message="Implementation changes only the ledger.")
@@ -1034,7 +1076,7 @@ class GitAutonomyManager:
         if _run_git(["merge-base", "--is-ancestor", base, "HEAD"], cwd=cwd).returncode == 0:
             _run_git(["branch", "-f", base, remote_ref], cwd=cwd)
 
-        ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind == "implementation")
+        ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind != "queue")
         if not ok:
             return DeliveryReport(
                 ok=False,
@@ -1059,6 +1101,13 @@ class GitAutonomyManager:
             return DeliveryReport(ok=False, action="no_changes", branch=branch, message="Implementation changes only the ledger.")
         if kind == "queue" and not is_ledger_only(self._changed_files(base, cwd)):
             return DeliveryReport(ok=False, action="error", branch=branch, message="Queue PR changes non-ledger files.")
+        if kind == "registry":
+            outside = registry_disallowed(self._changed_files(base, cwd))
+            if outside:
+                return DeliveryReport(
+                    ok=False, action="error", branch=branch,
+                    message=f"Registry PR changes files outside the model allowlist: {', '.join(outside[:5])}",
+                )
 
         # (d) push. USR-307: a queue registration is identified by its PR title (ticket + title). When
         # an open queue PR with the same identity already exists on ANOTHER branch (replay of the same
@@ -1087,8 +1136,9 @@ class GitAutonomyManager:
             number, pr_url = existing
         else:
             body = f"{'Registro de fila' if kind == 'queue' else 'Entrega autonoma'} do ticket {ticket_id}.\n\nDarkFac-Ticket: {ticket_id}"
-            pr_title = (f"chore(backlog): registrar {ticket_id} - {title.strip()}" if kind == "queue"
-                        else f"feat(core): {title.strip()} [{ticket_id}]")
+            if kind == "registry":
+                body = "Atualizacao autonoma do registro de modelos (sem ticket a concluir).\n\nDarkFac-Autonomy: zero-human-touch"
+            pr_title = _delivery_pr_title(kind, ticket_id, title)
             pr = runner(
                 [
                     "pr", "create", "--base", base, "--head", branch,
@@ -1108,16 +1158,16 @@ class GitAutonomyManager:
                 )
             number = int(m.group(1))
 
-        pr_title = (f"chore(backlog): registrar {ticket_id} - {title.strip()}" if kind == "queue"
-                    else f"feat(core): {title.strip()} [{ticket_id}]")
+        pr_title = _delivery_pr_title(kind, ticket_id, title)
         title_update = runner(["pr", "edit", str(number), "--title", pr_title], cwd)
         if title_update.returncode != 0:
             return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
                                   message=f"Could not set {kind} PR title: {title_update.stderr.strip()}")
         label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
         if label.returncode != 0:
-            color = "D4C5F9" if kind == "queue" else "0E8A16"
-            description = "Ticket registered in backlog" if kind == "queue" else "Ticket implementation"
+            color = {"queue": "D4C5F9", "registry": "FBCA04"}.get(kind, "0E8A16")
+            description = {"queue": "Ticket registered in backlog", "registry": "Model registry update"}.get(
+                kind, "Ticket implementation")
             created = runner(["label", "create", kind, "--color", color,
                               "--description", description, "--force"], cwd)
             if created.returncode != 0:
@@ -1182,7 +1232,7 @@ class GitAutonomyManager:
                     collision = self._ledger_collision(cwd, remote_ref)
                     if collision:
                         return DeliveryReport(ok=False, action="conflict", pr_url=pr_url, branch=branch, message=collision)
-                    ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind == "implementation")
+                    ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind != "queue")
                     if not ok:
                         return DeliveryReport(
                             ok=False, action="conflict", pr_url=pr_url, branch=branch, conflict_files=files,
@@ -1878,7 +1928,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     deliver_parser.add_argument("ticket_id", help="Ticket ID (e.g. USR-57)")
     deliver_parser.add_argument("--title", required=True, help="Title/summary of the change")
     deliver_parser.add_argument("--base", default="main", help="Base branch (default: main)")
-    deliver_parser.add_argument("--kind", choices=("queue", "implementation"), default="implementation",
+    deliver_parser.add_argument("--kind", choices=("queue", "implementation", "registry"), default="implementation",
                                 help="Delivery type (default: implementation)")
     deliver_parser.add_argument("--no-merge", action="store_true", help="Open PR only (commercial acceptance)")
 

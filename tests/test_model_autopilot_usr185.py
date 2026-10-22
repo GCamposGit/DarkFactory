@@ -137,7 +137,7 @@ def test_pr_receives_expected_arguments(tmp_path: Path) -> None:
 
     res = pr.deliver_model_change("promover dev-new", lambda p: "ok", repo_root=tmp_path,
                                   workspace_factory=factory, cleanup_fn=lambda *a, **k: None, executor=executor)
-    assert got == [("USR-185", "chore(models): promover dev-new", tmp_path / "ws", "implementation")]
+    assert got == [("USR-185", "chore(models): promover dev-new", tmp_path / "ws", "registry")]
     assert res.opened and res.pr_url == "u"
 
 
@@ -157,7 +157,7 @@ def test_run_daily_is_idempotent(tmp_path: Path) -> None:
     )
     first = autopilot.run_daily(**kw)
     assert first.promoted == ["dev-new"] and first.pr and first.pr.opened
-    assert delivered == [("USR-185", "chore(models): promover dev-new", "implementation")]
+    assert delivered == [("USR-185", "chore(models): promover dev-new", "registry")]
     second = autopilot.run_daily(**kw)
     assert not second.changed and second.pr and not second.pr.opened and second.pr.action == "no_changes"
     assert len(delivered) == 1 and len(ws_calls) == 2

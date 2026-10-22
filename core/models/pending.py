@@ -20,10 +20,17 @@ from core.models.registry import REPO_ROOT
 logger = logging.getLogger(__name__)
 
 PENDING_DIR = REPO_ROOT / ".factory" / "models" / "pending_grill"
+# Unversioned (gitignored) Hub storage: the Grill decision never touches .factory/owner_actions/owner_actions.json.
+HUB_OWNER_ACTIONS_DIR = REPO_ROOT / "hub" / "data" / "owner_actions"
 BLOCKING_STAGE = "model_promotion"
 
 Sender = Callable[[str], bool]
 Mirror = Callable[[Any], Any]
+# owner-action id -> chosen option id (``approve`` / ``reject``) or ``None`` while unanswered
+DecisionReader = Callable[[str], Optional[str]]
+
+APPROVE = "approve"
+REJECT = "reject"
 
 
 @dataclass(frozen=True)
@@ -68,10 +75,87 @@ def build_guide(model_id: str, role: Optional[str], reasons: Sequence[str], reco
     )
 
 
-def _default_mirror(request: Any) -> Any:
-    from core.owner_actions.mirror import mirror_human_request
+def decision_action_id(model_id: str) -> str:
+    from core.owner_actions.mirror import mirrored_id
 
-    return mirror_human_request(request)
+    return mirrored_id(f"model-promote-{model_id}", BLOCKING_STAGE)
+
+
+def _default_mirror(request: Any) -> Any:
+    """Mirror the Grill as an owner DECISION (approve/reject): the owner's answer is the approval channel."""
+    from core.owner_actions.mirror import human_request_to_action, mirror_human_request
+    from core.owner_actions.models import ActionKind, DecisionOption
+    from core.owner_actions.store import OwnerActionStore
+    from core.owner_actions.sync import publish_request
+
+    if not request.run_id.startswith("model-promote-"):
+        return mirror_human_request(request)
+    model_id = request.run_id[len("model-promote-"):]
+    base = human_request_to_action(request)
+    decision = base.model_copy(update={
+        "kind": ActionKind.DECISION,
+        "title": f"Aprovar a promocao do modelo {model_id}? (a politica pediu sua decisao)",
+        "options": [
+            DecisionOption(id=APPROVE, label="Aprovar promocao", detail="Libera a promocao no proximo ciclo diario."),
+            DecisionOption(id=REJECT, label="Recusar promocao", detail="Encerra a pendencia; o modelo atual segue."),
+        ],
+    })
+    publish_request(request)  # outbox in the state root (unversioned), read by the Hub
+    saved, _created = _hub_store().upsert(decision)
+    return saved
+
+
+def _hub_store() -> Any:
+    """Store over the Hub's unversioned dynamic file plus its resolutions overlay (where the owner's answer lands)."""
+    from core.owner_actions.store import OwnerActionStore
+
+    return OwnerActionStore(
+        HUB_OWNER_ACTIONS_DIR / "dynamic.json", overlay_path=HUB_OWNER_ACTIONS_DIR / "resolutions.json",
+        dynamic_path=HUB_OWNER_ACTIONS_DIR / "dynamic.json", remote_ref=None,
+    )
+
+
+def default_decision_reader(action_id: str) -> Optional[str]:
+    """Answer recorded for the owner decision ``action_id`` (repository ledger plus the Hub overlay)."""
+    from core.owner_actions.store import OwnerActionStore
+
+    action = _hub_store().get(action_id)
+    if action is None:  # curated ledger (e.g. answered through the repository) plus the same overlay
+        action = OwnerActionStore(overlay_path=HUB_OWNER_ACTIONS_DIR / "resolutions.json").get(action_id)
+    if action is None or action.answer is None:
+        return None
+    return action.answer.option_id
+
+
+def consume_decision(
+    model_id: str, *, now: datetime, reader: Optional[DecisionReader] = None, pending_dir: Optional[Path] = None,
+) -> Optional[str]:
+    """``"approved"`` / ``"rejected"`` once the owner answered the pending Grill of ``model_id``; else ``None``.
+
+    Only a pending that was actually raised can be answered. The verdict is stored in the pending file, so it stays
+    terminal: approval lets the next ``promote`` skip the Grill block, rejection closes the pending (no new request
+    is ever raised for it).
+    """
+    path = (pending_dir or PENDING_DIR) / f"{model_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        prev = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if prev.get("decision") in ("approved", "rejected"):
+        return str(prev["decision"])
+    try:
+        answer = (reader or default_decision_reader)(decision_action_id(model_id))
+    except Exception as exc:  # noqa: BLE001 - an unreadable backlog just leaves the pending open
+        logger.warning("could not read the Grill answer for %s: %s", model_id, exc)
+        return None
+    verdict = {APPROVE: "approved", REJECT: "rejected"}.get(answer or "")
+    if verdict is None:
+        return None
+    prev.update(decision=verdict, decided_at=now.isoformat())
+    path.write_text(json.dumps(prev, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return verdict
 
 
 def request_grill(
@@ -95,7 +179,7 @@ def request_grill(
     if path.is_file():
         try:
             prev = json.loads(path.read_text(encoding="utf-8"))
-            if prev.get("reasons") == list(reasons) and prev.get("role") == role:
+            if prev.get("decision") in ("approved", "rejected") or prev.get("reasons") == list(reasons) and prev.get("role") == role:
                 return GrillPending(model_id, role, tuple(reasons), recommendation, guide, run_id,
                                     bool(prev.get("notified")), False)
         except (OSError, ValueError):

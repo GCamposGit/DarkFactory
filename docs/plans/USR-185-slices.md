@@ -121,3 +121,28 @@ Marcadores e secoes geradas (`test_subagent_model`, `dev_subagent_models`, `haik
 - Catraca: `.factory/config/model_id_baseline.json` (total e por arquivo) + `tests/test_model_id_ratchet_usr185.py`; falha se o total ou qualquer arquivo subir, apontando o arquivo e mandando usar alias/`core.models.registry`. Regenerar o baseline (so ao reduzir): `python scripts/model_id_census.py --write-baseline`.
 - Migracao: `core/router/model_router.py` (ids de imagem via `gateway_id`, DeepSeek V4 Pro via `id_of`) e `core/portfolio/router_optimizer.py` (`deepseek-r1` via `resolve_known`). Os nomes de alias tambem casam com a regex do censo, entao o contador nao cai nesses trechos.
 - Contador antes: 511 (99 arquivos). Depois: 511 (99 arquivos). O restante sao aliases/modelos locais, dados (`.factory/*.json`), docs e skills.
+
+## Fatia 12 - Fechamento (ENTREGUE em 22/10/2026)
+
+- **Tipo de entrega `registry`** (`core/git/autonomy.py`, `deliver_branch(kind="registry")`): aceita so `.factory/config/model_registry.json`, `.factory/models/lifecycle_ledger.jsonl` e os alvos do docgen (`registry_allowlist()`); arquivo fora da lista e recusado antes do commit e de novo antes do push. Mesmo portao de CI e mesmo squash-merge da `implementation`, mas nao toca `demands.json` (nenhum ticket e concluido), titulo `chore(models): <descricao>` sem sufixo de ticket, rotulo `registry`. A CLI `deliver --kind registry` tambem aceita. `core/models/pr.py` usa esse tipo.
+- **Sem PR duplicado** (`core/models/pr.py`): antes de abrir, `gh pr list --state open` (executor/`pr_lister` injetavel) procura PR de branch `models/*` ou titulo `chore(models)`; se houver, nao abre outro e devolve `action="duplicate_pr"` com o motivo. Se a lista nao puder ser lida, segue (falha aberta so neste ponto); com executor injetado e sem `pr_lister` a checagem e pulada (testes nunca chamam `gh`).
+- **Agendamento** (`autopilot.daily_hook`, chamado por `daily_hook_async` em `get_next_dispatchable_task` logo depois da descoberta, numa thread daemon (no maximo uma viva por processo; o despacho nunca espera): uma vez por dia UTC (marcador `<state_root>/model_autopilot/last_run.json`, gravado mesmo se falhar), try/except, desligado sob pytest. A mudanca de registro so ocorre na worktree propria de `run_daily`.
+- **Aprovacao do Grill** (`core/models/pending.py`): a pendencia espelhada vira uma DECISAO do owner gravada so em `hub/data/owner_actions/dynamic.json` (gitignored, mesmo armazenamento dinamico/overlay do Hub; nunca em `.factory/owner_actions/owner_actions.json`) (`OA-HR-model-promote-<id>-model_promotion`, opcoes `approve`/`reject`). `consume_decision` le a resposta pelo canal de owner actions (`OwnerActionStore.get(...).answer`, repositorio + overlay do Hub), so vale para pendencia realmente aberta e grava o veredito no arquivo da pendencia. `approve` => `lifecycle.promote(grill_approved=True)` no proximo `run_daily` (so levanta o bloqueio do Grill; modelo proibido, qualificacao e precheck continuam valendo; o ledger registra `qualification_approved+grill_approved`). `reject` => pendencia encerrada, nunca mais perguntada.
+- **Gancho de qualificacao**: `run_daily(qualify_func=...)` roda na worktree depois de aplicar candidatos (a bateria real depende de executor de modelo; ver lacunas).
+- Testes: `tests/test_git_autonomy_registry_usr185.py` (allowlist, recusa, nao conclusao de ticket, titulo) e `tests/test_model_e2e_usr185.py` (descoberta -> qualificacao falsa -> promocao -> PR falso -> rollback -> PR falso; Grill com aprovacao e com recusa; PR duplicado; gancho diario).
+
+### Criterio de aceite x evidencia
+
+| Criterio | Evidencia |
+| --- | --- |
+| Ids de modelo vivem so no registro; docs/skills derivados com teste de deriva | Fatias 1, 2, 4, 11; `tests/test_model_docs_drift_usr185.py` |
+| Trocar/adicionar modelo sem trabalho manual | `tests/test_model_e2e_usr185.py::test_full_chain_*` |
+| Descoberta diaria sem escrever versionado | Fatia 9a; `tests/test_model_discovery_sources_usr185.py` |
+| Qualificacao deterministica com orcamento | Fatia 6; `tests/test_model_qualification_usr185.py` |
+| Promocao e rollback com ledger | Fatia 7/9b; `tests/test_model_lifecycle_usr185.py`, `tests/test_model_autopilot_usr185.py` |
+| Grill so quando a politica pede, com WAITING_HUMAN real e aprovacao consumida | Fatias 8, 8b, 9b e 12; `test_grill_pending_then_approval_*`, `test_grill_refusal_*` |
+| PR proprio, sem concluir ticket, sem duplicata | `tests/test_git_autonomy_registry_usr185.py`, `test_duplicate_open_model_pr_*` |
+| Agendamento diario idempotente e seguro | `test_daily_hook_runs_once_per_day_and_never_raises` |
+| Catraca contra ids literais novos | Fatia 10 (em entrega, fora desta fatia) |
+| Proposta para arquivos protegidos | Fatia 3 (aguarda OA-046) |
+| Qualificacao real em producao sem toque humano | PENDENTE: so existe `qualify_func`; falta ligar um executor de modelo real (custo/chaves) |
