@@ -10177,8 +10177,8 @@
     "project_id": "darkfac",
     "title": "trusted-pr-policy quebra com ModuleNotFoundError pydantic ao avaliar governanca",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ef7a2310ac8b6e53b3f60829e81bc913d6ce97ca",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10200,7 +10200,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T11:44:53.262016Z",
-    "updated_at": "2026-10-22T11:44:53.262016Z"
+    "updated_at": "2026-10-22T19:07:18.828590Z"
   },
   {
     "id": "USR-351",
