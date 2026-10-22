@@ -2222,6 +2222,34 @@
           "note": "Workflow hub-image.yml publicado no main (13f5d81f) pelo owner com HARNESS_PASS. Primeira imagem dispara no proximo push com paths do filtro; troca DARKHUB_IMAGE_SOURCE=ghcr fica com o agente."
         }
       ]
+    },
+    {
+      "id": "OA-053",
+      "kind": "action",
+      "title": "Gravar GHCR_TOKEN (read:packages) no Notebook para o redeploy usar a imagem GHCR do Hub",
+      "priority": "medium",
+      "status": "open",
+      "why": "Em 22/10 a primeira imagem ghcr.io/gcamposgit/darkhub:bf0dd10 foi publicada, mas scripts/dokploy_redeploy.py recusou o deploy com HTTP 401 ao conferir o manifest: o pacote e privado e o script so le GHCR_TOKEN ou GITHUB_PAT. O modo GHCR (DARKHUB_IMAGE_SOURCE) foi desligado de novo; o Hub segue no build local ate o token existir. Segredo: so o owner grava.",
+      "blocks": [
+        "USR-339"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra https://github.com/settings/tokens/new (token classic). Note: darkfac-ghcr-read. Expiration: 90 days. Marque SOMENTE read:packages. Clique Generate token e copie o valor (pode reusar o token criado para o Dokploy, se ainda o tiver)."
+        },
+        {
+          "text": "No PowerShell do Notebook, grave o token como variavel de usuario (troque COLE_AQUI pelo token). Ele nao vai para o chat nem para o repositorio.",
+          "command": "[Environment]::SetEnvironmentVariable('GHCR_TOKEN','COLE_AQUI','User')"
+        },
+        {
+          "text": "Avise o agente no chat ('053 ok'): ele liga DARKHUB_IMAGE_SOURCE=ghcr, roda o redeploy do Hub e confere /health."
+        }
+      ],
+      "verify": "Num PowerShell novo, [Environment]::GetEnvironmentVariable('GHCR_TOKEN','User').Length maior que 0; o redeploy imprime Waiting for ghcr.io/... e termina sem HTTP 401; /health responde o sha da main.",
+      "created_at": "2026-10-22T10:10:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
