@@ -28,6 +28,7 @@ ALLOWLIST_PREFIXES: tuple[str, ...] = (
     "docs/plans/",
     "tests/",
     "core/benchmarks/data/",
+    ".darkfac/runs/",
 )
 
 
