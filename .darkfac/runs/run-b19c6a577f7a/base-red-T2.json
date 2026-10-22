@@ -1,0 +1,8 @@
+{
+  "harness": "codex",
+  "model": "gpt-6-luna",
+  "effort": null,
+  "tests": [
+    "tests/test_model_id_ratchet_usr185.py::test_literal_model_ids_do_not_exceed_baseline"
+  ]
+}
