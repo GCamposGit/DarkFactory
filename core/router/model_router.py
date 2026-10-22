@@ -29,7 +29,7 @@ from core.benchmarks.frontier import (
     build_frontier_summary,
     get_top_candidates_for_tier,
 )
-from core.models.registry import forbidden_markers, id_of, resolve_known
+from core.models.registry import forbidden_markers, gateway_id, id_of, resolve_known
 from core.router.token_budget import plan_token_stress
 from core.usage.ledger import ModelUsageLedger
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelModality, ModelTier
@@ -46,6 +46,11 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 def _m(alias: str) -> str:
     """Routable model id for a registry alias (active or deprecated), USR-185."""
     return resolve_known(alias)
+
+
+def _gw(alias: str) -> str:
+    """Gateway (provider-prefixed) id for a registry alias, USR-185."""
+    return gateway_id(alias)
 
 
 def _id(alias: str) -> str:
@@ -143,9 +148,9 @@ MODEL_MATRIX = {
         "notes": "Deterministic regex & cadence linter + local GPT-OSS / Gemini 3.8 Flash for critique and polish passes."
     },
     "visual_synthesis": {
-        "fast": "google/gemini-3.1-flash-lite-image",
+        "fast": _gw("gemini-image-fast"),
         "balanced": "google/gemini-3.1-flash-image",
-        "frontier": "openai/gpt-image-2",
+        "frontier": _gw("gpt-image"),
         "primary_provider": "openrouter",
         "secondary": "google/gemini-3-pro-image",
         "secondary_provider": "openrouter",
@@ -234,7 +239,7 @@ def _apply_token_plan(
             replacement = _QUOTA_FAILOVER_MODELS.get(selected_provider)
             if plan.use_paid_api:
                 replacement = (
-                    "deepseek/deepseek-v4-pro"
+                    _id("deepseek-v4-pro")
                     if complexity in {"high", "critical"}
                     else "qwen/qwen3-8-flash-next"
                 )
