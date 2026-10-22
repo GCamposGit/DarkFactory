@@ -5132,11 +5132,7 @@
     "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
     "origin": "user",
     "status": "completed",
-<<<<<<< HEAD
     "delivery_evidence": "0ecb98cfc5f633b7c90dd0bae967f15fd3895baa",
-=======
-    "delivery_evidence": "7530bbd375f76f0d6a51283b58d9d4fd6a10bc8a",
->>>>>>> 2f35c808 (feat(core): Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual [USR-185])
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5168,11 +5164,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-<<<<<<< HEAD
     "updated_at": "2026-10-22T00:21:20.802247Z"
-=======
-    "updated_at": "2026-10-22T00:22:48.480970Z"
->>>>>>> 2f35c808 (feat(core): Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual [USR-185])
   },
   {
     "id": "USR-186",
