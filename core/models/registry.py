@@ -89,6 +89,18 @@ class GrillThresholds(BaseModel):
     min_qualification_steps: int = Field(default=DEFAULT_MIN_QUALIFICATION_STEPS, ge=1)
 
 
+class RollbackThresholds(BaseModel):
+    """Post-promotion regression limits (USR-185 slice 9b); consumed by ``telemetry.evaluate_post_promotion``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    min_samples: int = Field(default=10, ge=1)  # no verdict below this many calls (one failure never reverts)
+    max_failure_rate: float = Field(default=0.4, ge=0, le=1)
+    max_escalation_rate: float = Field(default=0.5, ge=0, le=1)
+    max_cost_per_call_usd: Optional[float] = Field(default=None, ge=0)  # None disables the cost trigger
+    window_days: int = Field(default=7, ge=1)
+
+
 class ModelRegistry(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -99,6 +111,7 @@ class ModelRegistry(BaseModel):
     roles: dict[str, str] = Field(default_factory=dict)
     review_pairs: list[ReviewPair] = Field(default_factory=list)
     grill_thresholds: GrillThresholds = Field(default_factory=GrillThresholds)
+    rollback_thresholds: RollbackThresholds = Field(default_factory=RollbackThresholds)
 
     @model_validator(mode="after")
     def _invariants(self) -> "ModelRegistry":
@@ -297,6 +310,12 @@ def grill_thresholds(registry: Optional[ModelRegistry] = None) -> GrillThreshold
     """Grill thresholds from the registry (embedded defaults when the block is absent)."""
     reg = registry if registry is not None else get_registry()
     return reg.grill_thresholds
+
+
+def rollback_thresholds(registry: Optional[ModelRegistry] = None) -> RollbackThresholds:
+    """Rollback thresholds from the registry (embedded defaults when the block is absent)."""
+    reg = registry if registry is not None else get_registry()
+    return reg.rollback_thresholds
 
 
 def forbidden_markers(registry: Optional[ModelRegistry] = None) -> list[str]:

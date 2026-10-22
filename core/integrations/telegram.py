@@ -389,6 +389,7 @@ class TelegramGateway:
         state_dir: Optional[Path] = None,
         state_file: Optional[Path] = None,
         intake_service: Optional[Any] = None,
+        project_demand_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         demand_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
         grill_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         approval_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
@@ -416,6 +417,7 @@ class TelegramGateway:
             self.outbox_file = self.state_dir / "outbox.json"
 
         self.intake_service = intake_service
+        self.project_demand_handler = project_demand_handler
         self.demand_handler = demand_handler
         self.grill_handler = grill_handler
         self.approval_handler = approval_handler
@@ -787,11 +789,28 @@ class TelegramGateway:
             else:
                 demand_project = route.project_id
                 arg_str = route.text
-                if demand_project != "darkfac" and self.intake_service is None:
+                active_intake = self.intake_service
+                if active_intake is None and demand_project != "darkfac" and self.project_demand_handler is not None:
+                    # USR-340: other projects register a ticket with their own prefix (PH-..), never USR-.
+                    try:
+                        res = self.project_demand_handler(demand_project, arg_str, user_id or 0)
+                        ticket_id = res.get("ticket_id", "")
+                        result.target_id = ticket_id
+                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                        result.response_text = (
+                            f"✅ {prefix}Demanda registrada no projeto {demand_project}: <b>{ticket_id}</b>"
+                        )
+                    except Exception as exc:
+                        logger.error("Telegram project demand error: %s", exc)
+                        result.error = str(exc)
+                        result.response_text = (
+                            f"❌ Intake indisponivel para o projeto {demand_project}: nada foi registrado ({exc})."
+                        )
+                elif demand_project != "darkfac" and active_intake is None:
                     result.response_text = (
                         f"Este canal nao encaminha demandas ao projeto {demand_project}: nada foi registrado."
                     )
-                elif self.intake_service is not None:
+                elif active_intake is not None:
                     try:
                         from core.workflow.control_contracts import IntakeCommand
                         ext_id = f"tg-msg-{chat_id}-{msg.message_id}"
@@ -809,7 +828,7 @@ class TelegramGateway:
                             mode="autonomous",
                             policy_ref="telegram-policy-v1",
                         )
-                        receipt = self.intake_service.accept(cmd, datetime.now(UTC))
+                        receipt = active_intake.accept(cmd, datetime.now(UTC))
                         demand_id = receipt.demand_id
                         result.target_id = demand_id
                         prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""

@@ -7,6 +7,10 @@ tools: [Bash, Read, Grep]
 
 # Specialized Test Runner (Claude Code Agent)
 
+<!-- BEGIN model-registry:test_subagent_model -->
+Modelo do subagente de teste no Claude Code: `claude-haiku-5-5` (alias `haiku`, papel `subagent.haiku`), sem *extended thinking*.
+<!-- END model-registry:test_subagent_model -->
+
 Você é o sub-agente especializado de execução e monitoramento de testes para a Dark Factory.
 
 ## Missão:
