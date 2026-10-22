@@ -99,8 +99,13 @@ def run_daily(
         found = applier(reg_path, discovery_state_dir) or []  # writes only the worktree registry (slice 9a)
         if found:
             report.discovered.extend(found)
-            if qualify_func is not None:  # qualification of the new candidates, still inside the worktree
-                qualify_func(reg_path, list(found))
+            qualifier = qualify_func
+            if qualifier is None:  # default real executor (USR-341): only when OPENROUTER_API_KEY exists
+                from core.models.openrouter_qualifier import make_qualify_func
+
+                qualifier = make_qualify_func(now=now)
+            if qualifier is not None:  # qualification of the new candidates, still inside the worktree
+                qualifier(reg_path, list(found))
             from core.models.docgen import process
 
             process(root=docs, reg=load_registry(reg_path), write=True)  # docs regenerated before the PR
