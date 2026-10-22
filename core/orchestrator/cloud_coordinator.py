@@ -166,33 +166,6 @@ class CloudCoordinator:
             logger.warning("Host health probe failed for %s: %s", host, exc)
             return False
 
-    def _local_host_has_capacity(self, host: str) -> bool:
-        """USR-337: the local host is only admitted when measured gate capacity (RAM workers) allows it.
-
-        Same rule as ``fleet_policy.select_host_for_ticket(verified_capacity=...)``: capacity <= 0 means no new
-        cycle. Remote hosts are not measured here. Probe failure is fail-closed only in managed mode.
-        """
-        try:
-            from core.line.line_lock import resolve_host_id
-
-            if host.lower() != resolve_host_id().lower():
-                return True
-            if self.capacity_probe is not None:
-                workers = int(self.capacity_probe())
-            elif fleet_managed_enabled():
-                from core.line.gate_ram import measure_workers
-
-                workers = measure_workers().workers
-            else:
-                return True
-        except Exception as exc:
-            logger.warning("Capacity probe failed for %s: %s", host, exc)
-            return not fleet_managed_enabled()
-        if workers <= 0:
-            logger.info("Host %s skipped: verified capacity %d", host, workers)
-            return False
-        return True
-
     def admit_eligible_cycles(self, now: datetime | None = None) -> list[FleetReservation]:
         """Admit eligible pending cycles to free fleet hosts (USR-282).
 
@@ -229,22 +202,66 @@ class CloudCoordinator:
             logger.warning("Failed to list active reservations: %s", exc)
             return []
 
-        occupied_hosts = {r.host_id.lower() for r in active_reservations}
         active_tickets = {(r.project_id, r.ticket_id) for r in active_reservations}
         active_runs = {r.run_id for r in active_reservations}
 
-        available_slots = self.max_slots - len(active_reservations)
-        if available_slots <= 0:
-            return []
+        # Adapt the coordinator's host list and durable reservations to the canonical pure policy.
+        from core.line.fleet_policy import (
+            FleetConfig,
+            HostConfig,
+            HostState,
+            TicketCandidate,
+            load_fleet_config,
+            select_host_for_ticket,
+        )
 
-        # 3. Determine free hosts in priority order (skipping occupied, draining, or offline hosts)
-        free_hosts = [
-            h for h in self.fleet_hosts
-            if h.lower() not in occupied_hosts
-            and self._host_verified_healthy(h)
-            and self._local_host_has_capacity(h)
-        ]
-        if not free_hosts:
+        configured = load_fleet_config()
+        configured_by_id = {host.id.lower(): host for host in configured.hosts}
+        policy_hosts = []
+        host_states: dict[str, HostState] = {}
+        for priority, host_id in enumerate(self.fleet_hosts, start=1):
+            host_config = configured_by_id.get(host_id.lower())
+            if host_config is None:
+                host_config = HostConfig(
+                    id=host_id,
+                    name=host_id,
+                    priority=priority,
+                    max_slots=1,
+                )
+            policy_hosts.append(host_config)
+            active_for_host = [r for r in active_reservations if r.host_id.lower() == host_id.lower()]
+            is_healthy = self._host_verified_healthy(host_id)
+            host_states[host_config.id] = HostState(
+                host_id=host_config.id,
+                status="online" if is_healthy else "offline",
+                active_slots=len(active_for_host),
+                active_cycle_runs=[r.run_id for r in active_for_host],
+            )
+
+        try:
+            from core.line.line_lock import resolve_host_id
+            from core.line.gate_ram import measure_workers
+
+            local_host_id = resolve_host_id()
+            workers = int(self.capacity_probe()) if self.capacity_probe is not None else int(measure_workers().workers)
+            verified_capacity = {local_host_id: max(0, workers)}
+        except Exception as exc:
+            logger.warning("Local capacity probe failed; local admissions are disabled: %s", exc)
+            try:
+                from core.line.line_lock import resolve_host_id
+
+                local_host_id = resolve_host_id()
+                verified_capacity = {local_host_id: 0}
+            except Exception as host_exc:
+                logger.warning("Unable to identify local host; admission is disabled: %s", host_exc)
+                return []
+
+        policy_config = FleetConfig(
+            max_fleet_slots=min(configured.max_fleet_slots, self.max_slots),
+            hosts=policy_hosts,
+        )
+        current_slots = len(active_reservations)
+        if current_slots >= policy_config.max_fleet_slots:
             return []
 
         # 4. Query pending jobs eligible for admission
@@ -260,7 +277,7 @@ class CloudCoordinator:
         admitted: list[FleetReservation] = []
 
         for job in eligible_jobs:
-            if not free_hosts or len(admitted) >= available_slots:
+            if current_slots >= policy_config.max_fleet_slots:
                 break
             proj_id = job["project_id"]
             tick_id = job["ticket_id"]
@@ -269,9 +286,34 @@ class CloudCoordinator:
             if (proj_id, tick_id) in active_tickets or r_id in active_runs:
                 continue
 
-            reserved = False
-            while free_hosts and len(admitted) < available_slots:
-                host = free_hosts.pop(0)
+            ticket = TicketCandidate(
+                ticket_id=tick_id,
+                project_id=proj_id,
+                status=job.get("status", "planned"),
+                horizon=job.get("horizon", "now"),
+                created_at=job.get("created_at", now_utc),
+                dependencies=job.get("dependencies", []),
+                tags=job.get("tags", []),
+                blocked_reason=job.get("blocked_reason"),
+                required_capabilities=job.get("required_capabilities", []),
+                required_platform=job.get("required_platform"),
+            )
+
+            # Re-run policy selection after each atomic reservation attempt. A failed host is
+            # marked full for this cycle so a concurrent winner cannot cause duplicate allocation.
+            while current_slots < policy_config.max_fleet_slots:
+                host_config, reason = select_host_for_ticket(
+                    hosts=policy_config.hosts,
+                    host_states=host_states,
+                    ticket=ticket,
+                    current_fleet_slots=current_slots,
+                    max_fleet_slots=policy_config.max_fleet_slots,
+                    verified_capacity=verified_capacity,
+                )
+                if host_config is None:
+                    logger.debug("No host selected for %s: %s", tick_id, reason)
+                    break
+                host = host_config.id
                 try:
                     reservation = self.store.reserve_cycle(
                         project_id=proj_id,
@@ -279,24 +321,29 @@ class CloudCoordinator:
                         run_id=r_id,
                         host_id=host,
                         now=now_utc,
+                        max_fleet_slots=policy_config.max_fleet_slots,
                     )
-                    admitted.append(reservation)
-                    active_tickets.add((proj_id, tick_id))
-                    active_runs.add(r_id)
-                    occupied_hosts.add(host.lower())
-                    logger.info(
-                        "Admitted ticket %s (run %s) on host %s (reservation %s)",
-                        tick_id, r_id, host, reservation.reservation_id,
-                    )
-                    reserved = True
-                    break
                 except (HostBusyError, TicketAlreadyActiveError, FleetCapacityExceededError) as exc:
                     logger.debug("Could not reserve %s on %s: %s", tick_id, host, exc)
+                    host_states[host].active_slots = max(host_states[host].active_slots, host_config.max_slots)
+                    if isinstance(exc, (TicketAlreadyActiveError, FleetCapacityExceededError)):
+                        break
                     continue
                 except Exception as exc:
                     logger.warning("Unexpected error reserving %s on %s: %s", tick_id, host, exc)
+                    host_states[host].active_slots = max(host_states[host].active_slots, host_config.max_slots)
                     continue
-            if not reserved and not free_hosts:
+
+                admitted.append(reservation)
+                active_tickets.add((proj_id, tick_id))
+                active_runs.add(r_id)
+                host_states[host].active_slots += 1
+                host_states[host].active_cycle_runs.append(r_id)
+                current_slots += 1
+                logger.info(
+                    "Admitted ticket %s (run %s) on host %s (reservation %s)",
+                    tick_id, r_id, host, reservation.reservation_id,
+                )
                 break
 
         return admitted
