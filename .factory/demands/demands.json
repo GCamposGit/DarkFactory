@@ -10112,5 +10112,35 @@
     "dependencies": [],
     "created_at": "2026-10-22T09:56:47.415028Z",
     "updated_at": "2026-10-22T09:56:47.415028Z"
+  },
+  {
+    "id": "USR-348",
+    "project_id": "darkfac",
+    "title": "Hub mostra acoes do owner desatualizadas: redeploy pula merge so de dados mas o ledger vive na imagem",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10, apos os merges #569 (fecha OA-047/052) e #573 (cria OA-053), /api/interventions/priority ainda listava OA-047 e OA-052 e nao listava OA-053; /health seguia em 40861ee4. scripts/dokploy_redeploy.py (plan_darkhub_deploy, core/infra/deploy_classifier.py da USR-207) classifica .factory/** como so dados e nao redeploya, mas o Hub le .factory/owner_actions/owner_actions.json embutido na imagem. O owner ve fila errada no Hub.",
+    "core_journey": [
+      "Em 22/10, apos os merges #569 (fecha OA-047/052) e #573 (cria OA-053), /api/interventions/priority ainda listava OA-047 e OA-052 e nao listava OA-053; /health seguia em 40861ee4. scripts/dokploy_redeploy.py (plan_darkhub_deploy, core/infra/deploy_classifier.py da USR-207) classifica .factory/** como so dados e nao redeploya, mas o Hub le .factory/owner_actions/owner_actions.json embutido na imagem. O owner ve fila errada no Hub."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Merge que altera .factory/owner_actions ou .factory/demands aparece no Hub em ate 5 min sem rebuild completo (leitura do ledger da origin/main, volume ou deploy leve)",
+      "Teste cobre: merge so de ledger atualiza a fila do Hub",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T10:03:36.429409Z",
+    "updated_at": "2026-10-22T10:03:36.429409Z"
   }
 ]
