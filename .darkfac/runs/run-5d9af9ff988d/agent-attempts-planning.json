@@ -1,0 +1,11 @@
+[
+  {
+    "attempt": 1,
+    "harness": "claude",
+    "model": "opus",
+    "error_kind": "invalid_json",
+    "duration_s": 122.79,
+    "note": "invalid_json",
+    "output": "{\"spec\":{\"objective\":\"Fechar o resíduo do USR-185: dar ao autopilot um executor de qualificação real que chama o candidato pela API do OpenRouter com teto de gasto por candidato (US$ 0,10) e por dia UTC da fábrica (US$ 1,00) lido do registro, mais o preenchimento automático de preços a partir do catálogo OpenRouter/benchmark (skill 12), mantendo fail-closed (sem autorização do owner, sem chave, sem preço aplicável ou sem custo máximo calculável, nenhuma chamada é feita e o candidato segue para o Grill).\",\"out_of_scope\":[\"Gastar acima dos tetos autorizados (US$ 0,10 por candidato, US$ 1,00 por dia UTC) ou relaxar o piso de cota de 15%.\",\"Habilitar canais de cobrança além do OpenRouter (provedores diretos Anthropic/OpenAI/Google/xAI ficam bloqueados nesta entrega).\",\"Alterar os portões de promoção, as regras de Grill existentes, o cascade da esteira ou o roteamento de subagentes.\",\"Mexer no pipeline de descoberta (slice 9a) e na geração de PR/docs do autopilot além da fiação do executor.\",\"Registrar segredos em arquivos versionados ou criar novo mecanismo de credenciais (usa somente o ambiente/registro já existente).\"],\"design\":\"Quatro módulos novos em core/models, todos com colaboradores injetáveis (clock, transporte HTTP, leitor de catálogo) para que os testes usem HTTP falso e nunca gastem.\\n\\n1) `core/models/spend.py` — autorização e orçamento. Nova seção opcional `qualification_spend` em `ModelRegistry` (pydantic v2, extra=forbid): `authorized: bool`, `channels: list[str]` (default `[\\\"openrouter\\\"]`), `max_usd_per_candidate` (0.10), `max_usd_per_day` (1.00), `owner_decision` (id do OA/demanda + data) e `max_output_tokens`. Um ledger de reservas persistente em `.factory/models/qualification_spend.json` (agregado por dia UTC, uma entrada por reserva com `reservation_id`, `model_id`, `max_usd`, `state` em `reserved|committed|held`) com escrita atômica (`tmp` + `os.replace`) sob lock de arquivo, de modo que reservas sobrevivam a falhas/reinícios e sejam somadas entr\n... [truncated, 14770 chars total]"
+  }
+]
