@@ -1778,6 +1778,19 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def list_project_runs(self, project_id: str, limit: int = 120) -> list[tuple[str, str]]:
+        """`(run_id, created_at)` of the newest runs of `project_id` (read-only, newest first)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT run_id, created_at FROM runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+                (project_id, int(limit)),
+            )
+            return [(str(r["run_id"]), str(r["created_at"])) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
     def max_iteration(self, run_id: str, ticket_id: str, plan_version: str, stage: str) -> int:
         """Highest `iteration` already recorded for `(run_id, ticket_id, plan_version, stage)`, or -1.
 

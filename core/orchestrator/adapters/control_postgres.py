@@ -1584,6 +1584,25 @@ class PostgresControlStore:
             logger.warning("PostgreSQL list_active_run_ids failed: %s", exc)
             return []
 
+    def list_project_runs(self, project_id: str, limit: int = 120) -> list[tuple[str, str]]:
+        """`(run_id, created_at ISO)` of the newest runs of `project_id` (read-only, newest first)."""
+        if self.mock_mode:
+            return self._backend.list_project_runs(project_id, limit)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT run_id, created_at FROM runs WHERE project_id = %s ORDER BY created_at DESC LIMIT %s",
+                        (project_id, int(limit)),
+                    )
+                    return [
+                        (str(r[0]), r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
+                        for r in cur.fetchall()
+                    ]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL list_project_runs failed: {exc}") from exc
+
     def max_iteration(self, run_id: str, ticket_id: str, plan_version: str, stage: str) -> int:
         """Highest `iteration` already recorded for `(run_id, ticket_id, plan_version, stage)`, or -1."""
         if self.mock_mode:

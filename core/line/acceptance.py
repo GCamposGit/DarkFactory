@@ -80,6 +80,12 @@ def verify_v1(store: Any | None = None) -> CriterionResult:
                 if run_id:
                     runs_to_check.append(run_id)
 
+        lister = getattr(line_store, "list_active_run_ids", None)
+        if not runs_to_check and conn is None and lister is not None:
+            try:
+                runs_to_check = list(lister())
+            except Exception:
+                pass
         if not runs_to_check and conn is not None:
             try:
                 with conn() as c:
@@ -184,14 +190,18 @@ def load_canary_days_from_store(store: Any, *, limit: int = 120) -> list[CanaryD
     """
     from core.line.canary import CANARY_PROJECT_ID
 
-    conn = getattr(store, "_connect", None)
-    if conn is None:
-        raise RuntimeError("control store sem acesso de leitura aos runs")
-    with conn() as c:
-        rows = c.execute(
-            f"SELECT run_id, created_at FROM runs WHERE project_id = '{CANARY_PROJECT_ID}' "
-            f"ORDER BY created_at DESC LIMIT {int(limit)}"
-        ).fetchall()
+    lister = getattr(store, "list_project_runs", None)
+    if lister is not None:
+        rows = lister(CANARY_PROJECT_ID, limit)
+    else:
+        conn = getattr(store, "_connect", None)
+        if conn is None:
+            raise RuntimeError("control store sem acesso de leitura aos runs")
+        with conn() as c:
+            rows = c.execute(
+                f"SELECT run_id, created_at FROM runs WHERE project_id = '{CANARY_PROJECT_ID}' "
+                f"ORDER BY created_at DESC LIMIT {int(limit)}"
+            ).fetchall()
     by_day: dict[date, CanaryDay] = {}
     for row in rows:
         run_id, created_at = row[0], row[1]
