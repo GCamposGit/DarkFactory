@@ -2393,6 +2393,35 @@
         "answered_at": "2026-10-23T11:28:24Z",
         "answered_by": "owner"
       }
+    },
+    {
+      "id": "OA-QR-601",
+      "kind": "action",
+      "title": "PR de registro #601 (PLANO-20261023) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "open",
+      "why": "Motivo: CI failed on DarkFac CI / ledger-fast; merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nErrors: Process completed with exit code 1.\n---\nclient.py:1\n  /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_demand_id_allocator.py::test_two_worktrees_reserve_distinct_ids_concurrently\ntests/test_demand_id_allocator.py::test_two_worktrees_reserve_distinct_ids_concurrently\n  /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2477) is multi-threaded, use of fork() may lead to deadlocks in the child.\n    self.pid = os.fork()\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nSKIPPED [1] tests/test_demand_id_allocator.py:110: Windows Git fallback\nFAILED tests/test_owner_actions_core.py::test_seeded_backlog_is_valid_and_complete - AssertionError: assert ['item OA-054...eld required'] == []\n  \n  Left contains one more item: 'item OA-054 ignorado: answer.option_id: Field required'\n  \n  Full diff:\n  - []\n  + [\n  +     'item OA-054 ignorado: answer.option_id: Field required',\n  + ]\n1 failed, 73 passed, 1 skipped, 3 warnings in 4.42s\n##[error]Process completed with exit code 1.\npr-validation (ubuntu-latest)\tAggregate result\t﻿2026-10-23T11:29:33.1794598Z ##[group]Run heavy=\"false\"\n^[[36;1mheavy=\"false\"^[[0m\n^[[36;1mecho \"changes=success heavy=$heavy ledger-fast=failure pr-tests=skipped\"^[[0m\n^[[36;1m[ \"success\" = \"success\" ] || exit 1^[[0m\n^[[36;1mif [ \"$heavy\" = \"true\" ]; then^[[0m\n^[[36;1m  [ \"skipped\" = \"success\" ] || exit 1^[[0m\n^[[36;1melse^[[0m\n^[[36;1m  [ \"failure\" = \"success\" ] || exit 1^[[0m\n^[[36;1mfi^[[0m\nshell: /usr/bin/bash -e {0}\n##[endgroup]\nchanges=success heavy=false ledger-fast=failure pr-tests=skipped\n##[error]Process completed with exit code 1.. PR: https://github.com/GCamposGit/DarkFactory/pull/601",
+      "blocks": [
+        "PLANO-20261023"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #601.",
+          "command": "gh pr view 601 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 601 --delete-branch"
+        }
+      ],
+      "verify": "O PR #601 aparece como MERGED e o ticket PLANO-20261023 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-23T11:29:39Z",
+      "created_by": "queue-registration",
+      "resolved_at": null
     }
   ]
 }
