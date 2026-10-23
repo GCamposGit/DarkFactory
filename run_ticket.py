@@ -1288,7 +1288,10 @@ def _run_gate_with_self_correction(
             print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
         # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
         gate_cmd = [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"]
-        if line_lock.is_fleet_mode():
+        if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
+            # USR-366: o despachante da frota fixa o worker remoto do host (DARKFAC_TEST_WORKERS).
+            gate_cmd.append("--remote-required")
+        elif line_lock.is_fleet_mode():
             gate_cmd.append("--local")
         elif _gate_should_require_remote():
             gate_cmd.append("--remote-required")
