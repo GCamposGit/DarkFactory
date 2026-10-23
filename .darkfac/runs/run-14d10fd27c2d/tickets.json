@@ -1,0 +1,78 @@
+[
+  {
+    "id": "T1",
+    "title": "Todo merge que redeploya o Hub tem imagem GHCR do sha (invariante travada por teste)",
+    "goal": "Eliminar o caso em que o classificador pede deploy para um sha cuja imagem GHCR nunca sera publicada: alinhar core/infra/deploy_classifier.py ao que a imagem realmente embute (COPY do deploy/dokploy/Dockerfile.hub) e travar com teste estatico a cobertura pelo gatilho de .github/workflows/hub-image.yml, sem tocar no workflow protegido.",
+    "files_hint": [
+      "core/infra/deploy_classifier.py",
+      "tests/test_hub_deploy_usr207.py",
+      "deploy/dokploy/Dockerfile.hub",
+      ".github/workflows/hub-image.yml"
+    ],
+    "acceptance": [
+      "run_hub.py sai de REBUILD_FILES com comentario citando o COPY do Dockerfile.hub como fonte da verdade; um merge que toca somente run_hub.py e classificado como dados (sem rebuild e sem deploy)",
+      "Todo prefixo de REBUILD_PREFIXES e todo arquivo de REBUILD_FILES e COPY do deploy/dokploy/Dockerfile.hub e esta coberto pelos paths do gatilho de .github/workflows/hub-image.yml",
+      "O teste le o workflow como somente leitura e, ao falhar, a mensagem instrui a abrir acao do owner (caminho .github/workflows protegido por core/orchestrator/guard.py), nunca a editar o workflow",
+      "Caminhos de runtime atuais (core/, hub/, scripts/, deploy/, requirements.txt, harness.config.json) continuam disparando exatamente um deploy",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py::test_classifier_rebuild_paths_are_embedded_in_the_hub_image",
+      "tests/test_hub_deploy_usr207.py::test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger",
+      "tests/test_hub_deploy_usr207.py::test_run_hub_only_merge_is_data_only"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Uma unica espera da tag GHCR, com recusa imediata e acionavel quando a tag nao pode ser verificada",
+    "goal": "Unificar as duas implementacoes de espera da imagem (core/orchestrator/compose_render.wait_for_ghcr_image e scripts/dokploy_redeploy.wait_for_ghcr_tag) numa so e dar erro acionavel: sem token configurado e resposta 401/403, recusar na hora citando GHCR_TOKEN com read:packages; com token, seguir em poll e informar o ultimo status HTTP no timeout. Nunca fazer fallback para build nem escrever no Dokploy antes da imagem existir.",
+    "files_hint": [
+      "core/orchestrator/compose_render.py",
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      "tests/test_compose_render.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "scripts/dokploy_redeploy.wait_for_ghcr_tag passa a delegar para compose_render.wait_for_ghcr_image, mantendo timeout de 900 s, injecao de probe/sleep/clock e traducao para DokployUsageError (codigos de saida do CLI inalterados)",
+      "Sem GHCR_TOKEN e sem GITHUB_PAT no ambiente, probe 401/403 recusa imediatamente (zero sleeps) com mensagem citando GHCR_TOKEN com read:packages e a OA-053",
+      "Com token configurado, 404 seguido de 200 prossegue; esgotado o prazo, a mensagem de erro inclui o ultimo status HTTP observado e nao propoe fallback para build",
+      "Nenhuma chamada POST ao Dokploy (compose.update/compose.deploy) ocorre quando a espera falha, tanto no CLI quanto no DokployDeploymentAdapter (release_identity_ghcr_image_unpublished) quanto no blue-green",
+      "Nenhuma mensagem imprime token ou segredo",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_compose_render.py::test_ghcr_wait_refuses_at_once_when_no_token_and_registry_answers_401",
+      "tests/test_compose_render.py::test_ghcr_wait_polls_404_then_succeeds_and_timeout_reports_last_status",
+      "tests/test_dokploy_redeploy.py::test_cli_ghcr_wait_delegates_to_shared_waiter_and_keeps_exit_code",
+      "tests/test_dokploy_redeploy.py::test_no_dokploy_write_when_ghcr_wait_refuses"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Proposta USR-207 no estado real entregue e agendamento da sonda protegido por teste",
+    "goal": "Reescrever docs/proposals/USR-207-zero-downtime.md para o que esta de fato em producao (workflow GHCR publicado, DARKHUB_IMAGE_SOURCE, blue-green no Traefik, OA-044/052/053/057 cumpridas), registrar o resultado da prova de 23/10 e o que resta sob USR-363 e OA-058, e cobrir com teste estatico o comando de agendamento da sonda da secao 1 para ele continuar colavel no PowerShell.",
+    "files_hint": [
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "Secoes 2.1/2.2/2.3 descrevem o estado entregue (sem 'Proposto' para o que ja esta em main) e nomeiam explicitamente o que ficou fora: rollback de compose up e pull da imagem privada (USR-363), frescor do ledger (USR-348), remocao do container legado (OA-058)",
+      "A proposta registra a prova de 23/10 (sha 704867e1: compose up em error, Hub seguiu no container antigo, sonda sem resposta diferente de 200) e diz que a prova de troca sem queda sera fechada pelo USR-363",
+      "O bloco de agendamento da sonda na secao 1 continua sem schtasks, usando Register-ScheduledTask, caminho absoluto de pythonw.exe e sem aspas aninhadas que quebrem ao colar no PowerShell, tudo verificado por teste",
+      "Todo comando de terminal citado na proposta usa caminho absoluto",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py::test_proposal_probe_schedule_block_is_powershell_paste_safe",
+      "tests/test_hub_deploy_usr207.py::test_proposal_declares_delivered_ghcr_and_bluegreen_state"
+    ],
+    "smoke": []
+  }
+]
