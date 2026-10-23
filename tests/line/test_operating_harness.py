@@ -572,18 +572,20 @@ def test_without_any_signal_the_development_choice_is_the_headroom_winner(tmp_pa
     assert _pick(tmp_path, _lookup(claude=60.0, codex=80.0), caps=["harness:claude"]) == ("claude", "sonnet")
 
 
-def test_without_any_signal_grok_and_antigravity_are_never_development_candidates(
+def test_without_any_signal_grok_is_a_development_candidate_and_antigravity_is_not(
     tmp_path: Path, grok_and_antigravity_write: None
 ) -> None:
     lookup = _lookup(claude=20.0, codex=20.0, grok=100.0, antigravity=100.0)
 
-    assert _pick(tmp_path, lookup) == ("claude", "sonnet")
+    assert _pick(tmp_path, lookup, config=load_routing_config(default_config_path())) == (
+        "grok", "development.grok"
+    )
 
 
-def test_the_real_development_cascade_keeps_grok_out_so_the_pump_never_picks_it_by_headroom() -> None:
-    """Design decision: Grok develops only as the operating harness, never as a cascade member."""
+def test_the_real_development_cascade_includes_grok_after_claude_and_codex() -> None:
+    """Grok participates in headroom ranking after the established development choices."""
     for config in (load_routing_config(default_config_path()), _default_routing_config()):
-        assert [harness for harness, _model in config.stages["development"].cascade] == ["claude", "codex"]
+        assert [harness for harness, _model in config.stages["development"].cascade] == ["claude", "codex", "grok"]
 
 
 def test_pick_keeps_every_existing_parameter_and_a_keyword_only_operating_harness() -> None:

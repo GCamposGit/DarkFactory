@@ -181,7 +181,7 @@ def _default_routing_config() -> RoutingConfig:
                 openrouter_model=cheap_model,
             ),
             "development": StageRoute(
-                cascade=[("claude", "sonnet"), ("codex", None)],
+                cascade=[("claude", "sonnet"), ("codex", None), ("grok", "development.grok")],
                 openrouter_ok=False,  # write stage: OpenRouter is read-only, never a fallback here
                 openrouter_model=cheap_model,
                 harness_pins={
@@ -531,6 +531,11 @@ def _extra_operating_candidate(
 CODEX_HEADLESS_BLOCK_REASON = "codex_headless_visible_windows"
 
 
+def _log_candidate_discard(harness: str, stage: str, reason: str) -> None:
+    """Log a safe, stable reason when a harness cannot be used for a stage."""
+    logger.info("routing_candidate_discard harness=%s stage=%s reason=%s", harness, stage, reason)
+
+
 def codex_headless_blocked() -> bool:
     """True when codex must not be elected for headless runs on this host (USR-336).
 
@@ -568,24 +573,38 @@ def _routable_candidates(
     candidates: list[tuple[str, Optional[str]]] = []
     cascade = _resolve_cascade(stage_cfg, implementing_harness)
     extra = _extra_operating_candidate(cascade, operating_harness)
+    cascade_harnesses = {harness for harness, _ in cascade}
+    extra_harness = extra[0] if extra is not None else None
+    # A host may advertise usable executors that this stage does not route to. Record those
+    # explicitly as well, so an empty route is explainable from the routing log alone.
+    for cap in sorted(caps):
+        if not cap.startswith("harness:"):
+            continue
+        harness = cap.removeprefix("harness:")
+        if harness in cascade_harnesses or harness == extra_harness:
+            continue
+        if harness in excluded_harnesses or any(pair_harness == harness for pair_harness, _ in excluded_pairs):
+            _log_candidate_discard(harness, stage, "excluded")
+        elif not supports(harness, required_mode):
+            _log_candidate_discard(harness, stage, "no_write_mode" if required_mode == "write" else "no_required_mode")
+        else:
+            _log_candidate_discard(harness, stage, "not_in_cascade")
+
     for harness, model in cascade + ([extra] if extra is not None else []):
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
+            _log_candidate_discard(harness, stage, "excluded")
             continue
         if f"harness:{harness}" not in caps:
+            _log_candidate_discard(harness, stage, "missing_host_capability")
             continue
         if harness == "codex" and codex_headless_blocked():
-            logger.info(
-                "Skipping harness codex for stage %s (%s; set DARKFAC_CODEX_HEADLESS_ALLOWED=1 to allow)",
-                stage, CODEX_HEADLESS_BLOCK_REASON,
-            )
+            _log_candidate_discard(harness, stage, CODEX_HEADLESS_BLOCK_REASON)
             continue
         if not supports(harness, required_mode):
-            logger.info(
-                "Skipping harness %s for stage %s (does not declare '%s' mode)", harness, stage, required_mode
-            )
+            _log_candidate_discard(harness, stage, "no_write_mode" if required_mode == "write" else "no_required_mode")
             continue
         if model and model.lower().strip() in forbidden_models:
-            logger.info("Skipping model %s for harness %s (forbidden autonomous model)", model, harness)
+            _log_candidate_discard(harness, stage, "forbidden_model")
             continue
         candidates.append((harness, model))
     return candidates
@@ -704,10 +723,11 @@ def pick(
             # reading under the floor ("critical") from one with no current, verifiable evidence at
             # all ("unknown" — stale snapshot, probe unavailable, or a suspicious reading; see
             # `_quota_headroom_diagnosis` for the exact reason when the default lookup is in play).
-            logger.info(
-                "pick: harness %s quota is %s for stage %s (remaining=%s, floor=%.1f)",
-                harness, "critical" if remaining is not None else "unknown", stage, remaining, critical_threshold,
+            _log_candidate_discard(
+                harness, stage, "critical_quota" if remaining is not None else "unknown_quota"
             )
+        elif cooling:
+            _log_candidate_discard(harness, stage, "cooldown")
 
         if (harness, model) == extra_candidate:
             # Outside the cascade: electable only by the operating-harness preference below. It takes no
@@ -745,6 +765,12 @@ def pick(
         )
 
     if winner is not None:
+        for harness, model, _remaining in eligible:
+            if (harness, model) != winner:
+                _log_candidate_discard(harness, stage, "not_selected")
+        for harness, model, _remaining in extra_eligible:
+            if (harness, model) != winner:
+                _log_candidate_discard(harness, stage, "not_selected")
         if reserve_quota:
             try:
                 from core.usage.reservation import QuotaReservationManager

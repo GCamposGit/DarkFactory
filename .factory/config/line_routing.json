@@ -14,7 +14,7 @@
       "openrouter_model": "distill.openrouter"
     },
     "development": {
-      "cascade": [["claude", "sonnet"], ["codex", null]],
+      "cascade": [["claude", "sonnet"], ["codex", null], ["grok", "development.grok"]],
       "harness_pins": {
         "claude": {"model": "sonnet"},
         "codex": {"model": "development.codex", "effort": "high"},

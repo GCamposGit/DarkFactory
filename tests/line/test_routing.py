@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -73,6 +74,89 @@ def test_pick_skips_critical_quota_account():
         cooldown_path=Path("does-not-exist.json"),
     )
     assert choice == ("codex", None)
+
+
+def test_pick_development_routes_grok_with_healthy_quota():
+    cfg = load_routing_config(default_config_path())
+    assert pick(
+        "development", ["harness:grok"], config=cfg,
+        quota_lookup=lambda provider: 17.4 if provider == "xai" else None,
+        cooldown_path=Path("does-not-exist.json"),
+    ) == ("grok", "development.grok")
+
+
+@pytest.mark.parametrize("quota", [15.0, 14.9])
+def test_pick_development_keeps_grok_ineligible_at_or_below_floor(quota):
+    cfg = load_routing_config(default_config_path())
+    assert pick(
+        "development", ["harness:grok"], config=cfg,
+        quota_lookup=lambda _provider: quota,
+        cooldown_path=Path("does-not-exist.json"),
+    ) is None
+
+
+def test_routable_candidates_logs_each_discard_reason(caplog, monkeypatch):
+    cfg = load_routing_config(default_config_path())
+    from core.line import routing
+
+    monkeypatch.setattr(routing, "supports", lambda harness, mode: harness == "other" and mode == "write")
+    # Antigravity and a non-cascaded harness are visible on the host; Claude is
+    # configured but unavailable, while Codex is explicitly excluded.
+    with caplog.at_level(logging.INFO):
+        choice = pick(
+            "development", ["harness:antigravity", "harness:other"],
+            exclude=["codex"], config=cfg, quota_lookup=lambda _provider: None,
+            cooldown_path=Path("does-not-exist.json"),
+        )
+    assert choice is None
+    for harness, reason in (
+        ("claude", "missing_host_capability"),
+        ("codex", "excluded"),
+        ("antigravity", "no_write_mode"),
+        ("other", "not_in_cascade"),
+    ):
+        assert f"harness={harness}" in caplog.text
+        assert f"reason={reason}" in caplog.text
+
+
+def test_pick_none_logs_quota_reason_for_every_host_harness(caplog):
+    cfg = load_routing_config(default_config_path())
+    with caplog.at_level(logging.INFO):
+        choice = pick(
+            "development", ["harness:grok"], config=cfg,
+            quota_lookup=lambda _provider: 15.0,
+            cooldown_path=Path("does-not-exist.json"),
+        )
+    assert choice is None
+    assert "harness=grok" in caplog.text
+    assert "reason=critical_quota" in caplog.text
+
+
+def test_pick_logs_healthy_host_harness_that_loses_headroom_ranking(caplog):
+    cfg = load_routing_config(default_config_path())
+    with caplog.at_level(logging.INFO):
+        choice = pick(
+            "development", ["harness:claude", "harness:grok"], config=cfg,
+            quota_lookup=lambda provider: {"anthropic": 50.0, "xai": 17.4}.get(provider),
+            cooldown_path=Path("does-not-exist.json"),
+        )
+    assert choice == ("claude", "sonnet")
+    assert "harness=grok" in caplog.text
+    assert "reason=not_selected" in caplog.text
+
+
+def test_pick_logs_forbidden_model_without_exposing_raw_data(caplog):
+    cfg = load_routing_config(default_config_path())
+    cfg.forbidden_autonomous_models = ["development.grok"]
+    with caplog.at_level(logging.INFO):
+        choice = pick(
+            "development", ["harness:grok"], config=cfg,
+            quota_lookup=_always_healthy,
+            cooldown_path=Path("does-not-exist.json"),
+        )
+    assert choice is None
+    assert "harness=grok" in caplog.text
+    assert "reason=forbidden_model" in caplog.text
 
 
 def test_pick_unknown_quota_counts_as_ineligible_fail_closed():
@@ -576,4 +660,3 @@ def test_quota_reservation_manager_reserve_and_release(tmp_path):
 
     assert mgr.release(res_id2) is True
     assert mgr.get_active_reserved_percent("google") == 0.0
-

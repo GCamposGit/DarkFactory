@@ -144,7 +144,7 @@ def test_last_resort_prefers_known_healthy_over_unknown(tmp_path: Path, monkeypa
 
 def test_last_resort_never_elects_known_critical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
-    assert _pick("development", {"anthropic": 5.0, "openai": 10.0}, tmp_path) is None
+    assert _pick("development", {"anthropic": 5.0, "openai": 10.0, "xai": 12.0}, tmp_path) is None
 
 
 def test_last_resort_skips_a_harness_in_cooldown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -135,7 +135,7 @@ def test_dry_run_json_payload_carries_the_mode(
     assert payload["mode"] == "write" and payload["selected_harness"] == "codex" and payload["dry_run"] is True
 
 
-def test_the_real_router_no_longer_elects_antigravity_for_development(
+def test_the_real_router_elects_highest_headroom_write_capable_harness_for_development(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The original defect: Antigravity has the most headroom, but it cannot write."""
@@ -145,7 +145,7 @@ def test_the_real_router_no_longer_elects_antigravity_for_development(
     assert main(["USR-99", "--dry-run", "--json"]) == 0
 
     payload = json.loads(capsys.readouterr().out)
-    assert (payload["selected_harness"], payload["selected_model"]) == ("claude", "sonnet")
+    assert (payload["selected_harness"], payload["selected_model"]) == ("grok", "development.grok")
 
 
 def test_the_recommendation_for_a_blocked_critical_harness_is_also_write_capable(
