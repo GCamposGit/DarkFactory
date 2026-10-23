@@ -326,3 +326,28 @@ def test_verify_v1_proof_links_to_live_board(tmp_path: Path) -> None:
     result = verify_v1(store=store)
     assert result.verified is True
     assert result.details["proof_url"] == f"/live.html?run={sub.run_id}"
+
+
+class _PostgresLikeStore:
+    """Mimics PostgresControlStore: no _connect, runs listed via list_project_runs."""
+
+    def __init__(self, days):
+        self._runs = [(f'run-{d}', f'{d}T08:00:00+00:00') for d in sorted(days, reverse=True)]
+
+    def list_project_runs(self, project_id, limit=120):
+        assert project_id == 'darkfac-canary'
+        return self._runs[:limit]
+
+    def get_run_status(self, run_id):
+        from core.line.bindings import LINE_STAGES
+
+        return {'status': 'completed', 'jobs': [{'stage': s, 'status': 'succeeded'} for s in LINE_STAGES]}
+
+
+def test_verify_v2_reads_postgres_like_store_without_connect() -> None:
+    now = _utc(2026, 10, 24, 1)
+    days = [f'2026-10-{d}' for d in range(17, 24)]
+    result = verify_v2(store=_PostgresLikeStore(days), now=now, min_streak=7)
+    assert result.verified is True
+    assert result.details['streak'] == 7
+    assert result.details['source'] == 'control_store'
