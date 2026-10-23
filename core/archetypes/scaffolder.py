@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .deploy_pattern import DEPLOY_TARGETS, DeploySpec, write_deploy_pattern
 from .models import ArchetypeManifest, ScaffoldRequest, ScaffoldResult
 from .registry import get_registry
 
@@ -47,6 +49,16 @@ class ArchetypeScaffolder:
                     target_dir=str(target_path),
                     archetype_id=request.archetype_id,
                     error_message=f"Scaffolder implementation for '{manifest.id}' is not yet available.",
+                )
+
+            if request.deploy_target in DEPLOY_TARGETS:
+                created_files += write_deploy_pattern(
+                    target_path,
+                    DeploySpec(
+                        app_name=re.sub(r"[^a-z0-9-]+", "-", request.project_name.lower()).strip("-") or "app",
+                        host=request.domain,
+                        ghcr_owner=request.ghcr_owner,
+                    ),
                 )
 
             next_steps = [

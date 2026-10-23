@@ -65,6 +65,7 @@ class ScaffoldRequest(BaseModel):
     domain: str = "example.com"
     deploy_target: str = "hostinger_ftp"
     description: str = ""
+    ghcr_owner: str = "gcamposgit"
 
 
 class ScaffoldResult(BaseModel):
