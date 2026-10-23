@@ -212,14 +212,27 @@ def test_data_only_merge_triggers_nothing(monkeypatch: pytest.MonkeyPatch) -> No
     assert "deploy skipped" in text
 
 
-def test_runtime_change_triggers_exactly_one_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "runtime_path",
+    [
+        "core/infra/node_sync.py",
+        "hub/backend/main.py",
+        "scripts/dokploy_redeploy.py",
+        "deploy/dokploy/docker-compose.hub.yml",
+        "requirements.txt",
+        "harness.config.json",
+    ],
+)
+def test_runtime_change_triggers_exactly_one_deploy(
+    monkeypatch: pytest.MonkeyPatch, runtime_path: str
+) -> None:
     def status(n: int) -> List[Dict[str, Any]]:
         if n == 1:
             return [_d("old", "done", NOW - timedelta(hours=1))]
         return [_d("new", "done", NOW + timedelta(seconds=30))]
 
     t = FakeDokploy(status)
-    code, text = _run(t, monkeypatch, A, ["core/x.py"])
+    code, text = _run(t, monkeypatch, A, [runtime_path])
     assert code == mod.EXIT_OK, text
     assert t.posts.count("/api/compose.deploy") == 1
 
