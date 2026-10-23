@@ -37,7 +37,9 @@ Causa raiz: `docker compose up` recria o container parando o antigo antes de sub
 
 ### 2.1 Imagem construida fora da VPS
 
-Entregue: `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkhub:<sha>` para os merges cobertos pelo workflow. O compose pode ser renderizado em modo `ghcr` sem `build:`; o classificador de deploy segue as fontes `COPY` de `deploy/dokploy/Dockerfile.hub`. O teste `test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger` trava a cobertura do workflow; como `.github/workflows/*` e protegido pelo guard, divergencias devem virar acao do owner, sem editar o workflow neste ticket.
+Entregue: `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkhub:<sha>` para os merges cobertos pelo workflow. O compose pode ser renderizado em modo `ghcr` sem `build:`; o classificador de deploy segue as fontes `COPY` de `deploy/dokploy/Dockerfile.hub`. Os testes estaticos travam as duas invariantes: todo caminho que o classificador considera imagem embutida corresponde a uma fonte `COPY` e esta coberto pelo gatilho do workflow. Como `.github/workflows/*` e protegido pelo guard, divergencias devem virar acao do owner, sem editar o workflow neste ticket.
+
+O gatilho do workflow e deliberadamente um **superconjunto** dos caminhos que geram deploy: tambem publica imagem para mudancas em `docs/**` e `.factory/**`, embora esses caminhos sejam dados e o classificador os trate como data-only. Isso garante que merges de dados tenham uma imagem publicada para seu SHA, sem gerar segundo deploy. O teste `test_workflow_image_trigger_is_documented_as_a_safe_superset` protege essa relacao e seu registro nesta proposta.
 
 ### 2.1b Chave de ativacao (USR-339)
 

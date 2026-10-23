@@ -99,6 +99,15 @@ def test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger() ->
     )
 
 
+def test_workflow_image_trigger_is_documented_as_a_safe_superset() -> None:
+    workflow_paths = _hub_image_workflow_paths()
+    proposal = (ROOT / "docs" / "proposals" / "USR-207-zero-downtime.md").read_text(encoding="utf-8")
+
+    assert {"docs/**", ".factory/**"}.issubset(workflow_paths)
+    assert "superconjunto" in proposal.lower()
+    assert "sem gerar segundo deploy" in proposal.lower()
+
+
 def test_run_hub_only_merge_is_data_only() -> None:
     assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
 
