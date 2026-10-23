@@ -141,7 +141,7 @@ POLL_HTTP_TIMEOUT_SEC = 10.0
 #: USR-162: worker ``error_code`` values of a ``failed`` job that is NOT a test
 #: verdict (the run never finished). They fall back like an unavailable worker.
 INFRASTRUCTURE_ERROR_CODES = frozenset(
-    {"worker_restarted", "worker_internal_error", "worker_setup_failed", "worker_signal_killed"}
+    {"worker_restarted", "worker_internal_error", "worker_setup_failed", "worker_signal_killed", "job_lost_on_worker"}
 )
 #: Default of ``DARKFAC_WORKER_RESTART_GRACE_SEC`` / ``DARKFAC_WORKER_RESTART_RETRIES``.
 DEFAULT_WORKER_RESTART_GRACE_SEC = 1200.0  # USR-342: a lost worker took ~17 min to return

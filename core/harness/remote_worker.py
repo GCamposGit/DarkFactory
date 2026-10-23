@@ -97,6 +97,15 @@ JOB_TIMEOUT_BUFFER_SEC = 120.0
 #: waiting Xs") is not execution time: the job deadline is extended by it, up to this cap in total.
 ENV_SUITE_LOCK_WAIT_CAP_SEC = "DARKFAC_WORKER_SUITE_LOCK_WAIT_CAP_SEC"
 DEFAULT_SUITE_LOCK_WAIT_CAP_SEC = 3600.0
+#: USR-253: a ``[SUITE_LOCK] waiting`` line means the runner is queued: the job clock is paused while it stays so.
+_SUITE_LOCK_WAITING_RE = re.compile(r"\[SUITE_LOCK\]\s+waiting\b")
+#: USR-344: a running job whose process tree shows no log output and CPU below the threshold for this long
+#: is declared lost, its tree is killed and the worker restarts itself (dispatcher retries with [REMOTE_RETRY]).
+ENV_JOB_STALL_SEC = "DARKFAC_WORKER_JOB_STALL_SEC"
+DEFAULT_JOB_STALL_SEC = 600.0
+JOB_STALL_CPU_PERCENT = 5.0
+#: ``error_code`` of a job killed by the stall detector (no verdict; retried by the dispatcher).
+ERROR_CODE_JOB_LOST_ON_WORKER = "job_lost_on_worker"
 _SUITE_LOCK_ACQUIRED_RE = re.compile(r"\[SUITE_LOCK\]\s+acquired\b.*?\bafter\s+waiting\s+([0-9]+(?:\.[0-9]+)?)\s*s\b")
 #: USR-162: job state is persisted (``<state_dir>/jobs/<job_id>.json``) on every
 #: transition, so a worker restart/crash leaves a terminal, queryable record
@@ -450,7 +459,11 @@ def parse_suite_lock_wait_sec(line: str) -> Optional[float]:
 
 
 class _JobDeadline:
-    """Monotonic job deadline that grows by the suite_lock wait the runner reports (USR-253)."""
+    """Monotonic job deadline; suite_lock queue time does not count against it (USR-253).
+
+    While a ``[SUITE_LOCK] waiting`` line is the latest lock state the clock is paused (up to the
+    cap); the ``acquired ... after waiting Xs`` line then settles the extension.
+    """
 
     def __init__(self, timeout_sec: float, *, clock: Any = time.monotonic, cap_sec: Optional[float] = None) -> None:
         self._clock = clock
@@ -458,14 +471,21 @@ class _JobDeadline:
         self._deadline = clock() + timeout_sec
         self._cap_sec = _suite_lock_wait_cap_sec() if cap_sec is None else cap_sec
         self._extended_sec = 0.0
+        self._waiting_since: Optional[float] = None
 
     def extend_for_line(self, line: str) -> float:
-        """Extend for a suite_lock line; returns the seconds actually added (0.0 if none)."""
+        """Handle a suite_lock line; returns the seconds added by an ``acquired`` line (0.0 otherwise)."""
 
+        if _SUITE_LOCK_WAITING_RE.search(line):
+            with self._lock:
+                if self._waiting_since is None:
+                    self._waiting_since = self._clock()
+            return 0.0
         waited = parse_suite_lock_wait_sec(line)
         if waited is None:
             return 0.0
         with self._lock:
+            self._waiting_since = None
             add = max(0.0, min(waited, self._cap_sec - self._extended_sec))
             self._deadline += add
             self._extended_sec += add
@@ -473,7 +493,49 @@ class _JobDeadline:
 
     def expired(self) -> bool:
         with self._lock:
-            return self._clock() > self._deadline
+            pending = 0.0
+            if self._waiting_since is not None:
+                pending = max(0.0, min(self._clock() - self._waiting_since, self._cap_sec - self._extended_sec))
+            return self._clock() > self._deadline + pending
+
+
+def _job_stall_sec() -> float:
+    raw = os.environ.get(ENV_JOB_STALL_SEC, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0.0 and value != float("inf"):
+                return value
+        except ValueError:
+            pass
+        logger.warning("Ignoring invalid %s=%r", ENV_JOB_STALL_SEC, raw)
+    return DEFAULT_JOB_STALL_SEC
+
+
+class _StallDetector:
+    """Declares a job stalled after ``stall_sec`` without log output and without CPU use (USR-344)."""
+
+    def __init__(
+        self, stall_sec: float, *, clock: Any = time.monotonic, cpu_percent: float = JOB_STALL_CPU_PERCENT
+    ) -> None:
+        self._clock = clock
+        self._stall_sec = stall_sec
+        self._cpu_threshold = cpu_percent
+        self._last_progress = clock()
+        self._lock = threading.Lock()
+
+    def note_output(self) -> None:
+        with self._lock:
+            self._last_progress = self._clock()
+
+    def check(self, cpu_percent: Optional[float]) -> bool:
+        """Feed a CPU sample (``None`` = unknown, counted as active); True when the job is stalled."""
+
+        with self._lock:
+            now = self._clock()
+            if cpu_percent is None or cpu_percent >= self._cpu_threshold:
+                self._last_progress = now
+            return now - self._last_progress >= self._stall_sec
 
 
 def _process_started_at(pid: Optional[int] = None) -> float:
@@ -590,6 +652,22 @@ class _ProcessTree:
             self._known.update(found)
             self._ticks.update(found_ticks)
 
+    def cpu_seconds(self) -> Optional[float]:
+        """Total CPU seconds (user+system) of the live known processes, ``None`` if unavailable."""
+
+        self.refresh()
+        with self._lock:
+            known = list(self._known.values())
+        total, seen = 0.0, False
+        for proc in known:
+            try:
+                times = proc.cpu_times()
+                total += float(times.user) + float(times.system)
+                seen = True
+            except Exception:  # noqa: BLE001 - vanished or inaccessible
+                continue
+        return total if seen else None
+
     def kill(self, *, force: bool = True) -> int:
         """Stop every still-running process of the tree; returns how many were targeted."""
 
@@ -643,6 +721,8 @@ class HarnessJob:
     cancel_requested: bool = False
     #: Set when the worker itself ends the job (restart); the run thread must not overwrite that verdict.
     interrupted: bool = False
+    #: Set by the stall detector (USR-344) with the reason the running job was declared lost.
+    stalled_reason: Optional[str] = None
     created_at: float = dataclass_field(default_factory=time.time)
     updated_at: float = dataclass_field(default_factory=time.time)
     #: Process that owns the job (pid + start time): a dead owner means an orphaned job.
@@ -746,6 +826,8 @@ class JobManager:
         self._jobs_lock = threading.Lock()
         self._persist_lock = threading.Lock()
         self._queue: "queue.Queue[str]" = queue.Queue()
+        #: USR-344: called after a stalled job was closed, to restart the worker (wired by ``create_worker_app``).
+        self.on_stall_restart: Optional[Any] = None
         self._recover_persisted_jobs()
         self._worker_thread = threading.Thread(
             target=self._worker_loop, daemon=True, name="darkfac-worker-jobs"
@@ -1170,13 +1252,30 @@ class JobManager:
             self._persist(job)
             deadline = _JobDeadline(timeout_sec)
             stop_watchdog = threading.Event()
+            stall = _StallDetector(_job_stall_sec())
 
             def _watchdog() -> None:
                 last_snapshot = float("-inf")
+                last_cpu: Optional[tuple[float, float]] = None
                 while not stop_watchdog.wait(JOB_WATCHDOG_POLL_SEC):
                     if time.monotonic() - last_snapshot >= JOB_TREE_SNAPSHOT_SEC:
                         last_snapshot = time.monotonic()
                         tree.refresh()
+                        cpu_now = tree.cpu_seconds()
+                        percent: Optional[float] = None
+                        if cpu_now is not None:
+                            if last_cpu is not None and last_snapshot > last_cpu[0]:
+                                percent = max(0.0, cpu_now - last_cpu[1]) / (last_snapshot - last_cpu[0]) * 100.0
+                            last_cpu = (last_snapshot, cpu_now)
+                        if stall.check(percent):
+                            job.stalled_reason = (
+                                f"job made no progress (no log output, CPU < {JOB_STALL_CPU_PERCENT:g}%) "
+                                f"for {_job_stall_sec():g}s"
+                            )
+                            tree.kill(force=True)
+                            with contextlib.suppress(Exception):
+                                process.kill()
+                            return
                     if job.cancel_requested or deadline.expired():
                         # USR-183: the whole tree, not just the runner (xdist workers keep the pipe open).
                         tree.kill(force=True)
@@ -1191,6 +1290,7 @@ class JobManager:
                 try:
                     for line in stream:
                         self._append_log(job, line)
+                        stall.note_output()
                         extended = deadline.extend_for_line(line)
                         if extended > 0.0:
                             self._append_log(
@@ -1234,6 +1334,10 @@ class JobManager:
                 self._set_status(job, "failed", error=lost_reason, error_code=ERROR_CODE_WORKER_RESTARTED)
                 return
 
+            if job.stalled_reason is not None:
+                self._report_stall(job, job.stalled_reason)
+                return
+
             if job.cancel_requested:
                 self._set_status(job, "cancelled", returncode=process.returncode)
                 return
@@ -1269,6 +1373,29 @@ class JobManager:
         finally:
             self._cleanup_worktree(job)
             self._prune_old_job_logs()
+
+    def _report_stall(self, job: HarnessJob, reason: str) -> None:
+        """USR-344: close a stalled job as lost (retried by the dispatcher), record the event, alert, restart."""
+
+        self._append_log(job, f"[WORKER {ERROR_CODE_JOB_LOST_ON_WORKER}] {reason}; worker is restarting\n")
+        self._set_status(job, "failed", error=reason, error_code=ERROR_CODE_JOB_LOST_ON_WORKER)
+        logger.error("Job %s declared lost: %s", job.job_id, reason)
+        event = {"event": "worker_job_stalled", "job_id": job.job_id, "reason": reason, "at": time.time()}
+        with contextlib.suppress(Exception):
+            with open(self.state_dir / "worker_events.jsonl", "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event) + "\n")
+        try:
+            from core.line.stage_grill import default_telegram_sender
+
+            sender = default_telegram_sender()
+            if sender is not None:
+                sender(f"Worker de teste: job {job.job_id} perdido ({reason}). Reiniciando; o dispatcher reenfileira.", [])
+        except Exception as exc:  # noqa: BLE001 - alerting must never break recovery
+            logger.warning("Stall alert failed: %s", exc)
+        callback = self.on_stall_restart
+        if callback is not None:
+            with contextlib.suppress(Exception):
+                callback()
 
     def _lost_underfoot_reason(
         self, job: HarnessJob, worktree_path: Path, *, expect_worktree: bool = True
@@ -1764,6 +1891,7 @@ def create_worker_app(
         description="Headless distributed test runner for Dark Factory infrastructure nodes.",
     )
     worker_app.state.job_manager = job_manager
+    job_manager.on_stall_restart = lambda: trigger_daemon_restart(root_path, host, port, node_id)
 
     @worker_app.get("/health", response_model=WorkerHealthStatus)
     def get_health() -> WorkerHealthStatus:
