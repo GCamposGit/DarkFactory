@@ -3519,15 +3519,21 @@ class HubService:
 
         try:
             rh = self.roadmap.get_health(p.id)
-            roadmap_health_status = rh.status
+            roadmap_health_status = (
+                "warning"
+                if rh.stale or rh.blocked_items > 0 or rh.conflicts > 0 or rh.warnings > 0 or rh.sources_unavailable
+                else "healthy"
+            )
             health_details = {
                 "stale": rh.stale,
-                "stale_reason": rh.stale_reason,
                 "blocked_items": rh.blocked_items,
-                "conflicts_count": rh.conflicts_count,
-                "warnings": list(rh.warnings),
+                "conflicts_count": rh.conflicts,
+                "warnings": rh.warnings,
+                "sources_unavailable": list(rh.sources_unavailable),
             }
         except Exception as exc:
+            logger.warning(f"Failed computing roadmap health for '{p.id}': {exc}")
+            roadmap_health_status = "error"
             health_details = {"error": str(exc)}
 
         # 3. Budget Summary
