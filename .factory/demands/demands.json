@@ -10382,5 +10382,36 @@
     "dependencies": [],
     "created_at": "2026-10-23T07:47:06.750537Z",
     "updated_at": "2026-10-23T07:47:06.750543Z"
+  },
+  {
+    "id": "USR-360",
+    "project_id": "darkfac",
+    "title": "Padrao de deploy sem queda (GHCR por sha + blue-green Traefik) como default de todo produto novo",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Decisao do owner em 23/10/2026: o padrao adotado no Hub (USR-339, OA-057 opcao A) deve valer sempre para novos produtos da fabrica. Hoje a adocao/planejamento de produto (Project Adoption Gateway, skills 02-plan-product-architecture e 07-build-dark-factory, templates de deploy/compose_render) nao gera isso por padrao.",
+    "core_journey": [
+      "Decisao do owner em 23/10/2026: o padrao adotado no Hub (USR-339, OA-057 opcao A) deve valer sempre para novos produtos da fabrica. Hoje a adocao/planejamento de produto (Project Adoption Gateway, skills 02-plan-product-architecture e 07-build-dark-factory, templates de deploy/compose_render) nao gera isso por padrao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Adocao/scaffold de produto novo gera workflow de imagem GHCR por sha, compose blue-green atras do Traefik com troca so apos healthcheck e espera da tag antes do deploy",
+      "Planejamento (PRD/handoffs) inclui como criterio de aceite a prova da sonda de 1 s sem resposta != 200 durante deploy",
+      "Reuso da implementacao do USR-339 (sem duplicar logica); testes do scaffold",
+      "Skills 02/07 documentam o padrao (se protegidas, registrar OA para o owner publicar)"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T09:46:54.819812Z",
+    "updated_at": "2026-10-23T09:46:54.819812Z"
   }
 ]
