@@ -1878,6 +1878,13 @@ def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:
         mod.wait_for_ghcr_tag("a" * 40, probe=boom, timeout=30, interval=10, sleep_fn=clock.sleep, clock_fn=clock.now)
 
 
+def test_default_ghcr_probe_maps_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI keeps only a compatibility wrapper; probe implementation is shared."""
+    from core.orchestrator import compose_render
+
+    assert mod._default_ghcr_probe is compose_render._ghcr_manifest_status
+
+
 def _bluegreen_run(monkeypatch: pytest.MonkeyPatch, compose_file: Optional[str], runner: Any):
     from core.infra import node_sync
 

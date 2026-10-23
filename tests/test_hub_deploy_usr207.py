@@ -49,6 +49,72 @@ def test_classify_same_sha_never_rebuilds_and_windows_paths_normalised() -> None
     assert dc.classify(A, B, [".factory\\demands\\demands.json"])[0] is False
 
 
+def _dockerfile_copy_sources() -> set[str]:
+    dockerfile = (ROOT / "deploy" / "dokploy" / "Dockerfile.hub").read_text(encoding="utf-8")
+    return {
+        match.group(1).rstrip("/")
+        for line in dockerfile.splitlines()
+        if (match := re.match(r"^\s*COPY\s+([^\s]+)\s+", line, flags=re.IGNORECASE))
+    }
+
+
+def _hub_image_workflow_paths() -> set[str]:
+    workflow = (ROOT / ".github" / "workflows" / "hub-image.yml").read_text(encoding="utf-8")
+    paths_start = re.search(r"^\s+paths:\s*$", workflow, flags=re.MULTILINE)
+    assert paths_start, "hub-image workflow has no push.paths trigger"
+    paths: set[str] = set()
+    for line in workflow[paths_start.end():].splitlines():
+        if line.strip() and not line.startswith("      "):
+            break
+        match = re.match(r'^\s+-\s+["\']?([^"\']+?)["\']?\s*$', line)
+        if match:
+            paths.add(match.group(1))
+    return paths
+
+
+def test_classifier_rebuild_paths_are_embedded_in_the_hub_image() -> None:
+    copied_sources = _dockerfile_copy_sources()
+    missing_prefixes = sorted(prefix for prefix in dc.REBUILD_PREFIXES if prefix.rstrip("/") not in copied_sources)
+    missing_files = sorted(path for path in dc.REBUILD_FILES if path not in copied_sources)
+
+    assert not missing_prefixes and not missing_files, (
+        "deploy classifier rebuild paths must be sources of COPY instructions in "
+        "deploy/dokploy/Dockerfile.hub; missing prefixes="
+        f"{missing_prefixes}, missing files={missing_files}"
+    )
+
+
+def test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger() -> None:
+    workflow_paths = _hub_image_workflow_paths()
+    missing_prefixes = sorted(
+        prefix for prefix in dc.REBUILD_PREFIXES if f"{prefix}**" not in workflow_paths
+    )
+    missing_files = sorted(path for path in dc.REBUILD_FILES if path not in workflow_paths)
+
+    assert not missing_prefixes and not missing_files, (
+        "classifier rebuild paths are not covered by the Hub image workflow trigger. "
+        "The workflow is protected by core/orchestrator/guard.py; open an owner action "
+        "to update .github/workflows/hub-image.yml. Missing prefixes="
+        f"{missing_prefixes}, missing files={missing_files}"
+    )
+
+
+def test_run_hub_only_merge_is_data_only() -> None:
+    assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
+
+
+def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments() -> None:
+    proposal = (ROOT / "docs" / "proposals" / "USR-207-zero-downtime.md").read_text(encoding="utf-8")
+    section = proposal.split("### Agendar a sonda", maxsplit=1)[1].split("## 2.", maxsplit=1)[0]
+    assert '$py = "C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\pythonw.exe"' in section
+    assert "Test-Path $py" in section and "throw" in section
+    assert "New-ScheduledTaskAction -Execute $py" in section
+    assert 'Register-ScheduledTask -TaskName "DarkFac-Hub-Availability"' in section
+    assert "-WorkingDirectory \"C:\\dev\\DarkFac\"" in section
+    assert "Start-Process" not in section
+    assert "Invoke-Expression" not in section
+
+
 # --------------------------------------------------------------------------- plan
 
 
@@ -158,14 +224,27 @@ def test_data_only_merge_triggers_nothing(monkeypatch: pytest.MonkeyPatch) -> No
     assert "deploy skipped" in text
 
 
-def test_runtime_change_triggers_exactly_one_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "runtime_path",
+    [
+        "core/infra/node_sync.py",
+        "hub/backend/main.py",
+        "scripts/dokploy_redeploy.py",
+        "deploy/dokploy/docker-compose.hub.yml",
+        "requirements.txt",
+        "harness.config.json",
+    ],
+)
+def test_runtime_change_triggers_exactly_one_deploy(
+    monkeypatch: pytest.MonkeyPatch, runtime_path: str
+) -> None:
     def status(n: int) -> List[Dict[str, Any]]:
         if n == 1:
             return [_d("old", "done", NOW - timedelta(hours=1))]
         return [_d("new", "done", NOW + timedelta(seconds=30))]
 
     t = FakeDokploy(status)
-    code, text = _run(t, monkeypatch, A, ["core/x.py"])
+    code, text = _run(t, monkeypatch, A, [runtime_path])
     assert code == mod.EXIT_OK, text
     assert t.posts.count("/api/compose.deploy") == 1
 
