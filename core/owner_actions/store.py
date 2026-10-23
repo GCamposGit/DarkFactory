@@ -189,17 +189,24 @@ class OwnerActionStore:
         overlay_path: Path | str | None = None,
         remote_ref: str | None = "origin/main",
         dynamic_path: Path | str | None = None,
+        remote_ledger: Any = None,
     ) -> None:
         self.path = Path(path) if path is not None else default_path()
         self.dynamic_path = Path(dynamic_path) if dynamic_path is not None else None
         self.overlay_path = Path(overlay_path) if overlay_path is not None else None
         # Best-effort id reservation against a branch's unsynced base (USR-255); None disables it.
         self.remote_ref = remote_ref
+        # Read-only source of the definitions on origin/main (USR-348); falls back to ``path``.
+        self.remote_ledger = remote_ledger
 
     # ------------------------------------------------------------------ read
 
     def _load_definitions(self) -> LoadResult:
         payload, warning = _read_json(self.path)
+        if self.remote_ledger is not None:
+            remote = self.remote_ledger.get()
+            if remote is not None:
+                payload, warning = remote, None
         result = LoadResult()
         if warning:
             result.warnings.append(warning)

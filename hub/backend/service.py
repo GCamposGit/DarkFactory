@@ -156,6 +156,7 @@ from hub.backend.webhooks import (
 from core.integrations.telegram import TelegramConfig, TelegramGateway, reply_messages
 from hub.backend.usage_sync_watch import UsageSyncWatch
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
+from core.owner_actions.remote_ledger import from_env as owner_actions_remote_from_env
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import (
     ENV_PATH as OWNER_ACTIONS_ENV_PATH,
@@ -424,6 +425,7 @@ class HubService:
             owner_actions_path,
             overlay_path=self.data_dir / "owner_actions" / "resolutions.json",
             dynamic_path=self.data_dir / "owner_actions" / "dynamic.json",
+            remote_ledger=owner_actions_remote_from_env() if data_dir is None else None,
         )
 
         self.usage_sync_watch = UsageSyncWatch(self.data_dir / "usage_sync" / "state.json")
