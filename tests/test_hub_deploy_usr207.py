@@ -16,6 +16,12 @@ from core.infra import availability_probe as probe_mod
 from core.infra import deploy_classifier as dc
 from scripts import dokploy_redeploy as mod
 
+
+@pytest.fixture(autouse=True)
+def _legacy_build_image_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    # USR-365: ghcr is the default now; these scenarios exercise the legacy build layout.
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "build")
+
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "hub" / "frontend"
 A, B = "a" * 40, "b" * 40
@@ -207,7 +213,7 @@ def _run(transport: FakeDokploy, monkeypatch: pytest.MonkeyPatch, deployed: Opti
     code = mod.main(
         ["--only", "Darkhub", "--skip-node-sync", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene",
          "--timeout", "50", "--poll-interval", "1"],
-        env={"DOKPLOY_API_URL": "https://dokploy.example", "DOKPLOY_API_KEY": "k"},
+        env={"DOKPLOY_API_URL": "https://dokploy.example", "DOKPLOY_API_KEY": "k", "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=lambda _n: None, transport_factory=lambda u, k: transport,
         health_client=lambda: {"git_sha": B}, sleep_fn=lambda s: None, clock_fn=lambda: float(next(ticks)),
         stdout=out, stderr=err,
