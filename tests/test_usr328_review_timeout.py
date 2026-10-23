@@ -60,6 +60,11 @@ def _wait_gone(pid: int, timeout_s: float = 5.0) -> bool:
 def test_review_timeout_is_structured_failure_with_next_route(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Hermetic routing: host policy (e.g. codex headless opt-out) and operating-harness hints must not
+    # change which harnesses are electable; the test pins the host caps and the env it depends on.
+    monkeypatch.delenv("DARKFAC_CODEX_HEADLESS_ALLOWED", raising=False)
+    monkeypatch.delenv("DARKFAC_OPERATING_HARNESS", raising=False)
+    monkeypatch.delenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", raising=False)
     project = _project(str(_init_bare_origin(tmp_path)))
     ws = _prepare_run(tmp_path, monkeypatch, project, "run-t", harness="claude")
     calls: list[AgentRequest] = []
@@ -72,7 +77,8 @@ def test_review_timeout_is_structured_failure_with_next_route(
         )
 
     stage = ReviewStage(
-        run_agent_func=timing_out, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config()
+        run_agent_func=timing_out, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config(),
+        host_caps=("harness:claude", "harness:codex", "harness:grok", "harness:antigravity"),
     )
     result = stage.run(project, "run-t")
     assert result.outcome == "retry"
