@@ -25,4 +25,8 @@ SERIAL_ALLOWED: dict[str, str] = {
         "test_dense_graph_500_items_1500_relations_latency_budget asserts a 500 ms compile latency budget "
         "that parallel CPU contention would break."
     ),
+    "test_remote_environment_isolation.py": (
+        "The test starts a nested pytest process to verify startup environment scrubbing; running that "
+        "process while xdist workers are active caused repeatable 30 s timeouts."
+    ),
 }

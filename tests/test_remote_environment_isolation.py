@@ -7,9 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.conftest import AMBIENT_REMOTE_INFRA_ENV
 
 
+@pytest.mark.serial
 def test_polluted_worker_environment_is_removed_before_child_tests_run(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -44,7 +47,7 @@ def test_polluted_worker_environment_is_removed_before_child_tests_run(
         env=os.environ.copy(),
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
         check=False,
     )
 
