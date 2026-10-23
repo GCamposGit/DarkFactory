@@ -152,3 +152,38 @@ def test_core_project_path_falls_back_to_the_service_root_when_the_registered_pa
     # other projects keep their registered path (or None) untouched
     assert resolve(SimpleNamespace(id="other", path=missing)) == Path(missing)
     assert resolve(SimpleNamespace(id="other", path=None)) is None
+
+
+def _summary_with_roadmap_health(monkeypatch, behavior):
+    from hub.backend.api import get_hub_service
+
+    service = get_hub_service()
+    monkeypatch.setattr(service.roadmap, "get_health", behavior)
+    descriptor = service.project_registry.get_project("darkfac")
+    return service._build_portfolio_project_summary(descriptor)
+
+
+def test_portfolio_health_has_no_attribute_error_with_real_roadmap_health(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from core.roadmap.models import RoadmapHealth
+
+    def _health(_pid):
+        return RoadmapHealth(
+            project_id="darkfac", snapshot_id="s", snapshot_hash="h",
+            observed_at=datetime.now(timezone.utc), total_items=1, confirmed_items=1,
+            blocked_items=0, conflicts=0, warnings=0, stale=False, policy="p",
+        )
+
+    summary = _summary_with_roadmap_health(monkeypatch, _health)
+    assert "error" not in summary.health_details
+    assert "stale" in summary.health_details
+
+
+def test_portfolio_health_failure_is_not_masked_as_healthy(monkeypatch) -> None:
+    def _boom(_pid):
+        raise RuntimeError("falha real")
+
+    summary = _summary_with_roadmap_health(monkeypatch, _boom)
+    assert summary.health_details.get("error") == "falha real"
+    assert summary.health_status != "healthy"
