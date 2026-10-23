@@ -1,0 +1,9 @@
+{
+  "harness": "claude",
+  "model": "sonnet",
+  "effort": null,
+  "tickets_done": [
+    "T1",
+    "fix-validation-559521225ac3"
+  ]
+}
