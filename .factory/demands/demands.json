@@ -7555,8 +7555,8 @@
     "project_id": "darkfac",
     "title": "Watchdog do job em remote_worker.py conta a fila do suite_lock do Desktop no prazo do job",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Patch em docs/proposals/USR-253-watchdog-suite-lock.patch (core/harness protegido); aguardando publicacao do owner pela OA-041. (anterior: 797eb891d88aff7e373cfcc5151a047ee2eb3941)",
+    "status": "completed",
+    "delivery_evidence": "PR #614 (_JobDeadline pausa o prazo na fila do suite_lock; junto com USR-344)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7586,7 +7586,7 @@
       "USR-344"
     ],
     "created_at": "2026-10-13T00:30:14.404999Z",
-    "updated_at": "2026-10-23T11:34:32.051051Z"
+    "updated_at": "2026-10-23T20:17:26.578187Z"
   },
   {
     "id": "USR-255",
