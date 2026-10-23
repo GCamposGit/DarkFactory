@@ -33,9 +33,14 @@ def _runner(stdout: str = "", returncode: int = 0, calls: List[Any] | None = Non
     return run
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_registry_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cr, "_windows_user_env", lambda _name: "")
+
+
 def test_real_hub_compose_renders_and_pins_every_placeholder() -> None:
     source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
-    rendered = render_darkhub_compose(source, SHA)
+    rendered = render_darkhub_compose(source, SHA, "build")
     assert "${DARKFAC_GIT_SHA}" not in rendered
     assert rendered.count(SHA) == 3
 
@@ -128,13 +133,40 @@ def test_repository_from_url(url: Any, expected: Any) -> None:
     assert repository_from_url(url) == expected
 
 
-def test_build_mode_is_default_and_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ghcr_is_default_and_build_requires_explicit_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(cr.IMAGE_SOURCE_ENV, raising=False)
     source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
-    assert cr.resolve_hub_image_source({}) == "build"
-    assert render_darkhub_compose(source, SHA) == render_darkhub_compose(source, SHA, "build")
-    assert "pull_policy: build" in render_darkhub_compose(source, SHA)
-    assert "container_name: darkhub-cloud-247" in render_darkhub_compose(source, SHA)
+    assert cr.resolve_hub_image_source({}) == "ghcr"
+    assert cr.resolve_hub_image_source() == "ghcr"
+    assert cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "build"}) == "build"
+    default = render_darkhub_compose(source, SHA)
+    assert default == render_darkhub_compose(source, SHA, "ghcr")
+    assert "build:" not in default and "pull_policy: build" not in default
+    legacy = render_darkhub_compose(source, SHA, "build")
+    assert "pull_policy: build" in legacy
+    assert "container_name: darkhub-cloud-247" in legacy
+
+
+def test_registry_token_falls_back_to_windows_user_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GHCR_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_PAT", raising=False)
+    monkeypatch.setattr(cr.sys, "platform", "win32")
+    monkeypatch.setattr(cr, "_windows_user_env", lambda name: "reg-token" if name == "GITHUB_PAT" else "")
+    assert cr._ghcr_registry_token() == "reg-token"
+    monkeypatch.setenv("GHCR_TOKEN", "proc-token")
+    assert cr._ghcr_registry_token() == "proc-token"
+
+
+def test_registry_token_no_windows_lookup_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GHCR_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_PAT", raising=False)
+    monkeypatch.setattr(cr.sys, "platform", "linux")
+
+    def boom(name: str) -> str:
+        raise AssertionError("registry must not be read off Windows")
+
+    monkeypatch.setattr(cr, "_windows_user_env", boom)
+    assert cr._ghcr_registry_token() == ""
 
 
 def test_ghcr_mode_emits_image_start_first_without_container_name() -> None:

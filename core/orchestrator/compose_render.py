@@ -76,10 +76,10 @@ _START_FIRST = (
 
 
 def resolve_hub_image_source(env: Optional[Mapping[str, str]] = None) -> str:
-    """``build`` (default) or ``ghcr``, from ``DARKHUB_IMAGE_SOURCE``. Unknown values fail closed."""
+    """``ghcr`` (default); ``build`` only with explicit ``DARKHUB_IMAGE_SOURCE=build`` (USR-365). Unknown values fail closed."""
     raw = ((env if env is not None else os.environ).get(IMAGE_SOURCE_ENV) or "").strip().lower()
     if not raw:
-        return IMAGE_SOURCE_BUILD
+        return IMAGE_SOURCE_GHCR
     if raw not in (IMAGE_SOURCE_BUILD, IMAGE_SOURCE_GHCR):
         raise ComposeRenderError(f"{IMAGE_SOURCE_ENV} must be 'build' or 'ghcr'")
     return raw
@@ -100,7 +100,28 @@ class GhcrImageUnavailableError(ComposeRenderError):
 
 def _ghcr_registry_token() -> str:
     """Return the configured GHCR credential without exposing it to callers."""
-    return (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
+    for name in ("GHCR_TOKEN", "GITHUB_PAT"):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    if sys.platform == "win32":
+        for name in ("GHCR_TOKEN", "GITHUB_PAT"):
+            value = _windows_user_env(name)
+            if value:
+                return value
+    return ""
+
+
+def _windows_user_env(name: str) -> str:
+    """Read a Windows user-level environment variable (registry HKCU, Environment); never logged."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _kind = winreg.QueryValueEx(key, name)
+    except Exception:  # noqa: BLE001 - missing key/value or non-Windows
+        return ""
+    return str(value or "").strip()
 
 
 def _ghcr_manifest_status(repository: str, tag: str) -> int:
@@ -163,7 +184,7 @@ def wait_for_ghcr_image(
 def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = None) -> str:
     """Bind the Hub image (Git build context or GHCR tag) and container environment to one SHA.
 
-    ``image_source`` defaults to :func:`resolve_hub_image_source` (``build`` unless the owner flipped it).
+    ``image_source`` defaults to :func:`resolve_hub_image_source` (``ghcr`` unless the owner opted into ``build``).
     """
     if not SHA_PATTERN.fullmatch(sha):
         raise ComposeRenderError("Darkhub build requires a full origin/main SHA")

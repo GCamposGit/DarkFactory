@@ -24,7 +24,7 @@ import pytest
 import core.orchestrator.deployment_adapter as mod
 from core.line.stage_release import ReleaseStageHandler, ReleaseStateStore
 from core.orchestrator.build_artifacts import ArtifactRef
-from core.orchestrator.compose_render import ComposeSourceError, render_darkhub_compose
+from core.orchestrator.compose_render import ComposeSourceError, render_darkhub_compose as _render_hub
 from core.orchestrator.deployment_adapter import (
     DeploymentOperation,
     DeploymentStatus,
@@ -44,6 +44,7 @@ API_KEY = "s3cr3t-dokploy-key-000000000000"
 def _no_ambient_dokploy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("DOKPLOY_API_URL", "DOKPLOY_API_KEY", "DOKPLOY_DEPLOY_URL"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "build")  # fixtures use the legacy layout (USR-365)
 
 
 class _Resp:
@@ -267,6 +268,12 @@ def _hub_template(*extra_env: str) -> str:
 TEMPLATE_A = _hub_template()
 TEMPLATE_B = _hub_template("NEW_FEATURE_FLAG=on")
 # What Dokploy stores today: the render of commit A at the previous release.
+
+def render_darkhub_compose(source: str, sha: str) -> str:
+    # Fixtures use the legacy build layout; the default is ghcr (USR-365).
+    return _render_hub(source, sha, "build")
+
+
 HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA)
 SHA_B = "c" * 40
 

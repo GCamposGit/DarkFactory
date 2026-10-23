@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.orchestrator.bluegreen import BlueGreenError, parse_state, run_bluegreen_deploy  # noqa: E402
-from core.orchestrator.compose_render import IMAGE_SOURCE_BUILD, render_darkhub_compose, wait_for_ghcr_image  # noqa: E402
+from core.orchestrator.compose_render import render_darkhub_compose, resolve_hub_image_source, wait_for_ghcr_image  # noqa: E402
 from scripts import dokploy_redeploy as dr  # noqa: E402
 
 
@@ -55,7 +55,7 @@ def main(argv: Optional[Sequence[str]] = None, env: Optional[Dict[str, str]] = N
 
     if args.restore_legacy:
         try:
-            legacy = render_darkhub_compose(source, sha, IMAGE_SOURCE_BUILD)
+            legacy = render_darkhub_compose(source, sha, resolve_hub_image_source())
             if parse_state(legacy) is not None:
                 raise BlueGreenError("legacy compose still contains the blue-green marker")
             transport("POST", "/api/compose.update", {
@@ -65,7 +65,7 @@ def main(argv: Optional[Sequence[str]] = None, env: Optional[Dict[str, str]] = N
         except Exception as exc:  # noqa: BLE001
             print(f"restore-legacy failed: {exc}", file=sys.stderr)
             return dr.EXIT_DEPLOY_FAILED
-        print(f"restore-legacy ok: compose.update only (no deploy), build image at sha={sha}")
+        print(f"restore-legacy ok: compose.update only (no deploy), image source={resolve_hub_image_source()} at sha={sha}")
         return dr.EXIT_OK
 
     def read_compose() -> Optional[str]:
