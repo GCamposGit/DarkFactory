@@ -168,7 +168,16 @@ def is_governance_evolution_authorized(
     unexpired date, and must exist on ``trusted_base`` (default origin/main), not
     merely in the candidate. An environment flag alone is never sufficient.
     """
-    from core.governance.authorization import DEFAULT_TRUSTED_BASE, verify_authorization
+    try:
+        from core.governance.authorization import DEFAULT_TRUSTED_BASE, verify_authorization
+    except ImportError as exc:
+        missing = getattr(exc, "name", None) or str(exc)
+        print(
+            f"[GUARD] governance authorization unavailable (missing dependency: {missing}); "
+            "treating as unauthorized",
+            file=sys.stderr,
+        )
+        return False
 
     result = verify_authorization(
         list(violations),
