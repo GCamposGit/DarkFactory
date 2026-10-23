@@ -57,6 +57,17 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.git.safe_show import safe_show
 from core.infra import deploy_classifier
+from core.infra.ghcr import (
+    DEFAULT_POLL_INTERVAL_SECONDS as GHCR_TAG_POLL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS as GHCR_TAG_TIMEOUT_SECONDS,
+    GHCR_IMAGE_REPOSITORY,
+    GhcrCredentialsError,
+    GhcrError,
+    GhcrManifestProbe,
+    ghcr_image_ref,
+    probe_ghcr_manifest as _default_ghcr_probe,
+    wait_for_ghcr_tag as _wait_for_ghcr_tag,
+)
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     SHA_PATTERN,
@@ -636,56 +647,26 @@ def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = 
         raise DokployUsageError(str(exc)) from None
 
 
-GHCR_TAG_TIMEOUT_SECONDS = 900.0
-GHCR_TAG_POLL_SECONDS = 15.0
-# (repository, tag) -> HTTP status of the manifest lookup (200 = exists, 404 = not yet).
-GhcrManifestProbe = Callable[[str, str], int]
-
-
-def _default_ghcr_probe(repository: str, tag: str) -> int:
-    """HEAD the GHCR manifest; needs GHCR_TOKEN or GITHUB_PAT (read:packages) for the private package."""
-    import base64
-
-    token = (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
-    headers = {
-        "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json"
-    }
-    if token:
-        headers["Authorization"] = "Bearer " + base64.b64encode(token.encode()).decode()
-    request = urllib.request.Request(
-        f"https://ghcr.io/v2/{repository}/manifests/{tag}", headers=headers, method="HEAD"
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return int(response.status)
-    except urllib.error.HTTPError as exc:
-        return int(exc.code)
-
-
 def wait_for_ghcr_tag(
-    sha: str, *, probe: Optional[GhcrManifestProbe] = None, timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
-    interval: float = GHCR_TAG_POLL_SECONDS, sleep_fn: Callable[[float], None] = time.sleep,
+    sha: str,
+    *,
+    probe: Optional[GhcrManifestProbe] = None,
+    timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
+    interval: float = GHCR_TAG_POLL_SECONDS,
+    sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Block until ``ghcr.io/<repo>:<sha>`` exists. Raises DokployUsageError on timeout; never falls back to build."""
-    check = probe or _default_ghcr_probe
-    deadline = clock_fn() + timeout
-    last: object = "no response"
-    while True:
-        try:
-            status = check(GHCR_IMAGE_REPOSITORY, sha)
-            if status == 200:
-                return
-            last = f"HTTP {status}"
-        except Exception as exc:
-            last = type(exc).__name__
-        remaining = deadline - clock_fn()
-        if remaining <= 0:
-            raise DokployUsageError(
-                f"GHCR image {ghcr_image_ref(sha)} not published within {int(timeout)}s (last: {last}); "
-                "deploy refused, no fallback to build (check the hub-image workflow)"
-            )
-        sleep_fn(min(interval, remaining))
+    """CLI compatibility wrapper around the shared GHCR wait implementation."""
+    try:
+        _wait_for_ghcr_tag(
+            sha, probe=probe, timeout=timeout, interval=interval, sleep_fn=sleep_fn, clock_fn=clock_fn
+        )
+    except GhcrCredentialsError:
+        raise
+    except GhcrError as exc:
+        raise DokployUsageError(
+            f"{exc}; deploy refused, no fallback to build (check the hub-image workflow)"
+        ) from None
 
 
 def set_compose_git_sha(
@@ -1065,7 +1046,7 @@ def _run_main(
             if image_source == IMAGE_SOURCE_GHCR:
                 print(f"Waiting for {ghcr_image_ref(expected_sha)} on GHCR...", file=out, flush=True)
                 wait_for_ghcr_tag(expected_sha, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn)
-        except (DokployUsageError, ComposeRenderError) as exc:
+        except (DokployUsageError, ComposeRenderError, GhcrCredentialsError) as exc:
             print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
     if local_subject:

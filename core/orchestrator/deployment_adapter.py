@@ -28,13 +28,24 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Union, runtime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.infra.ghcr import (
+    DEFAULT_POLL_INTERVAL_SECONDS as GHCR_TAG_POLL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS as GHCR_TAG_TIMEOUT_SECONDS,
+    GhcrCredentialsError,
+    GhcrImageNotPublished,
+    GhcrManifestProbe,
+    GhcrWaitTimeout,
+    wait_for_ghcr_tag,
+)
 from core.orchestrator.build_artifacts import ArtifactRef, Claim
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     ComposeFetcher,
     ComposeRenderError,
+    IMAGE_SOURCE_GHCR,
     fetch_compose_at_sha,
     render_darkhub_compose,
+    resolve_hub_image_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -196,6 +207,11 @@ class DokployDeploymentAdapter:
         api_key: Optional[str] = None,
         transport: Optional[Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Dict[str, Any]]] = None,
         compose_fetcher: Optional[ComposeFetcher] = None,
+        ghcr_probe: Optional[GhcrManifestProbe] = None,
+        ghcr_timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
+        ghcr_interval: float = GHCR_TAG_POLL_SECONDS,
+        ghcr_sleep: Callable[[float], None] = time.sleep,
+        ghcr_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.api_url = api_url or os.getenv("DOKPLOY_API_URL", "")
         self.api_key = api_key or os.getenv("DOKPLOY_API_KEY", "")
@@ -203,6 +219,11 @@ class DokployDeploymentAdapter:
         # (repository, sha, path) -> compose text at that commit; defaults to
         # `gh api` (compose_render.fetch_compose_at_sha). Injected by tests.
         self.compose_fetcher = compose_fetcher
+        self.ghcr_probe = ghcr_probe
+        self.ghcr_timeout = ghcr_timeout
+        self.ghcr_interval = ghcr_interval
+        self.ghcr_sleep = ghcr_sleep
+        self.ghcr_clock = ghcr_clock
         self._lock = threading.Lock()
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
@@ -329,7 +350,8 @@ class DokployDeploymentAdapter:
         if not isinstance(source, str) or not source.strip():
             return None, "release_identity_compose_unreadable"
         try:
-            return render_darkhub_compose(source, sha), None
+            image_source = resolve_hub_image_source()
+            return render_darkhub_compose(source, sha, image_source), None
         except ComposeRenderError:
             return None, "release_identity_compose_contract_invalid"
 
@@ -392,6 +414,29 @@ class DokployDeploymentAdapter:
                 rendered, render_error = self._render_compose_at_sha(params, sha)
                 if render_error is not None or rendered is None:
                     return render_error or "release_identity_compose_unreadable"
+                try:
+                    image_source = resolve_hub_image_source()
+                except ComposeRenderError:
+                    return "release_identity_compose_contract_invalid"
+                if image_source == IMAGE_SOURCE_GHCR:
+                    try:
+                        wait_for_ghcr_tag(
+                            sha,
+                            probe=self.ghcr_probe,
+                            timeout=self.ghcr_timeout,
+                            interval=self.ghcr_interval,
+                            sleep_fn=self.ghcr_sleep,
+                            clock_fn=self.ghcr_clock,
+                        )
+                    except GhcrImageNotPublished:
+                        return "release_identity_ghcr_image_missing"
+                    except GhcrCredentialsError:
+                        return "release_identity_ghcr_credentials_invalid"
+                    except GhcrWaitTimeout:
+                        return "release_identity_ghcr_probe_timeout"
+                    except Exception as exc:
+                        logger.warning("GHCR manifest probe failed (%s)", type(exc).__name__)
+                        return "release_identity_ghcr_probe_failed"
                 one = self._dokploy_request(
                     base_url, api_key, "GET", "compose.one", query={"composeId": service_id}
                 )

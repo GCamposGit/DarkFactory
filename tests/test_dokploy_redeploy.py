@@ -1868,6 +1868,17 @@ def test_darkhub_ghcr_tag_timeout_refuses_without_build_fallback(monkeypatch: py
     assert transport.post_calls == []
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_darkhub_ghcr_auth_failure_is_distinct_and_does_not_mutate_dokploy(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    code, transport, _out, err = _ghcr_run(monkeypatch, lambda repo, tag: status)
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "credentials rejected" in err and f"HTTP {status}" in err
+    assert "not published within" not in err
+    assert transport.post_calls == []
+
+
 def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:
     clock = FakeClock()
 
@@ -1876,3 +1887,11 @@ def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:
 
     with pytest.raises(mod.DokployUsageError, match="OSError"):
         mod.wait_for_ghcr_tag("a" * 40, probe=boom, timeout=30, interval=10, sleep_fn=clock.sleep, clock_fn=clock.now)
+
+
+def test_wait_for_ghcr_tag_reports_auth_failure_distinctly() -> None:
+    from core.infra.ghcr import GhcrCredentialsError
+
+    for status in (401, 403):
+        with pytest.raises(GhcrCredentialsError, match="credentials"):
+            mod.wait_for_ghcr_tag("a" * 40, probe=lambda _repo, _tag: status)

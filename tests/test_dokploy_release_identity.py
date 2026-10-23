@@ -266,6 +266,9 @@ def _hub_template(*extra_env: str) -> str:
 # Commit A of the repo; commit B adds an environment variable to the compose.
 TEMPLATE_A = _hub_template()
 TEMPLATE_B = _hub_template("NEW_FEATURE_FLAG=on")
+GHCR_TEMPLATE_A = TEMPLATE_A.replace(
+    "    pull_policy: build", "    image: darkhub:v2.1\n    pull_policy: build"
+) + "    deploy:\n      replicas: 1\n"
 # What Dokploy stores today: the render of commit A at the previous release.
 HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA)
 SHA_B = "c" * 40
@@ -328,11 +331,53 @@ def test_compose_is_rendered_from_the_merged_commit_and_installed_before_deploy(
     assert op.status == DeploymentStatus.IN_PROGRESS
     assert fetcher.requests == [("Org/DarkFactory", SHA, "deploy/dokploy/docker-compose.hub.yml")]
     assert _procedures(calls) == ["compose.one", "compose.update", "compose.one", "compose.deploy"]
+
+
+def test_ghcr_missing_image_refuses_before_mutating_dokploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=_FakeFetcher({SHA: GHCR_TEMPLATE_A}),
+        ghcr_probe=lambda _repo, _tag: 404,
+        ghcr_timeout=0,
+    )
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_ghcr_image_missing"
+    assert calls == []
+
+
+def test_ghcr_existing_image_installs_pinned_compose_then_deploys(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": HUB_COMPOSE},
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=_FakeFetcher({SHA: GHCR_TEMPLATE_A}), ghcr_probe=lambda _repo, _tag: 200
+    )
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    installed = calls[1]["body"]["composeFile"]
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in installed
+    assert _procedures(calls)[-1] == "compose.deploy"
     body = calls[1]["body"]
     assert body["composeId"] == "compose_hub" and body["sourceType"] == "raw"
     assert body["composePath"] == "docker-compose.yml"
-    assert body["composeFile"] == render_darkhub_compose(TEMPLATE_A, SHA)
-    assert OLD_SHA not in body["composeFile"] and "${GITHUB_PAT:-}" in body["composeFile"]
+    assert body["composeFile"] == render_darkhub_compose(GHCR_TEMPLATE_A, SHA, "ghcr")
+    assert OLD_SHA not in body["composeFile"] and "${GITHUB_PAT:-}" not in body["composeFile"]
 
 
 def test_compose_changed_between_commits_sends_the_render_of_the_merged_commit(
