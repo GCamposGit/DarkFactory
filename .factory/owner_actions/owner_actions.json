@@ -2316,13 +2316,13 @@
           "at": "2026-10-22T13:10:00Z",
           "outcome": "evidence:keep_open",
           "note": "Causa encontrada remotamente: BugCheck 0x50 com bucket AV_wsddpp (driver do Warsaw) em 21/10 23:09; suspensao ja desligada. Passos trocados para atualizar/remover o Warsaw."
+        },
+        {
+          "at": "2026-10-23T11:28:24Z",
+          "outcome": "done",
+          "note": "Owner informou no chat em 23/10/2026: Warsaw resolvido; falta so reiniciar o Desktop, que ja pode ser usado como 3a opcao de portao."
         }
-      ],
-      "answer": {
-        "note": "Owner informou no chat em 23/10/2026: Warsaw resolvido; falta so reiniciar o Desktop, que ja pode ser usado como 3a opcao de portao.",
-        "answered_at": "2026-10-23T11:28:24Z",
-        "answered_by": "owner"
-      }
+      ]
     },
     {
       "id": "OA-056",
