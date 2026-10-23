@@ -815,6 +815,9 @@ def _gate_failure_is_timeout(gate_res: Any) -> bool:
 # USR-308: two more gate failures a reinvoked agent cannot (or must not) fix.
 GATE_CAUSE_INFRA_NO_TESTS = "gate_infra_no_tests"
 GATE_CAUSE_BASE_RED = "base_red_suspected"
+# USR-354: remote slot whose worker stayed busy, with a local RAM that cannot run 2+ xdist workers.
+GATE_CAUSE_REMOTE_UNAVAILABLE = "gate_remote_unavailable"
+_GATE_REMOTE_REQUIRED_MARKER = "--remote-required:"
 _HARNESS_RESULT_PREFIX = "[HARNESS_RESULT]"
 _FAILED_FILE_RE = re.compile(r"^(?:FAILED|ERROR)[ \t]+(\S+?\.py)(?:::|\s|$)", re.MULTILINE)
 _FAILED_LINE_RE = re.compile(r"^(?:FAILED|ERROR)[ \t]+\S+", re.MULTILINE)
@@ -1057,9 +1060,21 @@ def _report_delivery_child_failure(
     print(f"  {resume}", file=out)
 
 
+def _gate_should_require_remote() -> bool:
+    """USR-354: True when the gate is configured for remote workers but the local host cannot take
+    2+ xdist workers; then a busy worker must requeue (``--remote-required``) instead of running a
+    1-worker local gate that blows through GATE_TIMEOUT_S."""
+    if not gate_ram.remote_workers_configured():
+        return False
+    try:
+        return gate_ram.measure_workers().workers < gate_ram.MIN_GATE_WORKERS
+    except Exception:
+        return True
+
+
 def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
     """USR-262: only when the gate would run locally (no idle remote worker); None = nothing to wait for."""
-    if gate_ram.remote_worker_available():
+    if gate_ram.remote_worker_available() or _gate_should_require_remote():
         return None
     return gate_ram.wait_for_gate_ram(announce=None if not as_json else (lambda _msg: None))
 
@@ -1275,6 +1290,8 @@ def _run_gate_with_self_correction(
         gate_cmd = [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"]
         if line_lock.is_fleet_mode():
             gate_cmd.append("--local")
+        elif _gate_should_require_remote():
+            gate_cmd.append("--remote-required")
         gate_res = _run_bounded(
             gate_cmd,
             cwd=target_worktree,
@@ -1300,6 +1317,19 @@ def _run_gate_with_self_correction(
         gate_log_tail = _tail_lines(last_output, count=40)
         if not as_json:
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
+
+        if "--remote-required" in gate_cmd and _GATE_REMOTE_REQUIRED_MARKER in last_output:
+            last_cause = GATE_CAUSE_REMOTE_UNAVAILABLE
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+            })
+            if not as_json:
+                print(
+                    "[WORKER REMOTO INDISPONIVEL]: RAM local nao comporta 2+ workers; portao local "
+                    f"evitado. Reenfileire/retome com: {resume_cmd} (USR-354).",
+                    file=sys.stderr,
+                )
+            break
 
         if _GATE_DIRTY_WORKTREE_MARKER in last_output:
             last_cause = "gate_dirty_worktree"
