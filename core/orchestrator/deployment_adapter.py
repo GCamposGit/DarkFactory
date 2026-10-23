@@ -35,7 +35,9 @@ from core.orchestrator.compose_render import (
     ComposeRenderError,
     fetch_compose_at_sha,
     render_darkhub_compose,
+    resolve_hub_image_source,
 )
+from core.orchestrator.ghcr_image import GhcrTagUnavailableError, wait_for_ghcr_tag
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +319,15 @@ class DokployDeploymentAdapter:
         repository = str(params.get("compose_repo") or "").strip()
         if not repository:
             return None, "release_identity_compose_repo_missing"
+        try:
+            image_source = resolve_hub_image_source()
+            if image_source == "ghcr":
+                wait_for_ghcr_tag(sha)
+        except GhcrTagUnavailableError as exc:
+            return None, f"release_identity_ghcr_tag_unavailable: {exc}"
+        except Exception as exc:
+            logger.warning("Cannot resolve Darkhub image source: %s", type(exc).__name__)
+            return None, "release_identity_image_source_invalid"
         path = str(params.get("compose_source_path") or HUB_COMPOSE_PATH).strip()
         fetch = self.compose_fetcher or (lambda repo, rev, rel: fetch_compose_at_sha(repo, rev, rel))
         try:
@@ -329,7 +340,7 @@ class DokployDeploymentAdapter:
         if not isinstance(source, str) or not source.strip():
             return None, "release_identity_compose_unreadable"
         try:
-            return render_darkhub_compose(source, sha), None
+            return render_darkhub_compose(source, sha, image_source), None
         except ComposeRenderError:
             return None, "release_identity_compose_contract_invalid"
 
@@ -482,12 +493,17 @@ class DokployDeploymentAdapter:
                     base_url, api_key, target_config, artifact_ref.byte_digest
                 )
             ) is not None:
+                identity_code, separator, identity_message = identity_error.partition(": ")
                 logger.warning(
-                    "Dokploy deploy aborted for project %s: could not bind release identity (%s)",
-                    target_config.project_id, identity_error,
+                    "Dokploy deploy aborted for project %s: could not bind release identity (%s)%s",
+                    target_config.project_id,
+                    identity_code,
+                    f": {identity_message}" if separator else "",
                 )
                 status = DeploymentStatus.FAILED
-                provider_details = {"error": identity_error}
+                provider_details = {"error": identity_code}
+                if separator:
+                    provider_details["error_message"] = identity_message
             else:
                 deploy_procedure, status_procedure, id_key = self._service_procedure_and_key(target_config)
                 baseline_created_at = self._latest_deployment_created_at(

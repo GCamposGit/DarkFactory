@@ -269,6 +269,7 @@ TEMPLATE_B = _hub_template("NEW_FEATURE_FLAG=on")
 # What Dokploy stores today: the render of commit A at the previous release.
 HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA)
 SHA_B = "c" * 40
+PRODUCTION_HUB_TEMPLATE = Path("deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8")
 
 
 class _FakeFetcher:
@@ -333,6 +334,83 @@ def test_compose_is_rendered_from_the_merged_commit_and_installed_before_deploy(
     assert body["composePath"] == "docker-compose.yml"
     assert body["composeFile"] == render_darkhub_compose(TEMPLATE_A, SHA)
     assert OLD_SHA not in body["composeFile"] and "${GITHUB_PAT:-}" in body["composeFile"]
+
+
+def test_ghcr_compose_waits_for_tag_before_any_dokploy_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {
+                "sourceType": "raw",
+                "composePath": "docker-compose.yml",
+                "composeFile": render_darkhub_compose(PRODUCTION_HUB_TEMPLATE, OLD_SHA, "ghcr"),
+            },
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    order: List[str] = []
+
+    def wait(sha: str, **kwargs: Any) -> None:
+        assert sha == SHA
+        order.append("ghcr-ready")
+
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    monkeypatch.setattr(mod, "wait_for_ghcr_tag", wait)
+    adapter, _ = _hub_adapter({SHA: PRODUCTION_HUB_TEMPLATE})
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    assert order == ["ghcr-ready"]
+    procedures = _procedures(calls)
+    assert procedures.index("compose.update") < procedures.index("compose.deploy")
+
+
+def test_ghcr_tag_timeout_fails_release_identity_without_dokploy_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+
+    def unavailable(sha: str, **kwargs: Any) -> None:
+        raise mod.GhcrTagUnavailableError(
+            f"GHCR image ghcr.io/gcamposgit/darkhub:{sha} not published; deploy refused, no fallback to build"
+        )
+
+    monkeypatch.setattr(mod, "wait_for_ghcr_tag", unavailable)
+    adapter, fetcher = _hub_adapter({SHA: TEMPLATE_A})
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_ghcr_tag_unavailable"
+    assert "ghcr.io/gcamposgit/darkhub:" in op.details["error_message"]
+    assert "no fallback to build" in op.details["error_message"]
+    assert not any(call["method"] == "POST" for call in calls)
+    assert fetcher.requests == []
+
+
+def test_build_mode_does_not_probe_ghcr(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": HUB_COMPOSE},
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "build")
+
+    def unexpected(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("build mode must not probe GHCR")
+
+    monkeypatch.setattr(mod, "wait_for_ghcr_tag", unexpected)
+    adapter, _ = _hub_adapter({SHA: TEMPLATE_A})
+    assert adapter.start(_artifact(), _hub_target()).status == DeploymentStatus.IN_PROGRESS
 
 
 def test_compose_changed_between_commits_sends_the_render_of_the_merged_commit(
