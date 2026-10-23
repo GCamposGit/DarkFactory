@@ -1042,7 +1042,7 @@ def _run_main(
         print("Darkhub deploy requires --wait so /health can prove the origin/main SHA", file=err, flush=True)
         return EXIT_USAGE_ERROR
     darkhub_compose = None
-    image_source = "build"
+    image_source = IMAGE_SOURCE_GHCR
     if darkhub_selected:
         try:
             darkhub_compose = get_origin_main_compose(expected_sha)

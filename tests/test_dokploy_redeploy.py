@@ -21,11 +21,18 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytest
 
+from core.orchestrator import compose_render as _cr
+
 from scripts import dokploy_redeploy as mod
 
 # Captured before the autouse fixture replaces the name with a no-op runner.
 _REAL_DEFAULT_DISK_HYGIENE = mod.default_disk_hygiene_runner
 _REAL_DEFAULT_CHECK_MAIN_RUNNER = mod.default_check_main_runner
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_registry_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_cr, "_windows_user_env", lambda _name: "")
 
 
 @pytest.fixture(autouse=True)
@@ -291,7 +298,7 @@ def test_main_rejects_disallowed_project_exit_2_no_deploy_call(project: str) -> 
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--project", project],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=_forbidden_transport_factory,
         stdout=out,
@@ -309,7 +316,7 @@ def test_main_rejects_disallowed_project_even_with_list_flag() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--list", "--project", "My First Project"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -332,7 +339,7 @@ def test_main_allows_default_project_explicitly() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--list", "--project", "darkfac-core"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -684,7 +691,7 @@ def test_main_list_prints_services_and_exits_0() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--list"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -706,7 +713,7 @@ def test_main_dry_run_does_not_trigger_and_exits_0() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--dry-run", "--only", "darkfac-cloud"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -722,7 +729,7 @@ def test_main_only_unknown_name_exit_2() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--list", "--only", "not-a-real-service"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -753,7 +760,7 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         [],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -795,7 +802,7 @@ def test_main_deploy_one_service_errors_exit_1() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         [],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -821,7 +828,7 @@ def test_main_no_wait_triggers_and_exits_0_without_polling() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--no-wait", "--only", "darkfac-cloud"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -846,7 +853,7 @@ def test_main_only_scopes_deploy_to_selected_services() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         ["--only", "darkfac-cloud"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -968,7 +975,7 @@ def test_main_title_match_uses_commit_subject_only(monkeypatch: pytest.MonkeyPat
     clock = FakeClock()
     exit_code = mod.main(
         ["--only", "darkfac-cloud"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -1003,7 +1010,7 @@ def test_main_executes_autonomous_post_deploy_backup_on_success() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         ["--only", "darkfac-cloud"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -1037,7 +1044,7 @@ def test_main_skips_autonomous_post_deploy_backup_with_flag() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         ["--only", "darkfac-cloud", "--skip-backup"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -1076,7 +1083,7 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
     out, err = io.StringIO(), io.StringIO()
     assert mod.main(
         ["--only", "darkfac-cloud", "--skip-backup"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -1090,7 +1097,7 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
 # USR-65: title check only for code-bearing services; node sync without loops
 # ---------------------------------------------------------------------------
 
-_ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY}
+_ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"}  # ghcr is the default (USR-365); legacy layout opt-in
 
 
 def _run_main(argv: List[str], transport: QueueTransport, monkeypatch: pytest.MonkeyPatch, subject: Optional[str]):
