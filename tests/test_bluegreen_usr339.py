@@ -110,3 +110,67 @@ def test_is_bluegreen_marker_or_env() -> None:
     marked = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
     assert is_bluegreen(marked, {}) and not is_bluegreen(SRC, {})
     assert is_bluegreen(SRC, {"DARKHUB_DEPLOY_MODE": "bluegreen"})
+
+
+def _run_apply(initial: Optional[str], applied: List[str], fail_on: int, serving: bool = True) -> None:
+    def apply(c: str) -> None:
+        applied.append(c)
+        if len(applied) == fail_on:
+            raise BlueGreenError("compose up error")
+
+    with pytest.raises(BlueGreenError) as ei:
+        run_bluegreen_deploy(
+            source=SRC, new_sha=C, read_compose=lambda: initial, apply_compose=apply,
+            sha_is_serving=lambda _s: serving, health_attempts=2,
+        )
+    assert "compose up error" in str(ei.value) or not serving
+    assert "previous compose restored" in str(ei.value)
+
+
+def test_legacy_apply_failure_restores_legacy() -> None:
+    applied: List[str] = []
+    _run_apply(SRC, applied, fail_on=1)
+    assert len(applied) == 2 and applied[-1] == SRC
+
+
+def test_legacy_health_failure_restores_legacy() -> None:
+    applied: List[str] = []
+    _run_apply(SRC, applied, fail_on=99, serving=False)
+    assert len(applied) == 2 and applied[-1] == SRC
+
+
+def test_cutover_failure_restores_previous() -> None:
+    initial = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
+    applied: List[str] = []
+    _run_apply(initial, applied, fail_on=2)
+    assert len(applied) == 3 and applied[-1] == initial
+
+
+def test_restore_failure_is_reported() -> None:
+    calls: List[str] = []
+
+    def apply(c: str) -> None:
+        calls.append(c)
+        raise BlueGreenError("boom")
+
+    with pytest.raises(BlueGreenError, match="RESTORE FAILED"):
+        run_bluegreen_deploy(source=SRC, new_sha=C, read_compose=lambda: SRC, apply_compose=apply,
+                             sha_is_serving=lambda _s: True)
+    assert len(calls) == 2
+
+
+def test_restore_legacy_cli_only_updates_without_marker(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    from scripts import dokploy_bluegreen as bg
+    from scripts import dokploy_redeploy as dr
+
+    sent: list = []
+    monkeypatch.setattr(dr, "resolve_credentials", lambda env: ("http://x", "k"))
+    monkeypatch.setattr(dr, "make_urllib_transport", lambda u, k: lambda m, p, b=None: sent.append((m, p, b)))
+    monkeypatch.setattr(bg, "_darkhub_service", lambda t: dr.Service("compose", "Darkhub", "cid"))
+    monkeypatch.setattr(dr, "get_origin_main_compose", lambda sha: SRC)
+    monkeypatch.setattr(dr, "fetch_darkhub_health", lambda *a, **k: {"git_sha": A})
+    assert bg.main(["--restore-legacy"], env={}) == 0
+    assert [p for _m, p, _b in sent] == ["/api/compose.update"]
+    body = sent[0][2]
+    assert body["composeId"] == "cid" and parse_state(body["composeFile"]) is None
+    assert "restore-legacy ok" in capsys.readouterr().out
