@@ -10609,8 +10609,8 @@
     "project_id": "darkfac",
     "title": "Teste instavel test_usr328_review_timeout::test_review_timeout_is_structured_failure_with_next_route no grokbox",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3177caa01985bb10b94ee2820b0aa869487e94d8",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10631,7 +10631,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T17:31:08.681082Z",
-    "updated_at": "2026-10-23T17:31:08.681082Z"
+    "updated_at": "2026-10-23T22:59:09.533708Z"
   },
   {
     "id": "USR-365",
