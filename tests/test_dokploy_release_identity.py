@@ -258,7 +258,7 @@ def _hub_template(*extra_env: str) -> str:
         "      context: https://${GITHUB_PAT:-}@github.com/Org/DarkFactory.git#${DARKFAC_GIT_SHA}\n"
         "      no_cache: true\n"
         "      args:\n        DARKFAC_GIT_SHA: ${DARKFAC_GIT_SHA}\n"
-        "    pull_policy: build\n"
+        "    image: darkhub:v2.1\n    pull_policy: build\n    deploy:\n      resources:\n        limits:\n          memory: 512M\n"
         f"    environment:\n      - DARKFAC_GIT_SHA=${{DARKFAC_GIT_SHA}}\n      - PORT=8000\n{env}"
     )
 
@@ -266,11 +266,9 @@ def _hub_template(*extra_env: str) -> str:
 # Commit A of the repo; commit B adds an environment variable to the compose.
 TEMPLATE_A = _hub_template()
 TEMPLATE_B = _hub_template("NEW_FEATURE_FLAG=on")
-GHCR_TEMPLATE_A = TEMPLATE_A.replace(
-    "    pull_policy: build", "    image: darkhub:v2.1\n    pull_policy: build"
-) + "    deploy:\n      replicas: 1\n"
+GHCR_TEMPLATE_A = TEMPLATE_A
 # What Dokploy stores today: the render of commit A at the previous release.
-HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA)
+HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA, "build")
 SHA_B = "c" * 40
 
 
@@ -291,7 +289,7 @@ class _FakeFetcher:
 
 def _hub_adapter(files: Dict[str, Any]) -> tuple[DokployDeploymentAdapter, _FakeFetcher]:
     fetcher = _FakeFetcher(files)
-    return DokployDeploymentAdapter(compose_fetcher=fetcher), fetcher
+    return DokployDeploymentAdapter(compose_fetcher=fetcher, ghcr_probe=lambda _repo, _tag: 200), fetcher
 
 
 def _hub_target(**overrides: Any) -> TargetConfig:
@@ -314,6 +312,7 @@ def _procedures(calls: List[Dict[str, Any]]) -> List[str]:
 def test_compose_is_rendered_from_the_merged_commit_and_installed_before_deploy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("DARKHUB_IMAGE_SOURCE", raising=False)
     calls: List[Dict[str, Any]] = []
     _install_urlopen(
         monkeypatch,
@@ -329,6 +328,7 @@ def test_compose_is_rendered_from_the_merged_commit_and_installed_before_deploy(
     op = adapter.start(_artifact(), _hub_target())
 
     assert op.status == DeploymentStatus.IN_PROGRESS
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in calls[1]["body"]["composeFile"]
     assert fetcher.requests == [("Org/DarkFactory", SHA, "deploy/dokploy/docker-compose.hub.yml")]
     assert _procedures(calls) == ["compose.one", "compose.update", "compose.one", "compose.deploy"]
 
@@ -380,6 +380,34 @@ def test_ghcr_existing_image_installs_pinned_compose_then_deploys(monkeypatch: p
     assert OLD_SHA not in body["composeFile"] and "${GITHUB_PAT:-}" not in body["composeFile"]
 
 
+@pytest.mark.parametrize(
+    "compose_type,should_warn",
+    [("docker-compose", True), ("swarm", False), ("Stack", False), (None, True)],
+)
+def test_ghcr_adapter_reports_when_compose_type_cannot_honor_start_first(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    compose_type: Optional[str],
+    should_warn: bool,
+) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    compose_one: Dict[str, Any] = {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": HUB_COMPOSE}
+    if compose_type is not None:
+        compose_one["composeType"] = compose_type
+    _install_urlopen(monkeypatch, [compose_one, True, {"deployments": []}, {"success": True}], calls)
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=_FakeFetcher({SHA: GHCR_TEMPLATE_A}), ghcr_probe=lambda _repo, _tag: 200
+    )
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    warnings = [record.message for record in caplog.records if "start-first may be ignored" in record.message]
+    assert bool(warnings) is should_warn
+    assert "OA-057" in warnings[0] if should_warn else not warnings
+
+
 def test_compose_changed_between_commits_sends_the_render_of_the_merged_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -404,7 +432,7 @@ def test_compose_changed_between_commits_sends_the_render_of_the_merged_commit(
     sent = calls[1]["body"]["composeFile"]
     assert sent == render_darkhub_compose(TEMPLATE_B, SHA_B)
     assert "NEW_FEATURE_FLAG=on" in sent and "NEW_FEATURE_FLAG" not in stored
-    assert SHA not in sent and sent.count(SHA_B) == 3
+    assert SHA not in sent and sent.count(SHA_B) == 2
 
 
 def test_compose_already_identical_to_the_render_is_not_rewritten(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -88,7 +88,8 @@ def wait_for_ghcr_tag(
             if status in (401, 403):
                 raise GhcrCredentialsError(
                     f"GHCR credentials rejected (HTTP {status}); configure GHCR_TOKEN or GITHUB_PAT "
-                    "with read:packages"
+                    "with read:packages. Deploy refused with no build fallback; for a manual rollback set "
+                    "DARKHUB_IMAGE_SOURCE=build and rerun the deploy"
                 ) from None
             last_status = status
             last_error = None

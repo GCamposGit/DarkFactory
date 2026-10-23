@@ -1,6 +1,6 @@
 # USR-207 - Hub sem queda a cada merge
 
-Estado: parte entregue no repositorio, parte proposta (exige acao do owner no Dokploy/GitHub).
+Estado: fase 2 de codigo entregue. A validacao sem queda ainda depende de `composeType` Stack/Swarm ou da decisao do Owner para blue/green (OA-057), e de evidencia coletada durante deploy real.
 
 ## 1. Entregue neste ticket
 
@@ -12,6 +12,9 @@ Estado: parte entregue no repositorio, parte proposta (exige acao do owner no Do
 | `node_sync` nao trata VPS em sha antigo como divergente quando a imagem nao mudou (evita redeploy em loop) | `core/infra/node_sync.py` (`verify`) |
 | Sonda externa de `/health` com alerta no Telegram ops apos 120 s e aviso de recuperacao | `core/infra/availability_probe.py` |
 | `healthcheck` + `stop_grace_period` no compose do Hub | `deploy/dokploy/docker-compose.hub.yml` |
+| GHCR como fonte padrao, imagem imutavel por SHA e espera compartilhada da tag | `core/orchestrator/compose_render.py`, `core/infra/ghcr.py`, `scripts/dokploy_redeploy.py`, `core/orchestrator/deployment_adapter.py` |
+| `start-first` sem `container_name`; aviso quando `composeType` nao indica Stack/Swarm | renderer, CLI e adapter de deploy |
+| Sonda externa de 1 s durante o deploy, com evidencia JSON e verificacao de 100% HTTP 200 + convergencia do SHA | `core/infra/switchover_probe.py`, chamada pelo redeploy com `--wait` |
 
 Notas:
 
@@ -30,7 +33,7 @@ Register-ScheduledTask -TaskName "DarkFac-Hub-Availability" -Action $action -Tri
 
 (`pythonw.exe` nao abre janela. Nao executar a partir de agentes; o owner cola no PowerShell ja feito na OA-044.)
 
-## 2. Proposto: troca sem downtime (fase 2)
+## 2. Fase 2: imagem GHCR e troca sem downtime
 
 Causa raiz: `docker compose up` recria o container parando o antigo antes de subir o novo, e o build roda na VPS (2 vCPU, 3,7 GB).
 
@@ -42,7 +45,9 @@ Aplicar `docs/proposals/USR-207-ghcr-build.patch` (cria `.github/workflows/hub-i
 git -C C:\dev\DarkFac apply docs/proposals/USR-207-ghcr-build.patch
 ```
 
-Depois o compose passa a usar a imagem (sem `build:`), diff exato do servico `darkhub`:
+O workflow protegido foi publicado pela OA-052; a imagem GHCR e agora a fonte padrao do CLI e do adapter, fixada no SHA completo. O compose versionado continua declarando `build:` como base para o escape hatch `DARKHUB_IMAGE_SOURCE=build`; o renderer converte essa base para `image: ghcr.io/gcamposgit/darkhub:<sha>`, `pull_policy: always`, `start-first` e `failure_action: rollback` no modo padrao. A credencial privada e a tag inicial foram verificadas nas OA-052/OA-053.
+
+O modo de rollback manual e explicito:
 
 ```diff
 -    build:
@@ -61,18 +66,21 @@ Depois o compose passa a usar a imagem (sem `build:`), diff exato do servico `da
 
 Efeitos em codigo que hoje exige `build:`: `core/orchestrator/compose_render.py` (`render_darkhub_compose` valida o contexto Git fixado) e o teste `test_darkhub_build_pinned_before_deploy_and_health_converges` precisam ser adaptados na mesma entrega; o redeploy deve esperar o workflow publicar a tag do sha antes de acionar o Dokploy. O pacote GHCR precisa ficar privado com credencial de pull no Dokploy (registry).
 
-### 2.1b Chave de ativacao (USR-339)
+### 2.1b Contrato atual de imagem (USR-339 / USR-207)
 
 O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOURCE` (ambiente de quem roda `scripts/dokploy_redeploy.py` e do `DokployDeploymentAdapter`):
 
-- `build` (padrao): comportamento de hoje, build do contexto Git na VPS.
-- `ghcr`: `render_darkhub_compose` troca `build:`/`pull_policy: build` por `image: ghcr.io/gcamposgit/darkhub:<sha>` + `pull_policy: always`, remove `container_name` e injeta `deploy.update_config.order: start-first` (+ `rollback_config`). O redeploy espera a tag do sha no GHCR (HEAD no manifesto; token em `GHCR_TOKEN` ou `GITHUB_PAT` com `read:packages`; timeout `--timeout`, padrao 900 s) e, se nao existir, recusa com erro explicito, sem voltar para build.
-- Valor desconhecido falha fechado. `start-first` so vale em modo Stack/Swarm; no Compose simples o Dokploy ignora `update_config` (rota 2 da secao 2.2 cobre isso).
-- Limite conhecido: a espera da tag esta no CLI `dokploy_redeploy.py`; o adapter da linha apenas renderiza.
+- `ghcr` (padrao): transforma a base `build:` em imagem GHCR imutavel com SHA completo, remove `container_name` e injeta `pull_policy: always`, `update_config.order: start-first` e rollback.
+- `build` (escape hatch explicito): mantém contexto Git pinado, `no_cache` e `pull_policy: build`.
+- Valor desconhecido falha fechado. CLI e adapter compartilham `core.infra.ghcr.wait_for_ghcr_tag`; 401/403 sao erros de credencial, 404/timeout nao acionam fallback para build. Configure `GHCR_TOKEN` ou `GITHUB_PAT` com `read:packages`.
+- `start-first` so vale em Stack/Swarm. CLI e adapter consultam `composeType`; Compose simples ou tipo desconhecido gera aviso e referencia OA-057, sem prometer ausencia de queda.
+- Com `--wait`, o redeploy mede externamente `/health` a cada segundo durante a implantacao e grava `.factory/evidence/hub-switchover-<sha>.json`. O aceite exige que todas as amostras sejam HTTP 200 e que pelo menos uma reporte o SHA esperado.
 
-### 2.1c Ativacao passo a passo (owner, OA registrada no DarkHub)
+### 2.1c Publicacao do workflow (concluida via OA-052)
 
-1. Abra o PowerShell e crie uma worktree limpa:
+O Owner ja publicou `hub-image.yml`, confirmou a primeira imagem e gravou `GHCR_TOKEN` conforme OA-052/OA-053. Nao reaplique o patch protegido. Para diagnostico e rollback manual, os comandos historicos abaixo permanecem como referencia:
+
+1. Abra o PowerShell e crie uma worktree limpa (somente se uma futura alteracao protegida for autorizada):
    `git -C C:\dev\DarkFac fetch origin` e `git -C C:\dev\DarkFac worktree add C:\dev\DarkFac\.worktrees\hub-image-publish -b chore/hub-image-workflow origin/main`
 2. Aplique o patch: `git -C C:\dev\DarkFac\.worktrees\hub-image-publish apply C:\dev\DarkFac\docs\proposals\USR-207-ghcr-build.patch`
 3. Rode o portao: `python C:\dev\DarkFac\core\harness\runner.py --quick` (dentro da worktree, ajustando o caminho).
@@ -81,7 +89,7 @@ O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOU
 6. So depois de a primeira imagem existir: defina `DARKHUB_IMAGE_SOURCE=ghcr` (Variaveis de Ambiente de Usuario do Windows, ou no ambiente do runner/orquestrador) e rode `python C:\dev\DarkFac\scripts\dokploy_redeploy.py --only Darkhub --wait`.
 7. Volte para `build` removendo a variavel se algo falhar.
 
-### 2.2 Start-first gated por healthcheck
+### 2.2 Start-first gated por healthcheck e tipo do servico
 
 `container_name` fixo impede dois containers simultaneos; remover (o `hostname` ja preserva a identidade de no, USR-212). O Docker Compose simples nao tem `start-first`; ha duas rotas:
 
@@ -101,15 +109,16 @@ O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOU
 
    (o `healthcheck` ja aplicado no compose e o que libera o corte do trafego.)
 
-2. Sem Swarm: dois servicos `darkhub-blue` / `darkhub-green` com rotulos Traefik distintos; o redeploy sobe o inativo, espera `healthy` e so entao troca o roteador (pode ser feito em `scripts/dokploy_redeploy.py`).
+2. Sem Swarm: o Dokploy ignora `update_config`; CLI e adapter avisam e a sonda registra qualquer queda. A rota alternativa e dois servicos `darkhub-blue` / `darkhub-green` com rotulos Traefik distintos. Ela exige decisao do Owner e ticket proprio; OA-057 oferece as opcoes.
 
-Criterio de aceite do ticket: sonda de 1 s durante um deploy real sem nenhuma resposta diferente de 200 em `/health`.
+Criterio de aceite operacional: sonda externa de 1 s durante deploy real com 100% HTTP 200 em `/health` e convergencia de `git_sha`. O teste local cobre amostragem e gravacao da evidencia com HTTP injetado; nao substitui a medicao externa real.
 
-### 2.3 Acoes do owner (o orquestrador registra as OA)
+### 2.3 Acoes do owner (registradas no DarkHub)
 
 - Desligar o autoDeploy do compose Darkhub no Dokploy (o deploy passa a ser so o do script).
-- Criar credencial de pull do GHCR no Dokploy e escolher a rota 2.2.
-- Agendar a sonda da secao 1.
+- OA-044: autoDeploy desligado, credencial GHCR criada e sonda externa agendada (concluida).
+- OA-052/OA-053: workflow publicado, token configurado e primeira imagem validada (concluidas).
+- OA-057: escolher Stack/Swarm ou aprovar ticket de blue/green se o servico reportar Compose simples.
 
 ## 3. Memoria: como medir antes de mexer nos 512 MB
 

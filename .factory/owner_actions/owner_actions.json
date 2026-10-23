@@ -2343,6 +2343,39 @@
       "created_at": "2026-10-22T19:20:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-057",
+      "kind": "decision",
+      "title": "Escolher o modo sem queda do Hub no Dokploy (USR-207)",
+      "priority": "high",
+      "status": "open",
+      "why": "O renderer agora publica a imagem GHCR por SHA e inclui update_config.start-first. Esse recurso so funciona em Stack/Swarm; em Compose simples o CLI e o adapter avisam e a sonda registra a disponibilidade real. A rota blue/green foi deixada fora da implementacao ate decisao do Owner.",
+      "blocks": [
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Entre em https://dokploy.ggcampos.com, abra Projects > darkfac-core > production > Darkhub e selecione o servico de compose. Na tela General/Deployments, confira o composeType exibido pela API/configuracao: se indicar Stack ou Swarm, responda A; se indicar Docker Compose simples ou estiver ausente, responda B para aprovar um ticket separado de blue/green. No DarkHub, abra Acoes do Owner > OA-057, selecione a opcao e envie a resposta."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Usar Stack/Swarm",
+          "detail": "Manter um servico e ativar update_config.order=start-first; verificar em um deploy real que o composeType reporta Stack/Swarm."
+        },
+        {
+          "id": "B",
+          "label": "Aprovar blue/green",
+          "detail": "Autorizar ticket separado para darkhub-blue/darkhub-green e troca do roteador Traefik, pois Compose simples ignora start-first."
+        }
+      ],
+      "verify": "A resposta A ou B aparece no DarkHub; o ticket USR-207 e destravado pela esteira.",
+      "created_at": "2026-10-23T00:00:00Z",
+      "created_by": "codex",
+      "resolved_at": null
     }
   ]
 }

@@ -18,9 +18,17 @@ from scripts import dokploy_redeploy as mod
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "hub" / "frontend"
+PROPOSAL = ROOT / "docs" / "proposals" / "USR-207-zero-downtime.md"
 A, B = "a" * 40, "b" * 40
 # Fixed instant injected through mod._utcnow; never compared with the real clock.
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
+
+
+def test_owner_probe_scheduling_snippet_uses_registered_task_and_absolute_pythonw() -> None:
+    proposal = PROPOSAL.read_text(encoding="utf-8")
+    assert "Register-ScheduledTask" in proposal
+    assert re.search(r'\$py\s*=\s*"[A-Za-z]:\\[^"\n]*pythonw\.exe"', proposal)
+    assert "schtasks" not in proposal.lower()
 
 
 # --------------------------------------------------------------------------- classifier
@@ -137,12 +145,20 @@ def _run(transport: FakeDokploy, monkeypatch: pytest.MonkeyPatch, deployed: Opti
     monkeypatch.setattr(mod, "probe_deployed_sha", lambda: deployed)
     monkeypatch.setattr(mod, "get_changed_paths", lambda a, b: changed)
     monkeypatch.setattr(mod, "_utcnow", lambda: NOW)
+    class FakeSwitchover:
+        path = "test-evidence.json"
+
+        def stop(self):
+            from types import SimpleNamespace
+            return SimpleNamespace(passed=True, samples=[1])
+
+    monkeypatch.setattr(mod, "_start_switchover_probe", lambda _sha: FakeSwitchover())
     ticks = iter(range(0, 100_000))
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
         ["--only", "Darkhub", "--skip-node-sync", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene",
          "--timeout", "50", "--poll-interval", "1"],
-        env={"DOKPLOY_API_URL": "https://dokploy.example", "DOKPLOY_API_KEY": "k"},
+        env={"DOKPLOY_API_URL": "https://dokploy.example", "DOKPLOY_API_KEY": "k", "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=lambda _n: None, transport_factory=lambda u, k: transport,
         health_client=lambda: {"git_sha": B}, sleep_fn=lambda s: None, clock_fn=lambda: float(next(ticks)),
         stdout=out, stderr=err,

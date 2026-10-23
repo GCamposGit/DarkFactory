@@ -8,7 +8,8 @@
 services:
   darkhub:
     build:
-      # The redeploy CLI supplies the full origin/main SHA. An empty SHA must fail the build.
+      # Renderer base for DARKHUB_IMAGE_SOURCE=build. Default GHCR mode replaces this block
+      # with the immutable sha-tagged image before sending the raw compose to Dokploy.
       context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#${DARKFAC_GIT_SHA}
       dockerfile: deploy/dokploy/Dockerfile.hub
       no_cache: true
@@ -20,8 +21,8 @@ services:
     # USR-212: hostname fallback for core.infra.metrics.resolve_host_node_id (darkhub-* => VPS)
     hostname: darkhub-cloud-247
     restart: unless-stopped
-    # USR-207: Traefik only routes to a healthy container, and a deploy is only "done" once /health answers.
-    # Phase 2 (start-first, no container_name) is in docs/proposals/USR-207-zero-downtime.md.
+    # USR-207 phase 2 is implemented by the shared renderer: GHCR by SHA, start-first and no fixed
+    # container_name. Dokploy applies start-first only when this service uses Stack/Swarm.
     stop_grace_period: 20s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]

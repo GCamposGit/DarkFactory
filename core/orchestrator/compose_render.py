@@ -73,10 +73,10 @@ _START_FIRST = (
 
 
 def resolve_hub_image_source(env: Optional[Mapping[str, str]] = None) -> str:
-    """``build`` (default) or ``ghcr``, from ``DARKHUB_IMAGE_SOURCE``. Unknown values fail closed."""
+    """``ghcr`` (default) or explicit ``build`` from ``DARKHUB_IMAGE_SOURCE``."""
     raw = ((env if env is not None else os.environ).get(IMAGE_SOURCE_ENV) or "").strip().lower()
     if not raw:
-        return IMAGE_SOURCE_BUILD
+        return IMAGE_SOURCE_GHCR
     if raw not in (IMAGE_SOURCE_BUILD, IMAGE_SOURCE_GHCR):
         raise ComposeRenderError(f"{IMAGE_SOURCE_ENV} must be 'build' or 'ghcr'")
     return raw
@@ -86,10 +86,16 @@ def ghcr_image_ref(sha: str) -> str:
     return f"{GHCR_IMAGE_PREFIX}:{sha}"
 
 
+def dokploy_supports_start_first(compose_type: object) -> bool:
+    """Recognize Dokploy Stack/Swarm compose types; unknown types are not promised zero downtime."""
+    normalized = str(compose_type or "").strip().lower()
+    return "swarm" in normalized or "stack" in normalized
+
+
 def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = None) -> str:
     """Bind the Hub image (Git build context or GHCR tag) and container environment to one SHA.
 
-    ``image_source`` defaults to :func:`resolve_hub_image_source` (``build`` unless the owner flipped it).
+    ``image_source`` defaults to :func:`resolve_hub_image_source` (GHCR unless explicitly set to build).
     """
     if not SHA_PATTERN.fullmatch(sha):
         raise ComposeRenderError("Darkhub build requires a full origin/main SHA")
@@ -188,6 +194,7 @@ __all__ = [
     "IMAGE_SOURCE_ENV",
     "IMAGE_SOURCE_GHCR",
     "ghcr_image_ref",
+    "dokploy_supports_start_first",
     "resolve_hub_image_source",
     "ComposeFetcher",
     "ComposeRenderError",

@@ -37,7 +37,8 @@ def test_real_hub_compose_renders_and_pins_every_placeholder() -> None:
     source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
     rendered = render_darkhub_compose(source, SHA)
     assert "${DARKFAC_GIT_SHA}" not in rendered
-    assert rendered.count(SHA) == 3
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in rendered
+    assert rendered.count(SHA) == 2
 
 
 def test_redeploy_script_uses_the_shared_render() -> None:
@@ -128,13 +129,24 @@ def test_repository_from_url(url: Any, expected: Any) -> None:
     assert repository_from_url(url) == expected
 
 
-def test_build_mode_is_default_and_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ghcr_mode_is_default_and_build_mode_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(cr.IMAGE_SOURCE_ENV, raising=False)
     source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
-    assert cr.resolve_hub_image_source({}) == "build"
-    assert render_darkhub_compose(source, SHA) == render_darkhub_compose(source, SHA, "build")
-    assert "pull_policy: build" in render_darkhub_compose(source, SHA)
-    assert "container_name: darkhub-cloud-247" in render_darkhub_compose(source, SHA)
+    assert cr.resolve_hub_image_source({}) == "ghcr"
+    assert cr.resolve_hub_image_source({cr.IMAGE_SOURCE_ENV: ""}) == "ghcr"
+    default_render = render_darkhub_compose(source, SHA)
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in default_render
+    assert "pull_policy: always" in default_render
+    assert "order: start-first" in default_render
+    assert "failure_action: rollback" in default_render
+    assert "container_name:" not in default_render
+    assert "${DARKFAC_GIT_SHA}" not in default_render
+
+    build_render = render_darkhub_compose(source, SHA, "build")
+    assert "pull_policy: build" in build_render
+    assert "container_name: darkhub-cloud-247" in build_render
+    assert "DarkFactory.git#" + SHA in build_render
+    assert "no_cache: true" in build_render
 
 
 def test_ghcr_mode_emits_image_start_first_without_container_name() -> None:
@@ -154,3 +166,10 @@ def test_image_source_env_fails_closed_on_unknown_value() -> None:
     assert cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "GHCR"}) == "ghcr"
     with pytest.raises(ComposeRenderError):
         cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "registry"})
+
+
+def test_start_first_only_claimed_for_stack_or_swarm() -> None:
+    assert cr.dokploy_supports_start_first("swarm")
+    assert cr.dokploy_supports_start_first("Stack")
+    assert not cr.dokploy_supports_start_first("docker-compose")
+    assert not cr.dokploy_supports_start_first(None)

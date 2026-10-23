@@ -3,6 +3,7 @@
   "model": "gpt-6-luna",
   "effort": null,
   "tickets_done": [
-    "T1"
+    "T1",
+    "T2"
   ]
 }

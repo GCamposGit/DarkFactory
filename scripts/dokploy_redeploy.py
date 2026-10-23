@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import sys
 import time
 import urllib.error
@@ -68,6 +69,7 @@ from core.infra.ghcr import (
     probe_ghcr_manifest as _default_ghcr_probe,
     wait_for_ghcr_tag as _wait_for_ghcr_tag,
 )
+from core.infra.switchover_probe import SwitchoverEvidence, probe_until_stopped
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     SHA_PATTERN,
@@ -77,6 +79,7 @@ from core.orchestrator.compose_render import (
     ghcr_image_ref,
     render_darkhub_compose as _shared_render_darkhub_compose,
     resolve_hub_image_source,
+    dokploy_supports_start_first,
 )
 
 DEFAULT_PROJECT = "darkfac-core"
@@ -665,7 +668,8 @@ def wait_for_ghcr_tag(
         raise
     except GhcrError as exc:
         raise DokployUsageError(
-            f"{exc}; deploy refused, no fallback to build (check the hub-image workflow)"
+            f"{exc}; deploy refused, no fallback to build (check the hub-image workflow). "
+            "For a manual rollback set DARKHUB_IMAGE_SOURCE=build and rerun the redeploy"
         ) from None
 
 
@@ -710,6 +714,40 @@ def wait_for_darkhub_sha(
         if remaining <= 0:
             return False
         sleep_fn(min(interval, remaining))
+
+
+class _SwitchoverProbeSession:
+    """Run the external one-second probe while a Dokploy deployment is active."""
+
+    def __init__(self, expected_sha: str) -> None:
+        self.expected_sha = expected_sha
+        self.stop_event = threading.Event()
+        self.evidence: Optional[SwitchoverEvidence] = None
+        evidence_dir = Path(__file__).resolve().parents[1] / ".factory" / "evidence"
+        self.path = evidence_dir / f"hub-switchover-{expected_sha}.json"
+        self.thread = threading.Thread(target=self._run, name="darkhub-switchover-probe", daemon=True)
+
+    def _run(self) -> None:
+        try:
+            self.evidence = probe_until_stopped(
+                self.expected_sha, stop_event=self.stop_event, evidence_path=self.path,
+            )
+        except Exception as exc:
+            logger.warning("Hub switchover probe failed to write evidence (%s)", type(exc).__name__)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> Optional[SwitchoverEvidence]:
+        self.stop_event.set()
+        self.thread.join(timeout=10)
+        return self.evidence
+
+
+def _start_switchover_probe(expected_sha: str) -> _SwitchoverProbeSession:
+    session = _SwitchoverProbeSession(expected_sha)
+    session.start()
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -1109,6 +1147,7 @@ def _run_main(
     node_sync_dirty = False
     triggered: List[Service] = []
     baselines: Dict[str, Optional[Deployment]] = {}
+    switchover_session: Optional[_SwitchoverProbeSession] = None
     for svc in selected:
         try:
             baseline_payload = fetch_service_status(transport, svc)
@@ -1127,10 +1166,23 @@ def _run_main(
                     continue
                 if action == DEPLOY_JOIN:
                     print(f"[{svc.name}] joining in-flight deployment (USR-207): {reason}", file=out, flush=True)
+                    if args.wait and switchover_session is None:
+                        switchover_session = _start_switchover_probe(expected_sha or "")
                     triggered.append(svc)
                     baselines[svc.name] = None
                     continue
+                if image_source == IMAGE_SOURCE_GHCR and not dokploy_supports_start_first(
+                    baseline_payload.get("composeType")
+                ):
+                    print(
+                        f"[{svc.name}] WARNING: Dokploy composeType={baseline_payload.get('composeType')!r}; "
+                        "start-first may be ignored. Owner decision OA-057 tracks Stack/Swarm versus blue/green.",
+                        file=err,
+                        flush=True,
+                    )
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
+            if svc.name.lower() == "darkhub" and svc.kind == "compose" and args.wait and switchover_session is None:
+                switchover_session = _start_switchover_probe(expected_sha or "")
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
@@ -1186,6 +1238,23 @@ def _run_main(
                     flush=True,
                 )
                 _run_hygiene("on-disk-failure", force=True)
+
+    if switchover_session is not None:
+        evidence = switchover_session.stop()
+        if evidence is None or not evidence.passed:
+            print(
+                f"[SWITCHOVER PROBE] failed; evidence={switchover_session.path}",
+                file=err,
+                flush=True,
+            )
+            all_ok = False
+            other_failure = True
+        else:
+            print(
+                f"[SWITCHOVER PROBE] passed samples={len(evidence.samples)} evidence={switchover_session.path}",
+                file=out,
+                flush=True,
+            )
 
     if darkhub_selected and any(svc.name.lower() == "darkhub" for svc in triggered):
         if wait_for_darkhub_sha(

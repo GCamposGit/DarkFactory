@@ -43,6 +43,7 @@ from core.orchestrator.compose_render import (
     ComposeFetcher,
     ComposeRenderError,
     IMAGE_SOURCE_GHCR,
+    dokploy_supports_start_first,
     fetch_compose_at_sha,
     render_darkhub_compose,
     resolve_hub_image_source,
@@ -429,10 +430,16 @@ class DokployDeploymentAdapter:
                             clock_fn=self.ghcr_clock,
                         )
                     except GhcrImageNotPublished:
+                        logger.warning(
+                            "GHCR image for %s was not published; Dokploy deploy refused with no build fallback. "
+                            "Manual rollback: set DARKHUB_IMAGE_SOURCE=build.", sha[:12]
+                        )
                         return "release_identity_ghcr_image_missing"
-                    except GhcrCredentialsError:
+                    except GhcrCredentialsError as exc:
+                        logger.warning("GHCR credentials rejected: %s", exc)
                         return "release_identity_ghcr_credentials_invalid"
-                    except GhcrWaitTimeout:
+                    except GhcrWaitTimeout as exc:
+                        logger.warning("GHCR manifest wait timed out: %s", exc)
                         return "release_identity_ghcr_probe_timeout"
                     except Exception as exc:
                         logger.warning("GHCR manifest probe failed (%s)", type(exc).__name__)
@@ -440,6 +447,13 @@ class DokployDeploymentAdapter:
                 one = self._dokploy_request(
                     base_url, api_key, "GET", "compose.one", query={"composeId": service_id}
                 )
+                if image_source == IMAGE_SOURCE_GHCR and not dokploy_supports_start_first(one.get("composeType")):
+                    logger.warning(
+                        "Dokploy compose %s reports composeType=%r; start-first may be ignored. "
+                        "Owner decision OA-057 tracks Stack/Swarm versus blue/green.",
+                        service_id,
+                        one.get("composeType"),
+                    )
                 if one.get("sourceType") != "raw" or not isinstance(one.get("composeFile"), str):
                     return "release_identity_compose_not_raw"
                 if rendered != one["composeFile"]:

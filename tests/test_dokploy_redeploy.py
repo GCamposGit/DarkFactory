@@ -39,6 +39,14 @@ def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(mod, "default_check_main_runner", lambda: (0, {"state": "green", "sha": "a" * 40}))
     monkeypatch.setattr(mod, "default_backup_runner", lambda project_id="darkfac": {"snapshot_id": "snp_fake", "drill_verified": True})
+    class FakeProbe:
+        path = "evidence.json"
+
+        def stop(self):
+            from types import SimpleNamespace
+            return SimpleNamespace(passed=True, samples=[1])
+
+    monkeypatch.setattr(mod, "_start_switchover_probe", lambda _sha: FakeProbe())
     monkeypatch.setattr(
         node_sync,
         "sync",
@@ -753,7 +761,7 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         [],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -795,7 +803,7 @@ def test_main_deploy_one_service_errors_exit_1() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         [],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -1090,7 +1098,12 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
 # USR-65: title check only for code-bearing services; node sync without loops
 # ---------------------------------------------------------------------------
 
-_ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY}
+_ENV = {
+    "DOKPLOY_API_URL": "https://dokploy.ggcampos.com",
+    "DOKPLOY_API_KEY": SENTINEL_KEY,
+    # Keep unrelated legacy deploy scenarios on their explicit escape hatch.
+    "DARKHUB_IMAGE_SOURCE": "build",
+}
 
 
 def _run_main(argv: List[str], transport: QueueTransport, monkeypatch: pytest.MonkeyPatch, subject: Optional[str]):
@@ -1206,7 +1219,7 @@ def test_vps_unknown_fails_after_successful_deploy(monkeypatch: pytest.MonkeyPat
     assert "VPS: unknown" in err
 
 
-def test_darkhub_build_pinned_before_deploy_and_health_converges(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_darkhub_ghcr_default_pinned_before_deploy_and_health_converges(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.infra import node_sync
 
     transport = _make_transport_with_full_project()
@@ -1219,9 +1232,10 @@ def test_darkhub_build_pinned_before_deploy_and_health_converges(monkeypatch: py
     ]))
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
-        ["--only", "Darkhub", "--skip-backup"], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
+        ["--only", "Darkhub", "--skip-backup"], env={k: v for k, v in _ENV.items() if k != "DARKHUB_IMAGE_SOURCE"},
         registry_reader=_no_registry, transport_factory=lambda url, key: transport,
         health_client=lambda: {"git_sha": "a" * 40}, stdout=out, stderr=err,
+        ghcr_probe=lambda _repository, _tag: 200,
     )
     assert code == mod.EXIT_OK, err.getvalue()
     posts = transport.post_calls
@@ -1230,16 +1244,37 @@ def test_darkhub_build_pinned_before_deploy_and_health_converges(monkeypatch: py
     assert body["composeId"] == "compose_hub"
     assert body["sourceType"] == "raw"
     assert body["composePath"] == "docker-compose.yml"
-    assert "DarkFactory.git#" + "a" * 40 in body["composeFile"]
-    assert "DARKFAC_GIT_SHA: " + "a" * 40 in body["composeFile"]
+    assert "image: ghcr.io/gcamposgit/darkhub:" + "a" * 40 in body["composeFile"]
+    assert "pull_policy: always" in body["composeFile"]
+    assert "order: start-first" in body["composeFile"]
+    assert "failure_action: rollback" in body["composeFile"]
+    assert "container_name:" not in body["composeFile"]
+    assert "DARKFAC_GIT_SHA: " not in body["composeFile"]
     assert "DARKFAC_GIT_SHA=" + "a" * 40 in body["composeFile"]
-    assert "no_cache: true" in body["composeFile"]
-    assert "pull_policy: build" in body["composeFile"]
+    assert "${DARKFAC_GIT_SHA}" not in body["composeFile"]
     assert "env" not in body  # existing Dokploy secrets are untouched
     assert posts[1][1] == "/api/compose.deploy"
     assert "VPS: converged" in out.getvalue()
     assert SENTINEL_KEY not in out.getvalue() + err.getvalue()
     assert "secret-value" not in out.getvalue() + err.getvalue()
+
+
+def test_darkhub_build_escape_hatch_keeps_pinned_build_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_hub", [[old], [new]])
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": "a" * 40}, stdout=io.StringIO(), stderr=io.StringIO(),
+    )
+    assert code == mod.EXIT_OK
+    compose = transport.post_calls[0][2]["composeFile"]
+    assert "DarkFactory.git#" + "a" * 40 in compose
+    assert "DARKFAC_GIT_SHA: " + "a" * 40 in compose
+    assert "no_cache: true" in compose
+    assert "pull_policy: build" in compose
 
 
 def test_darkhub_no_wait_refused_before_any_mutation() -> None:
