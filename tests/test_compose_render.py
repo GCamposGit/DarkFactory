@@ -154,3 +154,40 @@ def test_image_source_env_fails_closed_on_unknown_value() -> None:
     assert cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "GHCR"}) == "ghcr"
     with pytest.raises(ComposeRenderError):
         cr.resolve_hub_image_source({"DARKHUB_IMAGE_SOURCE": "registry"})
+
+
+def test_wait_for_ghcr_image_polls_until_tag_exists() -> None:
+    statuses = iter([404, 404, 200])
+    clock = {"t": 0.0}
+    cr.wait_for_ghcr_image(
+        SHA, probe=lambda repo, tag: next(statuses), interval=5, timeout=60,
+        sleep_fn=lambda s: clock.__setitem__("t", clock["t"] + s), clock_fn=lambda: clock["t"],
+    )
+    assert clock["t"] == 10.0
+
+
+def test_wait_for_ghcr_image_times_out_without_fallback() -> None:
+    clock = {"t": 0.0}
+    with pytest.raises(cr.GhcrImageUnavailableError, match="no fallback to build"):
+        cr.wait_for_ghcr_image(
+            SHA, probe=lambda repo, tag: 404, interval=5, timeout=12,
+            sleep_fn=lambda s: clock.__setitem__("t", clock["t"] + s), clock_fn=lambda: clock["t"],
+        )
+
+
+def test_adapter_refuses_deploy_when_ghcr_image_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.orchestrator.deployment_adapter import DokployDeploymentAdapter
+
+    source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+
+    def _missing(sha: str) -> None:
+        raise cr.GhcrImageUnavailableError("missing")
+
+    adapter = DokployDeploymentAdapter(compose_fetcher=lambda r, v, p: source, ghcr_waiter=_missing)
+    rendered, err = adapter._render_compose_at_sha({"compose_repo": "o/r"}, SHA)
+    assert rendered is None and err == "release_identity_ghcr_image_unpublished"
+
+    adapter = DokployDeploymentAdapter(compose_fetcher=lambda r, v, p: source, ghcr_waiter=lambda s: None)
+    rendered, err = adapter._render_compose_at_sha({"compose_repo": "o/r"}, SHA)
+    assert err is None and f"darkhub:{SHA}" in rendered

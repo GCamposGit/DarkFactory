@@ -18,6 +18,9 @@ import os
 import re
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from typing import Callable, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -84,6 +87,65 @@ def resolve_hub_image_source(env: Optional[Mapping[str, str]] = None) -> str:
 
 def ghcr_image_ref(sha: str) -> str:
     return f"{GHCR_IMAGE_PREFIX}:{sha}"
+
+
+GHCR_WAIT_TIMEOUT_SECONDS = 600.0
+GHCR_WAIT_POLL_SECONDS = 15.0
+GhcrManifestProbe = Callable[[str, str], int]
+
+
+class GhcrImageUnavailableError(ComposeRenderError):
+    """The GHCR tag for the SHA did not appear in time; the deploy must not start."""
+
+
+def _ghcr_manifest_status(repository: str, tag: str) -> int:
+    """HEAD the GHCR manifest (token: GHCR_TOKEN or GITHUB_PAT with read:packages)."""
+    import base64
+
+    token = (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
+    headers = {
+        "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + base64.b64encode(token.encode()).decode()
+    request = urllib.request.Request(
+        f"https://ghcr.io/v2/{repository}/manifests/{tag}", headers=headers, method="HEAD"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
+def wait_for_ghcr_image(
+    sha: str,
+    *,
+    probe: Optional[GhcrManifestProbe] = None,
+    timeout: float = GHCR_WAIT_TIMEOUT_SECONDS,
+    interval: float = GHCR_WAIT_POLL_SECONDS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    clock_fn: Callable[[], float] = time.monotonic,
+) -> None:
+    """Block until ``ghcr.io/gcamposgit/darkhub:<sha>`` exists; raise GhcrImageUnavailableError on timeout."""
+    check = probe or _ghcr_manifest_status
+    deadline = clock_fn() + timeout
+    last: object = "no response"
+    while True:
+        try:
+            status = check(GHCR_IMAGE_REPOSITORY, sha)
+            if status == 200:
+                return
+            last = f"HTTP {status}"
+        except Exception as exc:  # noqa: BLE001
+            last = type(exc).__name__
+        remaining = deadline - clock_fn()
+        if remaining <= 0:
+            raise GhcrImageUnavailableError(
+                f"GHCR image {ghcr_image_ref(sha)} not published within {int(timeout)}s (last: {last}); "
+                "deploy refused, no fallback to build (check the hub-image workflow)"
+            )
+        sleep_fn(min(interval, remaining))
 
 
 def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = None) -> str:
@@ -183,6 +245,8 @@ def fetch_compose_at_sha(
 
 __all__ = [
     "GHCR_IMAGE_PREFIX",
+    "GhcrImageUnavailableError",
+    "wait_for_ghcr_image",
     "GHCR_IMAGE_REPOSITORY",
     "IMAGE_SOURCE_BUILD",
     "IMAGE_SOURCE_ENV",
