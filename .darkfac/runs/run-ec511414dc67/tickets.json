@@ -1,0 +1,101 @@
+[
+  {
+    "id": "T1",
+    "title": "Detector de estagnacao de job (CPU da arvore + ausencia de saida) com amostrador compartilhado",
+    "goal": "Criar `core/harness/job_stall.py` com `JobStallWatch`/`StallVerdict` puro e injetavel (clock, amostrador, contador de progresso), limiares default 10 min e 5% de CPU normalizada em 1 nucleo com overrides por env, suspensao da janela em espera verificavel pelo suite_lock e fail-open quando a amostra nao e confiavel; extrair o amostrador de CPU por arvore para `core/harness/process_identity.sample_tree_cpu_seconds` e deixar `suite_lock._sample_holder_tree` como wrapper fino.",
+    "files_hint": [
+      "core/harness/job_stall.py",
+      "core/harness/process_identity.py",
+      "core/harness/suite_lock.py",
+      "tests/test_worker_stall_recovery.py"
+    ],
+    "acceptance": [
+      "`JobStallWatch` acusa estagnacao somente apos janela CONTINUA de `DARKFAC_JOB_STALL_AFTER_SEC` (default 600s) com CPU agregada da arvore abaixo de `DARKFAC_JOB_STALL_CPU_PCT` (default 5.0, calculada como cpu_delta/wall_delta*100, 100% = 1 nucleo) E sem incremento do contador de progresso de log",
+      "Progresso real (incremento do contador OU CPU acima do limiar) reinicia a janela e nunca produz veredito de estagnacao",
+      "Enquanto a espera de fila do suite_lock esta comprovada na saida do job (`[SUITE_LOCK] waiting` sem `acquired` posterior), a janela fica suspensa e nao ha veredito de estagnacao",
+      "Amostra indisponivel (psutil ausente, processo inexistente, acesso negado, pid reciclado) reinicia a janela em vez de acusar estagnacao; `DARKFAC_JOB_STALL_WATCH=off` desliga o detector",
+      "`StallVerdict` carrega evidencia (cpu_percent medido, segundos sem progresso, tamanho da arvore) e `sample_tree_cpu_seconds` identifica a arvore com `same_process`/`proc_start_ticks`, sem tocar pid reciclado",
+      "Comandos de validate do projeto passam (`python scripts/line_validate.py`) e o portao oficial `python core/harness/runner.py --quick` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_worker_stall_recovery.py: janela so fecha apos 10 min continuos de CPU baixa sem saida (clock e amostrador falsos)",
+      "tests/test_worker_stall_recovery.py: nova saida de log no meio da janela reinicia a contagem",
+      "tests/test_worker_stall_recovery.py: CPU acima de 5% normalizada em 1 nucleo (ex.: 1 nucleo saturado em maquina de 16) nao e estagnacao",
+      "tests/test_worker_stall_recovery.py: espera na fila do suite_lock nao e estagnacao",
+      "tests/test_worker_stall_recovery.py: amostrador indisponivel/pid reciclado = fail-open; env off desliga",
+      "tests/test_worker_stall_recovery.py: `sample_tree_cpu_seconds` soma CPU de processo real e descendente e `suite_lock._sample_holder_tree` continua com o mesmo contrato"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Worker marca job estagnado como perdido e se reinicia sozinho",
+    "goal": "Ligar o detector ao `_watchdog` de `JobManager._run_job`: contar progresso somente de saida real do runner (`[WORKER]` nao conta), ao veredito estagnado matar a arvore, fechar o job como `failed`/`worker_stalled` com evidencia persistida e sem veredito de teste, e relancar o daemon pelo mecanismo existente preservando host, porta e node_id via `restart_hook` injetado por `create_worker_app`.",
+    "files_hint": [
+      "core/harness/remote_worker.py",
+      "tests/test_worker_stall_recovery.py"
+    ],
+    "acceptance": [
+      "Novo `ERROR_CODE_WORKER_STALLED = 'worker_stalled'` e usado para fechar o job estagnado como `failed`, com `job.interrupted = True`, log e record em `<state_dir>/jobs/<job_id>.json` persistidos e nenhum `result_json`/veredito de teste",
+      "O watchdog mata a arvore inteira do runner (`_ProcessTree.kill(force=True)`) antes de fechar o job, sem deixar descendentes nem o suite_lock presos",
+      "`JobManager._append_log` conta progresso apenas para saida do runner; notas do proprio worker e consultas de saude nao reiniciam a janela",
+      "Apos fechar o job, o worker chama o hook de restart que executa `trigger_daemon_restart(root_path, host, port, node_id)`; `create_worker_app` injeta esse hook com o host/porta/node_id da instancia e nenhum `/system/update` e disparado",
+      "Job com progresso real (saida nova ou CPU acima do limiar) nunca e fechado como `worker_stalled` e segue ate o fim normal",
+      "Comandos de validate do projeto passam e o portao oficial `python core/harness/runner.py --quick` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_worker_stall_recovery.py: `_run_job` com runner real ocioso (detector com janela curta) fecha o job como failed/worker_stalled, mata a arvore e chama o restart_hook uma vez",
+      "tests/test_worker_stall_recovery.py: runner que produz saida continua termina com veredito normal e o restart_hook nunca e chamado",
+      "tests/test_worker_stall_recovery.py: record persistido do job estagnado e consultavel por `status()` com error_code worker_stalled e sem result_json",
+      "tests/test_worker_stall_recovery.py: `create_worker_app` instala um restart_hook que preserva host, porta e node_id"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Dispatcher reenfileira job estagnado com [REMOTE_RETRY], sem veredito e sem duplicidade",
+    "goal": "Classificar `worker_stalled` como erro de infraestrutura com retry no `remote_dispatch.py`, reaproveitando `_finalize_remote_result`, `_dispatch_with_restart_retry`, `_wait_for_worker_back` e `_await_worker_stable` para resubmeter o job no mesmo worker (ou cair para o proximo/local) sem execucao duplicada.",
+    "files_hint": [
+      "core/harness/remote_dispatch.py",
+      "tests/test_remote_dispatch_stalled_retry.py"
+    ],
+    "acceptance": [
+      "`worker_stalled` pertence a `INFRASTRUCTURE_ERROR_CODES` e a `RESTART_RETRY_ERROR_CODES`",
+      "Job que termina com `worker_stalled` virou `RemoteJobLost` com evidencia registrada e nunca produz `[HARNESS_FAIL]` nem veredito remoto",
+      "O dispatcher imprime `[REMOTE_RETRY] worker=<url> attempt=<n>/<max> reason=worker_stalled: ...`, espera o worker voltar e estavel, e reenvia o job uma unica vez por tentativa, respeitando `worker_restart_retries()` e a deduplicacao do `submit`",
+      "Esgotados os retries ou a grace, cai para o proximo worker ou para o fallback local pelo caminho atual, sem travar a execucao",
+      "`DISPATCH_ATTEMPTS` registra a tentativa perdida com `error_code=worker_stalled` para contabilidade de tempo remoto",
+      "Comandos de validate do projeto passam e o portao oficial `python core/harness/runner.py --quick` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_remote_dispatch_stalled_retry.py: job terminal worker_stalled gera RemoteJobLost e imprime [REMOTE_RETRY] com reason=worker_stalled",
+      "tests/test_remote_dispatch_stalled_retry.py: resubmissao unica por tentativa (sem job duplicado) e limite de retries respeitado",
+      "tests/test_remote_dispatch_stalled_retry.py: worker que nao volta ou nao estabiliza leva a fallback (proximo worker/local), nunca a [HARNESS_FAIL]",
+      "tests/test_remote_dispatch_stalled_retry.py: worker_stalled aparece nas duas frozensets de codigos"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Telemetria e alerta Telegram ops da auto-recuperacao, tolerantes a falha",
+    "goal": "Registrar o evento de estagnacao/auto-recuperacao via `NotificationService(telegram_role='ops').notify(category=SYSTEM_HEALTH, severity=CRITICAL, provider_id='worker:<node_id>')`, com a evidencia do `StallVerdict` em `details`, garantindo que qualquer falha de store ou Telegram seja apenas logada e nunca bloqueie o fechamento do job nem o restart.",
+    "files_hint": [
+      "core/harness/remote_worker.py",
+      "core/harness/job_stall.py",
+      "tests/test_worker_stall_recovery.py"
+    ],
+    "acceptance": [
+      "Ao fechar um job como `worker_stalled` e emitido um evento `SYSTEM_HEALTH`/`critical` persistido no store de notificacoes (visivel no DarkHub) com job_id, node_id, cpu_percent medido, segundos sem progresso e acao tomada (`job perdido + worker reiniciado`)",
+      "O alerta e enviado ao Telegram ops reutilizando o `NotificationService` existente (role `ops`), com o cooldown anti-spam atual",
+      "Excecao em qualquer parte do registro/alerta e capturada e logada; o job continua fechado como worker_stalled e o restart do worker acontece de qualquer forma",
+      "Nenhum segredo/token aparece no evento (redacao do NotificationService preservada)",
+      "Comandos de validate do projeto passam e o portao oficial `python core/harness/runner.py --quick` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_worker_stall_recovery.py: estagnacao registra evento SYSTEM_HEALTH critical com a evidencia esperada em details (store temporario)",
+      "tests/test_worker_stall_recovery.py: servico de notificacao que lanca excecao nao impede o fechamento do job nem o restart_hook",
+      "tests/test_worker_stall_recovery.py: alerta usa o role ops e nao vaza token no texto/details"
+    ],
+    "smoke": []
+  }
+]
