@@ -537,15 +537,16 @@ def _log_candidate_discard(harness: str, stage: str, reason: str) -> None:
 
 
 def codex_headless_blocked() -> bool:
-    """True when codex must not be elected for headless runs on this host (USR-336).
+    """True when the owner explicitly opts out of headless Codex on Windows (USR-336).
 
     codex.exe launches `codex-windows-sandbox-setup.exe` itself, which shows a console window on every
-    command even when our own child is CREATE_NO_WINDOW. On Windows the block is the default; set
-    `DARKFAC_CODEX_HEADLESS_ALLOWED=1` (true/yes/on) to allow it (e.g. a dedicated headless host).
+    command even when our own child is CREATE_NO_WINDOW. Per the owner's 2026-10-23 decision, Codex
+    is allowed by default; set `DARKFAC_CODEX_HEADLESS_ALLOWED` to `0`, `false`, `no`, or `off` to
+    block it on Windows. Unset the variable or set it to an affirmative value to allow Codex again.
     """
     if sys.platform != "win32":
         return False
-    return os.environ.get("DARKFAC_CODEX_HEADLESS_ALLOWED", "").strip().lower() not in ("1", "true", "yes", "on")
+    return os.environ.get("DARKFAC_CODEX_HEADLESS_ALLOWED", "").strip().lower() in ("0", "false", "no", "off")
 
 
 def _routable_candidates(
@@ -598,7 +599,11 @@ def _routable_candidates(
             _log_candidate_discard(harness, stage, "missing_host_capability")
             continue
         if harness == "codex" and codex_headless_blocked():
-            _log_candidate_discard(harness, stage, CODEX_HEADLESS_BLOCK_REASON)
+            _log_candidate_discard(
+                harness,
+                stage,
+                f"{CODEX_HEADLESS_BLOCK_REASON}; unset DARKFAC_CODEX_HEADLESS_ALLOWED or set it to 1 to re-enable",
+            )
             continue
         if not supports(harness, required_mode):
             _log_candidate_discard(harness, stage, "no_write_mode" if required_mode == "write" else "no_required_mode")

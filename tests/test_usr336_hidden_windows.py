@@ -1,4 +1,4 @@
-"""USR-336: headless harness children get no console window; codex blocked on Windows by default."""
+"""USR-336: headless harness children get no console window; Codex blocks by explicit opt-out."""
 from __future__ import annotations
 
 import logging
@@ -59,9 +59,22 @@ def test_hidden_helpers_noop_off_windows(monkeypatch):
     assert agent_cli.hidden_popen_kwargs() == {}
 
 
-def test_codex_blocked_by_default_on_windows(monkeypatch, caplog):
+def test_codex_allowed_by_default_on_windows(monkeypatch):
     monkeypatch.delenv("DARKFAC_CODEX_HEADLESS_ALLOWED", raising=False)
     monkeypatch.setattr(routing.sys, "platform", "win32")
+    assert not routing.codex_headless_blocked()
+    cfg = routing._default_routing_config()
+    cands = routing._routable_candidates(
+        "development", cfg.stages["development"], cfg,
+        {"harness:claude", "harness:codex"}, "write", set(), set(), None,
+    )
+    assert ("codex", None) in cands
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+def test_codex_blocked_by_explicit_negative_opt_out_on_windows(monkeypatch, caplog, value):
+    monkeypatch.setattr(routing.sys, "platform", "win32")
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", value)
     assert routing.codex_headless_blocked()
     cfg = routing._default_routing_config()
     with caplog.at_level(logging.INFO):
@@ -71,12 +84,17 @@ def test_codex_blocked_by_default_on_windows(monkeypatch, caplog):
         )
     assert ("codex", None) not in cands and any(h == "claude" for h, _ in cands)
     assert routing.CODEX_HEADLESS_BLOCK_REASON in caplog.text
+    assert "DARKFAC_CODEX_HEADLESS_ALLOWED" in caplog.text
 
 
-def test_codex_allowed_by_env_or_off_windows(monkeypatch):
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "anything-else"])
+def test_codex_allowed_by_affirmative_or_unrecognized_value_on_windows(monkeypatch, value):
     monkeypatch.setattr(routing.sys, "platform", "win32")
-    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "1")
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", value)
     assert not routing.codex_headless_blocked()
-    monkeypatch.delenv("DARKFAC_CODEX_HEADLESS_ALLOWED")
+
+
+def test_codex_never_blocked_off_windows_even_with_opt_out(monkeypatch):
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "false")
     monkeypatch.setattr(routing.sys, "platform", "linux")
     assert not routing.codex_headless_blocked()

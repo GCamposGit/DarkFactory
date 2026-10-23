@@ -24,6 +24,7 @@ ALLOWLIST_PREFIXES: tuple[str, ...] = (
     ".factory/config/model_registry.json",
     "core/models/registry.py",
     "scripts/model_id_census.py",
+    ".darkfac/runs/",
     "docs/proposals/",
     "docs/plans/",
     "tests/",

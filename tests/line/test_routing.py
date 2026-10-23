@@ -60,6 +60,19 @@ def test_pick_skips_harness_missing_from_host_caps():
     assert choice == ("codex", None)
 
 
+def test_pick_development_allows_codex_on_windows_without_opt_out(monkeypatch):
+    from core.line import routing
+
+    monkeypatch.setattr(routing.sys, "platform", "win32")
+    monkeypatch.delenv("DARKFAC_CODEX_HEADLESS_ALLOWED", raising=False)
+    cfg = load_routing_config(default_config_path())
+    choice = pick(
+        "development", ["harness:codex"], config=cfg,
+        quota_lookup=_always_healthy, cooldown_path=Path("does-not-exist.json"),
+    )
+    assert choice == ("codex", None)
+
+
 def test_pick_skips_critical_quota_account():
     cfg = load_routing_config(default_config_path())
 
