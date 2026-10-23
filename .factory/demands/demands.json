@@ -10324,8 +10324,8 @@
     "project_id": "darkfac",
     "title": "Resposta do owner a Grill pelo Telegram nao chega ao repositorio nem ao Hub",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "0d866b57229e5f4896cfb51b587dc4a81224583c",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10352,7 +10352,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T12:48:49.279487Z",
-    "updated_at": "2026-10-23T11:34:32.051051Z"
+    "updated_at": "2026-10-23T18:09:22.161026Z"
   },
   {
     "id": "USR-354",

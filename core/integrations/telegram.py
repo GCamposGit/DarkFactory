@@ -399,6 +399,7 @@ class TelegramGateway:
         audio_engine: Optional[Any] = None,
         line_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
         cancel_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
+        grill_text_handler: Optional[Callable[[str, str, int, int], Dict[str, Any]]] = None,
     ) -> None:
         self.config = config
         self.state_dir = state_dir if state_dir is not None else state_root() / "telegram"
@@ -420,6 +421,8 @@ class TelegramGateway:
         self.project_demand_handler = project_demand_handler
         self.demand_handler = demand_handler
         self.grill_handler = grill_handler
+        # USR-353: free-text reply to a Grill message (target, text, update_id, user_id) -> durable record.
+        self.grill_text_handler = grill_text_handler
         self.approval_handler = approval_handler
         self.status_handler = status_handler
         # HF-27-08 F: production-line grill answers (cb:grill:<run_id>#<qid>:<idx>,
@@ -604,12 +607,68 @@ class TelegramGateway:
             logger.error("Failed downloading Telegram file %s: %s", file_id, exc)
             return False
 
+    def _route_grill_text(
+        self, update: TelegramUpdate, msg: Any, raw_text: str, user_id: Optional[int]
+    ) -> Optional[TelegramDispatchResult]:
+        """USR-353: a free-text reply to a Grill message is recorded durably on either bot.
+
+        Returns ``None`` when the message is not a Grill reply (commands never are).
+        """
+        from core.owner_actions.grill_reply import find_grill_target, is_grill_context
+
+        if not raw_text or raw_text.startswith("/"):
+            return None
+        reply_text = ""
+        if msg.reply_to_message is not None:
+            reply_text = msg.reply_to_message.text or msg.reply_to_message.caption or ""
+        target: Optional[str] = None
+        if reply_text and is_grill_context(reply_text):
+            target = find_grill_target(reply_text)
+        if target is None:
+            explicit = re.match(r"^\s*grill\s+((?:USR|DF)-\d+)\b[\s:,-]*(.+)$", raw_text, re.IGNORECASE | re.DOTALL)
+            if explicit:
+                target = explicit.group(1).upper()
+                raw_text = explicit.group(2).strip()
+        if target is None:
+            return None
+        result = TelegramDispatchResult(
+            update_id=update.update_id,
+            action=TelegramActionType.GRILL,
+            authorized=True,
+            target_id=target,
+        )
+        if self.grill_text_handler is None:
+            result.error = "grill_text_handler not configured"
+            result.response_text = (
+                f"❌ Resposta ao Grill de {target} NAO foi registrada: este canal nao tem o gravador configurado. "
+                f"Responda no DarkHub ou com /grill {target} &lt;resposta&gt; no @darkfac_ops_bot."
+            )
+            return result
+        try:
+            res = self.grill_text_handler(target, raw_text, update.update_id, user_id or 0)
+            result.resumed = bool(res.get("resumed", False))
+            ref = res.get("action_id", "")
+            result.response_text = (
+                f"✅ Resposta registrada para o Grill de <b>{target}</b>"
+                + (f" (<code>{ref}</code>)" if ref else "")
+                + ". Visivel no DarkHub e sincronizada com o repositorio."
+            )
+        except Exception as exc:
+            logger.error("Failed to record Telegram grill reply for %s: %s", target, exc)
+            result.error = str(exc)
+            result.response_text = f"❌ Falha ao registrar a resposta do Grill de {target}: {exc}"
+        return result
+
     def _handle_message(self, update: TelegramUpdate) -> TelegramDispatchResult:
         msg = update.message
         assert msg is not None
         user_id = msg.from_user.id if msg.from_user else None
         chat_id = msg.chat.id
         raw_text = (msg.text or msg.caption or "").strip()
+
+        grill_reply = self._route_grill_text(update, msg, raw_text, user_id)
+        if grill_reply is not None:
+            return grill_reply
 
         if self.config.role == "owner":
             # Owner bot (@darkfac_bot) = alerts only. Commands, demands (text/voice), /linha and
