@@ -1,0 +1,1 @@
+- [loop_cap:plan_invalid not_before=2026-10-23T04:03:30+00:00] Analisar causa raiz 'loop_cap:plan_invalid not_before=2026-10-23T04:03:30+00:00' no estagio 'planning' e incluir salvaguardas preventivas determinísticas.
