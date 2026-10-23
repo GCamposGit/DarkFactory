@@ -2518,6 +2518,32 @@
       "created_at": "2026-10-23T20:10:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-061",
+      "kind": "action",
+      "title": "Mesclar PR #614 (USR-344 + USR-253: worker se auto-recupera e prazo do job so corre fora da fila) com --admin",
+      "priority": "medium",
+      "status": "open",
+      "why": "O PR toca core/harness/remote_worker.py (protegido); o GUARD barra o agente. Portao oficial passou no grokbox.",
+      "blocks": [
+        "USR-344",
+        "USR-253"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Mesclar o PR com privilegio de admin",
+          "command": "gh pr merge 614 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Avisar no chat; o agente fecha os tickets e faz o deploy"
+        }
+      ],
+      "verify": "gh pr view 614 --repo GCamposGit/DarkFactory mostra MERGED",
+      "created_at": "2026-10-23T20:40:00Z",
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }
