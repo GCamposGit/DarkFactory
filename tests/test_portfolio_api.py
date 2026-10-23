@@ -103,6 +103,7 @@ def test_portfolio_project_detail_http_has_no_attribute_error(client: TestClient
         project = detail["project"]
         assert "error" not in project["health_details"], project_id
         assert project["health_status"] in valid_health_statuses, project_id
+        assert "error" not in detail["roadmap_health"], project_id
         assert "has no attribute" not in str(detail["roadmap_health"]), project_id
 
 
@@ -241,3 +242,36 @@ def test_portfolio_snapshot_failure_is_not_masked_as_healthy(monkeypatch) -> Non
 
     assert summary.health_details.get("roadmap_snapshot_error") == "snapshot indisponivel"
     assert summary.health_status == "warning"
+
+
+def test_portfolio_health_happy_path_keeps_healthy_and_details(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from core.roadmap.models import RoadmapHealth
+
+    def _health(project_id):
+        return RoadmapHealth(
+            project_id=project_id,
+            snapshot_id="s",
+            snapshot_hash="h",
+            observed_at=datetime.now(timezone.utc),
+            total_items=1,
+            confirmed_items=1,
+            blocked_items=0,
+            conflicts=0,
+            warnings=0,
+            stale=False,
+            policy="p",
+        )
+
+    summary = _summary_with_roadmap_health(monkeypatch, _health)
+
+    assert summary.health_status == "healthy"
+    assert {
+        "stale",
+        "blocked_items",
+        "conflicts_count",
+        "warnings",
+        "sources_unavailable",
+    } <= summary.health_details.keys()
+    assert "roadmap_snapshot_error" not in summary.health_details

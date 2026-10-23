@@ -3488,7 +3488,7 @@ class HubService:
         """Aggregate a project's state across 5 core dimensions (DH-08)."""
         from core.projects.models import ProjectKind
         from core.portfolio.models import BudgetStatus
-        from core.roadmap.models import DeliveryStatus
+        from core.roadmap.models import DeliveryStatus, RoadmapFlag
 
         # 1. Dev Stage
         if p.id == "darkfac" or p.kind == ProjectKind.CORE:
@@ -3511,9 +3511,17 @@ class HubService:
         try:
             snapshot = self.roadmap.get_snapshot(p.id)
             total_items = len(snapshot.items)
-            delivered_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.DELIVERED)
-            in_progress_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.IN_PROGRESS)
-            blocked_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.BLOCKED)
+            delivered_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.COMPLETED)
+            in_progress_items = sum(
+                1
+                for item in snapshot.items
+                if item.delivery_status in (DeliveryStatus.IMPLEMENTING, DeliveryStatus.VALIDATING)
+            )
+            blocked_items = sum(
+                1
+                for item in snapshot.items
+                if RoadmapFlag.BLOCKED in item.operational_flags or bool(item.blocking_dependency_ids)
+            )
             completion_pct = round((delivered_items / total_items) * 100.0, 1) if total_items > 0 else 0.0
         except Exception as exc:
             logger.warning(f"Failed getting roadmap snapshot for '{p.id}': {exc}")
@@ -3922,4 +3930,3 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
