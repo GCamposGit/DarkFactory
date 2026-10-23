@@ -375,7 +375,17 @@ VOLATILE_STATE_PREFIXES: tuple[str, ...] = (
     ".factory/pids/",
     ".factory/line_lock/",
     ".factory/local_cancel/",
+    ".factory/executions/active/",
+    ".factory/hub_availability.json",
 )
+
+# Evidencias de runtime das OA (capturas/logs/scripts gerados), nunca versionadas (USR-352).
+_OA_EVIDENCE_RE = re.compile(r"^\.factory/owner_actions/OA-[^/]+\.(?:png|jsonl|ps1)$")
+
+
+def is_runtime_artifact(path: str) -> bool:
+    """True para arquivo gerado pela propria fabrica que nao conta como trabalho de outro ticket."""
+    return path.startswith(VOLATILE_STATE_PREFIXES) or bool(_OA_EVIDENCE_RE.match(path))
 
 
 LEDGER_RELATIVE = ".factory/demands/demands.json"
@@ -466,7 +476,11 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         return workspace
 
     if not args.allow_dirty_shared_checkout:
-        dirty = shared_checkout_dirty_paths(PROJECT_ROOT, ignore_prefixes=VOLATILE_STATE_PREFIXES)
+        dirty = [
+            p
+            for p in shared_checkout_dirty_paths(PROJECT_ROOT, ignore_prefixes=VOLATILE_STATE_PREFIXES)
+            if not is_runtime_artifact(p)
+        ]
         if dirty:
             raise SharedCheckoutDirty(dirty)
     workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
