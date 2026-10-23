@@ -10352,5 +10352,35 @@
     "dependencies": [],
     "created_at": "2026-10-22T15:13:08.756648Z",
     "updated_at": "2026-10-22T15:13:08.756648Z"
+  },
+  {
+    "id": "USR-359",
+    "project_id": "darkfac",
+    "title": "Diagnosticar falha do portao remoto no snapshot c030ea8 e job bdacc6f",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A validacao oficial em 2026-10-23 passou syntax_and_types, mas falhou no unit_and_integration_tests_parallel. No Desktop foram reportados 4846 erros e 3 falhas; no Grokbox, 5000 testes passaram, 31 foram ignorados e 1 falhou entre 5032 descobertos. O worker Grokbox ficou inacessivel por mais de 120 segundos e o runner retomou o mesmo job; o resumo nao reteve o identificador nem o traceback do teste que falhou. Os testes focados desta alteracao passaram localmente (185/185).",
+    "core_journey": [
+      "A validacao oficial em 2026-10-23 passou syntax_and_types, mas falhou no unit_and_integration_tests_parallel. No Desktop foram reportados 4846 erros e 3 falhas; no Grokbox, 5000 testes passaram, 31 foram ignorados e 1 falhou entre 5032 descobertos. O worker Grokbox ficou inacessivel por mais de 120 segundos e o runner retomou o mesmo job; o resumo nao reteve o identificador nem o traceback do teste que falhou. Os testes focados desta alteracao passaram localmente (185/185)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A proxima execucao oficial do runner identifica e persiste em artefato o nome e traceback do teste que falha no job remoto.",
+      "A causa raiz da falha de teste e da perda de health do worker e classificada como produto ou infraestrutura com evidencia reproduzivel.",
+      "Uma execucao completa em candidato limpo termina com HARNESS_PASS, com contagem de testes positiva."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T07:47:06.750537Z",
+    "updated_at": "2026-10-23T07:47:06.750543Z"
   }
 ]
