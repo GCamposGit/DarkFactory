@@ -10359,8 +10359,8 @@
     "project_id": "darkfac",
     "title": "Entrega com host desktop cai para portao local no Notebook quando o Desktop esta ocupado e estoura 3000 s",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "bbcc21f672db05f47a5611e15e1fc82968b24581",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10390,7 +10390,7 @@
       "USR-359"
     ],
     "created_at": "2026-10-22T14:27:55.521220Z",
-    "updated_at": "2026-10-23T11:34:32.051051Z"
+    "updated_at": "2026-10-23T17:33:06.164471Z"
   },
   {
     "id": "USR-355",
