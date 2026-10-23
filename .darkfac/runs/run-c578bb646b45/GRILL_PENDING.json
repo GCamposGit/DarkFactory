@@ -1,0 +1,53 @@
+{
+  "assumptions": [
+    "Esta etapa é somente leitura: não haverá implementação, execução de testes, alterações de arquivos ou ações nos serviços.",
+    "A mudança abrange o protocolo de jobs de teste em core/harness/remote_worker.py e core/harness/remote_dispatch.py, com compatibilidade Windows e Linux.",
+    "Os 10 minutos representam uma janela contínua sem nova saída do job e com CPU abaixo do limiar; atividade válida reinicia a contagem. Logs sintéticos do watchdog não contam como progresso.",
+    "A recuperação preservará logs e causa estruturada de perda antes de encerrar a árvore de processos; perda de infraestrutura não será apresentada como reprovação dos testes.",
+    "O dispatcher reutilizará o mecanismo existente de [REMOTE_RETRY], com duas retentativas no mesmo worker por padrão e posterior tentativa nos demais workers; as configurações existentes de fallback local e execução remota obrigatória serão preservadas.",
+    "O reinício será do processo do worker, sem reboot da máquina nem atualização automática do código via /system/update.",
+    "Telemetria e alerta usarão os mecanismos existentes e o destino Telegram ops já configurado, sem solicitar novos segredos nesta etapa; falha no envio do alerta não impedirá a recuperação.",
+    "A implementação deverá validar recuperação, preservação de jobs com progresso, retentativas limitadas e aprovação no portão oficial python core/harness/runner.py --quick."
+  ],
+  "technical": [
+    {
+      "id": "q2",
+      "text": "Como medir o limiar de CPU < 5% para detectar o job parado?",
+      "kind": "technical",
+      "options": [
+        "CPU agregada do job e descendentes, com 100% por núcleo",
+        "CPU total da máquina"
+      ],
+      "recommended": "CPU agregada do job e descendentes, com 100% por núcleo",
+      "why": "A árvore de processos já é rastreada pelo worker. A média da máquina pode esconder um teste ativo em um único núcleo ou mascarar travamento com carga externa."
+    },
+    {
+      "id": "q3",
+      "text": "Se reiniciar o daemon puder interromper outra execução saudável atendida pelo mesmo worker, qual comportamento deve prevalecer?",
+      "kind": "technical",
+      "options": [
+        "Encerrar o job perdido e adiar restart até não haver execução saudável",
+        "Reiniciar imediatamente todo o daemon"
+      ],
+      "recommended": "Encerrar o job perdido e adiar restart até não haver execução saudável",
+      "why": "O worker também expõe execução de comandos e harnesses; preservar trabalho saudável atende ao requisito de não matar jobs com progresso real."
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "CPU baixa e ausência de logs também podem ocorrer em esperas legítimas de I/O ou pelo suite_lock. Essas esperas devem impedir a recuperação automática?",
+      "kind": "intent",
+      "options": [
+        "Preservar esperas legítimas com evidência verificável",
+        "Reiniciar após 10 min mesmo nessas esperas"
+      ],
+      "recommended": "Preservar esperas legítimas com evidência verificável",
+      "why": "O runner já reconhece espera pelo suite_lock; silêncio e CPU baixa sozinhos não comprovam ausência de progresso."
+    }
+  ],
+  "deadline": "2026-10-23T23:21:14.029463Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
