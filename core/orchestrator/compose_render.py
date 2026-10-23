@@ -98,11 +98,16 @@ class GhcrImageUnavailableError(ComposeRenderError):
     """The GHCR tag for the SHA did not appear in time; the deploy must not start."""
 
 
+def _ghcr_registry_token() -> str:
+    """Return the configured GHCR credential without exposing it to callers."""
+    return (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
+
+
 def _ghcr_manifest_status(repository: str, tag: str) -> int:
     """HEAD the GHCR manifest (token: GHCR_TOKEN or GITHUB_PAT with read:packages)."""
     import base64
 
-    token = (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
+    token = _ghcr_registry_token()
     headers = {
         "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json"
     }
@@ -137,10 +142,7 @@ def wait_for_ghcr_image(
             if status == 200:
                 return
             last = f"HTTP {status}"
-            if status in (401, 403) and not (
-                (os.environ.get("GHCR_TOKEN") or "").strip()
-                or (os.environ.get("GITHUB_PAT") or "").strip()
-            ):
+            if status in (401, 403) and not _ghcr_registry_token():
                 raise GhcrImageUnavailableError(
                     f"Cannot verify GHCR image {ghcr_image_ref(sha)}: HTTP {status} and no GHCR token is configured; "
                     "set GHCR_TOKEN with read:packages permission (OA-053). Deploy refused, no fallback to build."

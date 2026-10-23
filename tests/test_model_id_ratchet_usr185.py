@@ -50,3 +50,8 @@ def test_ratchet_fails_for_planted_id(tmp_path: Path) -> None:
 
 def test_ratchet_allows_lower_or_equal() -> None:
     assert violations(5, {"a.py": 2}, {"total": 5, "files": {"a.py": 2}}) == []
+
+
+def test_model_id_census_ignores_darkfac_run_artifacts() -> None:
+    assert census.is_allowlisted(".darkfac/runs/run-123/progress.json")
+    assert census.is_allowlisted(".darkfac/runs/run-123/validate.log.md")

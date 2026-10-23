@@ -1868,6 +1868,80 @@ def test_darkhub_ghcr_tag_timeout_refuses_without_build_fallback(monkeypatch: py
     assert transport.post_calls == []
 
 
+def test_darkhub_ghcr_refusal_without_token_is_immediate_and_never_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GHCR_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_PAT", raising=False)
+    probes: list[str] = []
+
+    code, transport, _out, err = _ghcr_run(
+        monkeypatch, lambda repo, tag: probes.append(tag) or 403,
+    )
+
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "GHCR_TOKEN" in err and "read:packages" in err and "OA-053" in err
+    assert probes == ["a" * 40]
+    assert transport.post_calls == []
+
+
+def test_cli_ghcr_wait_delegates_to_shared_waiter_and_keeps_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.orchestrator.compose_render import GhcrImageUnavailableError
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def shared_wait(sha: str, **kwargs: Any) -> None:
+        calls.append((sha, kwargs))
+        raise GhcrImageUnavailableError("tag unavailable")
+
+    monkeypatch.setattr(mod, "_shared_wait_for_ghcr_image", shared_wait)
+    with pytest.raises(mod.DokployUsageError, match="tag unavailable"):
+        mod.wait_for_ghcr_tag("a" * 40, probe=lambda _repo, _tag: 404)
+
+    assert calls[0][0] == "a" * 40
+    assert calls[0][1]["timeout"] == 900.0
+    assert calls[0][1]["probe"] is not None
+
+
+def test_no_dokploy_write_when_ghcr_wait_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GHCR_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_PAT", raising=False)
+
+    code, transport, _out, err = _ghcr_run(monkeypatch, lambda _repo, _tag: 401)
+
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "GHCR_TOKEN" in err and "OA-053" in err
+    assert not [
+        call for call in transport.post_calls
+        if call[1] in ("/api/compose.update", "/api/compose.deploy")
+    ]
+
+
+def test_bluegreen_ghcr_wait_failure_never_posts_to_dokploy() -> None:
+    from core.orchestrator.bluegreen import BlueGreenError, run_bluegreen_via_dokploy
+    from core.orchestrator.compose_render import GhcrImageUnavailableError
+
+    requests: list[tuple[str, str]] = []
+
+    def request(method: str, path: str, body: Any) -> Any:
+        requests.append((method, path))
+        return {"composeFile": "services: {}\n", "deployments": []}
+
+    with pytest.raises(GhcrImageUnavailableError):
+        run_bluegreen_via_dokploy(
+            request=request,
+            compose_id="compose_hub",
+            source="services: {}\n",
+            new_sha="a" * 40,
+            sha_is_serving=lambda sha: False,
+            wait_ghcr=lambda sha: (_ for _ in ()).throw(GhcrImageUnavailableError("missing")),
+        )
+
+    assert not [method for method, _path in requests if method == "POST"]
+
+
 def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:
     clock = FakeClock()
 
