@@ -2486,6 +2486,38 @@
       "created_at": "2026-10-23T13:30:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-060",
+      "kind": "action",
+      "title": "VPS darkfac-vps-primary travada desde 23/10 16:45: reiniciar pelo console da Hetzner",
+      "priority": "critical",
+      "status": "open",
+      "why": "Durante o redeploy pos-merge (build da imagem do Hub na propria VPS de 3,7 GB) a VPS parou de responder: Hub, Dokploy, n8n, Tailscale e SSH sem resposta por mais de 15 min. Provavel falta de memoria no build. Sem a VPS nao ha Hub, coordenador da linha nem deploy.",
+      "blocks": [
+        "USR-339",
+        "USR-363",
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abrir https://console.hetzner.cloud, entrar no projeto, clicar no servidor (CX23, darkfac-vps-primary)."
+        },
+        {
+          "text": "Aba Power > botao 'Power cycle' (reinicio forcado). Confirmar."
+        },
+        {
+          "text": "Esperar 2-3 minutos e abrir https://darkhub.ggcampos.com/health; deve responder status ok."
+        },
+        {
+          "text": "Avisar no chat; o agente confere os servicos e retoma o deploy pelo caminho da imagem GHCR (sem build na VPS)."
+        }
+      ],
+      "verify": "https://darkhub.ggcampos.com/health e https://dokploy.ggcampos.com respondem",
+      "created_at": "2026-10-23T20:10:00Z",
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }
