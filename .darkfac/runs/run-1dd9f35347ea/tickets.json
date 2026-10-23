@@ -1,0 +1,155 @@
+[
+  {
+    "id": "T1",
+    "title": "Espera da tag GHCR compartilhada entre CLI e DokployDeploymentAdapter",
+    "goal": "Mover a sonda de manifesto e a espera da tag do SHA para um modulo de core reutilizavel e faze-la rodar tambem no DokployDeploymentAdapter, antes de qualquer compose.update/compose.deploy, falhando fechado e sem fallback para build.",
+    "files_hint": [
+      "core/orchestrator/ghcr_image.py",
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      "tests/test_dokploy_redeploy.py",
+      "tests/test_deployment_adapter_release_identity.py"
+    ],
+    "acceptance": [
+      "core/orchestrator/ghcr_image.py expoe a sonda HEAD do manifesto e a espera da tag (timeout e intervalo injetaveis, token em GHCR_TOKEN ou GITHUB_PAT, erros de sonda nao abortam a espera) e scripts/dokploy_redeploy.py passa a importar dali, mantendo wait_for_ghcr_tag e GhcrManifestProbe como nomes publicos para nao quebrar chamadores e testes existentes",
+      "Em modo ghcr, DokployDeploymentAdapter espera a tag ghcr.io/gcamposgit/darkhub:<sha> antes de instalar o compose; tag ausente dentro do timeout devolve um codigo de erro de release identity e nenhuma chamada POST ao Dokploy acontece",
+      "Nenhum caminho (CLI ou adapter) volta para build quando a imagem nao aparece; a mensagem de erro nomeia a imagem esperada e diz explicitamente que nao ha fallback",
+      "Em modo build o adapter e o CLI continuam sem sondar o GHCR (zero chamadas de rede novas)",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "adapter em modo ghcr espera a tag e so entao chama compose.update/compose.deploy",
+      "adapter em modo ghcr com tag ausente nao faz nenhum POST e devolve codigo de erro de release identity",
+      "adapter em modo build nao invoca a sonda GHCR",
+      "espera compartilhada tolera excecao da sonda, continua tentando e estoura com erro citando a imagem e a ausencia de fallback"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Imagem GHCR como padrao do Hub (build so com opt-in explicito)",
+    "goal": "Inverter o padrao de DARKHUB_IMAGE_SOURCE para ghcr em resolve_hub_image_source e em todos os pontos que hoje assumem build, para que um merge de runtime use a imagem do SHA tanto no CLI quanto na esteira, sem depender de variavel de ambiente no desktop do owner.",
+    "files_hint": [
+      "core/orchestrator/compose_render.py",
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      "tests/test_compose_render.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "resolve_hub_image_source sem a variavel definida devolve ghcr; DARKHUB_IMAGE_SOURCE=build continua valido como escape hatch e qualquer outro valor segue falhando fechado",
+      "scripts/dokploy_redeploy.py nao tem mais o default literal build na inicializacao de image_source e usa o modo resolvido tambem na renderizacao final que vai para o compose.update",
+      "test_darkhub_build_pinned_before_deploy_and_health_converges permanece como prova do escape hatch (DARKHUB_IMAGE_SOURCE=build explicito) e existe o teste equivalente para o padrao sem variavel, provando image/pull_policy always/start-first e ausencia de container_name e de build:",
+      "O compose renderizado no padrao nao contem build:, DarkFactory.git nem container_name, e mantem DARKFAC_GIT_SHA=<sha> no ambiente do container",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "resolve_hub_image_source sem env devolve ghcr e com build devolve build",
+      "deploy do Darkhub sem DARKHUB_IMAGE_SOURCE instala o compose com image ghcr do SHA, pull_policy always e start-first",
+      "deploy do Darkhub com DARKHUB_IMAGE_SOURCE=build mantem o contrato de build fixado no SHA"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Recusa rapida quando o filtro do workflow protegido nao cobre o merge",
+    "goal": "Alinhar o gatilho da imagem ao classificador de runtime: expor o filtro do workflow como dado, recusar o deploy em segundos quando um caminho de runtime alterado nunca geraria imagem, e entregar a correcao do arquivo protegido como patch mais owner action.",
+    "files_hint": [
+      "core/infra/deploy_classifier.py",
+      "scripts/dokploy_redeploy.py",
+      "docs/proposals/USR-207-hub-image-paths.patch",
+      "tests/test_hub_deploy_usr207.py",
+      ".factory/owner_actions/owner_actions.json"
+    ],
+    "acceptance": [
+      "core/infra/deploy_classifier.py ganha a leitura do filtro de paths de .github/workflows/hub-image.yml e uma funcao pura que diz se um conjunto de caminhos de runtime alterados e coberto por esse filtro (sem alterar o arquivo protegido)",
+      "Em modo ghcr, o deploy do Darkhub recusa antes de qualquer POST ao Dokploy quando um caminho de runtime alterado nao e coberto pelo filtro, citando o caminho, o patch docs/proposals/USR-207-hub-image-paths.patch e o ID da OA, em vez de esperar o timeout da tag",
+      "docs/proposals/USR-207-hub-image-paths.patch corrige o filtro do workflow para espelhar REBUILD_PREFIXES e REBUILD_FILES (inclui run_hub.py, remove docs/** e .factory/**), e aplica limpo sobre main",
+      "Owner action registrada em .factory/owner_actions/owner_actions.json (prioridade high, tela a tela com comandos absolutos em PowerShell e criterio de verificacao: Actions nao dispara em merge so de docs e dispara em merge de run_hub.py), com USR-207 em blocks",
+      "Os testes de cobertura passam com o filtro atual do repositorio (nao dependem de o owner ja ter publicado o patch) e o teste do patch valida o filtro resultante contra o classificador",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "parser do filtro de paths do workflow devolve os globs publicados e falha fechado quando o arquivo nao e legivel",
+      "caminho de runtime nao coberto pelo filtro (run_hub.py no filtro atual) faz o deploy em modo ghcr recusar sem nenhum POST, citando o patch e a OA",
+      "merge somente de docs/ledger continua sem exigir imagem nem deploy",
+      "o filtro contido no patch USR-207-hub-image-paths cobre todos os REBUILD_PREFIXES e REBUILD_FILES e nao inclui docs/ nem .factory/"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Sonda de 1 s na janela do deploy com relatorio de zero queda",
+    "goal": "Dar a core/infra/availability_probe.py um modo de observacao continua a cada 1 s e acion�-lo no proprio redeploy do Darkhub, para que todo deploy do Hub produza a evidencia exigida pelo aceite (nenhuma resposta diferente de 200 em /health e convergencia para o SHA esperado).",
+    "files_hint": [
+      "core/infra/availability_probe.py",
+      "scripts/dokploy_redeploy.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "availability_probe ganha um modo watch (intervalo padrao 1 s, duracao e URL configuraveis, SHA esperado opcional) que devolve um veredito estruturado com total de amostras, contagem e codigos das respostas diferentes de 200, maior lacuna continua em segundos e se o SHA esperado apareceu; relogio, sonda e escrita sao injetaveis",
+      "O modo tick de 1 minuto usado pela tarefa agendada no Notebook (DarkFac-Hub-Availability) continua com o mesmo comportamento, estado e caminho de arquivo de hoje",
+      "scripts/dokploy_redeploy.py --only Darkhub inicia a observacao de 1 s antes do compose.deploy, encerra depois da convergencia de /health, imprime o veredito, persiste o relatorio JSON sob .factory/ e avisa o ops no Telegram quando houver resposta diferente de 200",
+      "Falha da sonda ou da escrita do relatorio nunca derruba o deploy; o codigo de saida so muda com a flag explicita que exige zero queda",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "modo watch com relogio falso conta amostras, nao-200 e maior lacuna, e reporta convergencia para o SHA esperado",
+      "modo watch com todas as respostas 200 produz veredito de zero queda",
+      "deploy do Darkhub inicia e encerra a observacao, imprime o veredito e grava o relatorio",
+      "excecao da sonda ou erro ao gravar o relatorio nao altera o codigo de saida do deploy",
+      "modo tick de 1 minuto preserva o contrato de estado e alerta existente"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Verificar modo Stack antes de confiar no start-first",
+    "goal": "Tornar explicito o pre-requisito da rota 2.2.1: checar no Dokploy se o compose do Darkhub roda em modo Stack/Swarm (onde update_config.order start-first vale) e registrar a owner action de troca quando for compose simples.",
+    "files_hint": [
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      "tests/test_dokploy_redeploy.py",
+      ".factory/owner_actions/owner_actions.json"
+    ],
+    "acceptance": [
+      "Em modo ghcr o deploy do Darkhub le o tipo do compose em compose.one e registra no stdout se o start-first renderizado tera efeito (Stack) ou sera ignorado (compose simples)",
+      "Compose simples nao bloqueia o deploy (o Hub precisa continuar atualizavel), mas emite aviso explicito de que a troca tera queda e aponta a OA de troca para Stack",
+      "Campo ausente ou desconhecido no payload do Dokploy e tratado como indeterminado, com aviso, sem travar o deploy e sem afirmar zero queda",
+      "Owner action registrada em .factory/owner_actions/owner_actions.json (tela a tela no Dokploy para o compose Darkhub, criterio de verificacao: deploy real com a sonda de 1 s sem resposta diferente de 200), com USR-207 em blocks",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "compose em modo Stack imprime que start-first esta ativo e nao emite aviso de queda",
+      "compose simples imprime o aviso de start-first ignorado, cita a OA e ainda conclui o deploy",
+      "tipo de compose ausente ou desconhecido gera aviso de indeterminado sem travar o deploy"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T6",
+    "title": "Atualizar a proposta USR-207 e retirar o patch GHCR ja aplicado",
+    "goal": "Deixar docs/proposals/USR-207-zero-downtime.md descrevendo o estado real (imagem GHCR padrao, espera compartilhada, filtro do workflow, modo Stack, evidencia de 1 s), conferir o agendamento da sonda em PowerShell e retirar o patch que ja esta em main.",
+    "files_hint": [
+      "docs/proposals/USR-207-zero-downtime.md",
+      "docs/proposals/USR-207-ghcr-build.patch",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "Secoes 2.1, 2.1b e 2.1c saem de proposta para entregue: imagem GHCR como padrao, DARKHUB_IMAGE_SOURCE=build como escape hatch, espera da tag valendo para CLI e esteira, e remocao dos passos de ativacao manual ja cumpridos nas OA-044/OA-052",
+      "docs/proposals/USR-207-ghcr-build.patch e retirado seguindo o precedente de USR-158 (patch aplicado em main no commit 13f5d81f), com nota de retirada e sem deixar instrucao de reaplicacao em nenhum documento ou owner action",
+      "O bloco de agendamento da sonda na secao 1 e conferido e cola sem erro no PowerShell: Register-ScheduledTask, caminho absoluto de pythonw.exe, sem aspas aninhadas quebradas, preservando a tarefa DarkFac-Hub-Availability ja agendada; o novo modo watch de 1 s esta documentado como ferramenta de medicao, nao como tarefa agendada",
+      "A secao 2.2 registra qual rota esta em vigor (Stack com start-first) e mantem o blue/green como alternativa condicionada a medicao, sem prometer aumento de VPS",
+      "Teste estatico garante que a proposta nao volte a instruir git apply de patch retirado e que o bloco de agendamento continue usando Register-ScheduledTask com pythonw.exe absoluto",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "a proposta nao referencia git apply de USR-207-ghcr-build.patch e o arquivo de patch nao esta mais presente",
+      "o bloco de agendamento da secao 1 usa Register-ScheduledTask com caminho absoluto de pythonw.exe e nao contem aspas aninhadas invalidas",
+      "a proposta documenta DARKHUB_IMAGE_SOURCE=build como escape hatch e ghcr como padrao"
+    ],
+    "smoke": []
+  }
+]
