@@ -61,12 +61,14 @@ from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     SHA_PATTERN,
-    GHCR_IMAGE_REPOSITORY,
     IMAGE_SOURCE_GHCR,
     ComposeRenderError,
+    GhcrImageUnavailableError,
     ghcr_image_ref,
     render_darkhub_compose as _shared_render_darkhub_compose,
     resolve_hub_image_source,
+    wait_for_ghcr_image as _shared_wait_for_ghcr_image,
+    _ghcr_manifest_status as _default_ghcr_probe,
 )
 
 DEFAULT_PROJECT = "darkfac-core"
@@ -642,51 +644,18 @@ GHCR_TAG_POLL_SECONDS = 15.0
 # (repository, tag) -> HTTP status of the manifest lookup (200 = exists, 404 = not yet).
 GhcrManifestProbe = Callable[[str, str], int]
 
-
-def _default_ghcr_probe(repository: str, tag: str) -> int:
-    """HEAD the GHCR manifest; needs GHCR_TOKEN or GITHUB_PAT (read:packages) for the private package."""
-    import base64
-
-    token = (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
-    headers = {
-        "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json"
-    }
-    if token:
-        headers["Authorization"] = "Bearer " + base64.b64encode(token.encode()).decode()
-    request = urllib.request.Request(
-        f"https://ghcr.io/v2/{repository}/manifests/{tag}", headers=headers, method="HEAD"
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return int(response.status)
-    except urllib.error.HTTPError as exc:
-        return int(exc.code)
-
-
 def wait_for_ghcr_tag(
     sha: str, *, probe: Optional[GhcrManifestProbe] = None, timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
     interval: float = GHCR_TAG_POLL_SECONDS, sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Block until ``ghcr.io/<repo>:<sha>`` exists. Raises DokployUsageError on timeout; never falls back to build."""
-    check = probe or _default_ghcr_probe
-    deadline = clock_fn() + timeout
-    last: object = "no response"
-    while True:
-        try:
-            status = check(GHCR_IMAGE_REPOSITORY, sha)
-            if status == 200:
-                return
-            last = f"HTTP {status}"
-        except Exception as exc:
-            last = type(exc).__name__
-        remaining = deadline - clock_fn()
-        if remaining <= 0:
-            raise DokployUsageError(
-                f"GHCR image {ghcr_image_ref(sha)} not published within {int(timeout)}s (last: {last}); "
-                "deploy refused, no fallback to build (check the hub-image workflow)"
-            )
-        sleep_fn(min(interval, remaining))
+    """CLI compatibility wrapper around the shared GHCR waiter; never falls back to build."""
+    try:
+        _shared_wait_for_ghcr_image(
+            sha, probe=probe, timeout=timeout, interval=interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
+        )
+    except GhcrImageUnavailableError as exc:
+        raise DokployUsageError(str(exc)) from None
 
 
 def set_compose_git_sha(
