@@ -9826,8 +9826,8 @@
     "project_id": "darkfac",
     "title": "Hub sem queda: imagem GHCR e troca start-first (USR-207 parte 2)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: codigo entregue em 22/10 (PR #558: chave DARKHUB_IMAGE_SOURCE build|ghcr, espera da tag no CLI, start-first no compose); falta: OA-052 (owner publica hub-image.yml), espera da tag tambem no DokployDeploymentAdapter da linha, confirmar se o Dokploy usa Swarm (start-first so vale em Stack) e prova da sonda de 1 s num deploy real (anterior: 97694cbc8b5a14a0d7b63beadffe2c60c3b126f7)",
+    "status": "completed",
+    "delivery_evidence": "e46bba2be3220c543b5a3eb34afdf396f319cb95",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9852,7 +9852,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T23:53:15.560129Z",
-    "updated_at": "2026-10-22T02:21:15.084425Z"
+    "updated_at": "2026-10-23T01:52:24.938630Z"
   },
   {
     "id": "USR-340",

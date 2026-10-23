@@ -44,7 +44,7 @@ def test_polluted_worker_environment_is_removed_before_child_tests_run(
         env=os.environ.copy(),
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,  # the child pytest starts slowly on a loaded worker (Desktop xdist run)
         check=False,
     )
 

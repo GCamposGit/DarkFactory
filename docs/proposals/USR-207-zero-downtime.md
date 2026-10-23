@@ -23,6 +23,7 @@ Notas:
 
 ```powershell
 $py = "C:\Users\guigc\AppData\Local\Programs\Python\Python312\pythonw.exe"
+if (-not (Test-Path $py)) { throw "pythonw.exe nao encontrado em $py (confira com: (Get-Command python).Source)" }
 $action = New-ScheduledTaskAction -Execute $py -Argument "-m core.infra.availability_probe" -WorkingDirectory "C:\dev\DarkFac"
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName "DarkFac-Hub-Availability" -Action $action -Trigger $trigger -Force
@@ -68,7 +69,7 @@ O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOU
 - `build` (padrao): comportamento de hoje, build do contexto Git na VPS.
 - `ghcr`: `render_darkhub_compose` troca `build:`/`pull_policy: build` por `image: ghcr.io/gcamposgit/darkhub:<sha>` + `pull_policy: always`, remove `container_name` e injeta `deploy.update_config.order: start-first` (+ `rollback_config`). O redeploy espera a tag do sha no GHCR (HEAD no manifesto; token em `GHCR_TOKEN` ou `GITHUB_PAT` com `read:packages`; timeout `--timeout`, padrao 900 s) e, se nao existir, recusa com erro explicito, sem voltar para build.
 - Valor desconhecido falha fechado. `start-first` so vale em modo Stack/Swarm; no Compose simples o Dokploy ignora `update_config` (rota 2 da secao 2.2 cobre isso).
-- Limite conhecido: a espera da tag esta no CLI `dokploy_redeploy.py`; o adapter da linha apenas renderiza.
+- A espera da tag existe nos dois caminhos: CLI `dokploy_redeploy.py` e `DokployDeploymentAdapter` da linha (`compose_render.wait_for_ghcr_image`, timeout 600 s, poll 15 s). Sem a imagem no prazo o adapter devolve `release_identity_ghcr_image_unpublished` antes de qualquer chamada de escrita ao Dokploy (sem fallback para build).
 
 ### 2.1c Ativacao passo a passo (owner, OA registrada no DarkHub)
 
@@ -82,6 +83,8 @@ O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOU
 7. Volte para `build` removendo a variavel se algo falhar.
 
 ### 2.2 Start-first gated por healthcheck
+
+**Veredito (USR-339): `deploy.update_config.order: start-first` so tem efeito se o compose do Hub no Dokploy for do tipo `stack` (Swarm).** Um compose do tipo `docker-compose` roda `docker compose up` e ignora `update_config`: o container antigo e parado antes do novo (queda de ~1 min, mitigada so pelo retry do frontend). Confirmacao: Dokploy > servico Darkhub > aba General > "Compose Type" deve estar em "Stack". Se estiver em "Docker Compose", a troca start-first NAO ocorre e o bloco injetado pelo render e inerte. O Stack exige a VPS como no Swarm (`docker swarm init`), rotulos Traefik sob `deploy.labels` e rede overlay.
 
 `container_name` fixo impede dois containers simultaneos; remover (o `hostname` ja preserva a identidade de no, USR-212). O Docker Compose simples nao tem `start-first`; ha duas rotas:
 
@@ -104,6 +107,30 @@ O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOU
 2. Sem Swarm: dois servicos `darkhub-blue` / `darkhub-green` com rotulos Traefik distintos; o redeploy sobe o inativo, espera `healthy` e so entao troca o roteador (pode ser feito em `scripts/dokploy_redeploy.py`).
 
 Criterio de aceite do ticket: sonda de 1 s durante um deploy real sem nenhuma resposta diferente de 200 em `/health`.
+
+### 2.2b Roteiro de prova (owner)
+
+Terminal 1 (PowerShell): sonda de 1 s por 10 min.
+
+```powershell
+python C:\Users\guigc\darkfac-ops\tools\health_probe.py C:\Users\guigc\hub_probe.jsonl 600
+```
+
+Terminal 2, durante a sonda (`--force` ignora o "ja esta no ar"):
+
+```powershell
+$env:DARKHUB_IMAGE_SOURCE = "ghcr"
+python C:\dev\DarkFac\scripts\dokploy_redeploy.py --only Darkhub --wait --force
+```
+
+Verificacao ao fim da sonda (esperado: `non200 = 0` e dois shas, antigo e novo):
+
+```powershell
+$r = Get-Content C:\Users\guigc\hub_probe.jsonl | ForEach-Object { $_ | ConvertFrom-Json }
+"total = $($r.Count)"; "non200 = $(($r | Where-Object { $_.status -ne 200 }).Count)"; "shas = $((($r | Where-Object sha).sha | Select-Object -Unique) -join ', ')"
+```
+
+Se `non200 > 0`: o compose esta em modo `docker-compose` (veredito acima); passa so com Stack/Swarm ou com a rota 2.
 
 ### 2.3 Acoes do owner (o orquestrador registra as OA)
 

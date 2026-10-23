@@ -32,7 +32,11 @@ from core.orchestrator.build_artifacts import ArtifactRef, Claim
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     ComposeFetcher,
+    IMAGE_SOURCE_GHCR,
     ComposeRenderError,
+    GhcrImageUnavailableError,
+    resolve_hub_image_source,
+    wait_for_ghcr_image,
     fetch_compose_at_sha,
     render_darkhub_compose,
 )
@@ -196,6 +200,7 @@ class DokployDeploymentAdapter:
         api_key: Optional[str] = None,
         transport: Optional[Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Dict[str, Any]]] = None,
         compose_fetcher: Optional[ComposeFetcher] = None,
+        ghcr_waiter: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.api_url = api_url or os.getenv("DOKPLOY_API_URL", "")
         self.api_key = api_key or os.getenv("DOKPLOY_API_KEY", "")
@@ -203,6 +208,8 @@ class DokployDeploymentAdapter:
         # (repository, sha, path) -> compose text at that commit; defaults to
         # `gh api` (compose_render.fetch_compose_at_sha). Injected by tests.
         self.compose_fetcher = compose_fetcher
+        # USR-339: waits for the GHCR tag of the SHA (injected by tests).
+        self.ghcr_waiter = ghcr_waiter or wait_for_ghcr_image
         self._lock = threading.Lock()
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
@@ -329,7 +336,13 @@ class DokployDeploymentAdapter:
         if not isinstance(source, str) or not source.strip():
             return None, "release_identity_compose_unreadable"
         try:
+            if resolve_hub_image_source() == IMAGE_SOURCE_GHCR:
+                # USR-339: never trigger the deploy before the image for this SHA exists.
+                self.ghcr_waiter(sha)
             return render_darkhub_compose(source, sha), None
+        except GhcrImageUnavailableError:
+            logger.error("GHCR image for %s not published in time; Hub deploy refused", sha[:12])
+            return None, "release_identity_ghcr_image_unpublished"
         except ComposeRenderError:
             return None, "release_identity_compose_contract_invalid"
 

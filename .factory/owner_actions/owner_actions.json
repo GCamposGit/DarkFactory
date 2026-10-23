@@ -2343,6 +2343,45 @@
       "created_at": "2026-10-22T19:20:00Z",
       "created_by": "claude",
       "resolved_at": "2026-10-22T19:45:00Z"
+    },
+    {
+      "id": "OA-057",
+      "kind": "decision",
+      "title": "Hub sem queda (USR-339): migrar o compose Darkhub para Stack/Swarm ou fazer blue-green no Traefik",
+      "priority": "medium",
+      "status": "open",
+      "why": "Leitura da API do Dokploy em 22/10: compose Darkhub esta como composeType=docker-compose. Nesse modo o update_config start-first e ignorado: o container antigo para antes do novo subir, e a prova do USR-339 (sonda de 1 s sem resposta != 200 durante deploy) nao passa. Ver docs/proposals/USR-207-zero-downtime.md secao 2.2.",
+      "blocks": [
+        "USR-339",
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Escolha uma opcao respondendo no DarkHub ou no chat; a fabrica implementa e roda a prova."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Blue-green no Traefik, sem Swarm (recomendado)",
+          "detail": "A fabrica implementa dois servicos darkhub-blue/green no mesmo compose e troca o roteamento do Traefik so depois do healthcheck do novo. Sem mexer na VPS; mais codigo no render do compose."
+        },
+        {
+          "id": "B",
+          "label": "Migrar o Darkhub para Stack (Swarm)",
+          "detail": "Rodar docker swarm init na VPS, trocar Compose Type para Stack no Dokploy, rotulos Traefik em deploy.labels e rede overlay. Start-first nativo; mudanca de infraestrutura maior com risco para os outros servicos."
+        },
+        {
+          "id": "C",
+          "label": "Aceitar queda curta",
+          "detail": "Fechar USR-339/207 so com imagem GHCR e deploy unico; a queda de alguns segundos por deploy continua."
+        }
+      ],
+      "verify": "Item respondido; USR-339 recebe tag owner-decision.",
+      "created_at": "2026-10-22T21:10:00Z",
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }
