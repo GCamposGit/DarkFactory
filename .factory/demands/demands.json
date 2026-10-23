@@ -10632,5 +10632,35 @@
     "dependencies": [],
     "created_at": "2026-10-23T17:31:08.681082Z",
     "updated_at": "2026-10-23T17:31:08.681082Z"
+  },
+  {
+    "id": "USR-365",
+    "project_id": "darkfac",
+    "title": "Redeploy do Hub ainda faz build na VPS por padrao e derrubou a VPS em 23/10",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 23/10/2026 16:45 o redeploy pos-merge (scripts/dokploy_redeploy.py) renderizou o compose do Hub com image_source=build porque DARKHUB_IMAGE_SOURCE nao estava definido no processo; o build da imagem na VPS CX23 (3,7 GB) deixou a VPS sem resposta (Hub, Dokploy, n8n, Tailscale, SSH) por mais de 15 min (OA-060). A imagem do mesmo sha ja existia no GHCR (workflow hub-image).",
+    "core_journey": [
+      "Em 23/10/2026 16:45 o redeploy pos-merge (scripts/dokploy_redeploy.py) renderizou o compose do Hub com image_source=build porque DARKHUB_IMAGE_SOURCE nao estava definido no processo; o build da imagem na VPS CX23 (3,7 GB) deixou a VPS sem resposta (Hub, Dokploy, n8n, Tailscale, SSH) por mais de 15 min (OA-060). A imagem do mesmo sha ja existia no GHCR (workflow hub-image)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Padrao de image source do Hub passa a ser ghcr (build so com opt-in explicito DARKHUB_IMAGE_SOURCE=build)",
+      "Redeploy le GHCR_TOKEN tambem do ambiente de usuario do Windows quando o processo nao o tem",
+      "Teste: sem variavel definida, o render usa image ghcr.io/...:<sha> e espera a tag"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T20:06:19.043633Z",
+    "updated_at": "2026-10-23T20:06:19.043633Z"
   }
 ]
