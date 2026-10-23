@@ -1035,6 +1035,14 @@ class HubService:
                         if any(item.action_target_id == label and item.kind == PriorityInterventionKind.GRILL for item in items):
                             continue
 
+                        t_created = _queue_text(task, "created_at", "updated_at")
+                        # USR-362: attempts of one ticket collapse to the newest one.
+                        prior = next((i for i in items if i.id == f"waiting_human:{label}"), None)
+                        if prior is not None:
+                            if (t_created or "") < str(prior.metadata.get("queued_at") or ""):
+                                continue
+                            items.remove(prior)
+                            waiting_human_count -= 1
                         waiting_human_count += 1
                         items.append(
                             PriorityInterventionItem(
@@ -1048,6 +1056,7 @@ class HubService:
                                 action_target_id=label,
                                 metadata={
                                     "task_id": t_id or t_ticket,
+                                    "queued_at": t_created,
                                     "ticket_id": t_ticket,
                                     "run_id": t_run,
                                     "cause_code": t_cause,

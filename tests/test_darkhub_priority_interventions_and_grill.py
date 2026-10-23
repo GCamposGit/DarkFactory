@@ -387,3 +387,17 @@ def test_frontend_interventions_js_structure():
     assert "closeGrillModal" in js
     assert "submitGrillModalAnswers" in js
     assert "autoSelectRecommendedGrillOptions" in js
+
+
+def test_waiting_human_attempts_of_one_ticket_show_once_newest_wins(mock_hub_service: HubService):
+    """USR-362: two attempts (two runs) of USR-343 must not list the block twice."""
+    old = {"task_id": "dem-a", "ticket_id": "USR-343", "run_id": "run-old", "status": "WAITING_HUMAN",
+           "title": "t", "project_id": "darkfac", "created_at": "2026-10-22T13:03:00+00:00"}
+    new = {**old, "task_id": "dem-b", "run_id": "run-new", "created_at": "2026-10-22T20:42:00+00:00"}
+    for queue in ([old, new], [new, old]):
+        with patch.object(mock_hub_service, "get_task_dashboard") as mock_dash:
+            mock_dash.return_value = MagicMock(queue=queue)
+            report = mock_hub_service.get_priority_interventions()
+        waiting = [i for i in report.items if i.kind == PriorityInterventionKind.WAITING_HUMAN]
+        assert len(waiting) == 1 and waiting[0].metadata["run_id"] == "run-new"
+        assert report.waiting_human_count == 1

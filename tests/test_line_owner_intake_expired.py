@@ -51,3 +51,26 @@ def test_expired_wait_allows_a_new_ticket_attempt(tmp_path: Path) -> None:
     assert run_state(store, first.run_id, now=datetime(2026, 10, 1, 7, tzinfo=UTC), wall_clock_hours=6) == "failed"
     second = submit_ticket_to_line("USR-62", demands_store=demands, store=store)
     assert second.ok and second.attempt == 2 and second.run_id != first.run_id
+
+
+def test_new_attempt_cancels_the_expired_open_run_so_only_one_is_live(tmp_path: Path) -> None:
+    """USR-362: a2 must not run beside a1 still parked in waiting_human."""
+    demands = DemandsStore(tmp_path / "demands.json")
+    demands.save_ticket(UserTicket(id="USR-62", title="One live run per ticket"))
+    store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    first = submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    conn = store._connect()
+    try:
+        conn.execute("UPDATE runs SET created_at = ? WHERE run_id = ?", ("2026-10-01T00:00:00+00:00", first.run_id))
+        conn.execute(
+            "UPDATE jobs SET status = 'waiting_human', cause_code = 'no_route_available' WHERE run_id = ?",
+            (first.run_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    second = submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    assert second.attempt == 2
+    assert store.get_run_status(first.run_id)["status"] == "cancelled"
+    third = submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    assert third.replayed and third.run_id == second.run_id
