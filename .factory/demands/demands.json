@@ -10572,5 +10572,36 @@
     "dependencies": [],
     "created_at": "2026-10-23T10:37:36.139118Z",
     "updated_at": "2026-10-23T11:28:24.687673Z"
+  },
+  {
+    "id": "USR-363",
+    "project_id": "darkfac",
+    "title": "Blue-green do Hub: rollback nao cobre falha do compose up nem a migracao, e VPS nao puxa a imagem privada do GHCR",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Prova ao vivo do USR-339 em 23/10/2026 (sha 704867e1): dokploy_bluegreen.py aplicou o compose blue-green no Dokploy, o compose up terminou em error (deployment 12:30:48, log /etc/dokploy/logs/darkfaccore-darkhub-ishvas/...12:30:48.log) e o script saiu sem restaurar o compose anterior: run_bluegreen_deploy so restaura em falha de health e nunca na migracao legada (current None); apply_compose levanta BlueGreenError antes. O Dokploy ficou com compose marcado blue-green em status error; o Hub segue no container antigo (eca5feb, sonda 1 s: 0 respostas != 200). Causa provavel do compose up: pacote ghcr.io/gcamposgit/darkhub e privado (HEAD anonimo = 401) e o compose raw do Darkhub nao tem registryId; a VPS nao faz docker login no ghcr.",
+    "core_journey": [
+      "Prova ao vivo do USR-339 em 23/10/2026 (sha 704867e1): dokploy_bluegreen.py aplicou o compose blue-green no Dokploy, o compose up terminou em error (deployment 12:30:48, log /etc/dokploy/logs/darkfaccore-darkhub-ishvas/...12:30:48.log) e o script saiu sem restaurar o compose anterior: run_bluegreen_deploy so restaura em falha de health e nunca na migracao legada (current None); apply_compose levanta BlueGreenError antes. O Dokploy ficou com compose marcado blue-green em status error; o Hub segue no container antigo (eca5feb, sonda 1 s: 0 respostas != 200). Causa provavel do compose up: pacote ghcr.io/gcamposgit/darkhub e privado (HEAD anonimo = 401) e o compose raw do Darkhub nao tem registryId; a VPS nao faz docker login no ghcr."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Qualquer falha apos o primeiro compose.update (compose up error/timeout, health) restaura o compose anterior exato, inclusive na migracao legada",
+      "Teste: compose up error na migracao restaura o legado",
+      "Pull da imagem privada do GHCR funciona na VPS (docker login via registry do Dokploy ou credencial no compose), comprovado num deploy real",
+      "Prova da sonda de 1 s com 0 respostas != 200 em migracao e em troca blue->green"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T12:34:17.800806Z",
+    "updated_at": "2026-10-23T12:34:17.800806Z"
   }
 ]
