@@ -159,28 +159,38 @@ def run_bluegreen_deploy(
     else:
         overlap_state = planned
         running = COLORS
-    apply_compose(render_bluegreen_compose(source, overlap_state, running))
-    for _ in range(health_attempts):
-        if sha_is_serving(new_sha):
-            break
-        sleep_fn(interval)
-    else:
-        logger.error("blue-green: %s never served %s; keeping the previous colour", target, new_sha[:12])
-        if previous_compose and current is not None:
-            apply_compose(previous_compose)
-        raise BlueGreenError(
-            f"colour {target} did not serve sha {new_sha[:12]} within the health window; previous colour kept"
-        )
-    final = BlueGreenState(target, planned.blue_sha, planned.green_sha)
-    if current is None:
-        final = BlueGreenState(target, new_sha, new_sha)
-        if remove_legacy is not None:
+    try:
+        apply_compose(render_bluegreen_compose(source, overlap_state, running))
+        for _ in range(health_attempts):
+            if sha_is_serving(new_sha):
+                break
+            sleep_fn(interval)
+        else:
+            raise BlueGreenError(
+                f"colour {target} did not serve sha {new_sha[:12]} within the health window"
+            )
+        final = BlueGreenState(target, planned.blue_sha, planned.green_sha)
+        if current is None:
+            final = BlueGreenState(target, new_sha, new_sha)
+            if remove_legacy is not None:
+                try:
+                    if not remove_legacy():
+                        logger.warning("blue-green: legacy container %s was not removed", LEGACY_CONTAINER)
+                except Exception as exc:  # noqa: BLE001 - best effort, new colour is already healthy
+                    logger.warning("blue-green: legacy removal failed: %s", type(exc).__name__)
+        apply_compose(render_bluegreen_compose(source, final, (target,)))
+    except Exception as exc:  # noqa: BLE001 - any failure after the first apply restores the previous compose
+        logger.error("blue-green: deploy of %s failed (%s); restoring previous compose", new_sha[:12], exc)
+        if previous_compose:
             try:
-                if not remove_legacy():
-                    logger.warning("blue-green: legacy container %s was not removed", LEGACY_CONTAINER)
-            except Exception as exc:  # noqa: BLE001 - best effort, new colour is already healthy
-                logger.warning("blue-green: legacy removal failed: %s", type(exc).__name__)
-    apply_compose(render_bluegreen_compose(source, final, (target,)))
+                apply_compose(previous_compose)
+                restore_note = "previous compose restored"
+            except Exception as restore_exc:  # noqa: BLE001
+                logger.error("blue-green: restoring the previous compose failed: %s", restore_exc)
+                restore_note = f"RESTORE FAILED ({restore_exc})"
+        else:
+            restore_note = "no previous compose to restore"
+        raise BlueGreenError(f"{exc}; {restore_note}") from exc
     return final
 
 

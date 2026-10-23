@@ -20,8 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.orchestrator.bluegreen import BlueGreenError, run_bluegreen_deploy  # noqa: E402
-from core.orchestrator.compose_render import wait_for_ghcr_image  # noqa: E402
+from core.orchestrator.bluegreen import BlueGreenError, parse_state, run_bluegreen_deploy  # noqa: E402
+from core.orchestrator.compose_render import IMAGE_SOURCE_BUILD, render_darkhub_compose, wait_for_ghcr_image  # noqa: E402
 from scripts import dokploy_redeploy as dr  # noqa: E402
 
 
@@ -36,17 +36,37 @@ def _darkhub_service(transport: dr.Transport) -> dr.Service:
 def main(argv: Optional[Sequence[str]] = None, env: Optional[Dict[str, str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sha", default=None)
+    parser.add_argument("--restore-legacy", action="store_true",
+                        help="only compose.update with the legacy (build) compose, no deploy")
     parser.add_argument("--timeout", type=float, default=dr.DEFAULT_TIMEOUT_SECONDS)
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
         api_url, api_key = dr.resolve_credentials(dict(env if env is not None else os.environ))
         transport = dr.make_urllib_transport(api_url, api_key)
-        sha = (args.sha or dr.get_origin_main_sha() or "").lower()
+        if args.restore_legacy:
+            sha = (args.sha or str(dr.fetch_darkhub_health().get("git_sha", ""))).lower()
+        else:
+            sha = (args.sha or dr.get_origin_main_sha() or "").lower()
         source = dr.get_origin_main_compose(sha)
         service = _darkhub_service(transport)
     except dr.DokployUsageError as exc:
         print(f"usage error: {exc}", file=sys.stderr)
         return dr.EXIT_USAGE_ERROR
+
+    if args.restore_legacy:
+        try:
+            legacy = render_darkhub_compose(source, sha, IMAGE_SOURCE_BUILD)
+            if parse_state(legacy) is not None:
+                raise BlueGreenError("legacy compose still contains the blue-green marker")
+            transport("POST", "/api/compose.update", {
+                "composeId": service.service_id, "sourceType": "raw",
+                "composePath": "docker-compose.yml", "composeFile": legacy,
+            })
+        except Exception as exc:  # noqa: BLE001
+            print(f"restore-legacy failed: {exc}", file=sys.stderr)
+            return dr.EXIT_DEPLOY_FAILED
+        print(f"restore-legacy ok: compose.update only (no deploy), build image at sha={sha}")
+        return dr.EXIT_OK
 
     def read_compose() -> Optional[str]:
         payload = dr.fetch_service_status(transport, service)
