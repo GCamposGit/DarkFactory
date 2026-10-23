@@ -12,13 +12,13 @@ from __future__ import annotations
 from typing import Iterable
 
 REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/")
-REBUILD_FILES: frozenset[str] = frozenset(
-    {"requirements.txt", "harness.config.json", "run_hub.py"}
-)
+# Keep this aligned with COPY sources in deploy/dokploy/Dockerfile.hub. In particular,
+# run_hub.py is not copied into the image and therefore cannot require a Hub rebuild.
+REBUILD_FILES: frozenset[str] = frozenset({"requirements.txt", "harness.config.json"})
 
 REASON_NO_DIFF = "diff desconhecido"
 REASON_RUNTIME = "toca caminho embutido na imagem"
-REASON_DATA_ONLY = "somente ledger/docs/testes (imagem inalterada)"
+REASON_DATA_ONLY = "somente caminhos fora da imagem (imagem inalterada)"
 REASON_SAME_SHA = "sha ja implantado"
 
 
