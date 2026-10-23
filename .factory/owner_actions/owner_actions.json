@@ -2289,7 +2289,7 @@
       "kind": "action",
       "title": "Desktop: tela azul 0x50 do driver do Warsaw (modulo bancario) derrubou o worker em 21/10; atualizar ou remover o Warsaw",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "Diagnostico remoto via /system/exec do worker (22/10): em 21/10 23:09 local o Desktop teve BugCheck 0x00000050 (PAGE_FAULT_IN_NONPAGED_AREA), reiniciou 23:22 (Kernel-Power 41, EventLog 6008) com dump em C:\\WINDOWS\\MEMORY.DMP; o Windows Error Reporting classificou a falha no bucket AV_wsddpp (driver wsddpp.sys do Warsaw/GAS Tecnologia, modulo de seguranca bancaria) e o servico 'Warsaw Technology' caiu de novo as 23:40. Nao foi suspensao: standby na tomada ja e 0. Instalar/remover software no Desktop e decisao do owner.",
       "blocks": [],
       "depends_on": [],
@@ -2310,12 +2310,17 @@
       "verify": "Via /system/exec do worker do Desktop: Get-Service *warsaw* nao retorna nada (removido) ou mostra versao nova; nenhum evento Kernel-Power 41 / BugCheck depois da data da acao.",
       "created_at": "2026-10-22T12:00:00Z",
       "created_by": "claude",
-      "resolved_at": null,
+      "resolved_at": "2026-10-23T11:28:24Z",
       "history": [
         {
           "at": "2026-10-22T13:10:00Z",
           "outcome": "evidence:keep_open",
           "note": "Causa encontrada remotamente: BugCheck 0x50 com bucket AV_wsddpp (driver do Warsaw) em 21/10 23:09; suspensao ja desligada. Passos trocados para atualizar/remover o Warsaw."
+        },
+        {
+          "at": "2026-10-23T11:28:24Z",
+          "outcome": "done",
+          "note": "Owner informou no chat em 23/10/2026: Warsaw resolvido; falta so reiniciar o Desktop, que ja pode ser usado como 3a opcao de portao."
         }
       ]
     },
@@ -2349,7 +2354,7 @@
       "kind": "decision",
       "title": "Hub sem queda (USR-339): migrar o compose Darkhub para Stack/Swarm ou fazer blue-green no Traefik",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "Leitura da API do Dokploy em 22/10: compose Darkhub esta como composeType=docker-compose. Nesse modo o update_config start-first e ignorado: o container antigo para antes do novo subir, e a prova do USR-339 (sonda de 1 s sem resposta != 200 durante deploy) nao passa. Ver docs/proposals/USR-207-zero-downtime.md secao 2.2.",
       "blocks": [
         "USR-339",
@@ -2381,7 +2386,13 @@
       "verify": "Item respondido; USR-339 recebe tag owner-decision.",
       "created_at": "2026-10-22T21:10:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-23T11:28:24Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner escolheu a opcao A (blue-green no Traefik) em 23/10/2026; registrada no USR-360 e como tag owner-decision:OA-057=A no USR-339 e USR-207.",
+        "answered_at": "2026-10-23T11:28:24Z",
+        "answered_by": "owner"
+      }
     },
     {
       "id": "OA-QR-601",
