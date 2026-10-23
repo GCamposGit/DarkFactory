@@ -1259,6 +1259,121 @@ def test_darkhub_ghcr_default_pinned_before_deploy_and_health_converges(monkeypa
     assert "secret-value" not in out.getvalue() + err.getvalue()
 
 
+@pytest.mark.parametrize(("type_field", "compose_type"), [("composeType", "swarm"), ("serviceType", "Stack")])
+def test_darkhub_ghcr_stack_reports_start_first_before_mutation(
+    monkeypatch: pytest.MonkeyPatch, type_field: str, compose_type: str
+) -> None:
+    transport = _make_transport_with_full_project()
+    # Preserve the service's mode metadata in the compose.one response.
+    transport.program_get("/api/compose.one?composeId=compose_hub", [
+        {
+            "deployments": [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+            type_field: compose_type,
+            "env": "KEEP=secret-value\n",
+        },
+        {
+            "deployments": [{"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}],
+            type_field: compose_type,
+            "env": "KEEP=secret-value\n",
+        },
+    ])
+    out, err = io.StringIO(), io.StringIO()
+    real_set_compose_git_sha = mod.set_compose_git_sha
+    def assert_mode_reported_before_cleanup(_transport: Any) -> Dict[str, Any]:
+        assert "start-first is active" in out.getvalue()
+        return {"cleanDockerBuilder": True, "cleanUnusedImages": True, "hygiene_status": "ok"}
+
+    def assert_mode_reported_before_hygiene(_transport: Any, stage: str, **_kwargs: Any) -> Dict[str, Any]:
+        if stage == "pre-deploy":
+            assert "start-first is active" in out.getvalue()
+        return {"action": "skipped", "reason": "test"}
+
+    def assert_mode_reported_before_mutation(*args: Any, **kwargs: Any) -> None:
+        assert "start-first is active" in out.getvalue()
+        real_set_compose_git_sha(*args, **kwargs)
+
+    monkeypatch.setattr(mod, "set_compose_git_sha", assert_mode_reported_before_mutation)
+    monkeypatch.setattr(mod, "clean_dokploy_build_cache_and_images", assert_mode_reported_before_cleanup)
+
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--skip-node-sync", "--clean"],
+        env={k: v for k, v in _ENV.items() if k != "DARKHUB_IMAGE_SOURCE"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        stdout=out, stderr=err, ghcr_probe=lambda _repository, _tag: 200,
+        disk_hygiene_runner=assert_mode_reported_before_hygiene,
+    )
+
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert "Stack/Swarm" in out.getvalue()
+    assert "start-first is active" in out.getvalue()
+    assert "Stack/Swarm" in out.getvalue().split("start-first is active")[0]
+    assert [call[1] for call in transport.post_calls] == ["/api/compose.update", "/api/compose.deploy"]
+
+
+def test_darkhub_ghcr_compose_simple_warns_but_still_deploys() -> None:
+    transport = _make_transport_with_full_project()
+    transport.program_get("/api/compose.one?composeId=compose_hub", [
+        {
+            "deployments": [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+            "composeType": "docker-compose",
+            "env": "KEEP=secret-value\n",
+        },
+        {
+            "deployments": [{"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}],
+            "composeType": "docker-compose",
+            "env": "KEEP=secret-value\n",
+        },
+    ])
+    out, err = io.StringIO(), io.StringIO()
+
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--skip-node-sync"],
+        env={k: v for k, v in _ENV.items() if k != "DARKHUB_IMAGE_SOURCE"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        stdout=out, stderr=err, ghcr_probe=lambda _repository, _tag: 200,
+    )
+
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert "Compose simples" in err.getvalue()
+    assert "update_config" in err.getvalue() and "ignorado" in err.getvalue()
+    assert "sonda pode observar queda" in err.getvalue()
+    assert "nao promete zero downtime" in err.getvalue()
+    assert [call[1] for call in transport.post_calls] == ["/api/compose.update", "/api/compose.deploy"]
+
+
+@pytest.mark.parametrize("compose_type", [None, "unrecognized-compose-mode", "not-stack"])
+def test_darkhub_ghcr_missing_or_unrecognized_compose_type_uses_conservative_warning(
+    compose_type: Optional[str],
+) -> None:
+    transport = _make_transport_with_full_project()
+    first_payload: Dict[str, Any] = {
+        "deployments": [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+        "env": "KEEP=secret-value\n",
+    }
+    if compose_type is not None:
+        first_payload["composeType"] = compose_type
+    transport.program_get("/api/compose.one?composeId=compose_hub", [
+        first_payload,
+        {
+            "deployments": [{"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}],
+            "env": "KEEP=secret-value\n",
+        },
+    ])
+    out, err = io.StringIO(), io.StringIO()
+
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--skip-node-sync"],
+        env={k: v for k, v in _ENV.items() if k != "DARKHUB_IMAGE_SOURCE"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        stdout=out, stderr=err, ghcr_probe=lambda _repository, _tag: 200,
+    )
+
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert "tipo ausente/desconhecido" in err.getvalue()
+    assert "Compose simples" in err.getvalue()
+    assert [call[1] for call in transport.post_calls] == ["/api/compose.update", "/api/compose.deploy"]
+
+
 def test_darkhub_build_escape_hatch_keeps_pinned_build_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     transport = _make_transport_with_full_project()
     old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}

@@ -173,3 +173,6 @@ def test_start_first_only_claimed_for_stack_or_swarm() -> None:
     assert cr.dokploy_supports_start_first("Stack")
     assert not cr.dokploy_supports_start_first("docker-compose")
     assert not cr.dokploy_supports_start_first(None)
+    assert not cr.dokploy_supports_start_first("not-stack")
+    assert not cr.dokploy_supports_start_first("stackless")
+    assert not cr.dokploy_supports_start_first("non-swarm")

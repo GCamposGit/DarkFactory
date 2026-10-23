@@ -691,6 +691,15 @@ def set_compose_git_sha(
     })
 
 
+def dokploy_compose_type(payload: Dict[str, Any]) -> Optional[str]:
+    """Return Dokploy's compose mode from the known service payload fields."""
+    for field in ("composeType", "serviceType"):
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def fetch_darkhub_health(url: str = DARKHUB_HEALTH_URL) -> Dict[str, Any]:
     request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
     with urllib.request.urlopen(request, timeout=5) as response:
@@ -1090,6 +1099,46 @@ def _run_main(
     if local_subject:
         print(f"Local origin/main HEAD subject: {local_subject}", file=out, flush=True)
 
+    # Resolve and report the Hub's Dokploy mode before cleanup, disk hygiene,
+    # compose updates, or deploy calls can mutate anything.
+    hub_service = next(
+        (svc for svc in selected if svc.name.lower() == "darkhub" and svc.kind == "compose"),
+        None,
+    )
+    hub_mode_payload: Optional[Dict[str, Any]] = None
+    if image_source == IMAGE_SOURCE_GHCR and hub_service is not None:
+        try:
+            hub_mode_payload = fetch_service_status(transport, hub_service)
+        except DokployUsageError as exc:
+            print(
+                f"[{hub_service.name}] WARNING: Dokploy mode unavailable ({exc}); "
+                "zero downtime is not promised.",
+                file=err,
+                flush=True,
+            )
+        else:
+            compose_type = dokploy_compose_type(hub_mode_payload)
+            if dokploy_supports_start_first(compose_type):
+                print(
+                    f"[{hub_service.name}] Dokploy mode: Stack/Swarm ({compose_type}); start-first is active.",
+                    file=out,
+                    flush=True,
+                )
+            else:
+                mode_detail = (
+                    f"tipo ausente/desconhecido ({compose_type!r})"
+                    if compose_type is None or compose_type.lower() not in ("compose", "docker-compose", "docker compose")
+                    else f"Compose simples ({compose_type})"
+                )
+                print(
+                    f"[{hub_service.name}] WARNING: Dokploy mode conservador: {mode_detail}. "
+                    "Em Compose simples, update_config sera ignorado e a sonda pode observar queda; "
+                    "este deploy nao promete zero downtime. OA-057 acompanha a decisao de rota e OA-058 "
+                    "registra como habilitar Stack/Swarm.",
+                    file=err,
+                    flush=True,
+                )
+
     print(
         f"Triggering redeploy for {len(selected)} service(s) in {args.project}/{args.environment}...",
         file=out,
@@ -1150,7 +1199,11 @@ def _run_main(
     switchover_session: Optional[_SwitchoverProbeSession] = None
     for svc in selected:
         try:
-            baseline_payload = fetch_service_status(transport, svc)
+            baseline_payload = (
+                hub_mode_payload
+                if hub_mode_payload is not None and hub_service is not None and svc.name == hub_service.name
+                else fetch_service_status(transport, svc)
+            )
             baseline = latest_deployment(baseline_payload)
             if svc.name.lower() == "darkhub" and svc.kind == "compose":
                 action, reason = plan_darkhub_deploy(
@@ -1171,15 +1224,6 @@ def _run_main(
                     triggered.append(svc)
                     baselines[svc.name] = None
                     continue
-                if image_source == IMAGE_SOURCE_GHCR and not dokploy_supports_start_first(
-                    baseline_payload.get("composeType")
-                ):
-                    print(
-                        f"[{svc.name}] WARNING: Dokploy composeType={baseline_payload.get('composeType')!r}; "
-                        "start-first may be ignored. Owner decision OA-057 tracks Stack/Swarm versus blue/green.",
-                        file=err,
-                        flush=True,
-                    )
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
             if svc.name.lower() == "darkhub" and svc.kind == "compose" and args.wait and switchover_session is None:
                 switchover_session = _start_switchover_probe(expected_sha or "")

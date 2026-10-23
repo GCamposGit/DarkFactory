@@ -2376,6 +2376,38 @@
       "created_at": "2026-10-23T00:00:00Z",
       "created_by": "codex",
       "resolved_at": null
+    },
+    {
+      "id": "OA-058",
+      "kind": "action",
+      "title": "Configurar Darkhub como Stack no Dokploy se OA-057 escolher essa rota (USR-207)",
+      "priority": "high",
+      "status": "open",
+      "why": "A confirmacao de modo mostrou Stack/Swarm como pre-requisito para update_config.order=start-first. A documentacao atual do Dokploy informa que o tipo e escolhido ao criar o Compose; Compose simples ignora update_config. Primeiro responda OA-057 com a rota Stack. Preserve o servico atual ate a nova configuracao estar pronta e verificada.",
+      "blocks": [
+        "USR-207"
+      ],
+      "depends_on": [
+        "OA-057"
+      ],
+      "steps": [
+        {
+          "text": "Abra https://dokploy.ggcampos.com, entre em Projects > darkfac-core > production e abra o servico Compose Darkhub atual. Em General/Deploy Settings, confira o tipo. Se ja aparecer Stack, pare aqui: registre a evidencia e o agente pode marcar OA-058 como done. Se aparecer Docker Compose, mantenha este servico ativo e responda primeiro OA-057 escolhendo A (Stack/Swarm)."
+        },
+        {
+          "text": "Depois que OA-057 estiver respondida com A, no projeto darkfac-core e ambiente production use Create Service > Compose. No formulario, preencha Name = Darkhub, Compose Type = Stack, Environment = production, Server = o mesmo servidor usado pelo Darkhub atual e App Name = darkhub. Confirme que a tela mostra Stack antes de criar. Nao apague o servico atual antes de confirmar com o agente o plano de troca, pois o cadastro do Dokploy pode exigir substituir o nome Darkhub e isso pode interromper o Hub."
+        },
+        {
+          "text": "Na nova tela do Compose, abra Environment e replique as variaveis do servico atual sem copiar valores para o backlog ou para o chat. Em General, use a fonte raw e o compose versionado do Hub; mantenha GHCR configurado no registro Dokploy. Em Domains, confira e associe o dominio darkhub.ggcampos.com ao servico Darkhub. Salve e aguarde o estado Done antes de remover qualquer cadastro antigo."
+        },
+        {
+          "text": "Abra General/Deploy Settings do servico criado e confirme Compose Type = Stack; depois abra Deployments e aguarde o deploy terminar. No DarkHub, abra Acoes do Owner > OA-058 e informe que o tipo Stack esta ativo."
+        }
+      ],
+      "verify": "O compose Darkhub ativo no projeto darkfac-core/production informa composeType=stack pela API do Dokploy, o deploy termina em Done, o dominio darkhub.ggcampos.com responde em /health e o agente marca OA-058 como done com resolved_at.",
+      "created_at": "2026-10-23T00:00:00Z",
+      "created_by": "codex",
+      "resolved_at": null
     }
   ]
 }

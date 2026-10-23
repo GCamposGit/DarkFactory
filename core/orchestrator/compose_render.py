@@ -88,8 +88,8 @@ def ghcr_image_ref(sha: str) -> str:
 
 def dokploy_supports_start_first(compose_type: object) -> bool:
     """Recognize Dokploy Stack/Swarm compose types; unknown types are not promised zero downtime."""
-    normalized = str(compose_type or "").strip().lower()
-    return "swarm" in normalized or "stack" in normalized
+    normalized = str(compose_type or "").strip().lower().replace("_", " ").replace("-", " ")
+    return normalized in {"stack", "swarm", "docker stack", "docker swarm"}
 
 
 def render_darkhub_compose(source: str, sha: str, image_source: Optional[str] = None) -> str:

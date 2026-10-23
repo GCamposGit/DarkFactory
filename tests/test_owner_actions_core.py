@@ -47,6 +47,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SEED_FILE = REPO_ROOT / ".factory" / "owner_actions" / "owner_actions.json"
 
 
+def test_usr207_stack_mode_owner_action_matches_schema() -> None:
+    records = json.loads(SEED_FILE.read_text(encoding="utf-8"))["actions"]
+    action = next(record for record in records if record["id"] == "OA-058")
+
+    validated = OwnerAction.model_validate(action)
+    assert validated.kind is ActionKind.ACTION
+    assert validated.status is ActionStatus.OPEN
+    assert "USR-207" in validated.blocks
+
+
 def _draft(**overrides: Any) -> OwnerActionDraft:
     base: dict[str, Any] = {
         "title": "Fazer algo que so o owner pode",
