@@ -10123,8 +10123,8 @@
     "project_id": "darkfac",
     "title": "Roteador sem rota com Grok a 17,4%% e probe Anthropic ok mas snapshot parado ha 32h",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "98d290735c5626f79b554216db006f7d4a1ce373",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10155,7 +10155,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T09:56:47.415028Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T18:49:47.649446Z"
   },
   {
     "id": "USR-348",
