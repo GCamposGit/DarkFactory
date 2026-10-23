@@ -10662,5 +10662,37 @@
     "dependencies": [],
     "created_at": "2026-10-23T20:06:19.043633Z",
     "updated_at": "2026-10-23T22:38:00.773367Z"
+  },
+  {
+    "id": "USR-366",
+    "project_id": "darkfac",
+    "title": "Despachante continuo da frota: puxar planned e manter grokbox, Notebook e Desktop ocupados sem depender do chat",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 23/10/2026 o owner precisou cobrar repetidamente paralelismo basico: com portoes livres, os tickets ficaram serializados porque a entrega dependia de scripts ad hoc da sessao de chat (fila serial, um portao por vez). A frota ja tem line_fleet.json (prioridade grokbox > notebook > desktop), coordenador de frota (USR-282/337) e run_ticket, mas nada roda continuamente puxando tickets executaveis e preenchendo todos os hosts livres.",
+    "core_journey": [
+      "Em 23/10/2026 o owner precisou cobrar repetidamente paralelismo basico: com portoes livres, os tickets ficaram serializados porque a entrega dependia de scripts ad hoc da sessao de chat (fila serial, um portao por vez). A frota ja tem line_fleet.json (prioridade grokbox > notebook > desktop), coordenador de frota (USR-282/337) e run_ticket, mas nada roda continuamente puxando tickets executaveis e preenchendo todos os hosts livres."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Servico continuo (daemon agendado no Notebook, reinicia sozinho) que a cada ciclo le demands.json de origin/main, escolhe tickets planned executaveis (sem congelado-v0/not-authorized/waiting_human, sem run ativo) e despacha desenvolvimento + portao",
+      "Portoes em paralelo, um por host livre, na ordem grokbox (vivo e livre) > Notebook (RAM para 2+ workers) > Desktop; slot remoto com --remote-required; infra reenfileira",
+      "Nenhum host fica ocioso enquanto houver ticket executavel; telemetria por ciclo (hosts livres, tickets em voo) visivel no Hub",
+      "Deploy pos-merge deduplicado (um por lote) pelo caminho GHCR",
+      "Funciona sem nenhuma sessao de chat aberta; teste de unidade da selecao/distribuicao e prova com 3 tickets simultaneos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T22:43:20.608385Z",
+    "updated_at": "2026-10-23T22:43:20.608385Z"
   }
 ]
