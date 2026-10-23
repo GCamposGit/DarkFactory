@@ -865,3 +865,74 @@ def test_fix_commit_failure_ends_the_loop_with_fix_commit_failed(tmp_path: Path,
     err = capsys.readouterr().err
     assert "Worktree preservada" in err
     assert "secret detected" in err
+
+
+def test_gate_requires_remote_when_configured_and_local_ram_cannot_fit_two_workers() -> None:
+    """USR-354: busy_timeout on a remote slot must requeue, not fall to a 1-worker local gate."""
+    ga = run_ticket.gate_ram
+    low = ga.RamReading(4.0, 1)
+    ok = ga.RamReading(16.0, 3)
+    with patch.object(ga, "remote_workers_configured", return_value=True), \
+         patch.object(ga, "measure_workers", return_value=low):
+        assert run_ticket._gate_should_require_remote() is True
+        assert run_ticket._wait_gate_ram_if_local(True) is None
+    with patch.object(ga, "remote_workers_configured", return_value=True), \
+         patch.object(ga, "measure_workers", return_value=ok):
+        assert run_ticket._gate_should_require_remote() is False
+    with patch.object(ga, "remote_workers_configured", return_value=False), \
+         patch.object(ga, "measure_workers", return_value=low):
+        assert run_ticket._gate_should_require_remote() is False
+
+
+def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """USR-354: busy_timeout on the remote slot (RAM local < 2 workers) -> gate_remote_unavailable."""
+    # Fleet mode forces --local; CI runners may have it on, so pin the non-fleet path.
+    from core.line import line_lock
+
+    monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
+    monkeypatch.setattr(line_lock, "is_fleet_mode", lambda *a, **k: False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ticket = UserTicket(
+        id="USR-354", project_id="darkfac", title="Test Ticket",
+        problem_statement="Test problem", status=DeliveryStatus.PLANNED,
+    )
+    _seed_ticket_ledger(repo, ticket)
+    _branch(repo, "ticket/usr-354")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    _commit_all(repo, "feat: code")
+
+    gate_calls: list[list[str]] = []
+
+    def fake_run_bounded(argv, **kwargs):
+        gate_calls.append(list(argv))
+        return BoundedProcessResult(
+            stdout="", stderr="RemoteRequiredError: --remote-required: all workers busy among ['http://desktop']\n",
+            returncode=1, duration_s=52.0, timed_out=False,
+        )
+
+    fix_calls: list[str] = []
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        fix_calls.append(stage_label)
+        return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
+
+    ga = run_ticket.gate_ram
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch.object(ga, "remote_workers_configured", return_value=True), \
+         patch.object(ga, "measure_workers", return_value=ga.RamReading(4.0, 1)), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix):
+        result = run_ticket.resume_delivery(
+            "USR-354", worktree_path=repo, skip_validation=False, return_result=True
+        )
+
+    assert len(gate_calls) == 1
+    assert "--remote-required" in gate_calls[0] and "--local" not in gate_calls[0]
+    assert fix_calls == []
+    assert result["ok"] is False
+    assert result["cause"] == run_ticket.GATE_CAUSE_REMOTE_UNAVAILABLE
+    assert "--resume-delivery USR-354" in capsys.readouterr().err
