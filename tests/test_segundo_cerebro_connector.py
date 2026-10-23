@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import pytest
 from pydantic import ValidationError
@@ -240,8 +241,8 @@ def test_segundo_cerebro_health_check():
     client = SegundoCerebroClient()
     status = client.check_health()
     assert isinstance(status, SecondBrainStatus)
-    # The actual C:\dev\SegundoCerebro exists on this machine
-    if Path(r"C:\dev\SegundoCerebro").exists():
+    # Live assertions only on request: the folder can exist on a gate worker whose server is down.
+    if os.environ.get("DARKFAC_SECOND_BRAIN_LIVE") == "1" and Path(r"C:\dev\SegundoCerebro").exists():
         assert status.available is True
         assert "search" in status.registered_tools
         assert "read_note" in status.registered_tools

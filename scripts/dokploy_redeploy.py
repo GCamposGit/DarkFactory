@@ -56,6 +56,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.git.safe_show import safe_show
+from core.orchestrator.bluegreen import BlueGreenError, is_bluegreen, run_bluegreen_via_dokploy
 from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
@@ -1002,6 +1003,21 @@ def _resolve_services(
     return select_services(services, only)
 
 
+def _bluegreen_serving(health_client: Optional[Callable[[], Dict[str, Any]]]) -> Callable[[str], bool]:
+    probe = health_client or fetch_darkhub_health
+
+    def serving(expected: str) -> bool:
+        for _ in range(3):
+            try:
+                if str(probe().get("git_sha", "")).lower() != expected:
+                    return False
+            except Exception:
+                return False
+        return True
+
+    return serving
+
+
 def _run_main(
     *,
     argv: Optional[Sequence[str]],
@@ -1018,6 +1034,7 @@ def _run_main(
     disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     ops_notifier: Optional[Callable[[str], bool]] = None,
     ghcr_probe: Optional[GhcrManifestProbe] = None,
+    bluegreen_runner: Optional[Callable[..., Any]] = None,
 ) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -1149,9 +1166,21 @@ def _run_main(
                     triggered.append(svc)
                     baselines[svc.name] = None
                     continue
+                if is_bluegreen(baseline_payload.get("composeFile"), env):
+                    # USR-339: never overwrite a blue-green compose with the single-container render.
+                    print(f"[{svc.name}] blue-green deploy (USR-339)", file=out, flush=True)
+                    (bluegreen_runner or run_bluegreen_via_dokploy)(
+                        request=transport, compose_id=svc.service_id, source=darkhub_compose,
+                        new_sha=expected_sha, sha_is_serving=_bluegreen_serving(health_client),
+                        deploy_timeout=args.timeout, poll_interval=args.poll_interval,
+                        sleep_fn=sleep_fn, clock_fn=clock_fn,
+                        wait_ghcr=lambda s: wait_for_ghcr_tag(s, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn),
+                    )
+                    print(f"[{svc.name}] blue-green ok", file=out, flush=True)
+                    continue
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
             trigger_deploy(transport, svc)
-        except DokployUsageError as exc:
+        except (DokployUsageError, BlueGreenError) as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
             all_ok = False
             other_failure = True
@@ -1394,6 +1423,7 @@ def main(
     disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     ops_notifier: Optional[Callable[[str], bool]] = None,
     ghcr_probe: Optional[GhcrManifestProbe] = None,
+    bluegreen_runner: Optional[Callable[..., Any]] = None,
     stdout: Any = None,
     stderr: Any = None,
 ) -> int:
@@ -1428,6 +1458,7 @@ def main(
             disk_hygiene_runner=disk_hygiene_runner,
             ops_notifier=ops_notifier,
             ghcr_probe=ghcr_probe,
+            bluegreen_runner=bluegreen_runner,
         )
     except DokployUsageError as exc:
         print(str(exc), file=err, flush=True)

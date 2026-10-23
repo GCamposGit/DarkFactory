@@ -2386,11 +2386,11 @@
       "verify": "Item respondido; USR-339 recebe tag owner-decision.",
       "created_at": "2026-10-22T21:10:00Z",
       "created_by": "claude",
-      "resolved_at": "2026-10-23T11:28:24Z",
+      "resolved_at": "2026-10-23T03:00:00Z",
       "answer": {
         "option_id": "A",
-        "note": "Owner escolheu a opcao A (blue-green no Traefik) em 23/10/2026; registrada no USR-360 e como tag owner-decision:OA-057=A no USR-339 e USR-207.",
-        "answered_at": "2026-10-23T11:28:24Z",
+        "note": "Owner no chat em 23/10/2026: blue-green no Traefik",
+        "answered_at": "2026-10-23T03:00:00Z",
         "answered_by": "owner"
       }
     },
@@ -2422,6 +2422,36 @@
       "created_at": "2026-10-23T11:29:39Z",
       "created_by": "queue-registration",
       "resolved_at": "2026-10-23T11:34:36Z"
+    },
+    {
+      "id": "OA-058",
+      "kind": "action",
+      "title": "Hub blue-green: remover o container legado darkhub-cloud-247 na VPS apos a primeira migracao (so se ainda existir)",
+      "priority": "medium",
+      "status": "open",
+      "why": "USR-339: na primeira migracao para blue-green o container antigo pode ficar orfao com os mesmos rotulos Traefik e dividir trafego com o darkhub-blue. O agente tenta remover pela API do Dokploy, mas o endpoint nao esta confirmado. O agente avisa no chat quando a migracao rodar.",
+      "blocks": [
+        "USR-339"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abrir o terminal da VPS (Dokploy > Web Server > Terminal, ou ssh) e conferir os containers do Hub",
+          "command": "docker ps --filter name=darkhub --format \"{{.Names}} {{.Status}}\""
+        },
+        {
+          "text": "Se aparecer darkhub-cloud-247, remover",
+          "command": "docker rm -f darkhub-cloud-247"
+        },
+        {
+          "text": "Conferir de novo: deve sobrar so darkhub-blue (healthy)",
+          "command": "docker ps --filter name=darkhub --format \"{{.Names}} {{.Status}}\""
+        }
+      ],
+      "verify": "docker ps lista apenas darkhub-blue (ou darkhub-green) healthy",
+      "created_at": "2026-10-23T04:00:00Z",
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }

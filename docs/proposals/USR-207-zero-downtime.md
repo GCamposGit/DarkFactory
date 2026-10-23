@@ -104,7 +104,16 @@ O codigo ja suporta as duas fontes de imagem, controladas por `DARKHUB_IMAGE_SOU
 
    (o `healthcheck` ja aplicado no compose e o que libera o corte do trafego.)
 
-2. Sem Swarm: dois servicos `darkhub-blue` / `darkhub-green` com rotulos Traefik distintos; o redeploy sobe o inativo, espera `healthy` e so entao troca o roteador (pode ser feito em `scripts/dokploy_redeploy.py`).
+2. **ESCOLHIDA (owner, OA-057, 23/10/2026): blue-green no Traefik, sem Swarm.** Implementada em `core/orchestrator/bluegreen.py` e `scripts/dokploy_bluegreen.py`.
+
+   Desenho:
+   - O compose raw tem `darkhub-blue` e `darkhub-green`, com os MESMOS rotulos Traefik (mesmo router/service `darkhub`). O Traefik (provider Docker) trata os dois containers como um unico servico e so roteia para container `healthy` (o healthcheck ja existe). Mesmos volumes nomeados e mesmo ambiente nos dois; so a imagem/sha por cor muda.
+   - A cor inativa fica com `deploy.replicas: 0` (sem container). Estado persistido no proprio compose, numa linha `# darkfac-bluegreen: active=<cor> blue=<sha> green=<sha>` armazenada no Dokploy; o proximo deploy le por `compose.one` (sem arquivo local).
+   - Fase 1 (overlap): renderiza a cor inativa com o sha novo e `replicas: 1`; a ativa nao muda (compose so cria o container novo). Espera o `/health` publico devolver o sha novo 3 vezes seguidas (so ocorre depois de `healthy`, pois o Traefik so roteia para saudavel).
+   - Fase 2 (cutover): renderiza com a cor nova ativa e a antiga em `replicas: 0`; o compose remove so o container antigo.
+   - Falha: se a cor nova nao servir o sha na janela (30 x 5 s), o compose anterior e reinstalado, a cor antiga nunca parou, o script sai com codigo 1 e a mensagem de erro.
+   - Primeira migracao (compose ainda com o servico unico `darkhub`/`darkhub-cloud-247`): o overlap sobe `darkhub-blue`; o container legado fica orfao e continua servindo ate ser removido (`docker rm -f darkhub-cloud-247` na VPS, ou o proprio compose up com remocao de orfaos). Ele tem os mesmos rotulos, entao ha apenas balanceamento entre antigo e novo durante a transicao.
+   - Imagem: exige `ghcr` (o render usa o mesmo caminho GHCR e espera a tag antes de qualquer escrita).
 
 Criterio de aceite do ticket: sonda de 1 s durante um deploy real sem nenhuma resposta diferente de 200 em `/health`.
 
@@ -116,12 +125,13 @@ Terminal 1 (PowerShell): sonda de 1 s por 10 min.
 python C:\Users\guigc\darkfac-ops\tools\health_probe.py C:\Users\guigc\hub_probe.jsonl 600
 ```
 
-Terminal 2, durante a sonda (`--force` ignora o "ja esta no ar"):
+Terminal 2, durante a sonda (blue-green; o ultimo merge precisa ter a imagem GHCR publicada):
 
 ```powershell
-$env:DARKHUB_IMAGE_SOURCE = "ghcr"
-python C:\dev\DarkFac\scripts\dokploy_redeploy.py --only Darkhub --wait --force
+python C:\dev\DarkFac\scripts\dokploy_bluegreen.py
 ```
+
+Para provar a alternancia, rode uma segunda vez com outro sha (novo merge) e confira no Dokploy/Docker que a cor ativa mudou (`docker ps --filter name=darkhub`).
 
 Verificacao ao fim da sonda (esperado: `non200 = 0` e dois shas, antigo e novo):
 
@@ -130,7 +140,7 @@ $r = Get-Content C:\Users\guigc\hub_probe.jsonl | ForEach-Object { $_ | ConvertF
 "total = $($r.Count)"; "non200 = $(($r | Where-Object { $_.status -ne 200 }).Count)"; "shas = $((($r | Where-Object sha).sha | Select-Object -Unique) -join ', ')"
 ```
 
-Se `non200 > 0`: o compose esta em modo `docker-compose` (veredito acima); passa so com Stack/Swarm ou com a rota 2.
+Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de cutover) e se o container legado `darkhub-cloud-247` ainda existia.
 
 ### 2.3 Acoes do owner (o orquestrador registra as OA)
 

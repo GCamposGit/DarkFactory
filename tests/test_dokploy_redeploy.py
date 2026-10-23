@@ -1876,3 +1876,44 @@ def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:
 
     with pytest.raises(mod.DokployUsageError, match="OSError"):
         mod.wait_for_ghcr_tag("a" * 40, probe=boom, timeout=30, interval=10, sleep_fn=clock.sleep, clock_fn=clock.now)
+
+
+def _bluegreen_run(monkeypatch: pytest.MonkeyPatch, compose_file: Optional[str], runner: Any):
+    from core.infra import node_sync
+
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
+    payloads = [{"deployments": [old], "env": "KEEP=secret-value\n"}, {"deployments": [new], "env": "KEEP=secret-value\n"}]
+    if compose_file is not None:
+        payloads[0]["composeFile"] = compose_file
+    transport.program_get("/api/compose.one?composeId=compose_hub", payloads)
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+        node_sync.NodeStatus(name=name, state="converged", git_sha="a" * 40)
+        for name in ("Notebook", "Desktop", "VPS")
+    ]))
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": "a" * 40}, bluegreen_runner=runner, stdout=out, stderr=err,
+    )
+    return code, transport, err.getvalue()
+
+
+def test_darkhub_with_bluegreen_marker_delegates_and_never_writes_legacy_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Any] = []
+    marker = "# darkfac-bluegreen: active=blue blue=" + "b" * 40 + " green=" + "b" * 40 + "\nservices: {}\n"
+    code, transport, err = _bluegreen_run(monkeypatch, marker, lambda **kw: calls.append(kw))
+    assert code == mod.EXIT_OK, err
+    assert len(calls) == 1 and calls[0]["new_sha"] == "a" * 40 and calls[0]["compose_id"] == "compose_hub"
+    assert not [c for c in transport.post_calls if c[1] in ("/api/compose.update", "/api/compose.deploy")]
+
+
+def test_darkhub_without_marker_keeps_single_container_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Any] = []
+    code, transport, err = _bluegreen_run(monkeypatch, "services: {}\n", lambda **kw: calls.append(kw))
+    assert code == mod.EXIT_OK, err
+    assert calls == []
+    assert transport.post_calls[0][1] == "/api/compose.update"
+    assert transport.post_calls[1][1] == "/api/compose.deploy"
