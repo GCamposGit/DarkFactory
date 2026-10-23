@@ -88,6 +88,24 @@ def test_get_portfolio_project_detail_success(client: TestClient) -> None:
     assert "roadmap_health" in data
 
 
+def test_portfolio_project_detail_http_has_no_attribute_error(client: TestClient) -> None:
+    portfolio_response = client.get("/api/portfolio")
+    assert portfolio_response.status_code == 200
+    project_ids = [project["id"] for project in portfolio_response.json()["projects"]]
+    assert "pilot-hello" in project_ids
+    assert "darkfac" in project_ids
+    valid_health_statuses = {"healthy", "warning", "stale", "unknown", "error"}
+
+    for project_id in project_ids:
+        response = client.get(f"/api/portfolio/projects/{project_id}")
+        assert response.status_code == 200, f"{project_id}: {response.text}"
+        detail = response.json()
+        project = detail["project"]
+        assert "error" not in project["health_details"], project_id
+        assert project["health_status"] in valid_health_statuses, project_id
+        assert "has no attribute" not in str(detail["roadmap_health"]), project_id
+
+
 def test_get_portfolio_project_detail_not_found(client: TestClient) -> None:
     response = client.get("/api/portfolio/projects/non-existent-project-xyz")
     assert response.status_code == 404
@@ -187,3 +205,39 @@ def test_portfolio_health_failure_is_not_masked_as_healthy(monkeypatch) -> None:
     summary = _summary_with_roadmap_health(monkeypatch, _boom)
     assert summary.health_details.get("error") == "falha real"
     assert summary.health_status != "healthy"
+
+
+def test_portfolio_snapshot_failure_is_not_masked_as_healthy(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from core.roadmap.models import RoadmapHealth
+    from hub.backend.api import get_hub_service
+
+    service = get_hub_service()
+
+    def _snapshot_boom(_pid):
+        raise RuntimeError("snapshot indisponivel")
+
+    monkeypatch.setattr(service.roadmap, "get_snapshot", _snapshot_boom)
+    monkeypatch.setattr(
+        service.roadmap,
+        "get_health",
+        lambda project_id: RoadmapHealth(
+            project_id=project_id,
+            snapshot_id="s",
+            snapshot_hash="h",
+            observed_at=datetime.now(timezone.utc),
+            total_items=1,
+            confirmed_items=1,
+            blocked_items=0,
+            conflicts=0,
+            warnings=0,
+            stale=False,
+            policy="p",
+        ),
+    )
+    descriptor = service.project_registry.get_project("darkfac")
+    summary = service._build_portfolio_project_summary(descriptor)
+
+    assert summary.health_details.get("roadmap_snapshot_error") == "snapshot indisponivel"
+    assert summary.health_status == "warning"
