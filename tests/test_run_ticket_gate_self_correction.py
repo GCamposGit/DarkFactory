@@ -884,8 +884,15 @@ def test_gate_requires_remote_when_configured_and_local_ram_cannot_fit_two_worke
         assert run_ticket._gate_should_require_remote() is False
 
 
-def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(tmp_path: Path, capsys) -> None:
+def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
     """USR-354: busy_timeout on the remote slot (RAM local < 2 workers) -> gate_remote_unavailable."""
+    # Fleet mode forces --local; CI runners may have it on, so pin the non-fleet path.
+    from core.line import line_lock
+
+    monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
+    monkeypatch.setattr(line_lock, "is_fleet_mode", lambda *a, **k: False)
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
