@@ -9848,8 +9848,8 @@
     "project_id": "darkfac",
     "title": "Hub sem queda: imagem GHCR e troca start-first (USR-207 parte 2)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: fatia #594 entregue (espera da tag GHCR na linha, comando da sonda, roteiro de prova). Falta troca sem queda: compose Darkhub esta em docker-compose (start-first ignorado); aguarda decisao OA-057 e prova da sonda de 1 s (anterior: e46bba2be3220c543b5a3eb34afdf396f319cb95)",
+    "status": "completed",
+    "delivery_evidence": "cc1a78a291780a15956f53108db34cce79f7d0a9",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9877,7 +9877,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T23:53:15.560129Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T12:09:27.846990Z"
   },
   {
     "id": "USR-340",
