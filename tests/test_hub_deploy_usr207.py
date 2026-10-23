@@ -49,6 +49,60 @@ def test_classify_same_sha_never_rebuilds_and_windows_paths_normalised() -> None
     assert dc.classify(A, B, [".factory\\demands\\demands.json"])[0] is False
 
 
+def _dockerfile_copy_sources() -> set[str]:
+    dockerfile = (ROOT / "deploy" / "dokploy" / "Dockerfile.hub").read_text(encoding="utf-8")
+    return {
+        match.group(1).rstrip("/")
+        for line in dockerfile.splitlines()
+        if (match := re.match(r"^\s*COPY\s+([^\s]+)\s+", line, flags=re.IGNORECASE))
+    }
+
+
+def _hub_image_workflow_paths() -> set[str]:
+    workflow = (ROOT / ".github" / "workflows" / "hub-image.yml").read_text(encoding="utf-8")
+    paths_start = re.search(r"^\s+paths:\s*$", workflow, flags=re.MULTILINE)
+    assert paths_start, "hub-image workflow has no push.paths trigger"
+    paths: set[str] = set()
+    for line in workflow[paths_start.end():].splitlines():
+        if line.strip() and not line.startswith("      "):
+            break
+        match = re.match(r'^\s+-\s+["\']?([^"\']+?)["\']?\s*$', line)
+        if match:
+            paths.add(match.group(1))
+    return paths
+
+
+def test_classifier_rebuild_paths_are_embedded_in_the_hub_image() -> None:
+    copied_sources = _dockerfile_copy_sources()
+    missing_prefixes = sorted(prefix for prefix in dc.REBUILD_PREFIXES if prefix.rstrip("/") not in copied_sources)
+    missing_files = sorted(path for path in dc.REBUILD_FILES if path not in copied_sources)
+
+    assert not missing_prefixes and not missing_files, (
+        "deploy classifier rebuild paths must be sources of COPY instructions in "
+        "deploy/dokploy/Dockerfile.hub; missing prefixes="
+        f"{missing_prefixes}, missing files={missing_files}"
+    )
+
+
+def test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger() -> None:
+    workflow_paths = _hub_image_workflow_paths()
+    missing_prefixes = sorted(
+        prefix for prefix in dc.REBUILD_PREFIXES if f"{prefix}**" not in workflow_paths
+    )
+    missing_files = sorted(path for path in dc.REBUILD_FILES if path not in workflow_paths)
+
+    assert not missing_prefixes and not missing_files, (
+        "classifier rebuild paths are not covered by the Hub image workflow trigger. "
+        "The workflow is protected by core/orchestrator/guard.py; open an owner action "
+        "to update .github/workflows/hub-image.yml. Missing prefixes="
+        f"{missing_prefixes}, missing files={missing_files}"
+    )
+
+
+def test_run_hub_only_merge_is_data_only() -> None:
+    assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
+
+
 # --------------------------------------------------------------------------- plan
 
 
