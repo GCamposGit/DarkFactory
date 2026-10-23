@@ -1387,12 +1387,17 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             return self._from_snapshot(snapshot)
 
         # 1. Try real live Anthropic unified rate-limits probe
-        try:
-            live_usage = self._probe_claude_unified_ratelimits()
-            if live_usage:
-                return live_usage
-        except Exception as exc:
-            logger.debug("Claude unified ratelimits probe failed: %s", exc)
+        # A single transient network error must not leave a days-old snapshot as the only evidence
+        # (USR-347): when the caller forced a probe, try once more before falling back.
+        for attempt in range(2 if force else 1):
+            try:
+                live_usage = self._probe_claude_unified_ratelimits()
+                if live_usage:
+                    return live_usage
+            except Exception as exc:
+                logger.warning("Claude live quota probe failed (attempt %d): %s", attempt + 1, type(exc).__name__)
+        if snapshot and not self._is_snapshot_fresh(snapshot):
+            logger.warning("Claude live quota probe returned no reading; only a stale snapshot is available")
 
         if snapshot:
             return self._from_snapshot(snapshot)
