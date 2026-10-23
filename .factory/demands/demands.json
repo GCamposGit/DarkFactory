@@ -10447,5 +10447,38 @@
     "dependencies": [],
     "created_at": "2026-10-23T10:35:13.406958Z",
     "updated_at": "2026-10-23T10:35:13.406958Z"
+  },
+  {
+    "id": "USR-362",
+    "project_id": "darkfac",
+    "title": "Mesmo ticket vira duas demandas e dois runs ativos (USR-343: dem-f387275c284d e dem-db533d497a10)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 23/10/2026 /api/line/live mostra dois runs autonomos ativos para USR-343, ambos em grill/waiting_human: run-c057f02a57f5 (demanda dem-f387275c284d, criado 22/10 13:03 UTC) e run-ae8adb35958a (demanda dem-db533d497a10, criado 22/10 20:42 UTC). O Hub lista o bloqueio WAITING_HUMAN de USR-343 duas vezes em /api/interventions/priority. O alimentador do backlog ou o intake criou uma segunda demanda para um ticket que ja tinha run ativo, o que duplica Grill, custo e pedidos ao owner.",
+    "core_journey": [
+      "Em 23/10/2026 /api/line/live mostra dois runs autonomos ativos para USR-343, ambos em grill/waiting_human: run-c057f02a57f5 (demanda dem-f387275c284d, criado 22/10 13:03 UTC) e run-ae8adb35958a (demanda dem-db533d497a10, criado 22/10 20:42 UTC). O Hub lista o bloqueio WAITING_HUMAN de USR-343 duas vezes em /api/interventions/priority. O alimentador do backlog ou o intake criou uma segunda demanda para um ticket que ja tinha run ativo, o que duplica Grill, custo e pedidos ao owner."
+    ],
+    "non_goals": [
+      "Nao alterar o fluxo do Grill nem a politica de retomada"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste reproduz a criacao de segunda demanda/run para um ticket com run ativo e falha antes da correcao",
+      "Alimentador e intake sao idempotentes por ticket_id enquanto houver run ativo ou waiting_human",
+      "Os dois runs atuais de USR-343 sao reconciliados para um so, preservando a resposta do Grill",
+      "/api/interventions/priority nao lista o mesmo bloqueio duas vezes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T10:37:36.139118Z",
+    "updated_at": "2026-10-23T10:37:36.139118Z"
   }
 ]
