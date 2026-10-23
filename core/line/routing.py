@@ -528,19 +528,17 @@ def _extra_operating_candidate(
     return None
 
 
-CODEX_HEADLESS_BLOCK_REASON = "codex_headless_visible_windows"
+CODEX_HEADLESS_BLOCK_REASON = "codex_headless_opted_out"
 
 
 def codex_headless_blocked() -> bool:
-    """True when codex must not be elected for headless runs on this host (USR-336).
+    """True only when the host explicitly opts out of headless codex (USR-347).
 
-    codex.exe launches `codex-windows-sandbox-setup.exe` itself, which shows a console window on every
-    command even when our own child is CREATE_NO_WINDOW. On Windows the block is the default; set
-    `DARKFAC_CODEX_HEADLESS_ALLOWED=1` (true/yes/on) to allow it (e.g. a dedicated headless host).
+    The console-window issue of USR-336 was a one-off and is solved; owner decision of 23/10/2026:
+    codex headless is allowed on every OS. Set `DARKFAC_CODEX_HEADLESS_ALLOWED=0` (false/no/off) to
+    keep codex out of headless runs on a given host.
     """
-    if sys.platform != "win32":
-        return False
-    return os.environ.get("DARKFAC_CODEX_HEADLESS_ALLOWED", "").strip().lower() not in ("1", "true", "yes", "on")
+    return os.environ.get("DARKFAC_CODEX_HEADLESS_ALLOWED", "").strip().lower() in ("0", "false", "no", "off")
 
 
 def _routable_candidates(
@@ -570,12 +568,14 @@ def _routable_candidates(
     extra = _extra_operating_candidate(cascade, operating_harness)
     for harness, model in cascade + ([extra] if extra is not None else []):
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
+            logger.info("Skipping harness %s for stage %s (excluded by caller)", harness, stage)
             continue
         if f"harness:{harness}" not in caps:
+            logger.info("Skipping harness %s for stage %s (not in host_caps)", harness, stage)
             continue
         if harness == "codex" and codex_headless_blocked():
             logger.info(
-                "Skipping harness codex for stage %s (%s; set DARKFAC_CODEX_HEADLESS_ALLOWED=1 to allow)",
+                "Skipping harness codex for stage %s (%s; DARKFAC_CODEX_HEADLESS_ALLOWED=0 on this host)",
                 stage, CODEX_HEADLESS_BLOCK_REASON,
             )
             continue
@@ -696,6 +696,8 @@ def pick(
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
         remaining = None if cooling else lookup(provider_id)
+        if cooling:
+            logger.info("pick: harness %s skipped for stage %s (in cooldown)", harness, stage)
 
         # Fail-closed: unknown quota or quota <= critical is strictly critical/ineligible
         is_critical = remaining is None or remaining <= critical_threshold

@@ -59,8 +59,21 @@ def test_hidden_helpers_noop_off_windows(monkeypatch):
     assert agent_cli.hidden_popen_kwargs() == {}
 
 
-def test_codex_blocked_by_default_on_windows(monkeypatch, caplog):
+def test_codex_allowed_by_default_on_windows(monkeypatch):
+    # USR-347: owner decision of 23/10/2026, no default block on any OS.
     monkeypatch.delenv("DARKFAC_CODEX_HEADLESS_ALLOWED", raising=False)
+    monkeypatch.setattr(routing.sys, "platform", "win32")
+    assert not routing.codex_headless_blocked()
+    cfg = routing._default_routing_config()
+    cands = routing._routable_candidates(
+        "development", cfg.stages["development"], cfg,
+        {"harness:claude", "harness:codex"}, "write", set(), set(), None,
+    )
+    assert any(h == "codex" for h, _ in cands)
+
+
+def test_codex_blocked_only_by_explicit_opt_out(monkeypatch, caplog):
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "0")
     monkeypatch.setattr(routing.sys, "platform", "win32")
     assert routing.codex_headless_blocked()
     cfg = routing._default_routing_config()
@@ -80,3 +93,5 @@ def test_codex_allowed_by_env_or_off_windows(monkeypatch):
     monkeypatch.delenv("DARKFAC_CODEX_HEADLESS_ALLOWED")
     monkeypatch.setattr(routing.sys, "platform", "linux")
     assert not routing.codex_headless_blocked()
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "off")
+    assert routing.codex_headless_blocked()
