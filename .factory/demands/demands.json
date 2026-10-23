@@ -5700,13 +5700,16 @@
     "delivery_evidence": "Reaberto em 20/10/2026: codigo entregue (redeploy sem downtime/deploy deduplicado); falta a OA-044 do owner (autoDeploy off, GHCR, sonda) e a prova no deploy (anterior: 1a416f4bb52f7047050c57b3d2d52cd2bf72019d); Prova USR319 PR506: JOIN de Darkhub terminou done NEW CHANGES em1.4s, mas health permaneceu7433f3df em vez de c9117212. Recuperacao dirigida --force em Darkhub+n8n iniciada apos confirmar ambos done; verificar recuperacao automatica ao JOIN terminar SHA divergente.",
     "item_type": "operations",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
       "darkhub",
       "deploy",
       "dokploy",
-      "uptime"
+      "uptime",
+      "plano-20261023",
+      "onda-2",
+      "owner-decision:OA-057=A"
     ],
     "problem_statement": "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
@@ -5732,9 +5735,12 @@
       "hub/frontend/"
     ],
     "estimated_complexity": "high",
-    "dependencies": [],
+    "dependencies": [
+      "USR-339",
+      "USR-348"
+    ],
     "created_at": "2026-10-10T14:53:42.327437Z",
-    "updated_at": "2026-10-20T14:49:15.921450Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-208",
@@ -6391,7 +6397,8 @@
       "planning-only",
       "security-quality-2026-10-08",
       "not-authorized-for-execution",
-      "congelado-v0"
+      "hold",
+      "plano-20261023"
     ],
     "problem_statement": "Evidencia sintetica restrita registrada no planejamento de seguranca de 08/10/2026. O componente de auditoria precisa distinguir evidencia integra, ilegivel e ausente; a garantia atual precisa ser calibrada. Detalhes ficam fora do repositorio publico. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
@@ -6405,7 +6412,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:19.062511Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-171",
@@ -6422,7 +6429,8 @@
       "planning-only",
       "security-quality-2026-10-08",
       "not-authorized-for-execution",
-      "congelado-v0"
+      "hold",
+      "plano-20261023"
     ],
     "problem_statement": "Reproducao restrita do planejamento de 08/10/2026 identificou uma lacuna de vinculo entre evidencia de revisao e candidato retomado. Investigar e corrigir sem divulgar reproducoes antes da remediacao. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
@@ -6436,7 +6444,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:20.172392Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-172",
@@ -6453,7 +6461,8 @@
       "planning-only",
       "security-quality-2026-10-08",
       "not-authorized-for-execution",
-      "congelado-v0"
+      "hold",
+      "plano-20261023"
     ],
     "problem_statement": "Revisao documental da topologia encontrou concentracao de credenciais operacionais no ambiente usado pelo desenvolvimento. Planejar isolamento por tarefa e broker de efeitos, com provas de fronteira antes de considerar o contêiner suficiente. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
@@ -6468,7 +6477,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:21.366941Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-173",
@@ -6485,7 +6494,8 @@
       "planning-only",
       "security-quality-2026-10-08",
       "not-authorized-for-execution",
-      "congelado-v0"
+      "hold",
+      "plano-20261023"
     ],
     "problem_statement": "O passo syntax_and_types em harness.config.json executa compileall, que verifica sintaxe sem fazer analise estatica de tipos. Correcao deve passar pelo fluxo legitimo de evolucao de governanca. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
@@ -6500,7 +6510,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:22.461000Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-174",
@@ -6517,7 +6527,8 @@
       "planning-only",
       "security-quality-2026-10-08",
       "not-authorized-for-execution",
-      "congelado-v0"
+      "hold",
+      "plano-20261023"
     ],
     "problem_statement": "HF-24 ja oferece configuracao, auditoria e avaliacao Enterprise; busca documental em core/line, core/git e run_ticket.py nao demonstrou consumo obrigatorio dessa politica nos caminhos de inferencia e entrega. Exigir prova operacional antes de declarar protecao transversal. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
@@ -6532,7 +6543,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:23.668336Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-176",
@@ -7548,10 +7559,11 @@
     "delivery_evidence": "Patch em docs/proposals/USR-253-watchdog-suite-lock.patch (core/harness protegido); aguardando publicacao do owner pela OA-041. (anterior: 797eb891d88aff7e373cfcc5151a047ee2eb3941)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
-      "congelado-v0"
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Seguimento do USR-178: JobManager._run_job usa deadline = soma dos timeout_sec dos passos + 120 s, e a espera na fila do suite_lock do Desktop corre dentro desse prazo; uma fila longa pode matar o job. A proposta docs/proposals/USR-178-gate-resilience.md (secao 6) traz o trecho: o worker estende o deadline pela linha '[SUITE_LOCK] acquired ... after waiting Xs', com teto de 3600 s. remote_worker.py e protegido (patch em docs/proposals e OA).",
     "core_journey": [
@@ -7566,9 +7578,12 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-359",
+      "USR-344"
+    ],
     "created_at": "2026-10-13T00:30:14.404999Z",
-    "updated_at": "2026-10-20T11:20:23.207071Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-255",
@@ -8260,15 +8275,16 @@
     "delivery_evidence": "Reaberto em 20/10/2026: M1 (repo privado pilot-hello) e M2 (ambiente) concluidos; M3 aguarda deploy + OA-047 (demanda pelo Telegram) e M5 aguarda OA-043 (Dokploy/webhook) (anterior: b5ef8d3f4f6618f2e2712129fcac2d665385625c; M2 (ambiente) concluido em 20/10/2026)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
       "pos-v0-autonomia",
       "standalone-projects",
       "pilot",
       "needs-slicing",
-      "congelado-v0",
-      "owner-decision:OA-042=recomendado"
+      "owner-decision:OA-042=recomendado",
+      "plano-20261023",
+      "onda-3"
     ],
     "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar. Fatia 1 (plano do piloto) em docs/plans/USR-279-greenfield-pilot.md; marcos M1-M7 seguem.\n\n[Decisao do owner OA-042] Decidir o piloto greenfield do USR-279 (nome, texto, destino, retencao, build) -> opcao recomendado (Aceitar todas as recomendacoes), em 2026-10-20T10:29:29Z. Nota do owner: Owner no chat em 20/10/2026: sim (D1 pilot-hello, D2 'DarkFac pilot', D3 opcao A Dokploy existente, D4 manter arquivado, D5 build no venv).",
     "core_journey": [],
@@ -8284,9 +8300,12 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-355",
+      "USR-353"
+    ],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-20T15:48:12.919545Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-277",
@@ -9832,7 +9851,10 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0",
+      "owner-decision:OA-057=A"
     ],
     "problem_statement": "OA-044 cumprida pelo owner em 21/10 (autoDeploy do compose Darkhub desligado, registry ghcr.io criado no Dokploy, sonda de disponibilidade agendada no Notebook). Falta a parte de codigo de docs/proposals/USR-207-zero-downtime.md secoes 2.1-2.2: aplicar USR-207-ghcr-build.patch (workflow protegido hub-image.yml), trocar build por image ghcr.io/gcamposgit/darkhub:SHA no compose do Hub, adaptar core/orchestrator/compose_render.py e o teste test_darkhub_build_pinned_before_deploy_and_health_converges, redeploy esperar a tag do sha, remover container_name fixo e usar start-first gated por healthcheck. Corrigir tambem o comando schtasks da secao 1 da proposta (aspas quebram no PowerShell; usar Register-ScheduledTask com pythonw.exe em caminho absoluto).",
     "core_journey": [
@@ -9852,7 +9874,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T23:53:15.560129Z",
-    "updated_at": "2026-10-23T02:01:24.829944Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-340",
@@ -9960,7 +9982,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Em 21-22/10 cinco OAs (041/045/046/050/052) exigiram do owner o mesmo ritual: worktree, git apply de patch, portao local de 30-90 min, push direto ou merge --admin. Houve 3 tentativas falhas (runner apontando para o checkout sujo, timeout local por concorrencia, worker travado). O USR-228 ja criou o registro de autorizacao do owner (.factory/governance/authorizations/<id>.json na base confiavel) que o guard aceita. Falta o fluxo: agente abre PR com o patch protegido; o Hub mostra botao 'Aprovar publicacao protegida' que grava o registro vinculado a ticket, caminhos exatos e sha do candidato; a esteira roda o portao remoto e mergeia sozinha.",
     "core_journey": [
@@ -9979,9 +10003,11 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-353"
+    ],
     "created_at": "2026-10-22T09:19:41.449353Z",
-    "updated_at": "2026-10-22T09:19:41.449353Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-344",
@@ -9994,7 +10020,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0"
     ],
     "problem_statement": "Em 21/10 o grokbox respondeu busy=True, active_runs=1, queue_length=1 por mais de 45 min com CPU 2,4%; o portao do owner falhou como 'unstable/unreachable' ate o owner chamar /system/update e /system/restart manualmente. Mesma familia do incidente de 15/10 (OA-023).",
     "core_journey": [
@@ -10014,7 +10042,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T09:22:06.495119Z",
-    "updated_at": "2026-10-22T09:22:06.495119Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-345",
@@ -10027,7 +10055,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Em 22/10 GET https://darkhub.ggcampos.com/api/portfolio/projects/pilot-hello devolveu health_status=healthy com health_details.error informando que o objeto RoadmapHealth nao tem atributo status: o calculo de saude do portfolio acessa um atributo inexistente e mascara o erro como healthy.",
     "core_journey": [
@@ -10042,9 +10072,11 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-361"
+    ],
     "created_at": "2026-10-22T09:36:39.681403Z",
-    "updated_at": "2026-10-22T09:36:39.681403Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-346",
@@ -10091,7 +10123,10 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0",
+      "prioridade-0"
     ],
     "problem_statement": "Em 22/10 06:55 python run_ticket.py USR-346 saiu com 'Nenhuma rota disponivel'. Log: codex pulado (codex_headless_visible_windows); 'Snapshot for anthropic is stale (115537.9 s)... probe provider=anthropic outcome=ok' seguido de 'Quota data for anthropic is older than 3600.0s (probe_unavailable); failing closed' -- o probe teve sucesso mas o snapshot nao foi atualizado; grok com 17,4%% restante (acima do piso de 15%%) nem foi avaliado/registrado no log. Resultado: fila de desenvolvimento parada no Notebook com conta saudavel.",
     "core_journey": [
@@ -10105,13 +10140,16 @@
       "Probe Anthropic com outcome=ok grava snapshot novo e o roteador usa o valor medido",
       "Grok acima do piso e elegivel para development no Notebook, ou o log diz o motivo exato da exclusao",
       "Teste reproduz o caso do log de 22/10",
-      "Portao oficial runner.py --quick passa"
+      "Portao oficial runner.py --quick passa",
+      "Decisao do owner em 23/10/2026: o bloqueio do Codex headless no Windows (USR-336) era temporario; sem DARKFAC_CODEX_HEADLESS_ALLOWED no processo o Codex volta a ser elegivel no Notebook (o bloqueio so vale com opt-out explicito)",
+      "pick('development', ['harness:claude','harness:codex','harness:grok','harness:antigravity']) no Notebook devolve um harness com write sempre que algum estiver acima de 15%; devolver None nesse caso e defeito",
+      "Grok nunca e excluido em silencio: cada harness descartado gera log com o motivo (hoje pick com so harness:grok devolve None sem nenhuma linha de log)"
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T09:56:47.415028Z",
-    "updated_at": "2026-10-22T09:56:47.415028Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-348",
@@ -10124,7 +10162,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Em 22/10, apos os merges #569 (fecha OA-047/052) e #573 (cria OA-053), /api/interventions/priority ainda listava OA-047 e OA-052 e nao listava OA-053; /health seguia em 40861ee4. scripts/dokploy_redeploy.py (plan_darkhub_deploy, core/infra/deploy_classifier.py da USR-207) classifica .factory/** como so dados e nao redeploya, mas o Hub le .factory/owner_actions/owner_actions.json embutido na imagem. O owner ve fila errada no Hub.",
     "core_journey": [
@@ -10139,9 +10179,11 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-339"
+    ],
     "created_at": "2026-10-22T10:03:36.429409Z",
-    "updated_at": "2026-10-22T10:03:36.429409Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-349",
@@ -10242,7 +10284,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Em 22/10 python run_ticket.py USR-346 recusou rodar com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao' listando apenas arquivos gerados pela propria fabrica: .factory/executions/active/exec-*.json (hook de execucao), .factory/hub_availability.json (sonda USR-207 agendada no Notebook), evidencias .factory/owner_actions/OA-*-*.png/.jsonl/.ps1 e .factory/reports/*. Isso obriga --allow-dirty-shared-checkout e esconde sujeira real.",
     "core_journey": [
@@ -10257,9 +10301,11 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-347"
+    ],
     "created_at": "2026-10-22T12:34:30.263515Z",
-    "updated_at": "2026-10-22T12:34:30.263515Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-353",
@@ -10272,9 +10318,11 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0"
     ],
-    "problem_statement": "Em 22/10/2026 o owner respondeu pelo Telegram o Grill do USR-341 (teto de gasto da qualificacao de modelos). Nao ha registro: GET /api/owner-actions/answers termina em OA-049 (21/10), nao existe OA nem pending_grill para USR-341 e o ticket segue sem tag owner-decision. A decisao teve de ser refeita no chat.",
+    "problem_statement": "Em 22/10/2026 o owner respondeu pelo Telegram o Grill do USR-341 (teto de gasto da qualificacao de modelos). Nao ha registro: GET /api/owner-actions/answers termina em OA-049 (21/10), nao existe OA nem pending_grill para USR-341 e o ticket segue sem tag owner-decision. A decisao teve de ser refeita no chat. Evidencia adicional 23/10/2026: o owner respondeu o Grill do USR-343, mas grill_answers no Postgres nao tem nenhuma linha para run-c057f02a57f5 nem run-ae8adb35958a e o ticket no Hub segue sem alteracao desde 22/10 09:19; a resposta se perdeu no mesmo caminho. Concluir este ticket antes de pedir nova resposta do USR-343.",
     "core_journey": [
       "Em 22/10/2026 o owner respondeu pelo Telegram o Grill do USR-341 (teto de gasto da qualificacao de modelos). Nao ha registro: GET /api/owner-actions/answers termina em OA-049 (21/10), nao existe OA nem pending_grill para USR-341 e o ticket segue sem tag owner-decision. A decisao teve de ser refeita no chat."
     ],
@@ -10289,7 +10337,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T12:48:49.279487Z",
-    "updated_at": "2026-10-22T12:48:49.279487Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-354",
@@ -10302,7 +10350,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Em 22/10/2026 USR-350 e USR-341 entregues com deliver_parallel.py host=desktop: Desktop busy (job de outra sessao), remote_attempts busy_timeout em 52 s, path=local_after_remote, portao rodou no Notebook (4 GiB livres, 1 worker xdist) e estourou o limite (exit 124) apos 3008 s; entrega marcada infra e reenfileirada. Perde ~50 min por tentativa.",
     "core_journey": [
@@ -10312,13 +10362,17 @@
     "reachability_contract": "",
     "acceptance_criteria": [
       "Slot desktop espera o Desktop liberar (ou reenfileira imediatamente) em vez de cair para portao local quando a RAM do Notebook nao suporta 2+ workers",
-      "Teste cobrindo busy_timeout no slot desktop sem fallback local"
+      "Teste cobrindo busy_timeout no slot desktop sem fallback local",
+      "Ordem de portao segue .factory/config/line_fleet.json: Grokbox (1, testar disponibilidade a cada ticket e usar sempre que responder), Notebook (2), Desktop (3); Desktop com outra carga (indexacao) continua aceitando portao como terceira opcao",
+      "Com 3 tickets elegiveis a frota roda 3 em paralelo, um por host; menos que isso com fila e hosts livres e defeito registrado na telemetria"
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-359"
+    ],
     "created_at": "2026-10-22T14:27:55.521220Z",
-    "updated_at": "2026-10-22T14:27:55.521220Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-355",
@@ -10331,7 +10385,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-1"
     ],
     "problem_statement": "Em 22/10, apos o deploy do USR-346 (#588) o sweep retomou os runs do piloto entre 11:53 e 12:08 (OA-HR fecharam), mas USR-279, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30 e dem-173a2aa6f995 voltaram a waiting_human(no_route_available) em minutos: o run ja passou de run_caps.wall_clock_hours, entao RouteWaiter estaciona de imediato em vez de retry com not_before. So dem-6f1d432a760f (M3) pegou rota. O OA-HR do canario cancelado (run-aebc0411b972, dem-e365b0bd6553) segue aberto, contrariando o criterio do USR-346.",
     "core_journey": [
@@ -10349,9 +10405,11 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-347"
+    ],
     "created_at": "2026-10-22T15:13:08.756648Z",
-    "updated_at": "2026-10-22T15:13:08.756648Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-359",
@@ -10364,7 +10422,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0"
     ],
     "problem_statement": "A validacao oficial em 2026-10-23 passou syntax_and_types, mas falhou no unit_and_integration_tests_parallel. No Desktop foram reportados 4846 erros e 3 falhas; no Grokbox, 5000 testes passaram, 31 foram ignorados e 1 falhou entre 5032 descobertos. O worker Grokbox ficou inacessivel por mais de 120 segundos e o runner retomou o mesmo job; o resumo nao reteve o identificador nem o traceback do teste que falhou. Os testes focados desta alteracao passaram localmente (185/185).",
     "core_journey": [
@@ -10381,7 +10441,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T07:47:06.750537Z",
-    "updated_at": "2026-10-23T07:47:06.750543Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-360",
@@ -10394,7 +10454,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-2"
     ],
     "problem_statement": "Decisao do owner em 23/10/2026: o padrao adotado no Hub (USR-339, OA-057 opcao A) deve valer sempre para novos produtos da fabrica. Hoje a adocao/planejamento de produto (Project Adoption Gateway, skills 02-plan-product-architecture e 07-build-dark-factory, templates de deploy/compose_render) nao gera isso por padrao.",
     "core_journey": [
@@ -10410,9 +10472,11 @@
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
-    "dependencies": [],
+    "dependencies": [
+      "USR-339"
+    ],
     "created_at": "2026-10-23T09:46:54.819812Z",
-    "updated_at": "2026-10-23T09:46:54.819812Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-361",
@@ -10425,7 +10489,9 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0"
     ],
     "problem_statement": "Em 23/10/2026 GET https://darkhub.ggcampos.com/api/line/status devolve canary_streak=0 e last_canary_report=null; o criterio V2 traz 'Falha ao inspecionar relatorios do canario: control store sem acesso de leitura aos runs' e o relatorio de aceite exibido tem generated_at 2026-10-05. Ao mesmo tempo /api/line/live (mesmo Postgres) lista canarios darkfac-canary concluidos em retrospective/succeeded nos dias 17, 18, 19, 20, 21 (tentativa 2), 22 e 23 (tentativa 2). O verify_v2(store=self._line_control_store()) em hub/backend/service.py usa load_canary_days_from_store, que falha no store do Hub, e o painel de aceite (USR-215) volta ao JSON antigo. Sem isso V1 e V2 do HF-27 nunca podem ser verificados e o criterio de sucesso da MISSION fica sem medicao.",
     "core_journey": [
@@ -10437,16 +10503,16 @@
     "reachability_contract": "",
     "acceptance_criteria": [
       "Com o Hub em producao, /api/line/status devolve canary_streak calculado a partir dos runs darkfac-canary do Postgres, sem a mensagem 'control store sem acesso de leitura aos runs'",
-      "Regra documentada e testada para dia verde quando a primeira tentativa falha e a segunda conclui (tentativa 2 conta ou nao conta)",
       "Teste de regressao reproduz o store do Hub (o mesmo tipo devolvido por _line_control_store) e falha antes da correcao",
       "V1 tambem passa a ler o store e explica qual run comprova ou falta",
-      "Relatorio de aceite exibido traz generated_at do dia, nao o JSON de 05/10"
+      "Relatorio de aceite exibido traz generated_at do dia, nao o JSON de 05/10",
+      "Decisao do owner em 23/10/2026: dia verde = algum canario do dia concluiu sem intervencao humana direta, inclusive a 2a tentativa automatica; a falha da 1a tentativa gera diagnostico e correcao pela propria fabrica"
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T10:35:13.406958Z",
-    "updated_at": "2026-10-23T10:35:13.406958Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   },
   {
     "id": "USR-362",
@@ -10459,9 +10525,11 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-20261023",
+      "onda-0"
     ],
-    "problem_statement": "Em 23/10/2026 /api/line/live mostra dois runs autonomos ativos para USR-343, ambos em grill/waiting_human: run-c057f02a57f5 (demanda dem-f387275c284d, criado 22/10 13:03 UTC) e run-ae8adb35958a (demanda dem-db533d497a10, criado 22/10 20:42 UTC). O Hub lista o bloqueio WAITING_HUMAN de USR-343 duas vezes em /api/interventions/priority. O alimentador do backlog ou o intake criou uma segunda demanda para um ticket que ja tinha run ativo, o que duplica Grill, custo e pedidos ao owner.",
+    "problem_statement": "Em 23/10/2026 /api/line/live mostra dois runs autonomos ativos para USR-343, ambos em grill/waiting_human: run-c057f02a57f5 (demanda dem-f387275c284d, criado 22/10 13:03 UTC) e run-ae8adb35958a (demanda dem-db533d497a10, criado 22/10 20:42 UTC). O Hub lista o bloqueio WAITING_HUMAN de USR-343 duas vezes em /api/interventions/priority. O alimentador do backlog ou o intake criou uma segunda demanda para um ticket que ja tinha run ativo, o que duplica Grill, custo e pedidos ao owner. Evidencia adicional: intake_commands mostra external_id ticket:USR-343 (run-c057f02a57f5) e ticket:USR-343:a2 (run-ae8adb35958a): a tentativa 2 foi admitida com a tentativa 1 ainda ativa em waiting_human; o mesmo ocorreu com ticket:USR-344 e ticket:USR-344:a2 em 23/10.",
     "core_journey": [
       "Em 23/10/2026 /api/line/live mostra dois runs autonomos ativos para USR-343, ambos em grill/waiting_human: run-c057f02a57f5 (demanda dem-f387275c284d, criado 22/10 13:03 UTC) e run-ae8adb35958a (demanda dem-db533d497a10, criado 22/10 20:42 UTC). O Hub lista o bloqueio WAITING_HUMAN de USR-343 duas vezes em /api/interventions/priority. O alimentador do backlog ou o intake criou uma segunda demanda para um ticket que ja tinha run ativo, o que duplica Grill, custo e pedidos ao owner."
     ],
@@ -10479,6 +10547,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T10:37:36.139118Z",
-    "updated_at": "2026-10-23T10:37:36.139118Z"
+    "updated_at": "2026-10-23T11:28:24.687673Z"
   }
 ]
