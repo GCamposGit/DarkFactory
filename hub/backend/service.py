@@ -2963,7 +2963,11 @@ class HubService:
             owner_config = load_telegram_config(role="owner", config_dir=self.project_root / ".factory" / "telegram")
             if owner_updates:
                 owner_config = owner_config.model_copy(update=owner_updates)
-            return TelegramGateway(config=owner_config, state_dir=telegram_state_dir)
+            return TelegramGateway(
+                config=owner_config,
+                state_dir=telegram_state_dir,
+                grill_text_handler=self.record_telegram_grill_reply,
+            )
 
         token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
         users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
@@ -3033,11 +3037,10 @@ class HubService:
             return {"summary": self.telegram_status_summary()}
 
         def _handle_grill(ticket_id: str, choice: str, user_id: int) -> Dict[str, Any]:
-            try:
-                self.submit_demand_grill(ticket_id, answers=[f"Option: {choice}"])
-                return {"resumed": True, "ticket_id": ticket_id}
-            except Exception as e:
-                return {"resumed": False, "error": str(e)}
+            # USR-353: record durably first; the old refine call passed a list where a dict is
+            # required, failed silently and the gateway still told the owner it was recorded.
+            recorded = self.record_telegram_grill_reply(ticket_id, choice, 0, user_id)
+            return {"resumed": bool(recorded.get("resumed")), "ticket_id": ticket_id, **recorded}
 
         def _handle_approval(project_id: str, digest: str, user_id: int) -> Dict[str, Any]:
             pipeline = ReleasePipelineService(storage_path=state_root() / "releases" / "release_registry.json")
@@ -3088,7 +3091,27 @@ class HubService:
             approval_handler=_handle_approval,
             line_grill_handler=line_grill_handler,
             commercial_acceptance_handler=commercial_acceptance_handler,
+            grill_text_handler=self.record_telegram_grill_reply,
         )
+
+    def record_telegram_grill_reply(
+        self, target: str, text: str, update_id: int, user_id: int = 0
+    ) -> Dict[str, Any]:
+        """Persist a free-text Grill answer from Telegram (USR-353).
+
+        Visible in ``GET /api/owner-actions/answers`` (repo sync) and annotated on the blocked ticket.
+        """
+        from core.owner_actions.grill_reply import record_grill_reply
+
+        action, annotated = record_grill_reply(
+            self.owner_action_store,
+            self.demands_service.store,
+            target=target,
+            text=text,
+            update_id=update_id,
+            user_id=user_id,
+        )
+        return {"recorded": True, "action_id": action.id, "annotated_tickets": annotated, "resumed": bool(annotated)}
 
     def process_telegram_webhook(
         self,

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from core.owner_actions.models import ActionKind, ActionStatus, OwnerAction, redact
+from core.owner_actions.grill_reply import GRILL_ID_PREFIX
 from core.owner_actions.propagate import decision_tag
 from core.owner_actions.store import OwnerActionError, OwnerActionStore
 
@@ -100,6 +101,8 @@ def pending_answers(root: Path, answers: list[OwnerAction]) -> list[OwnerAction]
     for answer in answers:
         current = store.get(answer.id)
         if current is None:
+            if answer.id.startswith(GRILL_ID_PREFIX):
+                pending.append(answer)  # free-text Grill reply from Telegram (USR-353): persist it
             continue  # unknown in the repo (e.g. dynamic/machine item): nothing to persist
         if current.status is not ActionStatus.DONE or _missing_tag(answer, demands):
             pending.append(answer)
@@ -118,6 +121,14 @@ def apply_answers(root: Path, answers: list[OwnerAction]) -> AnswerSyncResult:
         if answer.answer is None:
             continue
         current = store.get(answer.id)
+        if current is None and answer.id.startswith(GRILL_ID_PREFIX):
+            # Grill replies are born in the Hub's dynamic store; import them as already-answered items.
+            try:
+                store.upsert(answer)
+                result.applied.append(answer.id)
+                current = store.get(answer.id)
+            except OwnerActionError as exc:
+                logger.warning("owner_actions: %s nao importada: %s", answer.id, redact(str(exc)))
         if current is None:
             continue
         try:
