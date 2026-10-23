@@ -7569,7 +7569,10 @@
     "core_journey": [
       "Seguimento do USR-178: JobManager._run_job usa deadline = soma dos timeout_sec dos passos + 120 s, e a espera na fila do suite_lock do Desktop corre dentro desse prazo; uma fila longa pode matar o job. A proposta docs/proposals/USR-178-gate-resilience.md (secao 6) traz o trecho: o worker estende o deadline pela linha '[SUITE_LOCK] acquired ... after waiting Xs', com teto de 3600 s. remote_worker.py e protegido (patch em docs/proposals e OA)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao alterar a ordem nem a politica de hosts da frota (line_fleet.json)"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "O watchdog do worker estende o prazo do job pelo tempo informado na linha [SUITE_LOCK] acquired, com teto configuravel",
@@ -7583,7 +7586,7 @@
       "USR-344"
     ],
     "created_at": "2026-10-13T00:30:14.404999Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-255",
@@ -10063,7 +10066,10 @@
     "core_journey": [
       "Em 22/10 GET https://darkhub.ggcampos.com/api/portfolio/projects/pilot-hello devolveu health_status=healthy com health_details.error informando que o objeto RoadmapHealth nao tem atributo status: o calculo de saude do portfolio acessa um atributo inexistente e mascara o erro como healthy."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao redesenhar o painel de portfolio nem o modelo RoadmapHealth alem do atributo que falta"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "GET /api/portfolio/projects/ID nao traz erro de atributo em health_details",
@@ -10076,7 +10082,7 @@
       "USR-361"
     ],
     "created_at": "2026-10-22T09:36:39.681403Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-346",
@@ -10170,7 +10176,10 @@
     "core_journey": [
       "Em 22/10, apos os merges #569 (fecha OA-047/052) e #573 (cria OA-053), /api/interventions/priority ainda listava OA-047 e OA-052 e nao listava OA-053; /health seguia em 40861ee4. scripts/dokploy_redeploy.py (plan_darkhub_deploy, core/infra/deploy_classifier.py da USR-207) classifica .factory/** como so dados e nao redeploya, mas o Hub le .factory/owner_actions/owner_actions.json embutido na imagem. O owner ve fila errada no Hub."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao mudar o fluxo de deploy sem queda do USR-339; so a leitura do ledger atualizado pelo Hub"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Merge que altera .factory/owner_actions ou .factory/demands aparece no Hub em ate 5 min sem rebuild completo (leitura do ledger da origin/main, volume ou deploy leve)",
@@ -10183,7 +10192,7 @@
       "USR-339"
     ],
     "created_at": "2026-10-22T10:03:36.429409Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-349",
@@ -10292,7 +10301,10 @@
     "core_journey": [
       "Em 22/10 python run_ticket.py USR-346 recusou rodar com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao' listando apenas arquivos gerados pela propria fabrica: .factory/executions/active/exec-*.json (hook de execucao), .factory/hub_availability.json (sonda USR-207 agendada no Notebook), evidencias .factory/owner_actions/OA-*-*.png/.jsonl/.ps1 e .factory/reports/*. Isso obriga --allow-dirty-shared-checkout e esconde sujeira real."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao relaxar a recusa de run_ticket para alteracoes rastreadas de codigo de outro ticket"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Arquivos de runtime da fabrica ficam fora do git status (gitignore ou diretorio de estado fora do repo)",
@@ -10305,7 +10317,7 @@
       "USR-347"
     ],
     "created_at": "2026-10-22T12:34:30.263515Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-353",
@@ -10326,7 +10338,10 @@
     "core_journey": [
       "Em 22/10/2026 o owner respondeu pelo Telegram o Grill do USR-341 (teto de gasto da qualificacao de modelos). Nao ha registro: GET /api/owner-actions/answers termina em OA-049 (21/10), nao existe OA nem pending_grill para USR-341 e o ticket segue sem tag owner-decision. A decisao teve de ser refeita no chat."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao mudar o conteudo nem o formato das perguntas do Grill; so a entrega durável da resposta"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Rastrear o caminho Telegram -> /webhooks/telegram/owner -> overlay do Hub -> answer_sync para o caso do USR-341 e achar onde a resposta se perdeu",
@@ -10337,7 +10352,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-22T12:48:49.279487Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-354",
@@ -10358,7 +10373,10 @@
     "core_journey": [
       "Em 22/10/2026 USR-350 e USR-341 entregues com deliver_parallel.py host=desktop: Desktop busy (job de outra sessao), remote_attempts busy_timeout em 52 s, path=local_after_remote, portao rodou no Notebook (4 GiB livres, 1 worker xdist) e estourou o limite (exit 124) apos 3008 s; entrega marcada infra e reenfileirada. Perde ~50 min por tentativa."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao alterar prioridades nem slots da frota definidos em .factory/config/line_fleet.json"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Slot desktop espera o Desktop liberar (ou reenfileira imediatamente) em vez de cair para portao local quando a RAM do Notebook nao suporta 2+ workers",
@@ -10372,7 +10390,7 @@
       "USR-359"
     ],
     "created_at": "2026-10-22T14:27:55.521220Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-355",
@@ -10430,7 +10448,10 @@
     "core_journey": [
       "A validacao oficial em 2026-10-23 passou syntax_and_types, mas falhou no unit_and_integration_tests_parallel. No Desktop foram reportados 4846 erros e 3 falhas; no Grokbox, 5000 testes passaram, 31 foram ignorados e 1 falhou entre 5032 descobertos. O worker Grokbox ficou inacessivel por mais de 120 segundos e o runner retomou o mesmo job; o resumo nao reteve o identificador nem o traceback do teste que falhou. Os testes focados desta alteracao passaram localmente (185/185)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao desativar, pular nem marcar como skip testes para obter HARNESS_PASS"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "A proxima execucao oficial do runner identifica e persiste em artefato o nome e traceback do teste que falha no job remoto.",
@@ -10441,7 +10462,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T07:47:06.750537Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-360",
@@ -10462,7 +10483,10 @@
     "core_journey": [
       "Decisao do owner em 23/10/2026: o padrao adotado no Hub (USR-339, OA-057 opcao A) deve valer sempre para novos produtos da fabrica. Hoje a adocao/planejamento de produto (Project Adoption Gateway, skills 02-plan-product-architecture e 07-build-dark-factory, templates de deploy/compose_render) nao gera isso por padrao."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar funcionalidade nova alem dos criterios de aceite deste ticket",
+      "Nao migrar produtos ja existentes alem do Hub; vale para produtos novos"
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Adocao/scaffold de produto novo gera workflow de imagem GHCR por sha, compose blue-green atras do Traefik com troca so apos healthcheck e espera da tag antes do deploy",
@@ -10476,7 +10500,7 @@
       "USR-339"
     ],
     "created_at": "2026-10-23T09:46:54.819812Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-23T11:34:32.051051Z"
   },
   {
     "id": "USR-361",
