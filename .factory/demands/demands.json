@@ -10469,8 +10469,8 @@
     "project_id": "darkfac",
     "title": "Padrao de deploy sem queda (GHCR por sha + blue-green Traefik) como default de todo produto novo",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "0bda7fcd7ec5f5966ca77cfaeea868b769f2f913",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10500,7 +10500,7 @@
       "USR-339"
     ],
     "created_at": "2026-10-23T09:46:54.819812Z",
-    "updated_at": "2026-10-23T11:34:32.051051Z"
+    "updated_at": "2026-10-23T22:49:05.122143Z"
   },
   {
     "id": "USR-361",
