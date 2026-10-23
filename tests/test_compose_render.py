@@ -198,12 +198,13 @@ def test_wait_for_ghcr_image_polls_auth_errors_when_token_is_configured(
     statuses = iter([401, 403, 404])
     clock = {"t": 0.0}
 
-    with pytest.raises(cr.GhcrImageUnavailableError, match="last: HTTP 404"):
+    with pytest.raises(cr.GhcrImageUnavailableError, match="last: HTTP 404") as exc_info:
         cr.wait_for_ghcr_image(
             SHA, probe=lambda _repo, _tag: next(statuses), interval=5, timeout=10,
             sleep_fn=lambda seconds: clock.__setitem__("t", clock["t"] + seconds),
             clock_fn=lambda: clock["t"],
         )
+    assert "test-token" not in str(exc_info.value)
 
 
 def test_cli_ghcr_wait_is_thin_wrapper_over_shared_waiter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,6 +225,27 @@ def test_cli_ghcr_wait_is_thin_wrapper_over_shared_waiter(monkeypatch: pytest.Mo
     kwargs = calls[0][1]
     assert kwargs["timeout"] == 123 and kwargs["interval"] == 7
     assert kwargs["probe"] is not None
+
+
+def test_cli_ghcr_wait_preserves_900_second_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import dokploy_redeploy
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        dokploy_redeploy,
+        "_shared_wait_for_ghcr_image",
+        lambda sha, **kwargs: calls.append(kwargs),
+    )
+
+    probe = lambda _repo, _tag: 200
+    sleeper = lambda _seconds: None
+    clock = lambda: 0.0
+    dokploy_redeploy.wait_for_ghcr_tag(SHA, probe=probe, sleep_fn=sleeper, clock_fn=clock)
+
+    assert calls[0]["timeout"] == 900.0
+    assert calls[0]["probe"] is probe
+    assert calls[0]["sleep_fn"] is sleeper
+    assert calls[0]["clock_fn"] is clock
 
 
 def test_adapter_refuses_deploy_when_ghcr_image_missing(monkeypatch: pytest.MonkeyPatch) -> None:

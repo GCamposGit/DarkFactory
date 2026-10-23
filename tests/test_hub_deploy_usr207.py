@@ -114,7 +114,6 @@ def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_a
     assert "Start-Process" not in section
     assert "Invoke-Expression" not in section
 
-
 # --------------------------------------------------------------------------- plan
 
 
