@@ -2492,7 +2492,7 @@
       "kind": "action",
       "title": "VPS darkfac-vps-primary travada desde 23/10 16:45: reiniciar pelo console da Hetzner",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "Durante o redeploy pos-merge (build da imagem do Hub na propria VPS de 3,7 GB) a VPS parou de responder: Hub, Dokploy, n8n, Tailscale e SSH sem resposta por mais de 15 min. Provavel falta de memoria no build. Sem a VPS nao ha Hub, coordenador da linha nem deploy.",
       "blocks": [
         "USR-339",
@@ -2517,14 +2517,14 @@
       "verify": "https://darkhub.ggcampos.com/health e https://dokploy.ggcampos.com respondem",
       "created_at": "2026-10-23T20:10:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-23T21:00:00Z"
     },
     {
       "id": "OA-061",
       "kind": "action",
       "title": "Mesclar PR #614 (USR-344 + USR-253: worker se auto-recupera e prazo do job so corre fora da fila) com --admin",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "O PR toca core/harness/remote_worker.py (protegido); o GUARD barra o agente. Portao oficial passou no grokbox.",
       "blocks": [
         "USR-344",
@@ -2543,7 +2543,7 @@
       "verify": "gh pr view 614 --repo GCamposGit/DarkFactory mostra MERGED",
       "created_at": "2026-10-23T20:40:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-23T21:00:00Z"
     }
   ]
 }
