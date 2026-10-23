@@ -562,3 +562,46 @@ def test_stage_still_fails_closed_when_digest_never_converges(tmp_path: Path) ->
     assert adapter.starts == 1
     # 4 polls in _deploy; no extra probe because the stage returned before smoke.
     assert adapter.probes == 4
+
+
+def test_bluegreen_marker_delegates_and_skips_legacy_compose_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    stored = f"# darkfac-bluegreen: active=blue blue={OLD_SHA} green={OLD_SHA}" + chr(10) + "services: {}"
+    runs: List[Dict[str, Any]] = []
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": stored},
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=_FakeFetcher({SHA: TEMPLATE_A}),
+        ghcr_waiter=lambda _s: None,
+        bluegreen_runner=lambda **kw: runs.append(kw),
+    )
+    adapter.start(_artifact(), _hub_target())
+    assert len(runs) == 1 and runs[0]["new_sha"] == SHA and runs[0]["source"] == TEMPLATE_A
+    assert "compose.update" not in _procedures(calls)
+
+
+def test_no_marker_adapter_keeps_legacy_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs: List[Dict[str, Any]] = []
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": HUB_COMPOSE},
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=_FakeFetcher({SHA: TEMPLATE_A}), bluegreen_runner=lambda **kw: runs.append(kw)
+    )
+    adapter.start(_artifact(), _hub_target())
+    assert runs == [] and "compose.update" in _procedures(calls)

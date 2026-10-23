@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Union, runtime
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.build_artifacts import ArtifactRef, Claim
+from core.orchestrator.bluegreen import is_bluegreen, run_bluegreen_via_dokploy
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     ComposeFetcher,
@@ -201,6 +202,7 @@ class DokployDeploymentAdapter:
         transport: Optional[Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Dict[str, Any]]] = None,
         compose_fetcher: Optional[ComposeFetcher] = None,
         ghcr_waiter: Optional[Callable[[str], None]] = None,
+        bluegreen_runner: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.api_url = api_url or os.getenv("DOKPLOY_API_URL", "")
         self.api_key = api_key or os.getenv("DOKPLOY_API_KEY", "")
@@ -210,6 +212,9 @@ class DokployDeploymentAdapter:
         self.compose_fetcher = compose_fetcher
         # USR-339: waits for the GHCR tag of the SHA (injected by tests).
         self.ghcr_waiter = ghcr_waiter or wait_for_ghcr_image
+        # USR-339: blue-green runner (run_bluegreen_via_dokploy signature); injected by tests.
+        self.bluegreen_runner = bluegreen_runner or run_bluegreen_via_dokploy
+        self._last_compose_source = ""
         self._lock = threading.Lock()
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
@@ -335,6 +340,7 @@ class DokployDeploymentAdapter:
             return None, "release_identity_compose_unreadable"
         if not isinstance(source, str) or not source.strip():
             return None, "release_identity_compose_unreadable"
+        self._last_compose_source = source
         try:
             if resolve_hub_image_source() == IMAGE_SOURCE_GHCR:
                 # USR-339: never trigger the deploy before the image for this SHA exists.
@@ -345,6 +351,29 @@ class DokployDeploymentAdapter:
             return None, "release_identity_ghcr_image_unpublished"
         except ComposeRenderError:
             return None, "release_identity_compose_contract_invalid"
+
+    def _run_bluegreen(
+        self, base_url: str, api_key: str, service_id: str, params: Dict[str, Any], source: str, sha: str
+    ) -> None:
+        def request(method: str, path: str, body: Optional[dict]) -> Any:
+            proc, _, qs = path.removeprefix("/api/").partition("?")
+            query = dict(urllib.parse.parse_qsl(qs)) if qs else None
+            return self._dokploy_request(base_url, api_key, method, proc, query=query, json_body=body)
+
+        health_url = str(params.get("health_url") or "https://darkhub.ggcampos.com/health")
+
+        def serving(expected: str) -> bool:
+            try:
+                req = urllib.request.Request(health_url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    return str(json.load(response).get("git_sha", "")).lower() == expected
+            except Exception:
+                return False
+
+        self.bluegreen_runner(
+            request=request, compose_id=service_id, source=source, new_sha=sha,
+            sha_is_serving=serving, wait_ghcr=self.ghcr_waiter,
+        )
 
     def _bind_release_identity(
         self, base_url: str, api_key: str, target_config: TargetConfig, sha: str
@@ -410,7 +439,10 @@ class DokployDeploymentAdapter:
                 )
                 if one.get("sourceType") != "raw" or not isinstance(one.get("composeFile"), str):
                     return "release_identity_compose_not_raw"
-                if rendered != one["composeFile"]:
+                if is_bluegreen(one["composeFile"]):
+                    # USR-339: never overwrite a blue-green compose with the legacy render.
+                    self._run_bluegreen(base_url, api_key, service_id, params, self._last_compose_source, sha)
+                elif rendered != one["composeFile"]:
                     self._dokploy_request(
                         base_url, api_key, "POST", "compose.update",
                         json_body={
