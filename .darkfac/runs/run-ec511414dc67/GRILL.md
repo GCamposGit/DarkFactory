@@ -13,7 +13,4 @@
 - (technical) Qual deve ser a política de reenvio após a recuperação automática? -> **Reutilizar limites, idempotência e fallback atuais do dispatcher** (remote_dispatch.py já trata perda por reinício e emite [REMOTE_RETRY]; reutilizar esse caminho evita repetição ilimitada e execuções duplicadas.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] CPU baixa e ausência de logs também podem ocorrer durante espera legítima por lock ou I/O. Nessas situações, o limite de 10 minutos deve provocar recuperação? (id=q1)
+- [intent] CPU baixa e ausência de logs também podem ocorrer durante espera legítima por lock ou I/O. Nessas situações, o limite de 10 minutos deve provocar recuperação? -> **Preservar esperas legítimas verificáveis; recuperar apenas estagnação sem evidência de progresso** (respondida pelo owner)
