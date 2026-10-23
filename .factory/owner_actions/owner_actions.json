@@ -2324,7 +2324,7 @@
       "kind": "action",
       "title": "Mesclar PR #591 (USR-350, guard sem traceback quando falta pydantic) com --admin",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "O PR toca core/orchestrator/guard.py (protegido); o job trusted-pr-policy roda o guard da main, entao a correcao so vale apos o merge. Portao oficial passou no Desktop.",
       "blocks": [
         "USR-350"
@@ -2342,7 +2342,7 @@
       "verify": "gh pr view 591 --repo GCamposGit/DarkFactory mostra MERGED",
       "created_at": "2026-10-22T19:20:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-22T19:45:00Z"
     }
   ]
 }
