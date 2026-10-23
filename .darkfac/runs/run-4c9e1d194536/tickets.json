@@ -1,0 +1,124 @@
+[
+  {
+    "id": "T1",
+    "title": "Espera da tag GHCR compartilhada e aplicada ao adapter da linha",
+    "goal": "Extrair a espera da imagem do CLI para core/infra/ghcr.py e faze-la valer tambem no DokployDeploymentAdapter, antes de compose.deploy, falhando fechada sem fallback para build na VPS.",
+    "files_hint": [
+      "core/infra/ghcr.py",
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      "tests/test_dokploy_redeploy.py",
+      "tests/test_deployment_adapter.py"
+    ],
+    "acceptance": [
+      "core/infra/ghcr.py expoe wait_for_ghcr_tag/manifest probe com clock, sleep e probe injetaveis, timeout padrao 900 s, poll 15 s e erros distintos para 404 (ainda nao publicada), 401/403 (credencial) e timeout",
+      "scripts/dokploy_redeploy.py reusa a funcao compartilhada (sem duplicar logica) e preserva o comportamento e as flags atuais (--timeout, mensagem 'not published within')",
+      "DokployDeploymentAdapter, com fonte de imagem ghcr, espera a tag do sha antes de acionar o deploy e retorna codigo de erro proprio (ex. release_identity_ghcr_image_missing) quando a imagem nao aparece, sem renderizar build nem acionar compose.deploy",
+      "Nenhum token aparece em log, stdout ou stderr em nenhum caminho de erro",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_deployment_adapter.py: adapter em modo ghcr nao chama compose.deploy quando a tag do sha nunca aparece e devolve o codigo de erro de imagem ausente",
+      "tests/test_deployment_adapter.py: adapter em modo ghcr instala o compose com image ghcr.io/gcamposgit/darkhub:<sha> e segue para deploy quando o probe responde 200",
+      "tests/test_dokploy_redeploy.py: 401/403 do manifesto produz erro de credencial (texto distinto de 404) e nenhuma mutacao no Dokploy"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "GHCR como fonte padrao da imagem do Hub e teste do contrato de deploy",
+    "goal": "Tornar ghcr o valor padrao de DARKHUB_IMAGE_SOURCE, mantendo build como escape hatch explicito, e adaptar o compose e o teste test_darkhub_build_pinned_before_deploy_and_health_converges ao novo layout (imagem fixada no sha, pull_policy always, sem container_name, start-first).",
+    "files_hint": [
+      "core/orchestrator/compose_render.py",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "tests/test_compose_render.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "resolve_hub_image_source retorna ghcr quando a variavel esta ausente ou vazia, build somente quando pedido explicitamente, e valor desconhecido continua falhando fechado",
+      "Com o ambiente padrao, o composeFile enviado ao Dokploy contem image: ghcr.io/gcamposgit/darkhub:<sha completo>, pull_policy: always, deploy.update_config.order: start-first com failure_action: rollback, DARKFAC_GIT_SHA do sha e nenhuma linha container_name",
+      "Com DARKHUB_IMAGE_SOURCE=build o render antigo (contexto Git fixado, no_cache, pull_policy: build) continua identico",
+      "Os comentarios de deploy/dokploy/docker-compose.hub.yml descrevem o estado real (fase 2 entregue; bloco build: e a base transformada pelo renderer para o modo build)",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_dokploy_redeploy.py: test_darkhub_build_pinned_before_deploy_and_health_converges roda sem DARKHUB_IMAGE_SOURCE e afirma o layout GHCR (image com sha, pull_policy always, start-first, sem container_name) e a convergencia de /health",
+      "tests/test_dokploy_redeploy.py: variante com DARKHUB_IMAGE_SOURCE=build mantendo as asserts do contrato de build fixado",
+      "tests/test_compose_render.py: ausencia da variavel => ghcr; valor desconhecido => ComposeRenderError; render ghcr nao deixa placeholder ${DARKFAC_GIT_SHA}"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Verificar o modo do servico (Stack vs Compose) antes de prometer troca sem queda",
+    "goal": "Em modo ghcr, detectar pelo Dokploy se o compose do Hub roda em Stack/Swarm (onde update_config vale) ou Compose simples e, no segundo caso, avisar de forma inequivoca e registrar a acao do owner, em vez de assumir start-first.",
+    "files_hint": [
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      ".factory/owner_actions/owner_actions.json",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "O redeploy do Hub em modo ghcr le o tipo do servico no payload do compose (ex. composeType/serviceType) e imprime o modo detectado antes de mutar nada",
+      "Em Compose simples o CLI avisa explicitamente que update_config sera ignorado e que a sonda pode ver queda, segue o deploy (sem travar a entrega) e nao mente sobre zero downtime; em Stack/Swarm registra que start-first esta ativo",
+      "Tipo ausente ou irreconhecivel e tratado como Compose simples (fail-closed na promessa, nao no deploy)",
+      "Existe item em .factory/owner_actions/owner_actions.json (novo ou reaproveitado) descrevendo tela a tela como por o compose Darkhub em modo Stack no Dokploy, com critério de verificação; se a rota escolhida na OA-044 ja foi Stack, o item e marcado done com resolved_at",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_dokploy_redeploy.py: payload com compose em Stack imprime start-first ativo; payload de Compose simples imprime o aviso de update_config ignorado e ainda assim deploya",
+      "tests/test_dokploy_redeploy.py: payload sem o campo de tipo cai no aviso conservador",
+      "tests/test_owner_actions.py (ou o teste de schema existente): o item de modo Stack valida contra o schema de owner actions"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Sonda de 1 s durante a troca com evidencia de 200 e convergencia de sha",
+    "goal": "Criar core/infra/switchover_probe.py que amostra /health a cada 1 s durante a troca, exige 100% de respostas 200 e convergencia ao sha esperado, e acionar essa medicao no redeploy do Hub gravando evidencia em arquivo.",
+    "files_hint": [
+      "core/infra/switchover_probe.py",
+      "scripts/dokploy_redeploy.py",
+      "tests/test_switchover_probe.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "core/infra/switchover_probe.py expoe uma funcao pura de amostragem com http, clock e sleep injetaveis, intervalo padrao de 1 s, e devolve total de amostras, contagem por status, primeira amostra nao-200 e sha final observado",
+      "O redeploy do Hub com --wait em modo ghcr executa a medicao durante a troca e grava a evidencia (JSON com janela, amostras, falhas e sha convergido) em caminho sob .factory/, imprimindo o resumo; falha de rede na propria sonda nao derruba o deploy, apenas marca a evidencia como inconclusiva",
+      "Qualquer resposta diferente de 200 na janela faz o resumo apontar o aceite como nao atingido, citando o instante e o status",
+      "A sonda nunca e executada contra a VPS de dentro da VPS (documentado e coberto pela escolha de URL publica configuravel)",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_switchover_probe.py: janela toda 200 com sha final esperado => resultado aprovado e contagem de amostras igual a duracao/intervalo",
+      "tests/test_switchover_probe.py: um 502 no meio => reprovado, com instante e status registrados; sha que nunca converge => reprovado por divergencia",
+      "tests/test_dokploy_redeploy.py: deploy do Hub com --wait grava o arquivo de evidencia e imprime o resumo sem vazar segredos"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Sincronizar a proposta USR-207 e travar o snippet de agendamento",
+    "goal": "Atualizar docs/proposals/USR-207-zero-downtime.md para o estado real (OA-044/OA-052 concluidas, GHCR como padrao, espera da tag tambem no adapter, start-first dependente do modo) e garantir por teste que o comando de agendamento da sonda cola no PowerShell.",
+    "files_hint": [
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "As secoes 2.1 e 2.1b descrevem ghcr como padrao, a ausencia de fallback para build e a remocao do limite 'a espera da tag esta so no CLI'",
+      "A secao 2.2 explica quando start-first vale (Stack) e o que o codigo faz em Compose simples, sem prometer zero downtime nessa rota",
+      "A secao 1 mantem o agendamento com Register-ScheduledTask e pythonw.exe em caminho absoluto, sem nenhum schtasks com aspas aninhadas, e os comandos citados ao owner usam caminho absoluto C:\\dev\\DarkFac",
+      "A secao 2.3 marca as acoes de owner concluidas (autoDeploy, registry, sonda) e lista apenas o que resta",
+      "python scripts/line_validate.py e python core/harness/runner.py --quick passam"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: teste estatico da proposta exige Register-ScheduledTask com -Execute apontando para pythonw.exe absoluto e proibe a forma schtasks /tr com aspas aninhadas",
+      "tests/test_hub_deploy_usr207.py: a proposta nao contem mais a frase do limite 'a espera da tag esta no CLI' e cita DARKHUB_IMAGE_SOURCE com ghcr como padrao"
+    ],
+    "smoke": []
+  }
+]
