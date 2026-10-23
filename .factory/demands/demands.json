@@ -10052,8 +10052,8 @@
     "project_id": "darkfac",
     "title": "Hub: health do projeto quebra com RoadmapHealth sem atributo status",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "9a4c38e6e95394aab47a0ede7b1f673313804c97",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10082,7 +10082,7 @@
       "USR-361"
     ],
     "created_at": "2026-10-22T09:36:39.681403Z",
-    "updated_at": "2026-10-23T11:34:32.051051Z"
+    "updated_at": "2026-10-23T20:16:01.647479Z"
   },
   {
     "id": "USR-346",
