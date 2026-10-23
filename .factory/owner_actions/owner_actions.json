@@ -2452,6 +2452,40 @@
       "created_at": "2026-10-23T04:00:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-059",
+      "kind": "action",
+      "title": "VPS: permitir pull da imagem privada do Hub no GHCR e liberar restauracao do compose do Darkhub",
+      "priority": "high",
+      "status": "open",
+      "why": "Prova do USR-339 em 23/10: o compose up do Darkhub terminou em error porque o pacote ghcr.io/gcamposgit/darkhub e privado e a VPS nao esta logada no GHCR. O Dokploy ficou com o compose blue-green em status error (Hub segue no ar no container antigo). O classificador de permissoes negou ao agente escrever no Dokploy (Production Deploy).",
+      "blocks": [
+        "USR-339",
+        "USR-363",
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No GitHub (github.com > foto > Settings > Developer settings > Personal access tokens > Tokens (classic) > Generate new token): nome 'vps-ghcr-pull', expiracao 1 ano, escopo somente read:packages. Copie o token."
+        },
+        {
+          "text": "No Dokploy (dokploy.ggcampos.com > Web Server > Terminal, ou ssh na VPS), logar o Docker no GHCR. Cole o token quando pedir a senha.",
+          "command": "docker login ghcr.io -u GCamposGit"
+        },
+        {
+          "text": "Testar o pull da imagem atual do Hub",
+          "command": "docker pull ghcr.io/gcamposgit/darkhub:704867e1be2ec6344bebb86dfa4b5563ce4c71cc"
+        },
+        {
+          "text": "Restauracao do compose: escreva no chat 'autorizo restaurar o compose do Hub no Dokploy' (o agente roda scripts/dokploy_bluegreen.py --restore-legacy, so compose.update, sem deploy). Alternativa: adicionar regra de permissao para PowerShell nas configuracoes do Claude Code."
+        }
+      ],
+      "verify": "docker pull termina com 'Downloaded newer image' ou 'Image is up to date'; compose do Darkhub no Dokploy sem a linha '# darkfac-bluegreen'.",
+      "created_at": "2026-10-23T13:30:00Z",
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }
