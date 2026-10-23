@@ -14,9 +14,6 @@
 - (technical) Quando só houver preço do OpenRouter, como tratar uma qualificação executada diretamente no provedor? -> **Exigir tarifa aplicável ao canal; sem correspondência comprovada, bloquear e enviar ao Grill** (O teto precisa ser verificado antes da chamada. Uma tarifa de gateway não garante o custo da API direta, especialmente com cobranças adicionais ou tokens de raciocínio.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [business] Quais tetos de gasto em USD você autoriza para qualificação, por candidato e no total diário da fábrica? (id=q1)
-- [business] Quais canais de cobrança ficam autorizados nesta primeira entrega? (id=q2)
-- [business] A autorização deve permitir qualificação automática de candidatos elegíveis ou exigir aprovação individual antes de cada bateria? (id=q3)
+- [business] Quais tetos de gasto em USD você autoriza para qualificação, por candidato e no total diário da fábrica? -> **US$ 0,10 por candidato e US$ 1,00 por dia** (respondida pelo owner)
+- [business] Quais canais de cobrança ficam autorizados nesta primeira entrega? -> **Somente OpenRouter com chave já provisionada** (respondida pelo owner)
+- [business] A autorização deve permitir qualificação automática de candidatos elegíveis ou exigir aprovação individual antes de cada bateria? -> **Automática após decisão registrada, dentro dos tetos e canais autorizados** (respondida pelo owner)
