@@ -1,0 +1,102 @@
+[
+  {
+    "id": "T1",
+    "title": "Grok elegivel para development e motivo de descarte sempre logado",
+    "goal": "Adicionar Grok a cascata de development em .factory/config/line_routing.json e instrumentar _routable_candidates para que nenhum harness seja descartado em silencio: cada harness presente em host_caps que nao vira candidato gera uma linha de log com o motivo (not_in_cascade, excluded, missing_host_capability, no_write_mode, forbidden_model).",
+    "files_hint": [
+      "core/line/routing.py",
+      ".factory/config/line_routing.json",
+      "tests/line/test_routing.py"
+    ],
+    "acceptance": [
+      "development.cascade em .factory/config/line_routing.json inclui grok com o pin development.grok ja existente em harness_pins",
+      "pick('development', ['harness:grok'], ...) com cota de 17,4% devolve ('grok', 'development.grok') em vez de None",
+      "Todo harness de host_caps nao eleito aparece no log com motivo explicito; pick nunca retorna None sem ao menos uma linha de motivo por harness avaliado",
+      "O piso de 15% continua estrito: Grok com 15,0% ou menos permanece inelegivel",
+      "Nenhuma linha de log contem token, credencial ou saida bruta de probe",
+      "python scripts/line_validate.py passa e python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/line/test_routing.py: pick('development', ['harness:grok']) com quota_lookup fixo em 17.4 elege grok",
+      "tests/line/test_routing.py: caplog registra motivo para cada harness descartado (not_in_cascade, missing_host_capability, no_write_mode) e para o caso em que pick devolve None",
+      "tests/line/test_routing.py: grok com 15.0 e com 14.9 permanece inelegivel (limites do piso)",
+      "tests/line/test_routing.py: antigravity em host_caps e descartado com motivo no_write_mode em development"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Codex headless no Windows passa a bloquear somente com opt-out explicito",
+    "goal": "Inverter codex_headless_blocked(): ausencia de DARKFAC_CODEX_HEADLESS_ALLOWED ou valor afirmativo permite Codex no Windows; somente valores negativos explicitos (0/false/no/off) bloqueiam, e o log de bloqueio passa a citar o opt-out.",
+    "files_hint": [
+      "core/line/routing.py",
+      "tests/test_usr336_hidden_windows.py",
+      "tests/line/conftest.py",
+      "tests/test_run_ticket_routing.py"
+    ],
+    "acceptance": [
+      "Com sys.platform=win32 e variavel ausente, codex_headless_blocked() e False e Codex vira candidato de development",
+      "Com DARKFAC_CODEX_HEADLESS_ALLOWED=0/false/no/off, codex_headless_blocked() e True e o log cita CODEX_HEADLESS_BLOCK_REASON e como reverter",
+      "Fora do Windows o comportamento permanece inalterado (nunca bloqueado)",
+      "Docstring de codex_headless_blocked() e a mensagem de log refletem a decisao do owner de 23/10/2026",
+      "Fixtures e testes que setavam a variavel para destravar Codex sao ajustados sem mascarar a nova regra",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_usr336_hidden_windows.py: Windows sem a variavel -> Codex elegivel",
+      "tests/test_usr336_hidden_windows.py: Windows com valor negativo explicito -> Codex bloqueado com motivo no log",
+      "tests/test_usr336_hidden_windows.py: Windows com valor afirmativo -> Codex elegivel (compatibilidade)",
+      "tests/line/test_routing.py: pick('development', ['harness:codex']) no Windows sem a variavel devolve codex"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Probe Anthropic: medicao nova grava snapshot e probe sem medicao nunca e reportado como ok",
+    "goal": "Fazer o probe Anthropic persistir snapshot novo sempre que obtiver medicao verificavel e, quando nao obtiver, deixar isso explicito: run_with_deadline distingue sucesso com medicao de sucesso sem medicao, e _quota_headroom_diagnosis loga uma unica linha com provider, motivo, idade da evidencia e se o snapshot foi renovado.",
+    "files_hint": [
+      "core/usage/adapters.py",
+      "core/usage/probe_deadline.py",
+      "core/line/routing.py",
+      "tests/line/test_claude_probe_hardening.py",
+      "tests/line/test_routing.py"
+    ],
+    "acceptance": [
+      "Probe Anthropic com headers de rate limit validos grava snapshot com checked_at novo e _quota_headroom_diagnosis devolve (headroom, 'healthy') usando o valor medido",
+      "Probe que retorna sem medicao (sem token, headers ausentes ou invalidos) nao atualiza checked_at nem reaproveita cota antiga como nova: o diagnostico continua fail-closed",
+      "O log de probe deixa de dizer outcome=ok quando nenhuma medicao nova foi obtida, usando um valor distinto e mantendo o prefixo 'probe provider=<id> outcome='",
+      "_quota_headroom_diagnosis emite uma linha por provider com motivo e idade da evidencia, sem credenciais nem headers brutos",
+      "Comportamento dos demais providers (codex/openai, grok/xai, gemini) permanece inalterado",
+      "python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/line/test_claude_probe_hardening.py: probe com headers validos grava providers/anthropic.json com checked_at atual e headroom medido",
+      "tests/line/test_claude_probe_hardening.py: probe sem token e probe com headers ausentes nao alteram checked_at do snapshot existente",
+      "tests/line/test_routing.py: run_with_deadline loga outcome distinto de ok quando o resultado nao traz medicao nova",
+      "tests/line/test_routing.py: _quota_headroom_diagnosis('anthropic') com snapshot antigo e probe sem medicao devolve (None, 'probe_unavailable') e loga idade da evidencia"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Regressao end-to-end do incidente de 22/10: roteador sempre devolve harness com write quando ha conta acima de 15%",
+    "goal": "Adicionar um teste de regressao que reconstroi o cenario do log de 22/10 (snapshot anthropic com ~115538 s de idade, probe Anthropic sem medicao nova, Codex no Windows sem a variavel, Grok com 17,4%) e exige que pick('development', ['harness:claude','harness:codex','harness:grok','harness:antigravity']) devolva um harness com modo write, com log de motivo para cada descartado.",
+    "files_hint": [
+      "tests/line/test_usr347_router_no_route.py",
+      "core/line/routing.py"
+    ],
+    "acceptance": [
+      "O teste monta providers/anthropic.json com checked_at de ~115538 s atras e probe que nao mede, grok com 17,4% e platform win32 sem DARKFAC_CODEX_HEADLESS_ALLOWED",
+      "pick devolve um harness com capacidade write (nunca None) e o anthropic descartado aparece no log como quota desconhecida com motivo",
+      "Variante em que todos os harnesses estao em 15% ou menos continua devolvendo None, com motivo logado para cada um (fail-closed preservado)",
+      "O teste falha se a cascata voltar a omitir Grok ou se o Codex voltar a ser bloqueado por padrao no Windows",
+      "python scripts/line_validate.py passa e python core/harness/runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/line/test_usr347_router_no_route.py: cenario completo do log de 22/10 -> pick devolve harness com write",
+      "tests/line/test_usr347_router_no_route.py: todos abaixo ou iguais ao piso -> pick devolve None com motivo logado por harness",
+      "tests/line/test_usr347_router_no_route.py: apenas harness:grok em host_caps -> grok eleito e nenhum descarte silencioso"
+    ],
+    "smoke": []
+  }
+]
