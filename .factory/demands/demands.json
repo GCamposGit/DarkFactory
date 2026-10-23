@@ -10413,5 +10413,39 @@
     "dependencies": [],
     "created_at": "2026-10-23T09:46:54.819812Z",
     "updated_at": "2026-10-23T09:46:54.819812Z"
+  },
+  {
+    "id": "USR-361",
+    "project_id": "darkfac",
+    "title": "Hub nao le o historico do canario: V1/V2 aparecem 0/7 com canarios verdes de 17 a 23/10",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 23/10/2026 GET https://darkhub.ggcampos.com/api/line/status devolve canary_streak=0 e last_canary_report=null; o criterio V2 traz 'Falha ao inspecionar relatorios do canario: control store sem acesso de leitura aos runs' e o relatorio de aceite exibido tem generated_at 2026-10-05. Ao mesmo tempo /api/line/live (mesmo Postgres) lista canarios darkfac-canary concluidos em retrospective/succeeded nos dias 17, 18, 19, 20, 21 (tentativa 2), 22 e 23 (tentativa 2). O verify_v2(store=self._line_control_store()) em hub/backend/service.py usa load_canary_days_from_store, que falha no store do Hub, e o painel de aceite (USR-215) volta ao JSON antigo. Sem isso V1 e V2 do HF-27 nunca podem ser verificados e o criterio de sucesso da MISSION fica sem medicao.",
+    "core_journey": [
+      "Em 23/10/2026 GET https://darkhub.ggcampos.com/api/line/status devolve canary_streak=0 e last_canary_report=null; o criterio V2 traz 'Falha ao inspecionar relatorios do canario: control store sem acesso de leitura aos runs' e o relatorio de aceite exibido tem generated_at 2026-10-05. Ao mesmo tempo /api/line/live (mesmo Postgres) lista canarios darkfac-canary concluidos em retrospective/succeeded nos dias 17, 18, 19, 20, 21 (tentativa 2), 22 e 23 (tentativa 2). O verify_v2(store=self._line_control_store()) em hub/backend/service.py usa load_canary_days_from_store, que falha no store do Hub, e o painel de aceite (USR-215) volta ao JSON antigo. Sem isso V1 e V2 do HF-27 nunca podem ser verificados e o criterio de sucesso da MISSION fica sem medicao."
+    ],
+    "non_goals": [
+      "Nao mudar a meta de 7 dias nem o fluxo do canario"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com o Hub em producao, /api/line/status devolve canary_streak calculado a partir dos runs darkfac-canary do Postgres, sem a mensagem 'control store sem acesso de leitura aos runs'",
+      "Regra documentada e testada para dia verde quando a primeira tentativa falha e a segunda conclui (tentativa 2 conta ou nao conta)",
+      "Teste de regressao reproduz o store do Hub (o mesmo tipo devolvido por _line_control_store) e falha antes da correcao",
+      "V1 tambem passa a ler o store e explica qual run comprova ou falta",
+      "Relatorio de aceite exibido traz generated_at do dia, nao o JSON de 05/10"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-23T10:35:13.406958Z",
+    "updated_at": "2026-10-23T10:35:13.406958Z"
   }
 ]
