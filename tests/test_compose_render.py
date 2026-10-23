@@ -175,6 +175,57 @@ def test_wait_for_ghcr_image_times_out_without_fallback() -> None:
         )
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_wait_for_ghcr_image_rejects_unauthorized_probe_without_token(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    monkeypatch.delenv("GHCR_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_PAT", raising=False)
+    calls: list[int] = []
+
+    with pytest.raises(cr.GhcrImageUnavailableError, match="GHCR_TOKEN.*read:packages"):
+        cr.wait_for_ghcr_image(
+            SHA, probe=lambda _repo, _tag: calls.append(status) or status,
+            timeout=900, interval=15, sleep_fn=lambda _seconds: pytest.fail("must refuse immediately"),
+        )
+    assert calls == [status]
+
+
+def test_wait_for_ghcr_image_polls_auth_errors_when_token_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GHCR_TOKEN", "test-token")
+    statuses = iter([401, 403, 404])
+    clock = {"t": 0.0}
+
+    with pytest.raises(cr.GhcrImageUnavailableError, match="last: HTTP 404"):
+        cr.wait_for_ghcr_image(
+            SHA, probe=lambda _repo, _tag: next(statuses), interval=5, timeout=10,
+            sleep_fn=lambda seconds: clock.__setitem__("t", clock["t"] + seconds),
+            clock_fn=lambda: clock["t"],
+        )
+
+
+def test_cli_ghcr_wait_is_thin_wrapper_over_shared_waiter(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import dokploy_redeploy
+
+    calls: list[tuple[str, object]] = []
+
+    def shared(sha: str, **kwargs: object) -> None:
+        calls.append((sha, kwargs))
+        raise cr.GhcrImageUnavailableError("GHCR image missing")
+
+    monkeypatch.setattr(dokploy_redeploy, "_shared_wait_for_ghcr_image", shared)
+    with pytest.raises(dokploy_redeploy.DokployUsageError, match="GHCR image missing"):
+        dokploy_redeploy.wait_for_ghcr_tag(
+            SHA, probe=lambda _repo, _tag: 404, timeout=123, interval=7,
+        )
+    assert calls[0][0] == SHA
+    kwargs = calls[0][1]
+    assert kwargs["timeout"] == 123 and kwargs["interval"] == 7
+    assert kwargs["probe"] is not None
+
+
 def test_adapter_refuses_deploy_when_ghcr_image_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.orchestrator.deployment_adapter import DokployDeploymentAdapter
 

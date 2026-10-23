@@ -103,6 +103,18 @@ def test_run_hub_only_merge_is_data_only() -> None:
     assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
 
 
+def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments() -> None:
+    proposal = (ROOT / "docs" / "proposals" / "USR-207-zero-downtime.md").read_text(encoding="utf-8")
+    section = proposal.split("### Agendar a sonda", maxsplit=1)[1].split("## 2.", maxsplit=1)[0]
+    assert '$py = "C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\pythonw.exe"' in section
+    assert "Test-Path $py" in section and "throw" in section
+    assert "New-ScheduledTaskAction -Execute $py" in section
+    assert 'Register-ScheduledTask -TaskName "DarkFac-Hub-Availability"' in section
+    assert "-WorkingDirectory \"C:\\dev\\DarkFac\"" in section
+    assert "Start-Process" not in section
+    assert "Invoke-Expression" not in section
+
+
 # --------------------------------------------------------------------------- plan
 
 

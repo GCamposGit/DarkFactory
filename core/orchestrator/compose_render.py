@@ -137,6 +137,16 @@ def wait_for_ghcr_image(
             if status == 200:
                 return
             last = f"HTTP {status}"
+            if status in (401, 403) and not (
+                (os.environ.get("GHCR_TOKEN") or "").strip()
+                or (os.environ.get("GITHUB_PAT") or "").strip()
+            ):
+                raise GhcrImageUnavailableError(
+                    f"Cannot verify GHCR image {ghcr_image_ref(sha)}: HTTP {status} and no GHCR token is configured; "
+                    "set GHCR_TOKEN with read:packages permission (OA-053). Deploy refused, no fallback to build."
+                )
+        except GhcrImageUnavailableError:
+            raise
         except Exception as exc:  # noqa: BLE001
             last = type(exc).__name__
         remaining = deadline - clock_fn()
