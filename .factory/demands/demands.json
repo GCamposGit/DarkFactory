@@ -10162,8 +10162,8 @@
     "project_id": "darkfac",
     "title": "Hub mostra acoes do owner desatualizadas: redeploy pula merge so de dados mas o ledger vive na imagem",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "b45b53ef71bb2dcddd7a74a917e4986a66702bfe",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10192,7 +10192,7 @@
       "USR-339"
     ],
     "created_at": "2026-10-22T10:03:36.429409Z",
-    "updated_at": "2026-10-23T11:34:32.051051Z"
+    "updated_at": "2026-10-23T17:15:08.752713Z"
   },
   {
     "id": "USR-349",
