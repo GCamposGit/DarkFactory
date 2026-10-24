@@ -71,14 +71,14 @@ Desenho:
 
 **Resultado da prova em 23/10/2026:** a tentativa de `compose up` terminou em `error` porque a VPS nao conseguiu fazer pull da imagem GHCR privada. Portanto, essa execucao nao demonstra o cutover blue-green nem satisfaz o criterio de zero downtime. Corrigir o acesso privado e o rollback de compose/migracao legada pertence ao USR-363.
 
-**Pendente:** executar a sonda real de 1 s durante deploy, com `non200 = 0` e ambos os SHAs observados. OA-058 segue aberta; depende do USR-363 e de uma nova janela operacional. Nao considerar a prova simulada nem a falha de pull como aceite.
+**Pendente:** executar a sonda versionada durante deploy, com `non200 = 0` e ambos os SHAs observados. O teste anterior de 23/10 falhou antes da troca blue-green por falta de pull da imagem privada. A execução real deste ticket depende do merge desta versão e de uma janela em que o Dokploy consiga fazer pull do SHA novo; OA-064 registra os comandos e a verificação. Não considerar a prova simulada nem a falha de pull como aceite.
 
 ### 2.2b Roteiro de prova (owner)
 
-Terminal 1 (PowerShell): sonda de 1 s por 10 min.
+Terminal 1 (PowerShell): sonda HTTPS de 1 s por 10 min, gravando um JSONL no repositório sincronizado.
 
 ```powershell
-python C:\Users\guigc\darkfac-ops\tools\health_probe.py C:\Users\guigc\hub_probe.jsonl 600
+python C:\dev\DarkFac\scripts\hub_downtime_probe.py --url https://darkhub.ggcampos.com/health --output C:\dev\DarkFac\docs\evidence\hub-downtime-<DEPLOY_SHA>.jsonl --duration 600 --interval 1 --timeout 5
 ```
 
 Terminal 2, durante a sonda (blue-green; o ultimo merge precisa ter a imagem GHCR publicada):
@@ -92,9 +92,10 @@ Para provar a alternancia, rode uma segunda vez com outro sha (novo merge) e con
 Verificacao ao fim da sonda (esperado: `non200 = 0` e dois shas, antigo e novo):
 
 ```powershell
-$r = Get-Content C:\Users\guigc\hub_probe.jsonl | ForEach-Object { $_ | ConvertFrom-Json }
-"total = $($r.Count)"; "non200 = $(($r | Where-Object { $_.status -ne 200 }).Count)"; "shas = $((($r | Where-Object sha).sha | Select-Object -Unique) -join ', ')"
+python C:\dev\DarkFac\scripts\hub_downtime_probe.py --verify C:\dev\DarkFac\docs\evidence\hub-downtime-<DEPLOY_SHA>.jsonl --verdict-output C:\dev\DarkFac\docs\evidence\hub-downtime-<DEPLOY_SHA>-verdict.json
 ```
+
+O comando de veredito retorna codigo diferente de zero se houver qualquer status diferente de 200, timeout/erro de conexao, JSONL invalido ou menos de dois SHAs de `/health`. Preserve o JSONL e a saida JSON do veredito como evidencia versionada em `docs/evidence/`; registre nesta proposta o SHA antigo, o SHA novo e o caminho do relatorio depois de uma execucao real aprovada.
 
 Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de cutover) e se o container legado `darkhub-cloud-247` ainda existia.
 
@@ -103,7 +104,8 @@ Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de 
 - OA-044: agendamento da sonda no Notebook/Desktop registrado e cumprido; o comando PowerShell da secao 1 e protegido por `test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments`.
 - OA-052/OA-053: configuracao de ativacao e credencial de leitura GHCR cumpridas para o runner que consulta o manifesto. A credencial de pull usada pela VPS/Dokploy ainda falhou na prova de 23/10 e esta no escopo do USR-363.
 - OA-057: blue-green no Traefik escolhido e implementado.
-- OA-058: prova de sonda de 1 s durante deploy real continua aberta; executar depois da correcao do pull privado pelo USR-363.
+- OA-058: limpeza do container legado foi concluida. A antiga referencia a uma sonda externa foi substituida pelo script versionado neste repositorio.
+- OA-064: prova de sonda de 1 s durante deploy real continua aberta; requer esta versao publicada e pull GHCR funcional na janela operacional.
 - O autoDeploy e a integracao Dokploy permanecem como registrados nas respectivas acoes do owner; esta proposta nao instrui a repetir configuracoes ja concluidas.
 
 ## 3. Memoria: como medir antes de mexer nos 512 MB

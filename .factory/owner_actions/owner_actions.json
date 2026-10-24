@@ -2610,6 +2610,42 @@
       "verify": "PR mergeado e python scripts/hub_image_workflow_check.py retorna codigo 0; o trigger lista exatamente os caminhos runtime derivados do Dockerfile.hub.",
       "created_at": "2026-10-24T00:00:00Z",
       "created_by": "codex"
+    },
+    {
+      "id": "OA-064",
+      "kind": "action",
+      "title": "USR-207 T5: executar a sonda versionada durante um deploy blue-green real",
+      "priority": "high",
+      "status": "open",
+      "why": "A prova real de zero downtime exige publicar esta versao, ter a imagem GHCR disponivel e executar o blue-green durante a janela. A tentativa neste harness, em 2026-10-24, terminou antes de qualquer escrita: `python scripts/dokploy_bluegreen.py` saiu com codigo 2: \"usage error: Missing Dokploy credentials: DOKPLOY_API_URL, DOKPLOY_API_KEY. Set them as environment variables (Windows: User scope is also read automatically via the registry). See docs/runbooks/dokploy_redeploy.md.\" Configure as credenciais no host que executara a janela e rode a sonda apos o merge e publicacao da imagem. A publicacao do commit 00422c45 deste harness tambem falhou antes do push: `git push origin HEAD` retornou \"fatal: could not read Username for 'https://github.com': No such device or address\"; o GitHub CLI informa que nao ha host autenticado. O harness precisa de uma sessao `gh` autenticada para abrir PR e publicar a versao.",
+      "blocks": [
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No host que executara o harness, autentique o GitHub CLI como owner para que o agente possa publicar a branch e abrir o PR automaticamente. Execute o comando abaixo, escolha GitHub.com, HTTPS e login pelo navegador, conclua a autorizacao na pagina aberta e confirme o estado com `gh auth status`. Nao faca push, PR ou merge manual; depois que a sessao estiver autenticada, o agente retoma o ciclo.",
+          "command": "\"C:\\Program Files\\GitHub CLI\\gh.exe\" auth login --hostname github.com --git-protocol https --web"
+        },
+        {
+          "text": "Antes da janela, siga docs/runbooks/dokploy_redeploy.md, secoes 1 e 2, para gerar um token de API no Dokploy e configurar DOKPLOY_API_URL e DOKPLOY_API_KEY no host que executara o deploy; mantenha o token fora do repositorio e de logs. Depois que esta versao estiver mergeada em main e o workflow publicar sua imagem GHCR, abra dois terminais PowerShell no Desktop sincronizado. No primeiro, crie a pasta de evidencia e inicie a sonda publica por 10 minutos; mantenha o terminal aberto.",
+          "command": "New-Item -ItemType Directory -Force C:\\dev\\DarkFac\\docs\\evidence | Out-Null; python C:\\dev\\DarkFac\\scripts\\hub_downtime_probe.py --url https://darkhub.ggcampos.com/health --output C:\\dev\\DarkFac\\docs\\evidence\\hub-downtime-<DEPLOY_SHA>.jsonl --duration 600 --interval 1 --timeout 5"
+        },
+        {
+          "text": "Durante a amostragem, no segundo terminal, execute o blue-green real. Se o deploy falhar ou o pull GHCR for negado, preserve a saida integral do comando e nao declare a prova aprovada.",
+          "command": "python C:\\dev\\DarkFac\\scripts\\dokploy_bluegreen.py"
+        },
+        {
+          "text": "Quando a sonda terminar, rode o veredito sobre o mesmo JSONL. Codigo 0 exige zero falhas HTTP/timeout/conexao e ao menos dois SHAs distintos.",
+          "command": "python C:\\dev\\DarkFac\\scripts\\hub_downtime_probe.py --verify C:\\dev\\DarkFac\\docs\\evidence\\hub-downtime-<DEPLOY_SHA>.jsonl --verdict-output C:\\dev\\DarkFac\\docs\\evidence\\hub-downtime-<DEPLOY_SHA>-verdict.json"
+        },
+        {
+          "text": "Se o veredito retornar 0, mantenha o JSONL e a saida JSON do veredito em docs/evidence e atualize docs/proposals/USR-207-zero-downtime.md com os SHAs observados. Se o deploy for negado, anote o texto exato da negacao nesta acao para o agente corrigir o bloqueio de permissao apropriado."
+        }
+      ],
+      "verify": "python C:\\dev\\DarkFac\\scripts\\hub_downtime_probe.py --verify <caminho-absoluto-do-JSONL> --verdict-output <caminho-absoluto-do-veredito.json> retorna codigo 0; o relatorio versionado contem somente status 200 e pelo menos dois SHAs de /health durante o deploy blue-green.",
+      "created_at": "2026-10-24T00:00:00Z",
+      "created_by": "codex"
     }
   ]
 }

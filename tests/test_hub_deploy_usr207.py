@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ from core.infra import container_memory
 from core.infra import deploy_classifier as dc
 from scripts import dokploy_redeploy as mod
 from scripts import hub_load_probe
+from scripts import hub_downtime_probe
 
 
 @pytest.fixture(autouse=True)
@@ -156,6 +158,95 @@ def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_a
     assert "-WorkingDirectory \"C:\\dev\\DarkFac\"" in section
     assert "Start-Process" not in section
     assert "Invoke-Expression" not in section
+
+
+def test_downtime_probe_samples_once_per_second_and_records_network_failures(tmp_path: Path) -> None:
+    class FakeClock:
+        def __init__(self) -> None:
+            self.elapsed = 0.0
+
+        def monotonic(self) -> float:
+            return self.elapsed
+
+        def sleep(self, seconds: float) -> None:
+            self.elapsed += seconds
+
+        def now(self) -> datetime:
+            return NOW + timedelta(seconds=self.elapsed)
+
+    clock = FakeClock()
+    responses = [
+        {"status": 200, "body": {"git_sha": A}, "latency_ms": 2},
+        TimeoutError("timed out"),
+        urllib.error.URLError("connection refused"),
+    ]
+
+    def get(_url: str, _timeout: float) -> Any:
+        result = responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    output = tmp_path / "samples.jsonl"
+    count = hub_downtime_probe.sample_probe(
+        "https://darkhub.ggcampos.com/health",
+        output,
+        duration=2.0,
+        interval=1.0,
+        timeout=0.5,
+        http_get=get,
+        now=clock.now,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert count == len(rows) == 3
+    assert [row["status"] for row in rows] == [200, None, None]
+    assert [row["error"] for row in rows] == [None, "timeout", "connection_error"]
+    assert [row["sha"] for row in rows] == [A, None, None]
+    assert [datetime.fromisoformat(rows[i + 1]["timestamp"]) - datetime.fromisoformat(rows[i]["timestamp"])
+            for i in range(2)] == [timedelta(seconds=1), timedelta(seconds=1)]
+
+
+@pytest.mark.parametrize("rows", [
+    [{"status": 200, "sha": A}, {"status": 503, "sha": B}],
+    [{"status": 200, "sha": A}, {"status": 200, "sha": A}],
+    [{"status": 200, "sha": A, "error": "timeout"}, {"status": 200, "sha": B}],
+])
+def test_downtime_probe_verdict_rejects_non200_or_single_sha(tmp_path: Path, rows: List[Dict[str, Any]]) -> None:
+    report = tmp_path / "samples.jsonl"
+    report.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    assert hub_downtime_probe.verify_report(report)["passed"] is False
+
+
+def test_downtime_probe_verdict_accepts_zero_failures_and_two_shas(tmp_path: Path) -> None:
+    report = tmp_path / "samples.jsonl"
+    report.write_text(
+        "\n".join(json.dumps({"status": 200, "sha": sha}) for sha in (A, B)) + "\n",
+        encoding="utf-8",
+    )
+    verdict = hub_downtime_probe.verify_report(report)
+    assert verdict["passed"] is True
+    assert verdict["non200"] == 0
+    assert verdict["shas"] == [A, B]
+
+
+def test_downtime_probe_cli_saves_verdict_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    report = tmp_path / "samples.jsonl"
+    report.write_text(
+        "\n".join(json.dumps({"status": 200, "sha": sha}) for sha in (A, B)) + "\n",
+        encoding="utf-8",
+    )
+    verdict_file = tmp_path / "evidence" / "verdict.json"
+    assert hub_downtime_probe.main(["--verify", str(report), "--verdict-output", str(verdict_file)]) == 0
+    assert json.loads(verdict_file.read_text(encoding="utf-8"))["passed"] is True
+    assert json.loads(capsys.readouterr().out)["passed"] is True
+
+
+@pytest.mark.parametrize("payload", [{"status": "ok"}, {"git_sha": None}, {}, "not-json"])
+def test_downtime_probe_sha_extraction_tolerates_health_payload_without_sha(payload: Any) -> None:
+    assert hub_downtime_probe.extract_sha(payload) is None
 
 # --------------------------------------------------------------------------- plan
 
