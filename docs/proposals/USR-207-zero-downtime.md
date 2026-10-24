@@ -76,7 +76,7 @@ Desenho:
 Terminal 1 (PowerShell): sonda de 1 s por 10 min.
 
 ```powershell
-python C:\Users\guigc\darkfac-ops\tools\health_probe.py C:\Users\guigc\hub_probe.jsonl 600
+python C:\dev\DarkFac\scripts\hub_downtime_probe.py --url https://darkhub.ggcampos.com/health --seconds 600 --out C:\Users\guigc\hub_probe.jsonl --expect-switch
 ```
 
 Terminal 2, durante a sonda (blue-green; o ultimo merge precisa ter a imagem GHCR publicada):
@@ -87,12 +87,7 @@ python C:\dev\DarkFac\scripts\dokploy_bluegreen.py
 
 Para provar a alternancia, rode uma segunda vez com outro sha (novo merge) e confira no Dokploy/Docker que a cor ativa mudou (`docker ps --filter name=darkhub`).
 
-Verificacao ao fim da sonda (esperado: `non200 = 0` e dois shas, antigo e novo):
-
-```powershell
-$r = Get-Content C:\Users\guigc\hub_probe.jsonl | ForEach-Object { $_ | ConvertFrom-Json }
-"total = $($r.Count)"; "non200 = $(($r | Where-Object { $_.status -ne 200 }).Count)"; "shas = $((($r | Where-Object sha).sha | Select-Object -Unique) -join ', ')"
-```
+O comando imprime o resumo ao terminar e retorna codigo 0 somente quando `non200 = 0` e, com `--expect-switch`, pelo menos dois SHAs foram observados. Cada amostra fica em JSONL com timestamp, status, SHA, latencia e erro. A sonda pode ser reproduzida sem acesso ao script externo; OA-058 continua pendente ate a execucao real durante um deploy.
 
 Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de cutover) e se o container legado `darkhub-cloud-247` ainda existia.
 
