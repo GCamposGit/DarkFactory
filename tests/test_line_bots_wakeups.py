@@ -209,8 +209,9 @@ def hub(monkeypatch, tmp_path, local_store, line_store):
         project_root=tmp_path, data_dir=tmp_path / "hub_data", control_store=local_store, line_control_store=line_store
     )
     app.dependency_overrides[get_hub_service] = lambda: service
+    secret = telegram_webhooks.effective_webhook_secret()
     try:
-        yield service, TestClient(app), sent
+        yield service, TestClient(app, headers={"X-Telegram-Bot-Api-Secret-Token": secret}), sent
     finally:
         app.dependency_overrides.pop(get_hub_service, None)
 
@@ -387,12 +388,14 @@ def test_each_bot_is_registered_on_its_own_route_with_the_existing_secret() -> N
         assert payload["secret_token"] == "s3cret_value" and payload["allowed_updates"] == ["message", "callback_query"]
 
 
-def test_registration_is_idempotent() -> None:
+def test_registration_reapplies_url_and_secret_on_every_start() -> None:
+    # getWebhookInfo cannot reveal the secret, so every start re-sends it (setWebhook is idempotent).
     api = FakeTelegramApi()
     assert telegram_webhooks.register_telegram_webhooks(_PROD_ENV, http=api) == {"ops": "updated", "owner": "updated"}
-    posts_before = sum(1 for c in api.calls if c[0] == "POST")
-    assert telegram_webhooks.register_telegram_webhooks(_PROD_ENV, http=api) == {"ops": "unchanged", "owner": "unchanged"}
-    assert sum(1 for c in api.calls if c[0] == "POST") == posts_before
+    first = dict(api.current)
+    assert telegram_webhooks.register_telegram_webhooks(_PROD_ENV, http=api) == {"ops": "updated", "owner": "updated"}
+    assert api.current == first
+    assert all(c[2]["secret_token"] == "s3cret_value" for c in api.calls if c[0] == "POST")
 
 
 def test_registration_uses_the_public_url_env_and_skips_a_shared_token() -> None:
