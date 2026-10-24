@@ -24,6 +24,7 @@ import run_ticket
 from core.line import agent_retry, routing
 from core.git.autonomy import GitAutonomyManager, SweepReport, TicketCompletionReport
 from core.demands.store import DemandsStore
+from core.enterprise import enforcement
 from core.roadmap.models import DeliveryStatus
 from core.git.ticket_workspace import TicketWorkspace
 from core.line.agent_cli import AgentRequest, AgentResult
@@ -63,6 +64,10 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     """Hermetic launcher environment: fake backlog and quotas, cooldowns in tmp, agent + sleep recorded."""
     monkeypatch.setattr(run_ticket, "DemandsStore", _Store)
     monkeypatch.setattr(run_ticket, "inspect_quotas", lambda: _quotas())
+    # Routing policy is read from mutable machine state by default. Keep this
+    # suite hermetic: the test ticket has no enterprise policy unless a test
+    # explicitly supplies one.
+    monkeypatch.setattr(enforcement, "_configs_file", lambda: tmp_path / "enterprise" / "configs.json")
     monkeypatch.setattr(routing, "default_cooldown_path", lambda: tmp_path / "cooldowns.json")
     # The retry backoff is recorded on the launcher's OWN `time` reference. Patching `time.sleep` on the
     # shared module would also record sleeps made by anything else in the process (stale-worktree cleanup

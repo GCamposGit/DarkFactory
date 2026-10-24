@@ -358,7 +358,9 @@ def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
     store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     ticket = _build_ticket(args, store)
     store.save_ticket(ticket)
-    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path, kind="queue")
+    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path, kind="queue",
+        project_id=ticket.project_id,
+    )
     if not report.ok:
         logger.error("Queue registration of %s failed (%s): %s", ticket.id, report.action, report.message)
     return ticket if report.ok else None
@@ -753,7 +755,7 @@ def _invoke_fix_agent(
     Best-effort: if no route is available or the call itself fails, the next focal/gate attempt simply
     fails again for the same reason, which the caller already treats as an (eventually final) failure.
     """
-    route = pick("development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE)
+    route = pick("development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE, project_id=ticket.project_id)
     if route is None:
         logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
         return None
@@ -1962,6 +1964,7 @@ def _deliver_worktree(
             delivery = git_mgr.deliver_branch(
                 ticket.id, ticket.title, cwd=target_worktree, base=project.default_branch,
                 merge=not project.requires_commercial_acceptance, kind="implementation",
+                project_id=ticket.project_id,
             )
             completion_report = delivery
             if delivery.ok and delivery.merge_sha and project.deploy is not None:
@@ -2359,7 +2362,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
                 "preflight", "failed", f"harness {target_harness} recusado: {quota_reason}", cause="quota_critical"
             )
             # Find recommended healthy harness
-            rec_route = pick("development", caps, mode=DEVELOPMENT_MODE)
+            rec_route = pick("development", caps, mode=DEVELOPMENT_MODE, project_id=ticket.project_id)
             if rec_route:
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
             return 2
@@ -2375,7 +2378,10 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         # Automatic router resolution via Dynamic Headroom, among harnesses that can write
         if operating_harness and not args.json:
             print(f"[+] Harness de operacao detectado: {operating_harness}")
-        route = pick("development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness)
+        route = pick(
+            "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
+            project_id=ticket.project_id,
+        )
         if route is None:
             progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
             print(

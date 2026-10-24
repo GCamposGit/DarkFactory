@@ -354,7 +354,12 @@ def export_services_catalog(
     service: HubService = Depends(get_hub_service),
 ) -> ExportCatalogResponse:
     """Export complete services catalog as JSON backup."""
-    return service.export_services_data()
+    from core.enterprise.enforcement import DataPolicyError
+
+    try:
+        return service.export_services_data()
+    except DataPolicyError as exc:
+        raise HTTPException(status_code=403, detail=exc.to_dict())
 
 
 @router.post("/services/import", response_model=ImportCatalogResponse)
