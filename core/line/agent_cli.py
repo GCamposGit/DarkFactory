@@ -775,6 +775,7 @@ def _run_bounded(
     grace_s: float = 10.0,
     stdin: Optional[Any] = None,
     env: Optional[dict[str, str]] = None,
+    scrub_env: bool = True,
 ) -> BoundedProcessResult:
     """Execute `argv` with a hard timeout and tree termination (USR-114).
 
@@ -785,6 +786,9 @@ def _run_bounded(
     partial output within a short grace period (default 10s).
     """
     start = time.perf_counter()
+    if scrub_env:  # USR-172: agents never inherit deploy/backup/DB/delivery credentials
+        from core.line.agent_env import build_agent_env
+        env = build_agent_env(env)
 
     # Backwards-compatibility for existing tests monkeypatching agent_cli.subprocess.run:
     if subprocess.run is not _ORIGINAL_SUBPROCESS_RUN:
