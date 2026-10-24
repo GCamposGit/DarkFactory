@@ -29,7 +29,7 @@ build/
 .factory/n8n/config.json
 .factory/telegram/*.json
 !.factory/telegram/config.example.json
-hub/data/session_token.txt
+hub/data/session_token*.txt
 
 # Local model/runtime data
 models/*.bin
