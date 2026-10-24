@@ -499,6 +499,29 @@ def _isolate_ambient_worker_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setenv("DARKFAC_ONPREM_BACKUP_DIR", str(tmp_path / "onprem_backup_mirror"))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_delivery_policy_state(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep delivery tests independent of enterprise policies created by other tests.
+
+    These tests exercise GitHub delivery with scripted ``gh`` runners. They must
+    not inherit a project policy from another test running in the same xdist
+    worker; policy-specific delivery behavior is covered by
+    ``test_data_policy_enforcement_usr174.py`` with an explicit state root.
+    """
+    delivery_modules = {
+        "test_git_autonomy_ci_gate.py",
+        "test_git_autonomy_registry_usr185.py",
+        "test_git_delivery.py",
+        "test_queue_duplicate_registration.py",
+        "test_queue_registration.py",
+        "test_ticket_workspace.py",
+    }
+    if Path(str(request.node.path)).name in delivery_modules:
+        monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "delivery_state"))
+
+
 # Prefixes/names of external-service settings that a developer or worker machine legitimately exports
 # (Telegram bots, Cloudflare R2 backup target, backup vault key) but that no offline test may inherit.
 # With them set, `load_telegram_config` lets the environment win over the fixtures a test writes, and
