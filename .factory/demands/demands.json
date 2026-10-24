@@ -10753,5 +10753,35 @@
     "dependencies": [],
     "created_at": "2026-10-24T04:33:55.793550Z",
     "updated_at": "2026-10-24T04:33:55.793550Z"
+  },
+  {
+    "id": "USR-369",
+    "project_id": "darkfac",
+    "title": "Trava de linha por host em modo frota: despachante nao consegue rodar runs em paralelo na mesma maquina",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 24/10/2026 o despachante continuo (USR-366) lancou USR-367 (notebook) e USR-368 (grokbox) a partir do Notebook; o segundo foi recusado por [TRAVA DE LINHA] (trava por maquina) e ficou em cooldown de infra de 10 min. Paralelismo efetivo = 1.",
+    "core_journey": [
+      "Em 24/10/2026 o despachante continuo (USR-366) lancou USR-367 (notebook) e USR-368 (grokbox) a partir do Notebook; o segundo foi recusado por [TRAVA DE LINHA] (trava por maquina) e ficou em cooldown de infra de 10 min. Paralelismo efetivo = 1."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Em modo frota a trava e por host de portao (line.fleet-<host>.lock); fora dele continua por maquina",
+      "Recusa por trava nao vira cooldown de infra no despachante",
+      "Testes de dois hosts simultaneos e do mesmo host recusado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T05:09:42.041470Z",
+    "updated_at": "2026-10-24T05:09:42.041470Z"
   }
 ]
