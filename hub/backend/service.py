@@ -326,7 +326,8 @@ class HubService:
         else:
             self.data_dir = Path(data_dir)
 
-        self.session_file = self.data_dir / "session_token.txt"
+        # v2: the v1 token was served by the public /api/session; a new file name rotates it on deploy.
+        self.session_file = self.data_dir / "session_token.v2.txt"
         loaded_token = ""
         if self.session_file.exists():
             try:
@@ -1923,6 +1924,38 @@ class HubService:
                 pass
         return self._session_token
 
+    def send_owner_login_link(self, now: Optional[float] = None) -> str:
+        """Send a one-time DarkHub login link to the owner's Telegram chat.
+
+        Returns "sent", "rate_limited" or "unavailable". The link only ever goes to the authorized
+        owner chats already configured for the bots, so triggering it anonymously grants nothing.
+        """
+        from hub.backend.auth import make_login_code
+
+        current = time.time() if now is None else now
+        last = getattr(self, "_last_login_link_at", 0.0)
+        if current - last < 60:
+            return "rate_limited"
+        self._last_login_link_at = current
+        base = (os.getenv("DARKHUB_PUBLIC_URL") or os.getenv("DARKHUB_BASE_URL") or "https://darkhub.ggcampos.com").rstrip("/")
+        link = f"{base}/api/auth/telegram-callback?code={make_login_code(self._session_token, current)}"
+        text = "<b>DarkHub</b>: link de acesso de uso unico (vale 10 minutos). Se nao foi voce, ignore."
+        buttons = [[{"text": "Entrar no DarkHub", "url": link}]]
+        from core.integrations.telegram import TelegramGateway, load_telegram_config
+
+        for role in ("owner", "ops"):
+            try:
+                cfg = load_telegram_config(role=role)
+                if not cfg.bot_token:
+                    continue
+                gateway = TelegramGateway(config=cfg)
+                targets = list(cfg.authorized_chat_ids) or list(cfg.authorized_user_ids)
+                if any(gateway.send_message(chat_id=chat_id, text=text, buttons=buttons) for chat_id in targets):
+                    return "sent"
+            except Exception as exc:  # noqa: BLE001 - login must degrade, never crash the Hub
+                logger.warning("login link: telegram role %s falhou: %s", role, exc.__class__.__name__)
+        return "unavailable"
+
     def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
         """
         Pings a service URL and measures round-trip latency with strict SSRF & redirect guards (DF-08).
@@ -3122,6 +3155,20 @@ class HubService:
         )
         return {"recorded": True, "action_id": action.id, "annotated_tickets": annotated, "resumed": bool(annotated)}
 
+    def _heal_telegram_webhooks(self) -> None:
+        """Re-push the webhook secret in the background (at most every 5 min) if updates arrive without it.
+
+        Covers a failed registration at startup: Telegram retries rejected updates, and the retries
+        carry the secret once `setWebhook` succeeds.
+        """
+        now = time.time()
+        if now - getattr(self, "_last_webhook_heal_at", 0.0) < 300:
+            return
+        self._last_webhook_heal_at = now
+        from core.integrations.telegram_webhooks import register_telegram_webhooks
+
+        threading.Thread(target=register_telegram_webhooks, daemon=True, name="telegram-webhook-heal").start()
+
     def process_telegram_webhook(
         self,
         payload: Dict[str, Any],
@@ -3129,8 +3176,11 @@ class HubService:
         role: str = "ops",
     ) -> Dict[str, Any]:
         """Processes an incoming Telegram webhook update for the given bot role (ops or owner)."""
-        expected_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-        if expected_secret and secret_token_header != expected_secret:
+        from core.integrations.telegram_webhooks import effective_webhook_secret
+
+        expected_secret = effective_webhook_secret()
+        if expected_secret and not secrets.compare_digest(secret_token_header or "", expected_secret):
+            self._heal_telegram_webhooks()
             return {
                 "update_id": payload.get("update_id", 0),
                 "action": "unauthorized",

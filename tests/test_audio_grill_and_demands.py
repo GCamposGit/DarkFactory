@@ -321,6 +321,8 @@ def test_telegram_voice_demand_rich_response_formatting(tmp_path: Path):
 
 
 def test_hub_service_telegram_webhook_dispatch_and_status(tmp_path: Path):
+    from core.integrations.telegram_webhooks import effective_webhook_secret
+
     from hub.backend.service import HubService
 
     service = HubService(project_root=tmp_path)
@@ -349,7 +351,7 @@ def test_hub_service_telegram_webhook_dispatch_and_status(tmp_path: Path):
                     "text": "/demand Criar tela de métricas no DarkHub",
                 },
             }
-            res = service.process_telegram_webhook(demand_payload)
+            res = service.process_telegram_webhook(demand_payload, secret_token_header=effective_webhook_secret())
             assert res.get("authorized") is True
             assert res.get("action") == "demand"
             assert "Criar tela de métricas no DarkHub" in res.get("response_text", "")
@@ -372,7 +374,7 @@ def test_hub_service_telegram_webhook_dispatch_and_status(tmp_path: Path):
                     "text": "/status",
                 },
             }
-            res_status = service.process_telegram_webhook(status_payload)
+            res_status = service.process_telegram_webhook(status_payload, secret_token_header=effective_webhook_secret())
             assert res_status.get("authorized") is True
             assert res_status.get("action") == "status"
             assert "DarkFac Status:" in res_status.get("response_text", "")
