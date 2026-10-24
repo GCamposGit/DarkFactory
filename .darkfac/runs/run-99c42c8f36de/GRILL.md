@@ -14,7 +14,4 @@
 - Manter inicialmente 512 MB; medir carga e sobreposição dos containers, monitorar OOMKilled e ajustar o limite com evidência, sem ampliar a VPS nesta demanda.
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [business] “CI publica no GHCR” significa publicar a imagem com acesso público ou manter o pacote privado com pull autenticado pela VPS? O repositório registra pacote privado e falha de pull no USR-363; a imagem inclui código e dados de .factory/. (id=q1)
+- [business] “CI publica no GHCR” significa publicar a imagem com acesso público ou manter o pacote privado com pull autenticado pela VPS? O repositório registra pacote privado e falha de pull no USR-363; a imagem inclui código e dados de .factory/. -> **Manter imagem privada e corrigir autenticação de pull** (respondida pelo owner)
