@@ -183,8 +183,8 @@ app.include_router(roadmap_router, prefix="/api")
 app.include_router(roadmap_router)
 
 @app.get("/health", include_in_schema=False)
-def get_health(disk: bool = False) -> Dict[str, Any]:
-    """Liveness plus the deployed commit (USR-65) and optional disk space capacity (USR-122)."""
+def get_health(disk: bool = False, memory: bool = False) -> Dict[str, Any]:
+    """Liveness plus deployed commit and opt-in disk/container memory diagnostics."""
     from core.infra.git_sha import current_git_sha
 
     data: Dict[str, Any] = {
@@ -198,6 +198,20 @@ def get_health(disk: bool = False) -> Dict[str, Any]:
         data["disk_percent"] = disk_info.get("disk_percent", 0.0)
         data["disk_free_gb"] = disk_info.get("free_gb", 0.0)
         data["disk_total_gb"] = disk_info.get("total_gb", 0.0)
+    if memory:
+        from core.infra.container_memory import read_container_memory
+
+        try:
+            data["memory"] = read_container_memory().model_dump()
+        except Exception:
+            # Diagnostics must not turn an otherwise healthy liveness response into an error.
+            data["memory"] = {
+                "used_mb": None,
+                "peak_mb": None,
+                "limit_mb": None,
+                "percent_of_limit": None,
+                "oom_kills": None,
+            }
     return data
 
 
