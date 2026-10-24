@@ -2638,7 +2638,7 @@
       "kind": "action",
       "title": "Confirmar no BotFather que o token antigo do bot exposto no historico publico do git foi revogado",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Um token real de bot do Telegram foi versionado em .factory/telegram/config.json (commits 0c7514e e 8d4b239) e o repositorio e publico. O commit d6b641d diz que foi revogado, mas isso nao e verificavel pelo repositorio.",
       "blocks": [],
       "depends_on": [],
@@ -2656,7 +2656,7 @@
       "verify": "Nenhum token ativo dos bots coincide com o token versionado no historico",
       "created_at": "2026-10-24T20:33:41Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-24T23:13:58Z"
     },
     {
       "id": "OA-066",
