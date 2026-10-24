@@ -52,8 +52,8 @@ USER darkfac
 
 EXPOSE 8000
 
-# Health check probing the Cloud Gateway status endpoint
+# Health check matches the compose healthcheck endpoint.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/cloud/status')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 CMD ["uvicorn", "hub.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

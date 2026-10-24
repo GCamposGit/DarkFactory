@@ -28,10 +28,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
 from core.orchestrator.compose_render import (
+    IMAGE_SOURCE_BUILD,
     IMAGE_SOURCE_GHCR,
     SHA_PATTERN,
     ComposeRenderError,
     render_darkhub_compose,
+    resolve_hub_image_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,9 +50,20 @@ MODE_ENV = "DARKHUB_DEPLOY_MODE"
 
 
 def is_bluegreen(compose_file: Optional[str], env: Optional[Mapping[str, str]] = None) -> bool:
-    """True when the stored compose is blue-green or ``DARKHUB_DEPLOY_MODE=bluegreen`` is set."""
-    mode = ((env if env is not None else os.environ).get(MODE_ENV) or "").strip().lower()
-    return mode == "bluegreen" or parse_state(compose_file) is not None
+    """Blue-green is the default; only an explicit ``single`` opts out."""
+    settings = env if env is not None else os.environ
+    mode = (settings.get(MODE_ENV) or "").strip().lower()
+    if mode and mode not in {"single", "bluegreen"}:
+        raise BlueGreenError(f"{MODE_ENV} must be 'single' or 'bluegreen'")
+    if mode == "single":
+        return False
+    try:
+        image_source = resolve_hub_image_source(settings)
+    except ComposeRenderError as exc:
+        raise BlueGreenError(str(exc)) from exc
+    if image_source == IMAGE_SOURCE_BUILD:
+        raise BlueGreenError("blue-green deployment requires DARKHUB_IMAGE_SOURCE='ghcr'")
+    return True
 
 
 class BlueGreenError(RuntimeError):

@@ -14,6 +14,7 @@ import pytest
 
 from core.infra import availability_probe as probe_mod
 from core.infra import deploy_classifier as dc
+from core.orchestrator.compose_render import render_darkhub_compose
 from scripts import dokploy_redeploy as mod
 
 
@@ -21,6 +22,7 @@ from scripts import dokploy_redeploy as mod
 def _legacy_build_image_source(monkeypatch: pytest.MonkeyPatch) -> None:
     # USR-365: ghcr is the default now; these scenarios exercise the legacy build layout.
     monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "build")
+    monkeypatch.setenv("DARKHUB_DEPLOY_MODE", "single")
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "hub" / "frontend"
@@ -62,6 +64,15 @@ def _dockerfile_copy_sources() -> set[str]:
         for line in dockerfile.splitlines()
         if (match := re.match(r"^\s*COPY\s+([^\s]+)\s+", line, flags=re.IGNORECASE))
     }
+
+
+def test_dockerfile_and_compose_healthchecks_probe_same_endpoint() -> None:
+    dockerfile = (ROOT / "deploy" / "dokploy" / "Dockerfile.hub").read_text(encoding="utf-8")
+    compose = (ROOT / "deploy" / "dokploy" / "docker-compose.hub.yml").read_text(encoding="utf-8")
+    assert "http://localhost:8000/health" in dockerfile
+    assert "http://localhost:8000/health" in compose
+    assert "/api/cloud/status" not in dockerfile
+    assert render_darkhub_compose(compose, B, "build")
 
 
 def _hub_image_workflow_paths() -> set[str]:
@@ -213,7 +224,7 @@ def _run(transport: FakeDokploy, monkeypatch: pytest.MonkeyPatch, deployed: Opti
     code = mod.main(
         ["--only", "Darkhub", "--skip-node-sync", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene",
          "--timeout", "50", "--poll-interval", "1"],
-        env={"DOKPLOY_API_URL": "https://dokploy.example", "DOKPLOY_API_KEY": "k", "DARKHUB_IMAGE_SOURCE": "build"},
+        env={"DOKPLOY_API_URL": "https://dokploy.example", "DOKPLOY_API_KEY": "k", "DARKHUB_IMAGE_SOURCE": "build", "DARKHUB_DEPLOY_MODE": "single"},
         registry_reader=lambda _n: None, transport_factory=lambda u, k: transport,
         health_client=lambda: {"git_sha": B}, sleep_fn=lambda s: None, clock_fn=lambda: float(next(ticks)),
         stdout=out, stderr=err,

@@ -2429,26 +2429,26 @@
       "title": "Hub blue-green: remover o container legado darkhub-cloud-247 na VPS apos a primeira migracao (so se ainda existir)",
       "priority": "medium",
       "status": "open",
-      "why": "USR-339: na primeira migracao para blue-green o container antigo pode ficar orfao com os mesmos rotulos Traefik e dividir trafego com o darkhub-blue. O agente tenta remover pela API do Dokploy, mas o endpoint nao esta confirmado. O agente avisa no chat quando a migracao rodar.",
+      "why": "Pre-condicao bloqueante do primeiro cutover default blue-green (T1): o container legado darkhub-cloud-247 pode compartilhar os rotulos Traefik com as cores novas e dividir trafego. O agente nao pode remover esse container sem autorizacao explicita do owner.",
       "blocks": [
         "USR-339"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "Abrir o terminal da VPS (Dokploy > Web Server > Terminal, ou ssh) e conferir os containers do Hub",
+          "text": "Antes do primeiro deploy blue-green, abrir o terminal da VPS pelo Dokploy > Web Server > Terminal (ou conectar por SSH) e listar containers do Hub",
           "command": "docker ps --filter name=darkhub --format \"{{.Names}} {{.Status}}\""
         },
         {
-          "text": "Se aparecer darkhub-cloud-247, remover",
+          "text": "Se darkhub-cloud-247 aparecer na lista, remover somente esse container legado; nao remover darkhub-blue nem darkhub-green",
           "command": "docker rm -f darkhub-cloud-247"
         },
         {
-          "text": "Conferir de novo: deve sobrar so darkhub-blue (healthy)",
+          "text": "Conferir de novo antes de liberar o deploy: darkhub-cloud-247 nao deve aparecer; qualquer darkhub-blue/green existente deve estar healthy e o endpoint publico do Hub deve responder HTTP 200",
           "command": "docker ps --filter name=darkhub --format \"{{.Names}} {{.Status}}\""
         }
       ],
-      "verify": "docker ps lista apenas darkhub-blue (ou darkhub-green) healthy",
+      "verify": "A saida de docker ps --filter name=darkhub nao contem darkhub-cloud-247; a cor darkhub-blue/green em uso esta healthy; curl -fsS https://darkhub.ggcampos.com/health retorna HTTP 200. So entao o primeiro deploy blue-green pode prosseguir.",
       "created_at": "2026-10-23T04:00:00Z",
       "created_by": "claude",
       "resolved_at": null

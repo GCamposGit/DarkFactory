@@ -45,6 +45,7 @@ def _no_ambient_dokploy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("DOKPLOY_API_URL", "DOKPLOY_API_KEY", "DOKPLOY_DEPLOY_URL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "build")  # fixtures use the legacy layout (USR-365)
+    monkeypatch.setenv("DARKHUB_DEPLOY_MODE", "single")  # fixture explicitly exercises the legacy deployment path
 
 
 class _Resp:
@@ -276,6 +277,10 @@ def render_darkhub_compose(source: str, sha: str) -> str:
 
 HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA)
 SHA_B = "c" * 40
+
+
+def _repo_hub_source() -> str:
+    return (Path(__file__).resolve().parents[1] / "deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8")
 
 
 class _FakeFetcher:
@@ -572,6 +577,8 @@ def test_stage_still_fails_closed_when_digest_never_converges(tmp_path: Path) ->
 
 
 def test_bluegreen_marker_delegates_and_skips_legacy_compose_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    monkeypatch.setenv("DARKHUB_DEPLOY_MODE", "bluegreen")
     stored = f"# darkfac-bluegreen: active=blue blue={OLD_SHA} green={OLD_SHA}" + chr(10) + "services: {}"
     runs: List[Dict[str, Any]] = []
     calls: List[Dict[str, Any]] = []
@@ -585,30 +592,33 @@ def test_bluegreen_marker_delegates_and_skips_legacy_compose_update(monkeypatch:
         calls,
     )
     adapter = DokployDeploymentAdapter(
-        compose_fetcher=_FakeFetcher({SHA: TEMPLATE_A}),
+        compose_fetcher=_FakeFetcher({SHA: _repo_hub_source()}),
         ghcr_waiter=lambda _s: None,
         bluegreen_runner=lambda **kw: runs.append(kw),
     )
     adapter.start(_artifact(), _hub_target())
-    assert len(runs) == 1 and runs[0]["new_sha"] == SHA and runs[0]["source"] == TEMPLATE_A
+    assert len(runs) == 1 and runs[0]["new_sha"] == SHA and runs[0]["source"] == _repo_hub_source()
     assert "compose.update" not in _procedures(calls)
 
 
-def test_no_marker_adapter_keeps_legacy_update(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_marker_adapter_defaults_to_bluegreen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    monkeypatch.delenv("DARKHUB_DEPLOY_MODE", raising=False)
     runs: List[Dict[str, Any]] = []
     calls: List[Dict[str, Any]] = []
     _install_urlopen(
         monkeypatch,
         [
-            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": HUB_COMPOSE},
-            True,
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": _render_hub(_repo_hub_source(), OLD_SHA, "ghcr")},
             {"deployments": []},
             {"success": True},
         ],
         calls,
     )
     adapter = DokployDeploymentAdapter(
-        compose_fetcher=_FakeFetcher({SHA: TEMPLATE_A}), bluegreen_runner=lambda **kw: runs.append(kw)
+        compose_fetcher=_FakeFetcher({SHA: _repo_hub_source()}), ghcr_waiter=lambda _s: None,
+        bluegreen_runner=lambda **kw: runs.append(kw),
     )
     adapter.start(_artifact(), _hub_target())
-    assert runs == [] and "compose.update" in _procedures(calls)
+    assert len(runs) == 1 and runs[0]["new_sha"] == SHA
+    assert "compose.update" not in _procedures(calls)

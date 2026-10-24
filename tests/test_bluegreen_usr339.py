@@ -104,12 +104,17 @@ def test_legacy_migration_removes_orphan_after_new_colour_is_healthy() -> None:
     assert events == ["apply", "health", "remove", "apply"]
 
 
-def test_is_bluegreen_marker_or_env() -> None:
+def test_is_bluegreen_default_opt_out_unknown_and_build_guard() -> None:
     from core.orchestrator.bluegreen import is_bluegreen
 
     marked = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
-    assert is_bluegreen(marked, {}) and not is_bluegreen(SRC, {})
+    assert is_bluegreen(marked, {}) and is_bluegreen(SRC, {})
+    assert not is_bluegreen(marked, {"DARKHUB_DEPLOY_MODE": "single"})
     assert is_bluegreen(SRC, {"DARKHUB_DEPLOY_MODE": "bluegreen"})
+    with pytest.raises(BlueGreenError, match="single.*bluegreen"):
+        is_bluegreen(SRC, {"DARKHUB_DEPLOY_MODE": "legacy"})
+    with pytest.raises(BlueGreenError, match="ghcr"):
+        is_bluegreen(SRC, {"DARKHUB_IMAGE_SOURCE": "build"})
 
 
 def _run_apply(initial: Optional[str], applied: List[str], fail_on: int, serving: bool = True) -> None:

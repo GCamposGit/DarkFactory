@@ -298,7 +298,7 @@ def test_main_rejects_disallowed_project_exit_2_no_deploy_call(project: str) -> 
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--project", project],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build", "DARKHUB_DEPLOY_MODE": "single"},
         registry_reader=_no_registry,
         transport_factory=_forbidden_transport_factory,
         stdout=out,
@@ -316,7 +316,7 @@ def test_main_rejects_disallowed_project_even_with_list_flag() -> None:
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
         ["--list", "--project", "My First Project"],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build", "DARKHUB_DEPLOY_MODE": "single"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         stdout=out,
@@ -760,7 +760,7 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
     clock = FakeClock()
     exit_code = mod.main(
         [],
-        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build", "DARKHUB_DEPLOY_MODE": "single"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
@@ -1097,7 +1097,7 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
 # USR-65: title check only for code-bearing services; node sync without loops
 # ---------------------------------------------------------------------------
 
-_ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"}  # ghcr is the default (USR-365); legacy layout opt-in
+_ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build", "DARKHUB_DEPLOY_MODE": "single"}  # legacy fixtures opt into single/build explicitly
 
 
 def _run_main(argv: List[str], transport: QueueTransport, monkeypatch: pytest.MonkeyPatch, subject: Optional[str]):
@@ -1966,7 +1966,10 @@ def test_default_ghcr_probe_maps_http_error_status(monkeypatch: pytest.MonkeyPat
     assert mod._default_ghcr_probe is compose_render._ghcr_manifest_status
 
 
-def _bluegreen_run(monkeypatch: pytest.MonkeyPatch, compose_file: Optional[str], runner: Any):
+def _bluegreen_run(
+    monkeypatch: pytest.MonkeyPatch, compose_file: Optional[str], runner: Any,
+    *, image_source: str = "ghcr", deploy_mode: Optional[str] = None,
+):
     from core.infra import node_sync
 
     transport = _make_transport_with_full_project()
@@ -1981,10 +1984,16 @@ def _bluegreen_run(monkeypatch: pytest.MonkeyPatch, compose_file: Optional[str],
         for name in ("Notebook", "Desktop", "VPS")
     ]))
     out, err = io.StringIO(), io.StringIO()
+    run_env = {**_ENV, "DARKHUB_IMAGE_SOURCE": image_source}
+    if deploy_mode is None:
+        run_env.pop("DARKHUB_DEPLOY_MODE", None)
+    else:
+        run_env["DARKHUB_DEPLOY_MODE"] = deploy_mode
     code = mod.main(
-        ["--only", "Darkhub", "--skip-backup"], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
+        ["--only", "Darkhub", "--skip-backup"], env=run_env,
         registry_reader=_no_registry, transport_factory=lambda url, key: transport,
-        health_client=lambda: {"git_sha": "a" * 40}, bluegreen_runner=runner, stdout=out, stderr=err,
+        health_client=lambda: {"git_sha": "a" * 40}, bluegreen_runner=runner,
+        ghcr_probe=lambda _repo, _tag: 200, stdout=out, stderr=err,
     )
     return code, transport, err.getvalue()
 
@@ -1998,10 +2007,20 @@ def test_darkhub_with_bluegreen_marker_delegates_and_never_writes_legacy_render(
     assert not [c for c in transport.post_calls if c[1] in ("/api/compose.update", "/api/compose.deploy")]
 
 
-def test_darkhub_without_marker_keeps_single_container_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_darkhub_without_marker_defaults_to_bluegreen_after_ghcr_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: List[Any] = []
     code, transport, err = _bluegreen_run(monkeypatch, "services: {}\n", lambda **kw: calls.append(kw))
     assert code == mod.EXIT_OK, err
+    assert len(calls) == 1
+    assert not [c for c in transport.post_calls if c[1] in ("/api/compose.update", "/api/compose.deploy")]
+
+
+def test_darkhub_build_source_is_refused_before_compose_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Any] = []
+    code, transport, err = _bluegreen_run(
+        monkeypatch, "services: {}\n", lambda **kw: calls.append(kw), image_source="build",
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "blue-green" in err and "ghcr" in err
     assert calls == []
-    assert transport.post_calls[0][1] == "/api/compose.update"
-    assert transport.post_calls[1][1] == "/api/compose.deploy"
+    assert not [c for c in transport.post_calls if c[1] in ("/api/compose.update", "/api/compose.deploy")]
