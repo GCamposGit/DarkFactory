@@ -1,12 +1,13 @@
 {
-  "harness": "claude",
-  "model": "sonnet",
-  "effort": null,
+  "harness": "codex",
+  "model": "gpt-6-luna",
+  "effort": "high",
   "tickets_done": [
     "T1",
     "T2",
     "T3",
     "T4",
-    "T5"
+    "T5",
+    "fix-validation-8b46dc86af11"
   ]
 }
