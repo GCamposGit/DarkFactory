@@ -128,13 +128,15 @@ def _lock_for(path: Path) -> _PathMutex:
 class DemandsStore:
     """Thread-safe, atomic persistence for user demands in JSON format."""
 
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(self, path: Path | str | None = None, *, remote_ledger: Any = None) -> None:
         if path is not None:
             self.path = Path(path)
         else:
             override = os.environ.get("DARKFAC_DEMANDS_PATH")
             self.path = Path(override) if override else DEFAULT_DEMANDS_PATH
         self._lock = _lock_for(self.path)
+        self.remote_ledger = remote_ledger
+        self._local_overrides: dict[str, dict[str, Any]] = {}
         self._ensure_storage()
 
     def _ensure_storage(self) -> None:
@@ -161,6 +163,31 @@ class DemandsStore:
                 logger.error(f"Failed to read demands from {self.path}: {exc}")
                 return []
 
+    def _read_for_listing(self) -> list[dict[str, Any]]:
+        """Read origin/main when available, preserving local writes as an overlay."""
+        if self.remote_ledger is None:
+            return self._read_raw()
+        try:
+            payload = self.remote_ledger.get_or_none()
+            if isinstance(payload, list) and all(isinstance(item, dict) for item in payload):
+                raw_items = payload
+            elif (
+                isinstance(payload, dict)
+                and isinstance(payload.get("demands"), list)
+                and all(isinstance(item, dict) for item in payload["demands"])
+            ):
+                raw_items = payload["demands"]
+            else:
+                raw_items = self._read_raw()
+        except Exception as exc:
+            logger.warning("Remote demands ledger unavailable (%s); using local file", type(exc).__name__)
+            raw_items = self._read_raw()
+        if not self._local_overrides:
+            return raw_items
+        merged = [item for item in raw_items if not isinstance(item, dict) or item.get("id") not in self._local_overrides]
+        merged.extend(self._local_overrides.values())
+        return merged
+
     def _write_raw(self, items: list[dict[str, Any]]) -> None:
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +202,7 @@ class DemandsStore:
         status: DeliveryStatus | None = None,
     ) -> list[UserTicket]:
         with self._lock:
-            raw_items = self._read_raw()
+            raw_items = self._read_for_listing()
             tickets: list[UserTicket] = []
             for raw in raw_items:
                 try:
@@ -207,6 +234,7 @@ class DemandsStore:
                     f"Completed ticket {ticket.id} with live deployment requirements requires live convergence proof in delivery_evidence"
                 )
         with self._lock:
+            # Mutations always read and write the local ledger; the remote copy is read-only.
             raw_items = self._read_raw()
             updated = False
             ticket_dump = json.loads(ticket.model_dump_json())
@@ -218,6 +246,7 @@ class DemandsStore:
             if not updated:
                 raw_items.append(ticket_dump)
             self._write_raw(raw_items)
+            self._local_overrides[ticket.id] = ticket_dump
             return ticket
 
     def next_ticket_id(self, project_id: str = "darkfac") -> str:

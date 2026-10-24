@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from core.roadmap.compiler import RoadmapCompiler
 from core.roadmap.models import (
@@ -211,6 +211,7 @@ def build_repository_roadmap_service(
     repository_root: Path,
     *,
     demands_path: Path | None = None,
+    demands_payload_provider: Callable[[], Any] | None = None,
     include_demands: bool = False,
     include_hf: bool = False,
     include_infra: bool = False,
@@ -258,6 +259,7 @@ def build_repository_roadmap_service(
         target_demands_path = demands_path or (repository_root / ".factory" / "demands" / "demands.json")
         user_demands_source = UserDemandsRoadmapSource(
             target_demands_path,
+            payload_provider=demands_payload_provider,
             evidence_dir=evidence_dir,
         )
         sources.append(user_demands_source)

@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 from core.roadmap.models import (
     ConfidenceLevel,
@@ -450,12 +450,14 @@ class UserDemandsRoadmapSource:
         self,
         path: Path,
         *,
+        payload_provider: Callable[[], Any] | None = None,
         evidence_dir: Path | None = None,
         source_id: str = "user-demands",
         label: str = "Demandas de Usuários",
         priority: int = 15,
     ) -> None:
         self.path = Path(path)
+        self.payload_provider = payload_provider
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
         self.source_id = source_id
         self.label = label
@@ -463,7 +465,22 @@ class UserDemandsRoadmapSource:
 
     def read(self, project_id: str) -> RoadmapSourceResult:
         locator = self.path.as_posix()
-        if not self.path.exists():
+        content: str | None = None
+        if self.payload_provider is not None:
+            try:
+                payload = self.payload_provider()
+                if isinstance(payload, list) and all(isinstance(item, dict) for item in payload):
+                    content = json.dumps(payload, ensure_ascii=False)
+                elif (
+                    isinstance(payload, dict)
+                    and isinstance(payload.get("demands"), list)
+                    and all(isinstance(item, dict) for item in payload["demands"])
+                ):
+                    content = json.dumps(payload, ensure_ascii=False)
+            except Exception:
+                # A remote source is an optimization; the tracked local ledger remains authoritative fallback.
+                content = None
+        if content is None and not self.path.exists():
             state = RoadmapSourceState(
                 source_id=self.source_id,
                 label=self.label,
@@ -475,7 +492,8 @@ class UserDemandsRoadmapSource:
             return RoadmapSourceResult(state=state, records=[], content="")
 
         try:
-            content = self.path.read_text(encoding="utf-8")
+            if content is None:
+                content = self.path.read_text(encoding="utf-8")
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             raw_data = json.loads(content) if content.strip() else []
             items_list = raw_data if isinstance(raw_data, list) else raw_data.get("demands", [])

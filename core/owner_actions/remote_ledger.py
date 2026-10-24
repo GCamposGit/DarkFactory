@@ -21,21 +21,25 @@ ENV_TOKEN = "GITHUB_TOKEN"
 DEFAULT_TTL_SEC = 120.0
 HTTP_TIMEOUT_SEC = 4.0
 LEDGER_PATH = ".factory/owner_actions/owner_actions.json"
+DEMANDS_LEDGER_PATH = ".factory/demands/demands.json"
 
 
 class RemoteLedger:
     """Cached fetcher; ``fetch`` is injectable for tests. Never raises."""
 
     def __init__(self, repo: str, *, ref: str = "main", token: str | None = None,
-                 ttl: float = DEFAULT_TTL_SEC, fetch: Any = None, clock: Any = time.monotonic) -> None:
+                 path: str = LEDGER_PATH, ttl: float = DEFAULT_TTL_SEC, fetch: Any = None,
+                 clock: Any = time.monotonic) -> None:
         self.repo, self.ref, self.token = repo, ref, token
+        self.path = path
         self.ttl, self._fetch, self._clock = ttl, fetch or self._http_fetch, clock
         self._lock = threading.Lock()
         self._payload: Any = None
         self._at: float | None = None
+        self._last_fetch_succeeded = False
 
     def _http_fetch(self) -> Any:
-        url = f"https://api.github.com/repos/{self.repo}/contents/{LEDGER_PATH}?ref={self.ref}"
+        url = f"https://api.github.com/repos/{self.repo}/contents/{self.path}?ref={self.ref}"
         headers = {"Accept": "application/vnd.github.raw+json", "User-Agent": "darkhub-owner-actions"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -50,20 +54,32 @@ class RemoteLedger:
                 return self._payload
             try:
                 self._payload = self._fetch()
+                self._last_fetch_succeeded = True
             except Exception as exc:
                 logger.warning("owner_actions remote ledger unavailable (%s)", type(exc).__name__)
+                self._last_fetch_succeeded = False
             self._at = now  # also backs off after failures
             return self._payload
+
+    def get_or_none(self) -> Any:
+        """Return the cached payload only when its latest fetch succeeded.
+
+        Demand readers use this to fall back to their local ledger after a failed
+        refresh. ``get`` keeps its historical stale-last-good behavior for owner actions.
+        """
+        payload = self.get()
+        with self._lock:
+            return payload if self._last_fetch_succeeded else None
 
 
 DEFAULT_REPO = "GCamposGit/DarkFactory"
 ENV_TOKEN_FALLBACK = "GITHUB_PAT"
 
 
-def from_env() -> RemoteLedger | None:
+def from_env(*, path: str = LEDGER_PATH) -> RemoteLedger | None:
     """On by default in production; opt out with DARKHUB_OWNER_ACTIONS_REMOTE=0/false/off."""
     if os.environ.get(ENV_ENABLE, "").strip().lower() in {"0", "false", "off"}:
         return None
     repo = os.environ.get(ENV_REPO, "").strip() or DEFAULT_REPO
     token = os.environ.get(ENV_TOKEN, "").strip() or os.environ.get(ENV_TOKEN_FALLBACK, "").strip()
-    return RemoteLedger(repo, token=token or None)
+    return RemoteLedger(repo, token=token or None, path=path)

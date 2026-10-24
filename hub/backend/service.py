@@ -156,7 +156,10 @@ from hub.backend.webhooks import (
 from core.integrations.telegram import TelegramConfig, TelegramGateway, reply_messages
 from hub.backend.usage_sync_watch import UsageSyncWatch
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
-from core.owner_actions.remote_ledger import from_env as owner_actions_remote_from_env
+from core.owner_actions.remote_ledger import (
+    DEMANDS_LEDGER_PATH,
+    from_env as owner_actions_remote_from_env,
+)
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import (
     ENV_PATH as OWNER_ACTIONS_ENV_PATH,
@@ -383,7 +386,13 @@ class HubService:
             self.demands_dir = self.data_dir / "demands"
         else:
             self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
-        self.demands_store = DemandsStore(self.demands_dir / "demands.json")
+        self.demands_remote_ledger = (
+            owner_actions_remote_from_env(path=DEMANDS_LEDGER_PATH) if data_dir is None else None
+        )
+        self.demands_store = DemandsStore(
+            self.demands_dir / "demands.json",
+            remote_ledger=self.demands_remote_ledger,
+        )
         self.demands_service = DemandsService(
             store=self.demands_store,
             specifier=DemandSpecifier(ollama_url=ollama_base_url),
@@ -448,6 +457,9 @@ class HubService:
         self.roadmap = build_repository_roadmap_service(
             repository_root,
             demands_path=self.demands_dir / "demands.json",
+            demands_payload_provider=(
+                self.demands_remote_ledger.get_or_none if self.demands_remote_ledger is not None else None
+            ),
             include_demands=True,
             include_hf=True,
             include_infra=True,
@@ -3921,5 +3933,4 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
 
