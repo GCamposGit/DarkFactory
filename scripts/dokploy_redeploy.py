@@ -1114,6 +1114,24 @@ def _run_main(
 
     _run_hygiene("pre-deploy")
 
+    def _start_darkhub(svc: Service, baseline_payload: Dict[str, Any]) -> None:
+        """Blue-green (USR-339) or single-container render + trigger for the Darkhub compose."""
+        if is_bluegreen(baseline_payload.get("composeFile"), env):
+            # USR-339: never overwrite a blue-green compose with the single-container render.
+            print(f"[{svc.name}] blue-green deploy (USR-339)", file=out, flush=True)
+            (bluegreen_runner or run_bluegreen_via_dokploy)(
+                request=transport, compose_id=svc.service_id, source=darkhub_compose,
+                new_sha=expected_sha, sha_is_serving=_bluegreen_serving(health_client),
+                deploy_timeout=args.timeout, poll_interval=args.poll_interval,
+                sleep_fn=sleep_fn, clock_fn=clock_fn,
+                wait_ghcr=lambda s: wait_for_ghcr_tag(s, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn),
+            )
+            print(f"[{svc.name}] blue-green ok", file=out, flush=True)
+            return
+        set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
+        trigger_deploy(transport, svc)
+
+    joined_darkhub = False
     all_ok = True
     other_failure = False
     node_sync_dirty = False
@@ -1139,21 +1157,13 @@ def _run_main(
                     print(f"[{svc.name}] joining in-flight deployment (USR-207): {reason}", file=out, flush=True)
                     triggered.append(svc)
                     baselines[svc.name] = None
+                    joined_darkhub = True
                     continue
+                _start_darkhub(svc, baseline_payload)
                 if is_bluegreen(baseline_payload.get("composeFile"), env):
-                    # USR-339: never overwrite a blue-green compose with the single-container render.
-                    print(f"[{svc.name}] blue-green deploy (USR-339)", file=out, flush=True)
-                    (bluegreen_runner or run_bluegreen_via_dokploy)(
-                        request=transport, compose_id=svc.service_id, source=darkhub_compose,
-                        new_sha=expected_sha, sha_is_serving=_bluegreen_serving(health_client),
-                        deploy_timeout=args.timeout, poll_interval=args.poll_interval,
-                        sleep_fn=sleep_fn, clock_fn=clock_fn,
-                        wait_ghcr=lambda s: wait_for_ghcr_tag(s, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn),
-                    )
-                    print(f"[{svc.name}] blue-green ok", file=out, flush=True)
                     continue
-                set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
-            trigger_deploy(transport, svc)
+            else:
+                trigger_deploy(transport, svc)
         except (DokployUsageError, BlueGreenError) as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
             all_ok = False
@@ -1216,9 +1226,32 @@ def _run_main(
         ):
             print(f"[NODE SYNC] VPS: converged sha={expected_sha}", file=out, flush=True)
         else:
-            print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
-            all_ok = False
-            other_failure = True
+            recovered = False
+            if joined_darkhub:
+                # USR-207: a joined autoDeploy can finish "done" while the VPS keeps an older sha
+                # (it built the previous push). Retrigger once with the exact expected sha.
+                print("[NODE SYNC] VPS: joined deploy ended on a divergent sha; retriggering once (USR-207)", file=out, flush=True)
+                try:
+                    dh = next(x for x in triggered if x.name.lower() == "darkhub")
+                    payload = fetch_service_status(transport, dh)
+                    base = latest_deployment(payload)
+                    _start_darkhub(dh, payload)
+                    if not is_bluegreen(payload.get("composeFile"), env):
+                        wait_for_service(transport, dh, base, args.timeout,
+                                         poll_interval_seconds=args.poll_interval,
+                                         sleep_fn=sleep_fn, clock_fn=clock_fn)
+                    recovered = wait_for_darkhub_sha(
+                        expected_sha, health=health_client or fetch_darkhub_health, timeout=args.timeout,
+                        interval=args.poll_interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
+                    )
+                except (DokployUsageError, BlueGreenError, StopIteration) as exc:
+                    print(f"[NODE SYNC] VPS: recovery retrigger failed: {exc}", file=err, flush=True)
+            if recovered:
+                print(f"[NODE SYNC] VPS: converged sha={expected_sha} (after recovery)", file=out, flush=True)
+            else:
+                print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
+                all_ok = False
+                other_failure = True
         try:
             h_data = (health_client or (lambda: fetch_darkhub_health(DARKHUB_HEALTH_DISK_URL)))()
             if "disk_percent" in h_data:
