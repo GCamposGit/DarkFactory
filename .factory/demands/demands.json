@@ -10813,5 +10813,34 @@
     "dependencies": [],
     "created_at": "2026-10-24T13:23:48.242972Z",
     "updated_at": "2026-10-24T13:23:48.242972Z"
+  },
+  {
+    "id": "USR-371",
+    "project_id": "darkfac",
+    "title": "Propagar project_id da demanda para pick() e deliver_branch() e ligar enforcement de exportacao (seguimento USR-174)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-174 criou core/enterprise/enforcement.py, pick(project_id=) e deliver_branch(project_id='darkfac'), mas run_ticket.py e demais chamadores nao passam o project_id real da demanda; o efeito export nao tem chamador. Assim a politica por projeto so vale na entrega e sempre como darkfac.",
+    "core_journey": [
+      "USR-174 criou core/enterprise/enforcement.py, pick(project_id=) e deliver_branch(project_id='darkfac'), mas run_ticket.py e demais chamadores nao passam o project_id real da demanda; o efeito export nao tem chamador. Assim a politica por projeto so vale na entrega e sempre como darkfac."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "run_ticket.py e despachante passam o project_id da demanda para pick e deliver_branch, com teste de caminho real para projeto local_only",
+      "exportacoes do Hub/ledger chamam enforce_data_policy(effect='export') com teste de bloqueio"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T13:39:10.374345Z",
+    "updated_at": "2026-10-24T13:39:10.374345Z"
   }
 ]
