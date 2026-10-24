@@ -1,0 +1,14 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "verdict": "approve",
+      "sha": null,
+      "forced": false,
+      "candidate_digest": "367f95444d7a5d50b81df75b2c4269b9fd7632750e084ddfc3e58b5252a7d8c6",
+      "policy_digest": "2f17777367f85234bfde4fe728c18ccbf14f8231629562d1b9fe2d010b027d30"
+    }
+  ],
+  "agent_error_streak": 0,
+  "timed_out_harnesses": []
+}
