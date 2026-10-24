@@ -1,0 +1,21 @@
+{
+  "sha": "331a750569072b84d56ab26131dbdcd0671a2342",
+  "commands": {
+    "setup": {
+      "ran": true,
+      "ok": true,
+      "exit_code": 0,
+      "duration_s": 1.933
+    },
+    "validate": {
+      "ran": true,
+      "ok": true,
+      "exit_code": 0,
+      "duration_s": 649.074
+    },
+    "build": {
+      "ran": false
+    }
+  },
+  "started_at": 1792800097.867785
+}
