@@ -2550,7 +2550,7 @@
       "kind": "action",
       "title": "Mesclar PR #634 (USR-359: runner grava teste e traceback quando o portao falha) com --admin",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "O PR toca core/harness/runner.py (protegido); o GUARD barra o agente. Portao oficial passou no Notebook.",
       "blocks": [
         "USR-359"
@@ -2568,7 +2568,7 @@
       "verify": "gh pr view 634 --repo GCamposGit/DarkFactory mostra MERGED",
       "created_at": "2026-10-24T04:00:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-23T21:00:00Z"
     }
   ]
 }
