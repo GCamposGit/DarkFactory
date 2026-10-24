@@ -10694,5 +10694,34 @@
     "dependencies": [],
     "created_at": "2026-10-23T22:43:20.608385Z",
     "updated_at": "2026-10-23T23:10:26.862570Z"
+  },
+  {
+    "id": "USR-367",
+    "project_id": "darkfac",
+    "title": "Teste instavel test_line_lock::test_heartbeat_thread_refreshes_the_sidecar_while_held no grokbox",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 24/10/2026 o portao do USR-362 (candidato dd9f2e3d) no grokbox falhou so em tests/test_line_lock.py::test_heartbeat_thread_refreshes_the_sidecar_while_held[True]; depende de thread e intervalo real sob carga xdist.",
+    "core_journey": [
+      "Em 24/10/2026 o portao do USR-362 (candidato dd9f2e3d) no grokbox falhou so em tests/test_line_lock.py::test_heartbeat_thread_refreshes_the_sidecar_while_held[True]; depende de thread e intervalo real sob carga xdist."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste deterministico (intervalo/relogio injetado ou espera por evento com timeout folgado)",
+      "Rodar o arquivo 20x com -n 4 sem falha"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T03:33:54.047867Z",
+    "updated_at": "2026-10-24T03:33:54.047867Z"
   }
 ]
