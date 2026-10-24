@@ -1,0 +1,194 @@
+[
+  {
+    "id": "T1",
+    "title": "Blue-green como caminho default do deploy do Hub",
+    "goal": "Hoje `is_bluegreen` (core/orchestrator/bluegreen.py:50-54) so retorna True com `DARKHUB_DEPLOY_MODE=bluegreen` ou com o marcador ja gravado no compose; o caminho default usa o render de servico unico, cujo `start-first` o Compose simples ignora, produzindo o stop-then-start que derruba o Hub. Inverter o default, recusar blue-green quando a fonte de imagem for `build` e alinhar a definicao de liveness do container.",
+    "files_hint": [
+      "core/orchestrator/bluegreen.py",
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/deployment_adapter.py",
+      "deploy/dokploy/Dockerfile.hub",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_bluegreen_usr339.py",
+      "tests/test_dokploy_redeploy.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "`is_bluegreen` retorna True quando nao ha marcador no compose nem variavel de ambiente; somente `DARKHUB_DEPLOY_MODE=single` desliga; valor desconhecido falha fechado com mensagem que nomeia os valores aceitos.",
+      "`scripts/dokploy_redeploy.py` e `core/orchestrator/deployment_adapter.py` tomam a ramificacao blue-green por padrao, sempre depois do portao de manifesto GHCR e antes de qualquer escrita no Dokploy.",
+      "Com `DARKHUB_IMAGE_SOURCE=build`, o blue-green e recusado com erro explicito em vez de cair silenciosamente no caminho de servico unico com queda.",
+      "O HEALTHCHECK de `deploy/dokploy/Dockerfile.hub` passa a sondar `/health`, a mesma definicao do healthcheck do compose (hoje sonda `/api/cloud/status`), e `render_darkhub_compose` continua renderizando o compose atual sem erro.",
+      "`docs/proposals/USR-207-zero-downtime.md` corrigido onde esta obsoleto: `ghcr` e o default desde o USR-365 e o blue-green passa a ser o caminho default.",
+      "Se OA-058 (remover o container legado `darkhub-cloud-247`, que compartilha os rotulos Traefik) ainda estiver aberta, a acao do owner e atualizada no mesmo turno com o passo a passo e o criterio de verificacao, por ser pre-condicao do primeiro cutover.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "tests/test_bluegreen_usr339.py: default ligado sem marcador e sem env; opt-out apenas com `single`; valor desconhecido falha fechado; recusa quando a fonte de imagem e `build`.",
+      "tests/test_dokploy_redeploy.py: ordem das etapas no caminho default (portao GHCR antes de qualquer `compose.update`) e selecao da ramificacao blue-green com compose legado.",
+      "tests/test_hub_deploy_usr207.py: paridade entre o HEALTHCHECK do Dockerfile e o healthcheck do compose, e render do compose atual continua valido."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Sonda de 1 s dentro do deploy com artefato de evidencia",
+    "goal": "A prova de zero downtime depende hoje de um script fora do repositorio (`C:\\Users\\guigc\\darkfac-ops\\tools\\health_probe.py`). Trazer a medicao para dentro do deploy: amostrar `/health` a cada segundo atravessando overlap e cutover, gravar evidencia versionavel por sha e alertar quando houver qualquer resposta diferente de 200.",
+    "files_hint": [
+      "core/infra/deploy_probe.py",
+      "core/infra/availability_probe.py",
+      "core/orchestrator/bluegreen.py",
+      "scripts/dokploy_bluegreen.py",
+      "scripts/dokploy_redeploy.py",
+      ".gitignore",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_deploy_probe_usr207.py"
+    ],
+    "acceptance": [
+      "Novo `core/infra/deploy_probe.py` amostra uma vez por segundo com clock/sleep/http injetaveis, nunca levanta excecao, reaproveita `core.infra.availability_probe.http_probe` e registra por amostra o instante, o status HTTP e o `git_sha` devolvido por `/health`; timeout e erro de conexao sao classificados como falha, nunca como 200.",
+      "O veredito exige `non200 == 0` E a observacao do sha antigo e do sha novo; a evidencia vai para JSONL mais um resumo em `state_root()/reports/deploy/`, com a entrada correspondente adicionada ao `.gitignore` (regra do USR-352: artefato de runtime nao suja o checkout).",
+      "`run_bluegreen_deploy` inicia o amostrador antes do primeiro `apply_compose` e o encerra depois do cutover, inclusive quando o deploy falha; o comportamento de rollback existente (restaurar o compose anterior na falha do health gate) permanece inalterado.",
+      "O CLI imprime total de amostras, `non200` e os shas observados; com `non200 > 0` ele sai com codigo diferente de zero e alerta o Telegram ops reusando `availability_probe.default_sender`, sem bloquear o rollback existente.",
+      "O resumo registra quantos deployments o Dokploy reportou para o sha alvo, de modo que um deploy duplicado (autoDeploy somado ao manual) apareca sinalizado na evidencia.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "tests/test_deploy_probe_usr207.py: cadencia de 1 s com clock falso; classificacao de timeout/erro de conexao como falha; veredito exige non200 zero e os dois shas; layout do JSONL e do resumo; sinalizacao de deployment duplicado.",
+      "tests/test_bluegreen_usr339.py: ciclo de vida do amostrador em `run_bluegreen_deploy` com Dokploy falso - troca saudavel produz non200 zero; 503 durante o overlap produz saida diferente de zero mais alerta, preservando a restauracao do compose anterior."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Dados do Hub frescos quando o deploy da imagem e dispensado",
+    "goal": "O classificador trata `.factory/**` e `docs/**` como data-only, mas o `Dockerfile.hub:40,43,44` embute esses caminhos e o USR-348 so resolveu `owner_actions.json`. Resultado: backlog, roadmap e demais paineis mostram a copia da imagem depois de um merge so de dados. Generalizar o leitor remoto e travar o inventario por teste.",
+    "files_hint": [
+      "core/infra/remote_data.py",
+      "core/owner_actions/remote_ledger.py",
+      "core/demands/store.py",
+      "hub/backend/service.py",
+      "core/infra/deploy_classifier.py",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_remote_data_usr207.py",
+      "tests/test_owner_actions_remote_usr348.py"
+    ],
+    "acceptance": [
+      "Novo `core/infra/remote_data.py` com o leitor cacheado da API de conteudos do GitHub generalizado de `core/owner_actions/remote_ledger.py`: TTL configuravel (default <= 120 s), backoff apos falha, nunca levanta, sempre devolve o ultimo valor bom ou `None`; `remote_ledger` passa a reusa-lo sem mudanca de comportamento e seus testes atuais continuam verdes.",
+      "O caminho de LEITURA de `.factory/demands/demands.json` usado pelo Hub (`hub/backend/service.py:386,450`) consome o leitor remoto e cai para a copia embutida em qualquer falha; intake e escritas do Hub continuam locais e inalterados.",
+      "Teste de inventario: a lista dos arquivos de dados sob `.factory/**` e `docs/**` que o Hub serve e explicita, e cada item esta coberto por `REBUILD_PREFIXES`/`REBUILD_FILES` ou tem leitor remoto registrado - um painel novo com fonte de dados nao coberta reprova o portao.",
+      "Opt-out por variavel de ambiente documentado, nenhuma rede nos testes (fetch injetado) e nenhum segredo novo exigido alem do token do GitHub ja usado pelo ledger.",
+      "Acao do owner registrada no mesmo turno para estreitar os gatilhos `docs/**` e `.factory/**` do `.github/workflows/hub-image.yml` (caminho protegido, nao editar aqui), explicando que hoje a imagem e publicada e nunca implantada.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "tests/test_remote_data_usr207.py: cache por TTL; falha preserva o ultimo valor bom; nunca levanta; fallback para o arquivo local; opt-out desliga a leitura remota.",
+      "tests/test_owner_actions_remote_usr348.py: comportamento preservado apos a refatoracao para o modulo compartilhado.",
+      "tests/test_hub_deploy_usr207.py: inventario dos dados servidos pelo Hub coberto por rebuild ou por leitor remoto."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Memoria do Hub: medicao sob carga, monitor de OOMKilled e orcamento do overlap",
+    "goal": "Nao existe nenhuma medicao nem monitor de `OOMKilled`; so uma receita manual em `docs/proposals/USR-207-zero-downtime.md` secao 3. Alem disso o overlap do blue-green dobra o Hub (2 x 512 MB) numa VPS de 3,7 GB cujos limites de compose ja somam ~4,2 GB, o que pode matar a cor ativa durante a troca. Automatizar a coleta de evidencia, o alerta e o orcamento.",
+    "files_hint": [
+      "core/infra/hub_memory_guard.py",
+      "core/infra/backup_cron.py",
+      "scripts/hub_load_probe.py",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_memory_guard_usr207.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "Novo `core/infra/hub_memory_guard.py` amostra os containers do Hub pela API Dokploy (mesmo transporte de `scripts/dokploy_redeploy.py`), registrando RSS, limite, `OOMKilled` e `RestartCount` num arquivo de evidencia sob `state_root()` ja coberto pelo `.gitignore`; nunca levanta e, sem `DOKPLOY_API_*`, apenas registra em log que nao ha credencial e nao faz nada.",
+      "Alerta no Telegram ops uma vez por nivel por janela quando houver `OOMKilled`, `RestartCount` crescendo ou RSS >= 80% do limite, com mensagem de recuperacao quando normaliza.",
+      "`recommend_limit()` implementa o criterio documentado (pico >= 80% do limite ou `OOMKilled` verdadeiro leva ao degrau seguinte, 768 MB) e devolve o limite atual nos outros casos; o limite no compose PERMANECE 512 MB neste ticket, porque ainda nao ha evidencia medida.",
+      "O guarda roda como thread do daemon `core.infra.backup_cron`, ao lado do `disk_guard`, com intervalo proprio por flag; falha do guarda nunca interrompe backup nem guarda de disco.",
+      "Novo `scripts/hub_load_probe.py` gera carga concorrente limitada contra os endpoints publicos da receita (todas as abas abertas mais refresh) por duracao limitada, imprime pico de latencia p95 e grava resumo; nao escreve em estado de producao e aceita http injetado nos testes.",
+      "Teste de orcamento: a soma de `deploy.resources.limits.memory` dos composes, contando o overlap do blue-green como DOIS containers do Hub, fica abaixo de uma constante declarada de orcamento da VPS, e a mensagem de falha nomeia o servico que estourou; se o compose for editado, `render_darkhub_compose` continua renderizando sem erro (contrato de regex literal).",
+      "`docs/proposals/USR-207-zero-downtime.md` secao 3 aponta para o coletor automatico e para o criterio executavel, em vez da receita manual.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_memory_guard_usr207.py: amostragem com transporte falso; alerta de `OOMKilled` uma vez mais recuperacao; limiar de RSS; tabela de casos de `recommend_limit`; no-op sem credencial; falha do guarda nao propaga para o daemon.",
+      "tests/test_hub_deploy_usr207.py: orcamento de memoria com o overlap contado em dobro, e render do compose ainda valido apos a edicao.",
+      "tests/test_hub_load_probe.py: concorrencia e duracao limitadas, http injetado, zero rede, resumo com p95."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Prova de vida da sonda externa de disponibilidade",
+    "goal": "A sonda de `/health` e uma tarefa agendada numa maquina fora da VPS; se ela parar, o silencio e indistinguivel de um Hub saudavel e o criterio de alerta em 2 min deixa de valer sem ninguem notar. Fazer cada lado vigiar o outro.",
+    "files_hint": [
+      "core/infra/availability_probe.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/frontend/health_ops.js",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "`availability_probe` passa a registrar `last_tick_ts` e `last_ok_ts` no estado e a postar um heartbeat para o Hub autenticado com a chave de telemetria ja existente; falha do envio nunca interrompe o tick, o alerta de 120 s nem a mensagem de recuperacao.",
+      "Novo endpoint do Hub recebe o heartbeat, exige a chave de telemetria (resposta 401 sem ela), valida o payload com Pydantic v2 e persiste o ultimo contato no diretorio de dados do Hub.",
+      "O Hub alerta o Telegram ops uma unica vez quando o ultimo contato da sonda envelhece acima da janela configurada (default 10 min), com mensagem de recuperacao quando o heartbeat volta; clock injetado nos testes.",
+      "O painel de operacao (`hub/frontend/health_ops.js`) mostra o ultimo contato da sonda e um estado explicito de 'sonda sem contato', passando pelo helper de rede.",
+      "O comando PowerShell de agendamento segue travado pelo teste existente `test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments` e so muda se o comando mudar; se o agendamento precisar ser refeito na maquina do owner, a acao do owner e registrada no mesmo turno.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: tick grava heartbeat; falha de envio nao quebra o tick nem o alerta de 120 s.",
+      "Testes do endpoint: exige a chave de telemetria, valida o payload, persiste o ultimo contato.",
+      "Alerta de obsolescencia: dispara uma vez acima da janela, envia recuperacao ao voltar, com clock injetado.",
+      "tests/js: estado 'sonda sem contato' no painel de operacao."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T6",
+    "title": "Camada de rede do frontend: sem replay de escrita, com timeout, e /live no helper",
+    "goal": "Fechar os defeitos reais da camada unica de rede: `hubNetFetch` repete POST/PUT/DELETE em 502/503/504 (uma resposta de gateway pode chegar depois do backend ter gravado), nao tem deadline proprio (um socket pendurado contorna a escada de backoff), convive com 7 fallbacks `fetch` nus em `audio.js`/`tasks.js`/`interventions.js` que o portao estatico nao detecta, e `live.js` continua fora do helper.",
+    "files_hint": [
+      "hub/frontend/hub_net.js",
+      "hub/frontend/live.js",
+      "hub/frontend/live.html",
+      "hub/frontend/infra.js",
+      "hub/frontend/interventions.js",
+      "hub/frontend/tasks.js",
+      "hub/frontend/audio.js",
+      "tests/js/hub_net.test.cjs",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "`hubNetFetch` nunca repete um metodo nao idempotente (POST, PUT, PATCH, DELETE) em 502/503/504; somente GET, HEAD e OPTIONS sao repetidos em condicao transitoria, e o cabecalho do arquivo explica o porque.",
+      "Cada tentativa tem deadline proprio (AbortController composto com o `signal` do chamador): uma requisicao pendurada cai na escada de backoff em vez de bloquea-la, e um abort do chamador continua rejeitando com `AbortError` sem retentativa.",
+      "O helper aceita orcamento de retentativa por chamada, para que um chamador de cadencia curta use a mesma classificacao e o mesmo banner sem herdar a escada de ~85 s.",
+      "`live.html` carrega `hub_net.js` antes de `live.js`; a busca de snapshot de `live.js` passa pelo helper com orcamento curto, preservando o timeout proprio e a UI de conexao/offline existente; `RAW_FETCH_ALLOWED` fica so com `hub_net.js`.",
+      "Os fallbacks `fetch` nus de `audio.js`, `tasks.js` e `interventions.js` sao removidos, e o portao estatico tambem reprova o identificador `fetch` sem parenteses e varre os scripts embutidos de `index.html` e `live.html`.",
+      "`infra.js` escapa a mensagem que interpola em `innerHTML` e mostra o aviso de atualizacao no lugar de um cartao de erro com texto cru de status; nenhum caminho do frontend exibe 'Failed to fetch'.",
+      "Os quatro arquivos `tests/js/*.test.cjs` hoje sem executor ganham um, no mesmo padrao de `tests/test_task_dashboard_client.py`, com skip quando o Node nao existe.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "tests/js/hub_net.test.cjs: POST nao e repetido em 504; deadline por tentativa alimenta o backoff; orcamento de retentativa por chamada; abort do chamador propaga.",
+      "tests/js para o snapshot de /live: passa pelo helper, mantem o estado offline e nao mostra texto cru de erro.",
+      "tests/test_hub_deploy_usr207.py: portao estatico endurecido (identificador `fetch` nu e scripts embutidos), `RAW_FETCH_ALLOWED` reduzido, ordem dos scripts em `live.html`.",
+      "Executor Python para os quatro arquivos `tests/js/*.test.cjs` orfaos."
+    ],
+    "smoke": [
+      "/health",
+      "/live",
+      "/"
+    ]
+  }
+]
