@@ -1,43 +1,37 @@
-"""Verificacao de autorizacao de evolucao de governanca (USR-228, SQ-03).
+"""Verificacao de autorizacao assinada de evolucao de governanca (USR-343 S1).
 
-Esquema: um registro JSON em ``.factory/governance/authorizations/<id>.json``
-vincula ticket, aprovador (owner), caminhos protegidos exatos, candidato
-(commit SHA ou tree hash) e expiracao. O registro so vale quando esta presente
-na BASE CONFIAVEL (por padrao ``origin/main``), lido via ``git show`` e nunca
-da arvore de trabalho do candidato; o agente de build escreve apenas o
-candidato e portanto nao consegue emitir a propria autorizacao. Qualquer
-duvida bloqueia (fail-closed). Sem rede.
+Um registro JSON em ``.factory/governance/authorizations/<id>.json`` vincula
+ticket, aprovador, caminhos protegidos exatos, candidato (commit ou tree) e
+expiracao, e carrega uma assinatura Ed25519 do owner sobre o JSON canonico
+(sem o campo ``signature``). A chave publica vem de
+``.factory/governance/owner_pubkey`` (base64 de 32 bytes), lida da BASE
+CONFIAVEL via ``git show``, junto com os registros. Registro sem assinatura
+valida, chave ausente ou placeholder, ou qualquer duvida: bloqueia. Roda so
+com stdlib + ``cryptography`` (o CI executa o guard sem pydantic). Sem rede.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Any, Iterable
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 AUTHORIZATIONS_DIR = ".factory/governance/authorizations"
+OWNER_PUBKEY_PATH = ".factory/governance/owner_pubkey"
 DEFAULT_TRUSTED_BASE = "origin/main"
 OWNER_APPROVERS: tuple[str, ...] = ("owner",)
 _GLOB_CHARS = frozenset("*?[]")
-
-
-class AuthorizationRecord(BaseModel):
-    """Registro de decisao do owner para uma evolucao protegida."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: str
-    ticket_id: str
-    approver: str
-    paths: tuple[str, ...]
-    candidate_kind: Literal["commit", "tree"]
-    candidate: str
-    expires_at: datetime
+_FIELDS = frozenset(
+    {"id", "ticket_id", "approver", "paths", "candidate_kind", "candidate", "expires_at"}
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +39,12 @@ class AuthorizationResult:
     ok: bool
     reason: str
     record_id: str | None = None
+
+
+def canonical_payload(record: dict[str, Any]) -> bytes:
+    """Bytes assinados: JSON canonico do registro sem ``signature``."""
+    body = {k: v for k, v in record.items() if k != "signature"}
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def _git(repository: Path, *args: str) -> str:
@@ -85,10 +85,26 @@ def _load_base_records(repository: Path, trusted_base: str) -> list[tuple[str, s
     names = _git(
         repository, "ls-tree", "-r", "--name-only", "-z", trusted_base, "--", AUTHORIZATIONS_DIR
     ).split("\0")
-    out: list[tuple[str, str]] = []
-    for name in sorted(n for n in names if n.endswith(".json")):
-        out.append((name, _git(repository, "show", f"{trusted_base}:{name}")))
-    return out
+    return [
+        (n, _git(repository, "show", f"{trusted_base}:{n}"))
+        for n in sorted(n for n in names if n.endswith(".json"))
+    ]
+
+
+def _load_pubkey(repository: Path, trusted_base: str) -> Ed25519PublicKey | None:
+    text = _git(repository, "show", f"{trusted_base}:{OWNER_PUBKEY_PATH}").strip()
+    try:
+        return Ed25519PublicKey.from_public_bytes(base64.b64decode(text, validate=True))
+    except (ValueError, binascii.Error):
+        return None
+
+
+def _signature_ok(key: Ed25519PublicKey, record: dict[str, Any]) -> bool:
+    try:
+        key.verify(base64.b64decode(str(record.get("signature", "")), validate=True), canonical_payload(record))
+    except (InvalidSignature, ValueError, binascii.Error):
+        return False
+    return True
 
 
 def verify_authorization(
@@ -99,7 +115,7 @@ def verify_authorization(
     now: datetime | None = None,
     approvers: tuple[str, ...] = OWNER_APPROVERS,
 ) -> AuthorizationResult:
-    """Authorize ``violations`` only with a valid record on the trusted base."""
+    """Authorize ``violations`` only with a validly signed record on the trusted base."""
     wanted = {_norm(v) for v in violations}
     if not wanted:
         return AuthorizationResult(False, "no protected paths to authorize")
@@ -110,6 +126,9 @@ def verify_authorization(
         identity = _candidate_identity(repository)
         if identity is None:
             return AuthorizationResult(False, "candidate has uncommitted changes")
+        key = _load_pubkey(repository, trusted_base)
+        if key is None:
+            return AuthorizationResult(False, "owner public key missing or invalid on trusted base")
         raw_records = _load_base_records(repository, trusted_base)
     except (subprocess.CalledProcessError, OSError) as exc:
         return AuthorizationResult(False, f"trusted base unreadable: {exc}")
@@ -119,24 +138,34 @@ def verify_authorization(
     reasons: list[str] = []
     for name, text in raw_records:
         try:
-            rec = AuthorizationRecord.model_validate(json.loads(text))
-        except (ValueError, ValidationError):
+            rec = json.loads(text)
+            if not isinstance(rec, dict) or not _FIELDS <= rec.keys() <= _FIELDS | {"signature"}:
+                raise ValueError("fields")
+            exp = datetime.fromisoformat(str(rec["expires_at"]).replace("Z", "+00:00"))
+            paths = rec["paths"]
+            if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+                raise ValueError("paths")
+        except (ValueError, TypeError):
             reasons.append(f"{name}: malformed")
             continue
-        exp = rec.expires_at if rec.expires_at.tzinfo else rec.expires_at.replace(tzinfo=timezone.utc)
-        if rec.approver not in approvers:
-            reasons.append(f"{rec.id}: approver not allowed")
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        rid = str(rec["id"])
+        kind = rec["candidate_kind"]
+        if not _signature_ok(key, rec):
+            reasons.append(f"{rid}: invalid or missing signature")
+        elif rec["approver"] not in approvers:
+            reasons.append(f"{rid}: approver not allowed")
         elif exp <= moment:
-            reasons.append(f"{rec.id}: expired")
-        elif not _valid_exact_paths(rec.paths):
-            reasons.append(f"{rec.id}: paths must be exact")
-        elif not wanted <= {_norm(p) for p in rec.paths}:
-            reasons.append(f"{rec.id}: paths do not cover candidate changes")
-        elif rec.candidate not in (identity[0] if rec.candidate_kind == "commit" else identity[1],):
-            reasons.append(f"{rec.id}: candidate mismatch")
-        elif not rec.ticket_id.strip():
-            reasons.append(f"{rec.id}: missing ticket")
+            reasons.append(f"{rid}: expired")
+        elif not _valid_exact_paths(paths):
+            reasons.append(f"{rid}: paths must be exact")
+        elif not wanted <= {_norm(p) for p in paths}:
+            reasons.append(f"{rid}: paths do not cover candidate changes")
+        elif kind not in ("commit", "tree") or rec["candidate"] != identity[0 if kind == "commit" else 1]:
+            reasons.append(f"{rid}: candidate mismatch")
+        elif not str(rec["ticket_id"]).strip():
+            reasons.append(f"{rid}: missing ticket")
         else:
-            return AuthorizationResult(True, "authorized", rec.id)
+            return AuthorizationResult(True, "authorized", rid)
     return AuthorizationResult(False, "; ".join(reasons))
-

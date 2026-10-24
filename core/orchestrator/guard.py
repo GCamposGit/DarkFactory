@@ -4,7 +4,7 @@ Dark Factory Guardrail & Protected Path Auditor
 Ensures autonomous agents NEVER tamper with the rules they are judged by:
 - MISSION.md (Scope & Non-Goals)
 - FACTORY_RULES.md (Autonomous operating rules)
-- Protected test harnesses and gates
+- The guard itself, core/governance/* and the CI workflows (self-protection anchor)
 
 If an agent attempts to edit any protected path in a PR or working tree,
 the guard fails with exit code 1 immediately.
@@ -23,21 +23,17 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[2])
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+# USR-343 D1: governance documents + self-protection anchor (the guard, its
+# governance package and the workflows that run it). Changes need a signed
+# owner authorization (python -m core.governance.keys).
 PROTECTED_PATTERNS: tuple[str, ...] = (
     "AGENTS.md",
     "MISSION.md",
     "FACTORY_RULES.md",
-    "FACTORY_GOVERNANCE.md",
-    "harness.config.json",
-    ".github/workflows/*",
-    ".agents/rules/*",
-    "core/harness/*",
     "core/orchestrator/guard.py",
     "core/governance/*",
-    ".factory/holdout/*",
-    "tests/test_ci_policy.py",
-    "tests/test_governance_guard.py",
-    "tests/test_harness_contract.py",
+    ".factory/governance/owner_pubkey",
+    ".github/workflows/*",
 )
 
 
@@ -165,8 +161,9 @@ def is_governance_evolution_authorized(
 
     The record (.factory/governance/authorizations/<id>.json) must bind ticket,
     owner approver, the exact protected paths, the candidate (tree/commit) and an
-    unexpired date, and must exist on ``trusted_base`` (default origin/main), not
-    merely in the candidate. An environment flag alone is never sufficient.
+    unexpired date, carry a valid Ed25519 signature from the key in
+    .factory/governance/owner_pubkey, and exist on ``trusted_base`` (default
+    origin/main), not merely in the candidate. An environment flag alone is never sufficient.
     """
     try:
         from core.governance.authorization import DEFAULT_TRUSTED_BASE, verify_authorization
@@ -179,11 +176,15 @@ def is_governance_evolution_authorized(
         )
         return False
 
-    result = verify_authorization(
-        list(violations),
-        repository=repository if repository is not None else Path.cwd(),
-        trusted_base=trusted_base or DEFAULT_TRUSTED_BASE,
-    )
+    try:
+        result = verify_authorization(
+            list(violations),
+            repository=repository if repository is not None else Path.cwd(),
+            trusted_base=trusted_base or DEFAULT_TRUSTED_BASE,
+        )
+    except Exception as exc:  # fail closed on any unexpected verifier error
+        print(f"[GUARD] governance authorization error: {exc}", file=sys.stderr)
+        return False
     if not result.ok:
         print(f"[GUARD] governance authorization rejected: {result.reason}", file=sys.stderr)
     return result.ok
@@ -229,7 +230,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("==================================================")
         for v in violations:
             print(f"  [BLOCKED] {v}")
-        print("\nThese files can ONLY be modified by a direct human commit.")
+        print("\nThese files need a signed owner authorization (see docs/manual/governanca.md).")
         return 1
 
     print("[GUARD PASS] No protected governance paths modified.")

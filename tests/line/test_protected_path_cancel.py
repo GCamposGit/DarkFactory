@@ -1,7 +1,7 @@
 """A cancelled edit of a guard-protected path is a human block, not a transient crash (USR-205).
 
 The fake Grok CLI prints ``stopReason=cancelled`` after ``search_replace`` on
-``core/harness/remote_worker.py``. The launcher must try once, classify
+``core/governance/keys.py``. The launcher must try once, classify
 ``protected_path``, keep the worktree and register one owner action.
 """
 
@@ -34,7 +34,7 @@ from core.orchestrator.guard import PROTECTED_PATTERNS
 from core.owner_actions.store import OwnerActionStore
 
 _SESSION = "sess-protected-1"
-_PROTECTED = "core/harness/remote_worker.py"
+_PROTECTED = "core/governance/keys.py"
 _TICKET = run_ticket.UserTicket(
     id="USR-99",
     project_id="darkfac",
@@ -68,7 +68,7 @@ def _cancelled(call_id: str, *, earlier: bool = False) -> dict[str, Any]:
 
 
 def _protected_rows(cwd: Path) -> list[dict[str, Any]]:
-    target = str(cwd / "core" / "harness" / "remote_worker.py")
+    target = str(cwd / "core" / "governance" / "keys.py")
     ordinary = str(cwd / "tests" / "test_remote_dispatch.py")
     return [
         _assistant(_edit_call("read-1", target, name="read_file")),
@@ -172,7 +172,7 @@ def test_a_cancelled_edit_of_an_ordinary_file_stays_a_crash(tmp_path: Path) -> N
 
 
 def test_reading_a_protected_file_does_not_count_as_an_edit(tmp_path: Path) -> None:
-    target = str(tmp_path / "core" / "harness" / "remote_worker.py")
+    target = str(tmp_path / "core" / "governance" / "keys.py")
     rows = [
         _assistant(_edit_call("read-1", target, name="read_file")),
         _result("read-1", "User cancelled the execution for tool `read_file`"),
@@ -340,7 +340,7 @@ class _Store:
 def test_run_ticket_treats_one_cancelled_protected_edit_as_a_human_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Focal: stopReason=cancelled after editing core/harness/remote_worker.py, once, with an OA."""
+    """Focal: stopReason=cancelled after editing core/governance/keys.py, once, with an OA."""
     sessions = tmp_path / "sessions"
     actions = tmp_path / "owner_actions.json"
     monkeypatch.setenv("DARKFAC_GROK_SESSIONS_DIR", str(sessions))
@@ -399,7 +399,7 @@ def test_run_ticket_treats_one_cancelled_protected_edit_as_a_human_block(
         grok_calls = [argv for argv in fake.calls if argv and argv[0] == "grok-fake"]
         assert len(grok_calls) == 1
         assert sleeps == []
-        assert fake.prompts and "docs/proposals" in fake.prompts[0] and "core/harness/*" in fake.prompts[0]
+        assert fake.prompts and "docs/proposals" in fake.prompts[0] and "core/governance/*" in fake.prompts[0]
         assert "error_kind=protected_path" in captured.err
         assert _PROTECTED in captured.err
         assert "[BLOQUEIO HUMANO]" in captured.err
