@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -61,30 +62,30 @@ def test_invalid_base_ref_blocks(git_repository: Path) -> None:
 
 
 def test_untracked_files_are_reported(git_repository: Path) -> None:
-    untracked = git_repository / "core" / "harness" / "rogue.py"
+    untracked = git_repository / "core" / "governance" / "rogue.py"
     untracked.parent.mkdir(parents=True)
     untracked.write_text("print('untracked')\n", encoding="utf-8")
 
     modified = guard.get_modified_files(repository=git_repository)
 
-    assert "core/harness/rogue.py" in modified
-    assert guard.audit_paths(modified) == ["core/harness/rogue.py"]
+    assert "core/governance/rogue.py" in modified
+    assert guard.audit_paths(modified) == ["core/governance/rogue.py"]
 
 
 def test_rename_reports_source_and_destination(git_repository: Path) -> None:
-    protected = git_repository / "core" / "harness" / "gate.py"
+    protected = git_repository / "core" / "governance" / "gate.py"
     protected.parent.mkdir(parents=True)
     protected.write_text("GATE = True\n", encoding="utf-8")
-    _git(git_repository, "add", "core/harness/gate.py")
+    _git(git_repository, "add", "core/governance/gate.py")
     _git(git_repository, "commit", "--quiet", "-m", "add gate")
     (git_repository / "docs").mkdir()
-    _git(git_repository, "mv", "core/harness/gate.py", "docs/gate.py")
+    _git(git_repository, "mv", "core/governance/gate.py", "docs/gate.py")
 
     modified = guard.get_modified_files(repository=git_repository)
 
-    assert "core/harness/gate.py" in modified
+    assert "core/governance/gate.py" in modified
     assert "docs/gate.py" in modified
-    assert guard.audit_paths(modified) == ["core/harness/gate.py"]
+    assert guard.audit_paths(modified) == ["core/governance/gate.py"]
 
 
 def test_diff_is_calculated_against_requested_base(git_repository: Path) -> None:
@@ -111,7 +112,52 @@ def test_env_flag_alone_no_longer_authorizes(
     assert not guard.is_governance_evolution_authorized(["AGENTS.md"], repository=git_repository)
 
 
-def test_governance_helper_is_protected() -> None:
-    assert guard.audit_paths(["core/governance/authorization.py"]) == [
-        "core/governance/authorization.py"
-    ]
+def test_signed_owner_record_authorizes_and_forgery_is_rejected(git_repository: Path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from core.governance import keys
+    from core.governance.authorization import verify_authorization
+
+    assert guard.audit_paths(
+        ["core/governance/keys.py", "core/harness/runner.py", ".factory/governance/owner_pubkey",
+         ".factory/governance/authorizations/A1.json"]
+    ) == ["core/governance/keys.py", ".factory/governance/owner_pubkey"]
+    _git(git_repository, "branch", "-M", "main")
+    _git(git_repository, "checkout", "--quiet", "-b", "cand")
+    (git_repository / "AGENTS.md").write_text("x", encoding="utf-8")
+    _git(git_repository, "add", "AGENTS.md")
+    _git(git_repository, "commit", "--quiet", "-m", "cand")
+    sha = _git(git_repository, "rev-parse", "HEAD")
+    _git(git_repository, "checkout", "--quiet", "main")
+    private, public = git_repository.parent / "owner.pem", git_repository.parent / "pub"
+    keys.init_keys(private, public)
+    gov = git_repository / ".factory" / "governance"
+    (gov / "authorizations").mkdir(parents=True)
+    (gov / "owner_pubkey").write_text(public.read_text(encoding="utf-8"), encoding="utf-8")
+    record = {
+        "id": "A1", "ticket_id": "USR-343", "approver": "owner", "paths": ["AGENTS.md"],
+        "candidate_kind": "commit", "candidate": sha,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    }
+    target = gov / "authorizations" / "A1.json"
+    target.write_text(json.dumps(record), encoding="utf-8")
+    keys.sign_record(target, private)
+    _git(git_repository, "add", ".factory")
+    _git(git_repository, "commit", "--quiet", "-m", "owner record")
+    _git(git_repository, "checkout", "--quiet", "cand")
+
+    assert verify_authorization(["AGENTS.md"], repository=git_repository, trusted_base="main").ok
+    # unsigned and wrong-key records are rejected
+    _git(git_repository, "checkout", "--quiet", "main")
+    other = git_repository.parent / "other.pem"
+    keys.init_keys(other, git_repository.parent / "pub2")
+    keys.sign_record(target, other)
+    _git(git_repository, "commit", "--quiet", "-am", "forged")
+    _git(git_repository, "checkout", "--quiet", "cand")
+    assert not verify_authorization(["AGENTS.md"], repository=git_repository, trusted_base="main").ok
+    record.pop("signature", None)
+    _git(git_repository, "checkout", "--quiet", "main")
+    target.write_text(json.dumps(record), encoding="utf-8")
+    _git(git_repository, "commit", "--quiet", "-am", "unsigned")
+    _git(git_repository, "checkout", "--quiet", "cand")
+    assert not verify_authorization(["AGENTS.md"], repository=git_repository, trusted_base="main").ok

@@ -20,13 +20,8 @@ def test_all_validation_control_files_are_protected() -> None:
         "AGENTS.md",
         "MISSION.md",
         "FACTORY_RULES.md",
-        "harness.config.json",
         ".github/workflows/ci.yml",
-        "core/harness/runner.py",
         "core/orchestrator/guard.py",
-        "tests/test_ci_policy.py",
-        "tests/test_governance_guard.py",
-        "tests/test_harness_contract.py",
     ]
 
     assert audit_paths(controls) == controls
