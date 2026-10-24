@@ -82,7 +82,7 @@ def run_started_at_lookup(store: Any) -> RunStartLookup:
     """
 
     def _lookup(run_id: str) -> Optional[datetime]:
-        getter = getattr(store, "get_run_created_at", None)
+        getter = getattr(store, "get_run_budget_started_at", None) or getattr(store, "get_run_created_at", None)
         if getter is None:
             return None
         try:

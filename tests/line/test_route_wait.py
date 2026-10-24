@@ -537,3 +537,34 @@ def test_planning_waits_for_a_route_then_parks_after_the_budget(tmp_path: Path, 
     )
     assert (parked.outcome, parked.cause_code) == ("waiting_human", NO_ROUTE_CAUSE)
     assert [r.blocking_stage for _p, r in humans.requests] == ["planning"]
+
+
+def test_resume_after_no_route_park_restarts_the_run_wall_clock_budget() -> None:
+    """USR-355: a run past 6h resumed by a probe gets a new budget instead of re-parking at once."""
+    store = SQLiteControlStore(":memory:")
+    created = (NOW - timedelta(hours=10)).isoformat()
+    conn = store._connect()
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status, "
+        "plan_digest, config_version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        ("run-old", "proj", "dem", "1.0", "hf05_sqlite", "autonomous", "active", "d", "1.0", created, created),
+    )
+    conn.execute(
+        "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, cause_code, "
+        "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("run-old", "T", "1.0", "development", 0, "waiting_human", "dev", "no_route_available", created, created),
+    )
+    conn.commit()
+    conn.close()
+    lookup = run_started_at_lookup(store)
+    assert lookup("run-old") == NOW - timedelta(hours=10)
+
+    key = JobKey(run_id="run-old", ticket_id="T", plan_version="1.0", stage="development", iteration=0)
+    assert store.resume_job(key, NOW)
+    assert lookup("run-old") == NOW
+
+    waiter = RouteWaiter(run_started_at=lookup, clock=lambda: NOW + timedelta(minutes=5),
+                         earliest=lambda *a, **k: NOW + timedelta(hours=1))
+    result = waiter.no_route_result("development", None, "run-old", host_caps=ALL_CAPS, config=_config())  # type: ignore[arg-type]
+    assert result.outcome == "retry"
+    assert result.cause_code.startswith(NO_ROUTE_CAUSE)

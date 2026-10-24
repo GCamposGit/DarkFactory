@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS runs (
     CONSTRAINT uq_runs_project_demand UNIQUE (project_id, demand_id, demand_version)
 );
 
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS budget_reset_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs (status);
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -1451,12 +1453,57 @@ class PostgresControlStore:
             logger.warning("PostgreSQL find_job failed: %s", exc)
             return None
 
+    def _parked_on_missing_route(self, job_key: JobKey) -> bool:
+        """True if the waiting job's cause is `no_route_available*`; any failure reads as False (USR-355)."""
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT cause_code FROM jobs WHERE run_id = %s AND ticket_id = %s AND plan_version = %s "
+                        "AND stage = %s AND iteration = %s AND status IN ('waiting_human', 'waiting_dependency')",
+                        (job_key.run_id, job_key.ticket_id, job_key.plan_version, job_key.stage, job_key.iteration),
+                    )
+                    row = cur.fetchone()
+                    return bool(row) and str(row[0] or "").startswith("no_route_available")
+        except Exception as exc:
+            logger.warning("PostgreSQL could not read the park cause of %s: %s", job_key.run_id, exc)
+            return False
+
+    def _reset_run_budget(self, run_id: str, now_utc: datetime) -> None:
+        """Restart the run's wall-clock budget (USR-355); a failure only degrades to `created_at`."""
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE runs SET budget_reset_at = %s WHERE run_id = %s", (now_utc, run_id))
+                conn.commit()
+        except Exception as exc:
+            logger.warning("PostgreSQL could not reset the wall-clock budget of %s: %s", run_id, exc)
+
+    def get_run_budget_started_at(self, run_id: str) -> str | None:
+        """Later of `created_at` and `budget_reset_at`; degrades to `created_at` on any column failure."""
+        if self.mock_mode:
+            return self._backend.get_run_budget_started_at(run_id)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT GREATEST(created_at, budget_reset_at) FROM runs WHERE run_id = %s", (run_id,))
+                    row = cur.fetchone()
+                    if row and row[0] is not None:
+                        return row[0].isoformat() if hasattr(row[0], "isoformat") else str(row[0])
+                    if row:
+                        return self.get_run_created_at(run_id)
+                    return None
+        except Exception as exc:
+            logger.warning("PostgreSQL get_run_budget_started_at failed, using created_at: %s", exc)
+            return self.get_run_created_at(run_id)
+
     def resume_job(self, job_key: JobKey, now: datetime) -> bool:
         """Transition a `waiting_human`/`waiting_dependency` job back to `pending` (HF-27-08 D-d)."""
         if self.mock_mode:
             return self._backend.resume_job(job_key, now)
 
         now_utc = now.astimezone(UTC)
+        reset_budget = self._parked_on_missing_route(job_key)
         try:
             with self._psycopg.connect(self.raw_url) as conn:
                 with conn.cursor() as cur:
@@ -1487,6 +1534,8 @@ class PostgresControlStore:
                             (now_utc, job_key.run_id),
                         )
                     conn.commit()
+                    if resumed and reset_budget:
+                        self._reset_run_budget(job_key.run_id, now_utc)
                     return resumed
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL resume_job failed: {exc}") from exc
