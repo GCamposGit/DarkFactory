@@ -2719,6 +2719,8 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         if args.no_push:
             delivery_cmd.append("--no-push")
 
+        # USR-370: deliberately NOT scrubbed with build_agent_env: this child is the delivery executor
+        # (commit/push/PR/merge/deploy) and must keep GH/deploy credentials. Scrubbing applies to agents.
         child_env = dict(os.environ)
         # The delivery subprocess is part of THIS run, not a second launch (USR-250): it inherits the
         # line lock instead of trying to acquire (and refusing itself on) a lock its own parent holds.

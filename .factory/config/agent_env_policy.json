@@ -14,8 +14,8 @@
     "(PASSWORD|PASSWD)$", "_SECRET(_KEY)?$", "^SSH_AUTH_SOCK$", "^DEPLOY"
   ],
   "network_allowlist": {
-    "status": "not_enforced",
-    "note": "No existing network seam; hosts the agent legitimately reaches are documented here for a future sandbox.",
+    "status": "infeasible_documented",
+    "note": "USR-370: see docs/decisions/USR-370-network-allowlist.md (no real mechanism without admin rights). Hosts the agent legitimately reaches are documented here for a future sandbox.",
     "hosts": ["api.anthropic.com", "api.openai.com", "api.x.ai", "openrouter.ai", "github.com"]
   }
 }
