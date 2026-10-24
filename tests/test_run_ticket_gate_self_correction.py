@@ -11,6 +11,7 @@ failure reinvokes the agent in the same worktree with the distilled failure, up 
 
 from __future__ import annotations
 
+import os
 import logging
 import subprocess
 from pathlib import Path
@@ -893,6 +894,7 @@ def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(
 
     monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
     monkeypatch.setattr(line_lock, "is_fleet_mode", lambda *a, **k: False)
+    monkeypatch.setattr(run_ticket.time, "sleep", lambda s: None)
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -930,9 +932,52 @@ def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(
             "USR-354", worktree_path=repo, skip_validation=False, return_result=True
         )
 
-    assert len(gate_calls) == 1
+    assert len(gate_calls) == 1 + run_ticket.GATE_REMOTE_RETRIES  # USR-372 bounded retries
     assert "--remote-required" in gate_calls[0] and "--local" not in gate_calls[0]
     assert fix_calls == []
     assert result["ok"] is False
     assert result["cause"] == run_ticket.GATE_CAUSE_REMOTE_UNAVAILABLE
     assert "--resume-delivery USR-354" in capsys.readouterr().err
+
+
+def test_gate_remote_unavailable_retries_on_other_host_then_passes(tmp_path: Path, monkeypatch) -> None:
+    """USR-372: gate_remote_unavailable is retried automatically on another worker."""
+    from core.line import line_lock
+
+    monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
+    monkeypatch.setattr(line_lock, "is_fleet_mode", lambda *a, **k: False)
+    monkeypatch.setattr(run_ticket.time, "sleep", lambda s: None)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ticket = UserTicket(
+        id="USR-372", project_id="darkfac", title="Test Ticket",
+        problem_statement="Test problem", status=DeliveryStatus.PLANNED,
+    )
+    _seed_ticket_ledger(repo, ticket)
+    _branch(repo, "ticket/usr-372")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    _commit_all(repo, "feat: code")
+
+    seen_workers: list[str] = []
+
+    def fake_run_bounded(argv, **kwargs):
+        if not any("runner.py" in str(a) for a in argv):
+            return BoundedProcessResult(stdout="", stderr="", returncode=0, duration_s=0.1, timed_out=False)
+        seen_workers.append(os.environ.get("DARKFAC_TEST_WORKERS", ""))
+        if len(seen_workers) == 1:
+            return BoundedProcessResult(
+                stdout="", stderr="RemoteRequiredError: --remote-required: unreachable http://100.77.130.5:8080\n",
+                returncode=1, duration_s=5.0, timed_out=False,
+            )
+        return BoundedProcessResult(stdout="[HARNESS_PASS]", stderr="", returncode=0, duration_s=5.0, timed_out=False)
+
+    ga = run_ticket.gate_ram
+    with patch("run_ticket.PROJECT_ROOT", repo),          patch.object(ga, "remote_workers_configured", return_value=True),          patch.object(ga, "measure_workers", return_value=ga.RamReading(4.0, 1)),          patch("run_ticket._run_bounded", new=fake_run_bounded):
+        run_ticket.resume_delivery("USR-372", worktree_path=repo, skip_validation=False, return_result=True)
+
+    assert len(seen_workers) == 2
+    assert "100.77.130.5" in seen_workers[0]
+    assert "100.77.130.5" not in seen_workers[1] and "100.78.181.90" in seen_workers[1]
+    assert os.environ["DARKFAC_TEST_WORKERS"] == "http://100.77.130.5:8080"
