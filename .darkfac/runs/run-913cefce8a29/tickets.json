@@ -1,0 +1,148 @@
+[
+  {
+    "id": "T1",
+    "title": "Pagina /live tambem passa pelo helper unico de fetch",
+    "goal": "Fazer o unico fetch cru restante do frontend (snapshot do /live) usar hubNetFetch, para que toda chamada do Hub tenha retry/backoff, banner de reconexao e nenhuma mensagem 'Failed to fetch'.",
+    "files_hint": [
+      "hub/frontend/live.html",
+      "hub/frontend/live.js",
+      "hub/frontend/hub_net.js",
+      "tests/test_hub_deploy_usr207.py",
+      "tests/js/hub_net.test.cjs"
+    ],
+    "acceptance": [
+      "live.html carrega /static/hub_net.js antes de live.js",
+      "fetchSnapshot usa hubNetFetch mantendo o AbortController e o timeout atuais: AbortError continua propagando sem nova tentativa e o polling proprio da pagina nao duplica o backoff do helper",
+      "RAW_FETCH_ALLOWED do teste estatico contem apenas hub_net.js e o teste passa",
+      "Durante indisponibilidade o /live mostra 'Hub atualizando, reconectando...' e se recupera sozinho quando o Hub volta",
+      "docs/proposals/USR-207-zero-downtime.md deixa de registrar live.js como excecao",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: nenhum fetch cru fora de hub_net.js (allowlist reduzida a hub_net.js)",
+      "tests/test_hub_deploy_usr207.py: live.html carrega hub_net.js antes de live.js",
+      "tests/js/hub_net.test.cjs: GET do snapshot repetido em 503 e abort propagado sem retry"
+    ],
+    "smoke": [
+      "/live",
+      "/static/hub_net.js",
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Hub le demandas e roadmap de origin/main quando o deploy da imagem e dispensado",
+    "goal": "Eliminar o painel desatualizado em merges classificados como so dados: generalizar o ledger remoto do USR-348 e aplicar as demandas, que hoje vem da copia embutida na imagem.",
+    "files_hint": [
+      "core/owner_actions/remote_ledger.py",
+      "core/demands/store.py",
+      "hub/backend/service.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "RemoteLedger aceita o caminho do ledger como parametro, com default .factory/owner_actions/owner_actions.json e comportamento atual inalterado",
+      "No Hub de producao (sem data_dir) a leitura de demandas e do roadmap usa o ledger de origin/main com TTL curto, cache compartilhado e fallback para o arquivo local em qualquer falha, sem levantar excecao",
+      "Escrita de demandas continua indo para o arquivo local; modos embarcado e de teste (data_dir definido) seguem lendo so o arquivo local",
+      "Merge que altera apenas .factory/demands aparece em /api/demands/tickets e no roadmap sem rebuild nem recriacao de container",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "Ledger remoto com caminho de demandas: payload novo aparece apos o TTL e e servido com fetch injetado",
+      "Falha de rede no fetch remoto cai no arquivo local e nao levanta",
+      "Escrita de demanda nao e afetada pelo ledger remoto (grava no arquivo e a releitura reflete)"
+    ],
+    "smoke": [
+      "/api/demands/tickets",
+      "/api/interventions/priority",
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Conciliar trigger do workflow de imagem, COPY do Dockerfile e classificador de deploy",
+    "goal": "Garantir que merge que nao toca no que a imagem embute como runtime nao reconstrua nada, com uma fonte unica de verdade para os caminhos e o patch do workflow protegido pronto para o owner.",
+    "files_hint": [
+      "core/infra/deploy_classifier.py",
+      "scripts/hub_image_workflow_check.py",
+      "deploy/dokploy/Dockerfile.hub",
+      "docs/proposals/USR-207-zero-downtime.md",
+      ".factory/owner_actions/owner_actions.json",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "deploy_classifier expone uma funcao unica com os caminhos de runtime da imagem (COPY do Dockerfile.hub excluindo docs/ e .factory/, que ficam apenas como seed lido fresco em runtime)",
+      "scripts/hub_image_workflow_check.py compara essa lista com o trigger de .github/workflows/hub-image.yml e sai com codigo != 0 na divergencia, imprimindo o que sobra e o que falta",
+      "Patch pronto do workflow (paths restritos aos caminhos de runtime + grupo de concurrency para nao construir dois shas em paralelo) gravado em docs/proposals e acao do owner registrada em .factory/owner_actions/owner_actions.json com passo a passo e comandos absolutos, porque .github/** e protegido pelo guard",
+      "Teste garante que o workflow vigente cobre todos os caminhos de rebuild (superset, nunca perde build) e que o patch proposto bate exatamente com a lista de runtime",
+      "Proposta atualizada explicando que docs/ e .factory/ permanecem na imagem so como seed",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "Lista de runtime do classificador e subconjunto dos paths do workflow vigente",
+      "Lista de runtime e igual a lista de paths do patch proposto e o patch contem o bloco de concurrency",
+      "Checker reporta divergencia e codigo de saida != 0 com um trigger sintetico fora de sincronia"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Memoria do container do Hub medida sob carga e OOMKilled monitorado",
+    "goal": "Dar visibilidade de memoria e de OOM ao Hub e ajustar o limite de 512 MB somente com evidencia, levando em conta a sobreposicao de duas cores do blue-green.",
+    "files_hint": [
+      "core/infra/container_memory.py",
+      "hub/backend/api.py",
+      "core/infra/availability_probe.py",
+      "scripts/hub_load_probe.py",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "Leitor de memoria do container le cgroup v2 (memory.current, memory.max, memory.events oom_kill) com fallback cgroup v1, nunca levanta excecao e e exposto num endpoint que o Hub ja serve",
+      "A sonda externa ja agendada (1 minuto, fora da VPS) alerta no Telegram ops quando o contador de oom_kill sobe ou o uso fica >= 85% do limite em dois ticks seguidos, com um alerta por evento e mensagem de recuperacao",
+      "A sonda ganha um modo de status que imprime a idade do ultimo tick e sai != 0 quando o agendamento externo parou de rodar",
+      "scripts/hub_load_probe.py mede pico de memoria e latencia p95 com 20 requisicoes concorrentes em tres endpoints do Hub por 5 minutos e grava relatorio JSON, abortando se detectar reinicializacao ou oom_kill",
+      "Limite de memoria em deploy/dokploy/docker-compose.hub.yml muda apenas com a medicao registrada na proposta, considerando duas cores simultaneas na VPS; sem medicao, continua 512M e a proposta guarda o runbook e os numeros coletados",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "Parsing de cgroup v2 e v1 a partir de arquivos temporarios, inclusive memory.max = max e arquivos ausentes",
+      "Alerta de oom_kill dispara uma vez por evento e avisa recuperacao; uso alto em um unico tick fica silencioso",
+      "Modo de status sai != 0 com arquivo de estado velho e 0 com tick recente",
+      "Relatorio do script de carga calcula pico e p95 a partir de amostras injetadas"
+    ],
+    "smoke": [
+      "/health",
+      "/api/infra/metrics"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Sonda de 1 s versionada e prova de deploy sem indisponibilidade",
+    "goal": "Trazer para o repositorio a ferramenta de prova (hoje um script solto na maquina do owner) e executar a prova de zero downtime num deploy blue-green real.",
+    "files_hint": [
+      "scripts/hub_downtime_probe.py",
+      "core/infra/availability_probe.py",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "Sonda de 1 s no repositorio: GET por HTTPS no dominio publico, uma linha JSONL por amostra (instante, status, sha do /health, latencia) e timeout ou erro de conexao contados como falha",
+      "Modo de veredito le o JSONL e aprova somente com zero respostas diferentes de 200 e pelo menos dois shas distintos observados (sha antigo e novo servindo), saindo != 0 quando reprova",
+      "Prova executada durante um deploy blue-green real: relatorio e veredito gravados como evidencia e referenciados na proposta; se a escrita no Dokploy ou a execucao do deploy for negada por permissao, a negacao exata e reportada e uma acao do owner com os comandos absolutos da janela e registrada em .factory/owner_actions/owner_actions.json",
+      "Proposta substitui o comando do script externo pela invocacao absoluta do script do repositorio",
+      "python scripts/line_validate.py passa"
+    ],
+    "tests_to_add": [
+      "Amostragem com relogio e HTTP injetados mantem o intervalo de 1 s e registra timeout e erro de conexao como falha",
+      "Veredito reprova JSONL com resposta != 200 e reprova JSONL com um unico sha; aprova com zero falhas e dois shas",
+      "Extracao do sha do payload de /health tolera corpo sem sha"
+    ],
+    "smoke": [
+      "/health",
+      "/live"
+    ]
+  }
+]
