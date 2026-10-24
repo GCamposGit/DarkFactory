@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from core.roadmap.models import (
     ConfidenceLevel,
@@ -78,6 +78,8 @@ class JsonRoadmapSource:
         source_id: str = "approved-roadmap",
         label: str = "Roadmap operacional aprovado",
         priority: int = 10,
+        content_loader: Any = None,
+        plan_content_loader: Any = None,
     ) -> None:
         self.path = Path(path)
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
@@ -87,17 +89,22 @@ class JsonRoadmapSource:
         self.source_id = source_id
         self.label = label
         self.priority = priority
+        self.content_loader = content_loader
+        self.plan_content_loader = plan_content_loader
 
     def read(self, project_id: str) -> RoadmapSourceResult:
         locator = self.path.as_posix()
         try:
-            content = self.path.read_text(encoding="utf-8")
+            content = self.content_loader() if self.content_loader is not None else self.path.read_text(encoding="utf-8")
             evidence_files = self._evidence_files()
             plan_hash = ""
             plan_units: dict[str, dict[str, Any]] = {}
-            if self.plan_path and self.plan_path.exists():
+            if self.plan_path and (self.plan_path.exists() or self.plan_content_loader is not None):
                 try:
-                    plan_content = self.plan_path.read_text(encoding="utf-8")
+                    plan_content = (
+                        self.plan_content_loader() if self.plan_content_loader is not None
+                        else self.plan_path.read_text(encoding="utf-8")
+                    )
                     plan_hash = hashlib.sha256(plan_content.encode("utf-8")).hexdigest()
                     plan_data = json.loads(plan_content)
                     if isinstance(plan_data, dict):
@@ -294,17 +301,19 @@ class MarkdownDevelopmentPlanSource:
         source_id: str = "development-plan",
         label: str = "Plano de desenvolvimento DF",
         priority: int = 20,
+        content_loader: Any = None,
     ) -> None:
         self.path = Path(path)
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
         self.source_id = source_id
         self.label = label
         self.priority = priority
+        self.content_loader = content_loader
 
     def read(self, project_id: str) -> RoadmapSourceResult:
         locator = self.path.as_posix()
         try:
-            content = self.path.read_text(encoding="utf-8")
+            content = self.content_loader() if self.content_loader is not None else self.path.read_text(encoding="utf-8")
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             rows = self._parse_rows(content)
             if not rows:
@@ -454,16 +463,18 @@ class UserDemandsRoadmapSource:
         source_id: str = "user-demands",
         label: str = "Demandas de Usuários",
         priority: int = 15,
+        content_loader: Any = None,
     ) -> None:
         self.path = Path(path)
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
         self.source_id = source_id
         self.label = label
         self.priority = priority
+        self.content_loader = content_loader
 
     def read(self, project_id: str) -> RoadmapSourceResult:
         locator = self.path.as_posix()
-        if not self.path.exists():
+        if not self.path.exists() and self.content_loader is None:
             state = RoadmapSourceState(
                 source_id=self.source_id,
                 label=self.label,
@@ -475,7 +486,13 @@ class UserDemandsRoadmapSource:
             return RoadmapSourceResult(state=state, records=[], content="")
 
         try:
-            content = self.path.read_text(encoding="utf-8")
+            content = (
+                self.content_loader()
+                if self.content_loader is not None
+                else self.path.read_text(encoding="utf-8")
+            )
+            if isinstance(content, (dict, list)):
+                content = json.dumps(content, ensure_ascii=False)
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             raw_data = json.loads(content) if content.strip() else []
             items_list = raw_data if isinstance(raw_data, list) else raw_data.get("demands", [])
@@ -842,16 +859,18 @@ class InfraRoadmapJsonSource:
         source_id: str = "infra-roadmap-json",
         label: str = "Roadmap de Infraestrutura",
         priority: int = 25,
+        content_loader: Any = None,
     ) -> None:
         self.path = Path(path)
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
         self.source_id = source_id
         self.label = label
         self.priority = priority
+        self.content_loader = content_loader
 
     def read(self, project_id: str) -> RoadmapSourceResult:
         locator = self.path.as_posix()
-        if not self.path.exists():
+        if not self.path.exists() and self.content_loader is None:
             state = RoadmapSourceState(
                 source_id=self.source_id,
                 label=self.label,
@@ -863,7 +882,7 @@ class InfraRoadmapJsonSource:
             return RoadmapSourceResult(state=state, records=[], content="")
 
         try:
-            content = self.path.read_text(encoding="utf-8")
+            content = self.content_loader() if self.content_loader is not None else self.path.read_text(encoding="utf-8")
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             raw_data = json.loads(content)
             items_list = raw_data.get("items", []) if isinstance(raw_data, dict) else []

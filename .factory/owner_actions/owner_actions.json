@@ -2569,6 +2569,35 @@
       "created_at": "2026-10-24T04:00:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-063",
+      "kind": "action",
+      "title": "Ajustar gatilhos do workflow da imagem do Hub",
+      "priority": "medium",
+      "status": "open",
+      "why": "O workflow .github/workflows/hub-image.yml inclui docs/** e .factory/**, então publica imagens em merges de dados; o classificador do deploy os trata como data-only e dispensa a implantação. Isso deixa a cópia da imagem divergente. O arquivo é protegido e só o Owner pode alterá-lo.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o checkout DarkFac no editor e edite o workflow protegido.",
+          "command": "code C:\\dev\\DarkFac\\.github\\workflows\\hub-image.yml"
+        },
+        {
+          "text": "Na seção on.push.paths e on.pull_request.paths, remova os padrões amplos docs/** e .factory/**. Preserve os padrões dos arquivos e diretórios que exigem rebuild, alinhados a core/infra/deploy_classifier.py e deploy/dokploy/Dockerfile.hub."
+        },
+        {
+          "text": "Revise o diff para confirmar que apenas os gatilhos foram estreitados e que os caminhos de runtime continuam cobertos."
+        },
+        {
+          "text": "Envie a alteração pelo fluxo normal de PR do repositório; não altere a política do classificador nem os dados versionados nesta ação."
+        }
+      ],
+      "verify": "O diff de .github/workflows/hub-image.yml não contém docs/** nem .factory/** nos gatilhos, mantém core/**, hub/**, scripts/**, deploy/** e os arquivos de rebuild; uma mudança somente em docs/** ou .factory/** não dispara publicação, enquanto uma mudança em core/ dispara.",
+      "created_at": "2026-10-24T13:40:40Z",
+      "created_by": "codex",
+      "resolved_at": null
     }
   ]
 }

@@ -107,6 +107,12 @@ Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de 
 
 ## 3. Memoria: como medir antes de mexer nos 512 MB
 
+### Leitura remota de dados do Hub (T3)
+
+O Hub busca arquivos de dados versionados em `origin/main` pela API de conteúdos do GitHub. O cache padrão é de 120 segundos; falhas preservam o último conteúdo válido e, antes da primeira leitura bem-sucedida, usam a cópia local embutida. O token `GITHUB_TOKEN` (ou o fallback já aceito `GITHUB_PAT`) continua opcional e é enviado apenas como credencial da chamada à API.
+
+Para desligar todas as leituras remotas, configure `DARKHUB_REMOTE_DATA=off` no ambiente do processo do Hub. O Hub passa a usar as cópias locais da imagem. O ledger de ações também mantém o opt-out legado `DARKHUB_OWNER_ACTIONS_REMOTE=off`.
+
 Nao alterar o limite agora. Evidencia necessaria para mudar:
 
 1. Coletar na VPS, durante pelo menos uma semana util e incluindo ao menos 3 deploys e uma rajada de telemetria:

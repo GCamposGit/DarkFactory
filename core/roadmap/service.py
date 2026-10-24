@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from core.roadmap.compiler import RoadmapCompiler
 from core.roadmap.models import (
@@ -218,10 +218,13 @@ def build_repository_roadmap_service(
     hf_plan_path: Path | None = None,
     infra_roadmap_path: Path | None = None,
     continuous_autonomy_plan_path: Path | None = None,
+    demands_content_loader: Callable[[], Any] | None = None,
+    content_loaders: dict[str, Callable[[], Any]] | None = None,
 ) -> RoadmapQueryService:
     """Build the default DarkHub service from all versioned roadmap sources."""
 
     repository_root = Path(repository_root)
+    content_loaders = content_loaders or {}
     manifest_path = repository_root / ".factory" / "roadmap" / "darkfac.json"
     development_plan_path = repository_root / "docs" / "DEVELOPMENT_PLAN_2026-09-05.md"
     evidence_dir = repository_root / ".factory" / "reports"
@@ -235,10 +238,13 @@ def build_repository_roadmap_service(
         manifest_path,
         evidence_dir=evidence_dir,
         plan_path=plan_to_enrich,
+        content_loader=content_loaders.get(".factory/roadmap/darkfac.json"),
+        plan_content_loader=content_loaders.get(".factory/planning/continuous-autonomy/plan.json"),
     )
     development_plan_source = MarkdownDevelopmentPlanSource(
         development_plan_path,
         evidence_dir=evidence_dir,
+        content_loader=content_loaders.get("docs/DEVELOPMENT_PLAN_2026-09-05.md"),
     )
     sources: list[RoadmapSource] = [manifest_source]
     documents: dict[str, RoadmapSourceDocument] = {
@@ -259,6 +265,7 @@ def build_repository_roadmap_service(
         user_demands_source = UserDemandsRoadmapSource(
             target_demands_path,
             evidence_dir=evidence_dir,
+            content_loader=demands_content_loader,
         )
         sources.append(user_demands_source)
         documents[user_demands_source.source_id] = RoadmapSourceDocument(
@@ -289,6 +296,7 @@ def build_repository_roadmap_service(
         infra_source = InfraRoadmapJsonSource(
             target_infra_path,
             evidence_dir=evidence_dir,
+            content_loader=content_loaders.get(".factory/infra/roadmap.json"),
         )
         sources.append(infra_source)
         documents[infra_source.source_id] = RoadmapSourceDocument(

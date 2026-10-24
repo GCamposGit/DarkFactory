@@ -14,6 +14,7 @@ import pytest
 
 from core.infra import availability_probe as probe_mod
 from core.infra import deploy_classifier as dc
+from core.infra.remote_data import HUB_DATA_INVENTORY, HUB_REMOTE_DATA_FILES
 from core.orchestrator.compose_render import render_darkhub_compose
 from scripts import dokploy_redeploy as mod
 
@@ -114,6 +115,15 @@ def test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger() ->
         "to update .github/workflows/hub-image.yml. Missing prefixes="
         f"{missing_prefixes}, missing files={missing_files}"
     )
+
+
+def test_hub_served_factory_and_docs_data_inventory_is_covered() -> None:
+    uncovered = sorted(
+        path for path in HUB_DATA_INVENTORY
+        if path not in HUB_REMOTE_DATA_FILES
+        and not (path in dc.REBUILD_FILES or path.startswith(dc.REBUILD_PREFIXES))
+    )
+    assert not uncovered, f"Hub-served data lacks rebuild coverage or a remote reader: {uncovered}"
 
 
 def test_run_hub_only_merge_is_data_only() -> None:

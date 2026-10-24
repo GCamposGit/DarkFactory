@@ -157,6 +157,12 @@ from core.integrations.telegram import TelegramConfig, TelegramGateway, reply_me
 from hub.backend.usage_sync_watch import UsageSyncWatch
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
 from core.owner_actions.remote_ledger import from_env as owner_actions_remote_from_env
+from core.infra.remote_data import (
+    DEMANDS_PATH as REMOTE_DEMANDS_PATH,
+    from_env as remote_data_from_env,
+    read_json,
+    read_text,
+)
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import (
     ENV_PATH as OWNER_ACTIONS_ENV_PATH,
@@ -384,6 +390,7 @@ class HubService:
         else:
             self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
         self.demands_store = DemandsStore(self.demands_dir / "demands.json")
+        self.remote_data = remote_data_from_env() if data_dir is None else None
         self.demands_service = DemandsService(
             store=self.demands_store,
             specifier=DemandSpecifier(ollama_url=ollama_base_url),
@@ -448,6 +455,40 @@ class HubService:
         self.roadmap = build_repository_roadmap_service(
             repository_root,
             demands_path=self.demands_dir / "demands.json",
+            demands_content_loader=(
+                lambda: (
+                    read_json(
+                        self.demands_store.path,
+                        self.remote_data,
+                        REMOTE_DEMANDS_PATH,
+                        validator=lambda value: isinstance(value, list) or (
+                            isinstance(value, dict) and isinstance(value.get("demands"), list)
+                        ),
+                    )
+                    if self.remote_data is not None
+                    else self.demands_store.path.read_text(encoding="utf-8")
+                )
+            ),
+            content_loaders=(
+                {
+                    ".factory/roadmap/darkfac.json": lambda: read_text(
+                        repository_root / ".factory" / "roadmap" / "darkfac.json", self.remote_data,
+                        ".factory/roadmap/darkfac.json",
+                    ),
+                    ".factory/planning/continuous-autonomy/plan.json": lambda: read_text(
+                        repository_root / ".factory" / "planning" / "continuous-autonomy" / "plan.json",
+                        self.remote_data, ".factory/planning/continuous-autonomy/plan.json",
+                    ),
+                    ".factory/infra/roadmap.json": lambda: read_text(
+                        repository_root / ".factory" / "infra" / "roadmap.json", self.remote_data,
+                        ".factory/infra/roadmap.json",
+                    ),
+                    "docs/DEVELOPMENT_PLAN_2026-09-05.md": lambda: read_text(
+                        repository_root / "docs" / "DEVELOPMENT_PLAN_2026-09-05.md", self.remote_data,
+                        "docs/DEVELOPMENT_PLAN_2026-09-05.md",
+                    ),
+                } if self.remote_data is not None else {}
+            ),
             include_demands=True,
             include_hf=True,
             include_infra=True,
@@ -878,10 +919,34 @@ class HubService:
     ) -> List[UserTicket]:
         """List user demands filtered by project and status."""
         stat_enum = DeliveryStatus(status) if status else None
-        return self.demands_service.list_tickets(project_id=project_id, status=stat_enum)
+        if self.remote_data is None:
+            return self.demands_service.list_tickets(project_id=project_id, status=stat_enum)
+        payload = read_json(
+            self.demands_store.path,
+            self.remote_data,
+            REMOTE_DEMANDS_PATH,
+            validator=lambda value: isinstance(value, list) or (
+                isinstance(value, dict) and isinstance(value.get("demands"), list)
+            ),
+        )
+        rows = payload if isinstance(payload, list) else payload.get("demands", [])
+        tickets: list[UserTicket] = []
+        for row in rows if isinstance(rows, list) else []:
+            try:
+                ticket = UserTicket.model_validate(row)
+                if project_id and ticket.project_id != project_id:
+                    continue
+                if stat_enum and ticket.status != stat_enum:
+                    continue
+                tickets.append(ticket)
+            except Exception as exc:
+                logger.warning("Skipping invalid remote demand row (%s)", type(exc).__name__)
+        return sorted(tickets, key=lambda ticket: ticket.id)
 
     def get_demand_ticket(self, ticket_id: str) -> Optional[UserTicket]:
         """Retrieve a single user demand ticket."""
+        if self.remote_data is not None:
+            return next((ticket for ticket in self.list_demand_tickets() if ticket.id == ticket_id), None)
         return self.demands_service.get_ticket(ticket_id)
 
     def update_demand_ticket_status(
@@ -3921,5 +3986,3 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
-
