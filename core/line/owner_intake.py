@@ -320,6 +320,33 @@ def run_state(
     return "failed"
 
 
+def _supersede_open_attempts(
+    store: Any, attempts: list[tuple[int, str | None]], *, now: datetime | None = None,
+) -> None:
+    """Cancel earlier attempts that still hold open jobs, so one ticket never has two live runs.
+
+    A run judged `failed` only logically (expired no-route wait) keeps its waiting job open; without
+    this the next attempt would run beside it (USR-362). Failures to cancel are logged, not raised.
+    """
+    from core.workflow.control_store import RUN_OPEN_JOB_STATUSES
+
+    getter = getattr(store, "get_run_status", None)
+    cancel = getattr(store, "cancel_run", None)
+    if getter is None or cancel is None:
+        return
+    for _, run_id in attempts:
+        if not run_id:
+            continue
+        try:
+            status = getter(run_id) or {}
+            if status.get("status") == "cancelled":
+                continue
+            if any(job.get("status") in RUN_OPEN_JOB_STATUSES for job in status.get("jobs") or []):
+                cancel(run_id, reason="superseded_by_new_attempt", actor="line_intake", now=now)
+        except Exception as exc:
+            logger.warning("Could not supersede earlier run %s: %s", run_id, exc)
+
+
 def extract_run_delivery_evidence(store: Any, run_id: str | None) -> str:
     """Extract PR URL and merge SHA evidence from a succeeded line run."""
     if not run_id:
@@ -442,6 +469,7 @@ def submit_ticket_to_line(
                         attempt=latest_attempt,
                     )
                 attempt = latest_attempt + 1
+                _supersede_open_attempts(line_store, attempts, now=now)
         command = command_for_ticket(ticket, attempt)
         receipt = service.accept(command, now or datetime.now(UTC))
     except IdempotencyConflict:
