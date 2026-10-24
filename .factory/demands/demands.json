@@ -10901,5 +10901,34 @@
     "dependencies": [],
     "created_at": "2026-10-24T18:49:47.345792Z",
     "updated_at": "2026-10-24T18:49:47.345792Z"
+  },
+  {
+    "id": "USR-374",
+    "project_id": "darkfac",
+    "title": "Desktop nao atualiza: owner_actions.json alterado localmente bloqueia o merge do node_sync",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "node_sync retry em 24/10 19:12Z: Desktop em fcbb10a nao chega em d928790; worker output 'Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json ... Aborting'. Algum processo no Desktop escreve no ledger versionado do checkout do worker, travando a convergencia.",
+    "core_journey": [
+      "node_sync retry em 24/10 19:12Z: Desktop em fcbb10a nao chega em d928790; worker output 'Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json ... Aborting'. Algum processo no Desktop escreve no ledger versionado do checkout do worker, travando a convergencia."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificado o processo que escreve owner_actions.json no checkout do Desktop e ele passa a escrever fora da arvore versionada ou via PR",
+      "node_sync preserva a alteracao local (backup branch) e converge mesmo com arquivo de ledger sujo, com teste"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T19:14:04.006561Z",
+    "updated_at": "2026-10-24T19:14:04.006561Z"
   }
 ]
