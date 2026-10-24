@@ -73,6 +73,11 @@ class AuditChainVerificationResult(BaseModel):
     total_events: int
     tampered_event_id: Optional[str] = None
     error_message: str = ""
+    # Evidence state: "intact" | "absent" | "unreadable" | "tampered".
+    status: str = "intact"
+    # Structured error (None when intact/absent): "malformed_line", "read_failure", ...
+    error_code: Optional[str] = None
+    error_line: Optional[int] = None
 
 
 class SLACheckResult(BaseModel):
