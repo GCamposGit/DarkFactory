@@ -617,6 +617,12 @@ def _rank_eligible(
     return pool[0][0], pool[0][1]
 
 
+def _policy_allows(project_id: str, harness: str) -> bool:
+    from core.enterprise.enforcement import provider_allowed
+
+    return provider_allowed(project_id, harness)
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -634,6 +640,7 @@ def pick(
     mode: Optional[str] = None,
     unknown_quota_last_resort_ok: Optional[bool] = None,
     operating_harness: Optional[str] = None,
+    project_id: Optional[str] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
@@ -695,6 +702,8 @@ def pick(
     ):
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
+        if project_id and not _policy_allows(project_id, harness):
+            continue  # USR-174: per-project data policy refuses this harness/provider
         remaining = None if cooling else lookup(provider_id)
         if cooling:
             logger.info("pick: harness %s skipped for stage %s (in cooldown)", harness, stage)
@@ -760,6 +769,7 @@ def pick(
     all_exhausted = bool(evaluated) and all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
     if (
         required_mode == "read"
+        and (not project_id or _policy_allows(project_id, "openrouter"))
         and stage_cfg.openrouter_model
         and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
         and (stage_cfg.openrouter_ok or all_exhausted)
