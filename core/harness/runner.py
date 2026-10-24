@@ -350,8 +350,21 @@ def normalize_xdist_workers(command: list[str]) -> list[str]:
     return capped
 
 
+def check_scope_label(cmd: str) -> str | None:
+    """Rotulo honesto do que um passo verifica (USR-173): sintaxe nao e tipos."""
+    lowered = cmd.casefold()
+    if "compileall" in lowered:
+        return "syntax-only (compileall; NOT type checking)"
+    if "typecheck" in lowered or "mypy" in lowered:
+        return "static types (mypy)"
+    return None
+
+
 def run_step(step: HarnessStepConfig) -> StepExecution:
     print(f"{MARKER_STEP_START} {step.name}")
+    label = check_scope_label(step.cmd)
+    if label:
+        print(f"[CHECK-SCOPE] {step.name}: {label}")
     started_at = time.perf_counter()
 
     def _elapsed() -> float:
