@@ -2610,7 +2610,7 @@
       "kind": "action",
       "title": "Parar o DarkHub vulneravel e publicar o hotfix depois do merge do PR #657",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "O deploy do hotfix de seguranca (#653) falhou no blue-green e o rollback religou a versao antiga: /api/session voltou a entregar o token de sessao para qualquer pessoa. O PR #657 corrige a checagem do blue-green.",
       "blocks": [
         "USR-369"
@@ -2631,7 +2631,7 @@
       "verify": "https://darkhub.ggcampos.com/api/session numa janela anonima responde {\"detail\":\"Login required: /api/auth/login\"} e https://darkhub.ggcampos.com/health mostra o git_sha de main",
       "created_at": "2026-10-24T20:33:41Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-24T22:53:21Z"
     },
     {
       "id": "OA-065",
