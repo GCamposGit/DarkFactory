@@ -153,8 +153,25 @@ async def _lifespan(app: FastAPI):
                 _logger_hub.info(f"[STARTUP] Telegram webhooks: {outcome}")
     except Exception as exc:
         _logger_hub.error(f"[STARTUP] Telegram webhook registration exception: {type(exc).__name__}")
-    yield
-    # Teardown (none needed)
+    memory_monitor = None
+    try:
+        from core.infra.container_memory import start_background_memory_sampler
+
+        memory_monitor = start_background_memory_sampler()
+        if memory_monitor is None:
+            _logger_hub.info("[STARTUP] Container memory sampler disabled: no readable cgroup limit.")
+        else:
+            app.state.container_memory_sampler = memory_monitor[2]
+            _logger_hub.info("[STARTUP] Container memory sampler started.")
+    except Exception as exc:
+        _logger_hub.warning(f"[STARTUP] Container memory sampler skipped: {type(exc).__name__}")
+    try:
+        yield
+    finally:
+        if memory_monitor is not None:
+            thread, stop_event, _sampler = memory_monitor
+            stop_event.set()
+            thread.join(timeout=1.0)
 
 
 app = FastAPI(

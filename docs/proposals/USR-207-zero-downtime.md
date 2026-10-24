@@ -101,18 +101,18 @@ Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de 
 
 ## 3. Memoria: como medir antes de mexer nos 512 MB
 
-Nao alterar o limite agora. Evidencia necessaria para mudar:
+O limite do container permanece em **512 MB** ate que exista evidencia coletada. O Hub agora amostra seu cgroup a cada 30 s, mantém o maior uso desde o boot e envia alerta ao Telegram de ops quando atingir 80% do limite ou quando o contador `oom_kill` aumentar. A leitura detalhada fica opt-in em `/health?memory=1`; `/health` sem parametro continua leve.
 
-1. Coletar na VPS, durante pelo menos uma semana util e incluindo ao menos 3 deploys e uma rajada de telemetria:
+Execute no Notebook ou Desktop, contra a URL publica do Hub. A carga dura 5 minutos, com 20 requisicoes concorrentes distribuidas entre os tres endpoints; o JSON inclui pico percentual/MB, p95, erros e `oom_kills`:
 
-```bash
-docker stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.MemPerc}}" darkhub-cloud-247   # a cada 30 s via cron
-docker inspect -f "{{.State.OOMKilled}} {{.RestartCount}}" darkhub-cloud-247
-dmesg -T | grep -i "out of memory"
-free -m
+```powershell
+python C:\dev\DarkFac\scripts\hub_memory_load.py --base-url https://darkhub.ggcampos.com --concurrency 20 --seconds 300 --out C:\Users\guigc\hub_memory_load.json
 ```
 
-2. Carga sintetica contra o container (do Notebook): 20 requisicoes simultaneas em `/api/cloud/status`, `/api/usage/accounts` e `/api/telemetry/tickets` por 5 min, anotando o pico de `MemUsage` e a latencia p95.
-3. Observar o pico durante o build local atual (RAM da VPS ~79%): a memoria que falta e do build, nao do runtime; com a imagem vinda do GHCR esse pico some.
-4. Criterio para subir o limite: pico RSS do container >= 80% de 512 MB em operacao normal OU `OOMKilled=true`/`RestartCount` crescendo. Subir para o proximo degrau (768 MB) e remedir; aumentar a VPS so se `free -m` mostrar a VPS sem folga com o limite novo (non-goal do ticket: nao aumentar a VPS sem medicao).
-5. Registrar os numeros em `docs/` (ou no ticket) antes da mudanca de `deploy.resources.limits.memory`.
+Durante a coleta e no fim dela, registre tambem `OOMKilled` e `RestartCount` do container ativo no host Docker (ajuste o nome se a cor ativa for `darkhub-blue` ou `darkhub-green`):
+
+```powershell
+docker inspect -f "{{.Name}} OOMKilled={{.State.OOMKilled}} RestartCount={{.RestartCount}}" darkhub-cloud-247
+```
+
+Repita a medicao em operacao normal por pelo menos uma semana util, incluindo tres deploys e uma rajada de telemetria, e guarde os JSONs e os valores de `docker inspect` junto ao ticket. Se o pico atingir **80% de 512 MB** ou `OOMKilled`/`RestartCount` crescer, suba o limite para **768 MB** e remeca. O limite atual fica em 512 MB ate essa evidencia existir; aumentar a VPS exige evidencia separada de falta de folga no host.
