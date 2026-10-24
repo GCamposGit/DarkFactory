@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.line import workspace as ws_mod
+from core.line import stage_review as review_mod
 from core.line.routing import load_routing_config
 from core.line.stage_review import ReviewStage, _load_review_state, _write_review_state
 from tests.line.test_stage_review import (
@@ -32,6 +33,22 @@ def test_same_digest_and_policy_reuses_approval(tmp_path, monkeypatch) -> None:
     project, _ws, agent, stage = _setup(tmp_path, monkeypatch)
     assert stage.run(project, "run-b").outcome == "success"
     assert len(agent.calls) == 1
+
+
+def test_unavailable_candidate_digest_cannot_be_approved(tmp_path, monkeypatch) -> None:
+    project = _project(str(_init_bare_origin(tmp_path)))
+    _prepare_run(tmp_path, monkeypatch, project, "run-b", harness="claude")
+    agent = _ScriptedAgent([_APPROVE])
+    stage = ReviewStage(
+        run_agent_func=agent, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config()
+    )
+    monkeypatch.setattr(review_mod, "_candidate_digest", lambda *_args: None)
+
+    result = stage.run(project, "run-b")
+
+    assert result.outcome == "retry"
+    assert result.cause_code == "review_candidate_digest_unavailable"
+    assert agent.calls == []
 
 
 def test_changed_candidate_requires_new_review(tmp_path, monkeypatch) -> None:

@@ -289,6 +289,17 @@ class ReviewStage:
         cur_candidate = _candidate_digest(ws, default_branch)
         cur_policy = _policy_digest(self.routing_config)
 
+        # A failed diff command is not an empty candidate. Without a digest we
+        # cannot bind the review evidence to the tree that will be resumed or
+        # integrated, so do not ask the reviewer to approve an unverifiable
+        # snapshot.
+        if cur_candidate is None:
+            return StageResult(
+                outcome="retry",
+                cause_code="review_candidate_digest_unavailable",
+                output_refs=[],
+            )
+
         if (
             state.rounds
             and state.rounds[-1].verdict == "approve"
