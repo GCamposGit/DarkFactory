@@ -40,6 +40,21 @@ test("GET repete apos falha de rede e esconde o banner ao recuperar", async () =
   assert.match(banner.textContent, /Hub atualizando, reconectando/);
 });
 
+test("GET do snapshot repete apos 503 e preserva o AbortController", async () => {
+  const ok = { ok: true, status: 200 };
+  const retry = load([{ ok: false, status: 503 }, ok]);
+  const controller = new AbortController();
+  assert.equal(await retry.ctx.__fetch("/api/line/snapshot", { signal: controller.signal }), ok);
+  assert.equal(retry.calls.length, 2);
+  assert.deepEqual(retry.calls.map(([url]) => url), ["/api/line/snapshot", "/api/line/snapshot"]);
+
+  const aborted = new Error("aborted");
+  aborted.name = "AbortError";
+  const noRetry = load([aborted, ok]);
+  await assert.rejects(() => noRetry.ctx.__fetch("/api/line/snapshot", { signal: controller.signal }), (error) => error.name === "AbortError");
+  assert.equal(noRetry.calls.length, 1);
+});
+
 test("503 do proxy e repetido; POST com erro de rede nao e reenviado", async () => {
   const ok = { ok: true, status: 200 };
   const a = load([{ ok: false, status: 503 }, ok]);
