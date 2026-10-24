@@ -174,3 +174,15 @@ def test_restore_legacy_cli_only_updates_without_marker(monkeypatch: pytest.Monk
     body = sent[0][2]
     assert body["composeId"] == "cid" and parse_state(body["composeFile"]) is None
     assert "restore-legacy ok" in capsys.readouterr().out
+
+
+def test_refused_restore_takes_the_hub_offline_instead_of_reviving_the_old_colour() -> None:
+    initial = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
+    applied: List[str] = []
+    with pytest.raises(BlueGreenError, match="Hub offline"):
+        run_bluegreen_deploy(
+            source=SRC, new_sha=C, read_compose=lambda: initial, apply_compose=applied.append,
+            sha_is_serving=lambda _s: False, health_attempts=2, restore_allowed=lambda _prev: False,
+        )
+    assert applied[-1] != initial
+    assert applied[-1].count("replicas: 0") == 2

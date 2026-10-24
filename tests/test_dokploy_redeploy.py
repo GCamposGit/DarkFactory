@@ -2050,3 +2050,21 @@ def test_joined_darkhub_deploy_on_divergent_sha_retriggers_once(monkeypatch: pyt
     assert len(runs) == 1 and runs[0]["new_sha"] == "a" * 40
     assert "after recovery" in out.getvalue(), err.getvalue()
     assert code == mod.EXIT_OK, err.getvalue()
+
+
+def test_hub_restore_requires_the_security_fix_in_the_active_colour(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.orchestrator.bluegreen import BlueGreenState, render_bluegreen_compose
+
+    source = (mod.REPO_ROOT / "deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8")
+    assert not mod.hub_restore_is_secure(source)  # legacy compose: sha unknown -> never revived
+    old, new = "b" * 40, "c" * 40
+    previous = render_bluegreen_compose(source, BlueGreenState("green", new, old), ("green",))
+    calls: List[List[str]] = []
+
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        return type("R", (), {"returncode": 1})()
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    assert not mod.hub_restore_is_secure(previous)
+    assert calls[-1][-2:] == [mod.MIN_SECURE_HUB_SHA, old]  # checks the ACTIVE colour

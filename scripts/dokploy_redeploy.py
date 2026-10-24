@@ -57,6 +57,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.git.safe_show import safe_show
 from core.orchestrator.bluegreen import BlueGreenError, is_bluegreen, run_bluegreen_via_dokploy
+from core.orchestrator.bluegreen import parse_state as parse_bluegreen_state
 from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
@@ -972,6 +973,25 @@ def _resolve_services(
     return select_services(services, only)
 
 
+# b653a30 (#653) closed the public /api/session; a Hub older than it must never be revived by a rollback.
+MIN_SECURE_HUB_SHA = "b653a305fe602c7afb6b82c2016d7197ebaf2a8f"
+
+
+def hub_restore_is_secure(previous_compose: str, *, repo_root: Optional[Path] = None) -> bool:
+    """True only if the colour active in ``previous_compose`` already contains MIN_SECURE_HUB_SHA."""
+    state = parse_bluegreen_state(previous_compose)
+    if state is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", MIN_SECURE_HUB_SHA, state.sha_of(state.active)],
+            cwd=str(repo_root or REPO_ROOT), capture_output=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _bluegreen_serving(health_client: Optional[Callable[[], Dict[str, Any]]]) -> Callable[[str], bool]:
     probe = health_client or fetch_darkhub_health
 
@@ -1122,6 +1142,7 @@ def _run_main(
             (bluegreen_runner or run_bluegreen_via_dokploy)(
                 request=transport, compose_id=svc.service_id, source=darkhub_compose,
                 new_sha=expected_sha, sha_is_serving=_bluegreen_serving(health_client),
+                restore_allowed=hub_restore_is_secure,
                 deploy_timeout=args.timeout, poll_interval=args.poll_interval,
                 sleep_fn=sleep_fn, clock_fn=clock_fn,
                 wait_ghcr=lambda s: wait_for_ghcr_tag(s, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn),
