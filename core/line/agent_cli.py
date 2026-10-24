@@ -148,6 +148,8 @@ class AgentRequest(BaseModel):
     effort: Optional[str] = None
     timeout_s: int = 1800
     max_turns: Optional[int] = None
+    # USR-370: ticket-granted env names exempted from the credential scrub (tolerant when absent).
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class AgentResult(BaseModel):
@@ -776,6 +778,7 @@ def _run_bounded(
     stdin: Optional[Any] = None,
     env: Optional[dict[str, str]] = None,
     scrub_env: bool = True,
+    capabilities: tuple[str, ...] = (),
 ) -> BoundedProcessResult:
     """Execute `argv` with a hard timeout and tree termination (USR-114).
 
@@ -788,7 +791,7 @@ def _run_bounded(
     start = time.perf_counter()
     if scrub_env:  # USR-172: agents never inherit deploy/backup/DB/delivery credentials
         from core.line.agent_env import build_agent_env
-        env = build_agent_env(env)
+        env = build_agent_env(env, capabilities=capabilities)
 
     # Backwards-compatibility for existing tests monkeypatching agent_cli.subprocess.run:
     if subprocess.run is not _ORIGINAL_SUBPROCESS_RUN:
@@ -956,6 +959,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             input_text=req.prompt,
             cwd=req.cwd,
             timeout_s=req.timeout_s,
+            capabilities=tuple(req.capabilities),
         )
     except OSError as exc:
         return AgentResult(
@@ -1216,6 +1220,7 @@ def _run_codex(req: AgentRequest) -> AgentResult:
             input_text=req.prompt,
             cwd=req.cwd,
             timeout_s=req.timeout_s,
+            capabilities=tuple(req.capabilities),
         )
     except OSError as exc:
         return AgentResult(
@@ -1339,6 +1344,7 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
                 stdin=subprocess.DEVNULL,
                 cwd=req.cwd,
                 timeout_s=req.timeout_s,
+                capabilities=tuple(req.capabilities),
             )
         except OSError as exc:
             return AgentResult(
@@ -1555,6 +1561,7 @@ def _run_grok(req: AgentRequest) -> AgentResult:
                 res = _run_bounded(
                     [*argv, "--prompt-file", str(prompt_file)],
                     cwd=req.cwd, timeout_s=req.timeout_s, env=env,
+                    capabilities=tuple(req.capabilities),
                 )
         except OSError as exc:
             return AgentResult(
@@ -1613,6 +1620,7 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
             argv,
             cwd=req.cwd,
             timeout_s=req.timeout_s,
+            capabilities=tuple(req.capabilities),
         )
     except OSError as exc:
         return AgentResult(
