@@ -6387,8 +6387,8 @@
     "project_id": "darkfac",
     "title": "Fortalecer validade e rastreabilidade das evidencias de auditoria",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "080ede18492297110d253cfb2b1e6b44825de39c",
     "item_type": "security",
     "lifecycle_stage": "next_steps",
     "horizon": "later",
@@ -6412,7 +6412,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:19.062511Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T13:58:11.592695Z"
   },
   {
     "id": "USR-171",
