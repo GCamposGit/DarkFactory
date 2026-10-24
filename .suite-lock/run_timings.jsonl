@@ -1,0 +1,1 @@
+{"exec_sec": 0.2, "host": "AI_Notebook", "local_only": false, "lock_timed_out": false, "lock_wait_sec": 0.0, "no_cache": false, "path": "local", "quick": true, "remote_attempts": [], "remote_lost_sec": 0, "schema": 1, "steps_timeout_sum_sec": 3540.0, "success": false, "total_sec": 0.3, "tree_hash": null, "ts": "2026-10-24T20:42:44Z", "worker_job": false}

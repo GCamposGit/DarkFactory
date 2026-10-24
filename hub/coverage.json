@@ -338,6 +338,9 @@
     "GET /api/session": {
       "surface": "services-grid"
     },
+    "POST /api/auth/telegram-link": {
+      "machine": "Pagina /api/auth/login (fora do SPA): envia ao Telegram do owner um link de login de uso unico para o Hub remoto"
+    },
     "GET /api/tasks/dashboard": {
       "machine": "Projecao read-only da fila de jobs para scripts e agentes; a pagina principal deixou de exibi-la no USR-219 (bloqueios na fila prioritaria, execucoes na Esteira ao vivo)."
     },

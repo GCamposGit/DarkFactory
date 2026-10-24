@@ -39,7 +39,7 @@ Causa raiz: `docker compose up` recria o container parando o antigo antes de sub
 
 Entregue: `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkhub:<sha>` para os merges cobertos pelo workflow. O compose pode ser renderizado em modo `ghcr` sem `build:`. `core.infra.deploy_classifier.runtime_image_paths()` deriva a lista dos `COPY` do `deploy/dokploy/Dockerfile.hub`; `docs/` e `.factory/` sao copiados somente como seeds e ficam fora dos caminhos runtime. Assim, mudancas apenas nesses dados nao pedem nova imagem. `python scripts/hub_image_workflow_check.py` compara o trigger real com essa fonte unica e retorna codigo diferente de zero se houver caminhos sobrando ou faltando.
 
-O workflow atual ainda inclui `docs/**` e `.factory/**`, portanto continua sendo um superset seguro, mas reconstrui a imagem em merges que tocam apenas esses seeds. O patch restrito e serializado esta em `docs/proposals/USR-207-hub-image-trigger.patch`; teste automatizado exige que seus paths sejam exatamente os da funcao runtime e que o workflow atual nao perca nenhum caminho runtime. O workflow `.github/workflows/*` e protegido, entao a publicacao do patch foi registrada para o owner na OA-063.
+O workflow atual ainda inclui `docs/**` e `.factory/**`, portanto continua sendo um superset seguro, mas reconstrui a imagem em merges que tocam apenas esses seeds. O patch restrito e serializado esta em `docs/proposals/USR-207-hub-image-trigger.patch`; teste automatizado exige que seus paths sejam exatamente os da funcao runtime e que o workflow atual nao perca nenhum caminho runtime. O workflow `.github/workflows/*` e protegido, entao a publicacao do patch foi registrada para o owner na OA-068.
 
 ### 2.1b Chave de ativacao (USR-339)
 
@@ -71,7 +71,7 @@ Desenho:
 
 **Resultado da prova em 23/10/2026:** a tentativa de `compose up` terminou em `error` porque a VPS nao conseguiu fazer pull da imagem GHCR privada. Portanto, essa execucao nao demonstra o cutover blue-green nem satisfaz o criterio de zero downtime. Corrigir o acesso privado e o rollback de compose/migracao legada pertence ao USR-363.
 
-**Pendente:** executar a sonda versionada durante deploy, com `non200 = 0` e ambos os SHAs observados. O teste anterior de 23/10 falhou antes da troca blue-green por falta de pull da imagem privada. A execução real deste ticket depende do merge desta versão e de uma janela em que o Dokploy consiga fazer pull do SHA novo; OA-064 registra os comandos e a verificação. Não considerar a prova simulada nem a falha de pull como aceite.
+**Pendente:** executar a sonda versionada durante deploy, com `non200 = 0` e ambos os SHAs observados. O teste anterior de 23/10 falhou antes da troca blue-green por falta de pull da imagem privada. A execução real deste ticket depende do merge desta versão e de uma janela em que o Dokploy consiga fazer pull do SHA novo; OA-069 registra os comandos e a verificação. Não considerar a prova simulada nem a falha de pull como aceite.
 
 ### 2.2b Roteiro de prova (owner)
 
@@ -105,7 +105,7 @@ Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de 
 - OA-052/OA-053: configuracao de ativacao e credencial de leitura GHCR cumpridas para o runner que consulta o manifesto. A credencial de pull usada pela VPS/Dokploy ainda falhou na prova de 23/10 e esta no escopo do USR-363.
 - OA-057: blue-green no Traefik escolhido e implementado.
 - OA-058: limpeza do container legado foi concluida. A antiga referencia a uma sonda externa foi substituida pelo script versionado neste repositorio.
-- OA-064: prova de sonda de 1 s durante deploy real continua aberta; requer esta versao publicada e pull GHCR funcional na janela operacional.
+- OA-069: prova de sonda de 1 s durante deploy real continua aberta; requer esta versao publicada e pull GHCR funcional na janela operacional.
 - O autoDeploy e a integracao Dokploy permanecem como registrados nas respectivas acoes do owner; esta proposta nao instrui a repetir configuracoes ja concluidas.
 
 ## 3. Memoria: como medir antes de mexer nos 512 MB

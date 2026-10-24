@@ -175,6 +175,7 @@ def test_external_delivery_opens_pr_from_project_worktree_against_registered_bas
     assert result["ok"] is True
     delivery.assert_called_once_with(
         ticket.id, ticket.title, cwd=worktree, base="trunk", merge=True, kind="implementation",
+        project_id="fake-client",
     )
 
 

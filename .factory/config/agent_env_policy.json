@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "description": "USR-172: env policy for development-agent subprocesses (claude/codex/grok). Deploy, backup, DB and delivery credentials stay OUT of the agent env; the delivery executor (core.git.autonomy / run_ticket.py) keeps them in its own process.",
+  "keep_names": [
+    "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+    "XAI_API_KEY", "GROK_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"
+  ],
+  "deny_names": [
+    "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "DATABASE_URL"
+  ],
+  "deny_patterns": [
+    "^DOKPLOY", "BACKUP", "^GH_ADMIN", "^GITHUB_ADMIN", "^POSTGRES", "^PG(PASSWORD|USER|HOST)$",
+    "^TELEGRAM", "^CLOUDFLARE", "^CF_API", "^AWS_", "^AZURE_", "^GCP_", "^DARKFAC_.*(TOKEN|SECRET|PASSWORD|KEY)",
+    "(PASSWORD|PASSWD)$", "_SECRET(_KEY)?$", "^SSH_AUTH_SOCK$", "^DEPLOY", "^SOPS_", "^AGE_"
+  ],
+  "network_allowlist": {
+    "status": "infeasible_documented",
+    "note": "USR-370: see docs/decisions/USR-370-network-allowlist.md (no real mechanism without admin rights). Hosts the agent legitimately reaches are documented here for a future sandbox.",
+    "hosts": ["api.anthropic.com", "api.openai.com", "api.x.ai", "openrouter.ai", "github.com"]
+  }
+}

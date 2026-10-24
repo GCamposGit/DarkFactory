@@ -2005,3 +2005,48 @@ def test_darkhub_without_marker_keeps_single_container_path(monkeypatch: pytest.
     assert calls == []
     assert transport.post_calls[0][1] == "/api/compose.update"
     assert transport.post_calls[1][1] == "/api/compose.deploy"
+
+
+def test_bluegreen_serving_accepts_the_new_sha_alternating_with_the_old_colour() -> None:
+    # Traefik round-robins between both healthy colours during the overlap.
+    new, old = "a" * 40, "b" * 40
+    alternating = iter([old, new] * 10)
+    assert mod._bluegreen_serving(lambda: {"git_sha": next(alternating)})(new)
+    assert not mod._bluegreen_serving(lambda: {"git_sha": old})(new)
+
+
+def test_joined_darkhub_deploy_on_divergent_sha_retriggers_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-207: JOIN ended 'done' but /health kept the old sha -> one recovery deploy, then converged."""
+    from core.infra import node_sync
+
+    transport = _make_transport_with_full_project()
+    marker = "# darkfac-bluegreen: active=blue blue=" + "b" * 40 + " green=" + "b" * 40 + "\nservices: {}\n"
+    done = {"deploymentId": "d1", "status": "done", "title": "NEW CHANGES", "createdAt": "2026-09-12T09:10:00Z"}
+    transport.program_get("/api/compose.one?composeId=compose_hub", [{"deployments": [done], "composeFile": marker}])
+    monkeypatch.setattr(mod, "plan_darkhub_deploy", lambda **kw: (mod.DEPLOY_JOIN, "inflight"))
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+        node_sync.NodeStatus(name=n, state="converged", git_sha="a" * 40) for n in ("Notebook", "Desktop", "VPS")
+    ]))
+    runs: List[Any] = []
+    health = {"sha": "b" * 40}
+
+    def runner(**kw: Any) -> None:
+        runs.append(kw)
+        health["sha"] = "a" * 40
+
+    tick = {"t": 0.0}
+
+    def clock() -> float:
+        tick["t"] += 1.0
+        return tick["t"]
+
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--timeout", "5"], env={**_ENV, "DARKHUB_IMAGE_SOURCE": "build"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": health["sha"]}, bluegreen_runner=runner,
+        sleep_fn=lambda _s: None, clock_fn=clock, stdout=out, stderr=err,
+    )
+    assert len(runs) == 1 and runs[0]["new_sha"] == "a" * 40
+    assert "after recovery" in out.getvalue(), err.getvalue()
+    assert code == mod.EXIT_OK, err.getvalue()

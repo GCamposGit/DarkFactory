@@ -5696,8 +5696,8 @@
     "project_id": "darkfac",
     "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: codigo entregue (redeploy sem downtime/deploy deduplicado); falta a OA-044 do owner (autoDeploy off, GHCR, sonda) e a prova no deploy (anterior: 1a416f4bb52f7047050c57b3d2d52cd2bf72019d); Prova USR319 PR506: JOIN de Darkhub terminou done NEW CHANGES em1.4s, mas health permaneceu7433f3df em vez de c9117212. Recuperacao dirigida --force em Darkhub+n8n iniciada apos confirmar ambos done; verificar recuperacao automatica ao JOIN terminar SHA divergente.",
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-369 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5740,7 +5740,7 @@
       "USR-348"
     ],
     "created_at": "2026-10-10T14:53:42.327437Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-208",
@@ -6419,8 +6419,8 @@
     "project_id": "darkfac",
     "title": "Vincular retomada da revisao independente ao candidato atual",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "91510ca3dc9dbc3486b269eedc0c996c063f6e66",
     "item_type": "security",
     "lifecycle_stage": "next_steps",
     "horizon": "later",
@@ -6444,15 +6444,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:20.172392Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T16:40:25.037551Z"
   },
   {
     "id": "USR-172",
     "project_id": "darkfac",
     "title": "Separar privilegios e credenciais dos agentes de desenvolvimento",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "19e3a5e07f15c5461774957eb051f2b01af2c18d",
     "item_type": "security",
     "lifecycle_stage": "next_steps",
     "horizon": "later",
@@ -6477,15 +6477,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:21.366941Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T15:55:22.149322Z"
   },
   {
     "id": "USR-173",
     "project_id": "darkfac",
     "title": "Tornar verificacao de tipos explicita e mensuravel no portao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "d6a2191d816b3a7938bde3585708bcb3c2c7a0e8",
     "item_type": "security",
     "lifecycle_stage": "next_steps",
     "horizon": "later",
@@ -6510,15 +6510,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:22.461000Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T15:13:41.014472Z"
   },
   {
     "id": "USR-174",
     "project_id": "darkfac",
     "title": "Vincular politica de protecao de dados e residencia aos executores reais",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "4844320c6473e1e031503b7753ec1a7da1264ea6",
     "item_type": "security",
     "lifecycle_stage": "next_steps",
     "horizon": "later",
@@ -6543,7 +6543,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:23.668336Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T18:07:22.845157Z"
   },
   {
     "id": "USR-176",
@@ -8272,7 +8272,7 @@
   {
     "id": "USR-279",
     "project_id": "darkfac",
-    "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
+    "title": "Prova da V0: 5 demandas reais seguidas sem toque, incluindo o piloto M1 do gestor de SEO e redes sociais da mansaodolago.com",
     "origin": "agent",
     "status": "planned",
     "delivery_evidence": "Reaberto em 20/10/2026: M1 (repo privado pilot-hello) e M2 (ambiente) concluidos; M3 aguarda deploy + OA-047 (demanda pelo Telegram) e M5 aguarda OA-043 (Dokploy/webhook) (anterior: b5ef8d3f4f6618f2e2712129fcac2d665385625c; M2 (ambiente) concluido em 20/10/2026)",
@@ -8281,34 +8281,42 @@
     "horizon": "now",
     "tags": [
       "user-demand",
-      "pos-v0-autonomia",
-      "standalone-projects",
-      "pilot",
-      "needs-slicing",
-      "owner-decision:OA-042=recomendado",
-      "plano-20261023",
-      "onda-3"
+      "plano-v0-20261024",
+      "bloco-g",
+      "planning-only"
     ],
-    "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar. Fatia 1 (plano do piloto) em docs/plans/USR-279-greenfield-pilot.md; marcos M1-M7 seguem.\n\n[Decisao do owner OA-042] Decidir o piloto greenfield do USR-279 (nome, texto, destino, retencao, build) -> opcao recomendado (Aceitar todas as recomendacoes), em 2026-10-20T10:29:29Z. Nota do owner: Owner no chat em 20/10/2026: sim (D1 pilot-hello, D2 'DarkFac pilot', D3 opcao A Dokploy existente, D4 manter arquivado, D5 build no venv).",
-    "core_journey": [],
+    "problem_statement": "O relatorio de aceite da linha (05/10) registra V1 ponta a ponta como pendente e canario 0/7; quase 99% das demandas foram da propria fabrica. O criterio de V0 aprovado em 24/10: 5 demandas reais seguidas entram por Telegram, Hub ou chat e chegam em producao sem o owner tocar, cada uma com learning pack e manual, sendo pelo menos 1 de produto real. O piloto escolhido e um gestor de SEO e redes sociais para mansaodolago.com, comecando pela fase M1. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
+    "core_journey": [
+      "Owner envia a demanda do piloto pelo Telegram; a fabrica faz o grill de produto (objetivo, sucesso, aceite) e pesquisa (APIs do Google Search Console, Instagram Graph e Google Ads)",
+      "M1: auditoria de SEO do site e Search Console, relatorio semanal, calendario de conteudo, posts do Instagram com texto e imagem aprovados pelo owner com um toque no Telegram e publicados pela fabrica; Google Ads apenas leitura e recomendacoes",
+      "Projeto em repositorio e ambiente separados do nucleo (project_id proprio)",
+      "Registro das 5 demandas seguidas com evidencia (SHA, PR, deploy, smoke, learning pack, manual) e metricas do plano"
+    ],
     "non_goals": [
-      "Nao contratar servicos novos.",
-      "Nao inventar decisoes de negocio do produto."
+      "Nao operar lances ou orcamento do Google Ads (fase M3)",
+      "Nao publicar no Instagram sem aprovacao do owner nesta fase"
     ],
-    "reachability_contract": "",
+    "reachability_contract": "Owner aprova posts no Telegram e le o relatorio semanal de SEO; acompanha a prova da V0 no DarkHub.",
     "acceptance_criteria": [
-      "Planejamento registra o piloto, fronteiras do produto, ambiente, validacao, destino permitido e marcos executaveis de ate tres criterios cada, sem nova decisao de negocio inventada",
-      "Demanda percorre intake, planejamento, implementacao, revisao, PR, CI, merge, deploy e smoke do projeto com evidencias reais vinculadas ao SHA",
-      "Clone do produto instala, testa, constroi e executa sem checkout ou servico DarkFac; falhas sao retomadas ou diagnosticadas e o owner recebe relatorio final"
+      "5 demandas seguidas concluidas sem acao do owner fora do grill e do aceite, registradas com evidencia",
+      "Pelo menos 1 delas e o M1 do piloto em producao, com post publicado apos aprovacao de um toque",
+      "Cada entrega tem learning pack e pagina do manual do produto",
+      "Owner gastou menos de 1 hora por dia operando durante a prova",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
     ],
     "suggested_files": [],
-    "estimated_complexity": "medium",
+    "estimated_complexity": "high",
     "dependencies": [
-      "USR-355",
-      "USR-353"
+      "USR-343",
+      "USR-375",
+      "USR-376",
+      "USR-369"
     ],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-277",
@@ -9977,7 +9985,7 @@
   {
     "id": "USR-343",
     "project_id": "darkfac",
-    "title": "Publicacao de protegidos por aprovacao no Hub (fim do ritual manual de portao+push)",
+    "title": "Atrito zero: fila no control store, guard enxuto com aprovacao de um toque, GitHub App e cofre de segredos",
     "origin": "user",
     "status": "planned",
     "delivery_evidence": null,
@@ -9986,31 +9994,57 @@
     "horizon": "now",
     "tags": [
       "user-demand",
-      "plano-20261023",
-      "onda-1"
+      "plano-v0-20261024",
+      "bloco-b",
+      "planning-only"
     ],
-    "problem_statement": "Em 21-22/10 cinco OAs (041/045/046/050/052) exigiram do owner o mesmo ritual: worktree, git apply de patch, portao local de 30-90 min, push direto ou merge --admin. Houve 3 tentativas falhas (runner apontando para o checkout sujo, timeout local por concorrencia, worker travado). O USR-228 ja criou o registro de autorizacao do owner (.factory/governance/authorizations/<id>.json na base confiavel) que o guard aceita. Falta o fluxo: agente abre PR com o patch protegido; o Hub mostra botao 'Aprovar publicacao protegida' que grava o registro vinculado a ticket, caminhos exatos e sha do candidato; a esteira roda o portao remoto e mergeia sozinha.",
+    "problem_statement": "Cerca de 80% das 70 acoes do owner desde 09/10 foram criadas pela propria fabrica: 23 rituais de publicar arquivo protegido com merge --admin ou push direto (core/orchestrator/guard.py protege core/harness/*, que e codigo operacional), PRs de registro de fila e de OA que nao mergeiam (39 PRs ticket/queue-* e 22 chore/oa-* entre os ultimos 100), chaves recadastradas e segredos espalhados entre .env, registro do Windows e Dokploy. O merge autonomo depende do gh do owner com permissao de admin. Este bloco absorve USR-370 (isolamento de credenciais do agente) e USR-374 (owner_actions.json local bloqueia o node_sync). Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
-      "Em 21-22/10 cinco OAs (041/045/046/050/052) exigiram do owner o mesmo ritual: worktree, git apply de patch, portao local de 30-90 min, push direto ou merge --admin. Houve 3 tentativas falhas (runner apontando para o checkout sujo, timeout local por concorrencia, worker travado). O USR-228 ja criou o registro de autorizacao do owner (.factory/governance/authorizations/<id>.json na base confiavel) que o guard aceita. Falta o fluxo: agente abre PR com o patch protegido; o Hub mostra botao 'Aprovar publicacao protegida' que grava o registro vinculado a ticket, caminhos exatos e sha do candidato; a esteira roda o portao remoto e mergeia sozinha."
+      "Fila de tickets e acoes do owner passam a ter como fonte da verdade o control store Postgres que ja existe (core/workflow/control_store.py e adapter Postgres), com API unica de leitura e escrita usada por run_ticket --create, Hub, Telegram e chat",
+      "Um job diario exporta snapshot de .factory/demands/demands.json e .factory/owner_actions/owner_actions.json para o git em um unico commit; nenhum registro de ticket ou OA abre PR",
+      "guard.py passa a proteger apenas MISSION.md, FACTORY_RULES.md e AGENTS.md; mudanca nesses arquivos gera pedido de aprovacao no Telegram (bot do owner) com o diff resumido; o toque do owner grava autorizacao assinada que o CI verifica; core/governance/authorization.py deixa de aceitar a string 'owner' sem assinatura",
+      "Push e merge autonomos usam uma GitHub App com token de curta duracao e escopo contents/pull_requests apenas neste repositorio, fora da lista de bypass",
+      "Segredos ficam num cofre unico (SOPS+age no repositorio ou equivalente gratuito escolhido por ADR) lido por todas as maquinas; script de bootstrap faz o owner cadastrar cada segredo uma unica vez",
+      "Agentes de codigo rodam sem acesso ao cofre (filtro de ambiente por allowlist em core/line/agent_env.py); push, merge e deploy sao feitos por um processo separado (broker) com credencial de curta duracao",
+      "Acao do owner da mesma categoria repetida duas vezes gera automaticamente um ticket de automacao"
     ],
     "non_goals": [
-      "Nao relaxar o guard nem permitir autoaprovacao por agente"
+      "Nao trocar Postgres por outro banco",
+      "Nao criar interface grafica nova para o cofre",
+      "Nao mudar o fluxo de aceite comercial (requires_commercial_acceptance)"
     ],
-    "reachability_contract": "",
+    "reachability_contract": "Owner ve a fila e as acoes no DarkHub; aprova mudancas de governanca com um toque no bot do owner; configura maquina nova com um comando de bootstrap.",
     "acceptance_criteria": [
-      "OA de protegido vira um unico clique de aprovacao no Hub com diff visivel",
-      "Registro de autorizacao amarrado a ticket, caminhos e sha; sha diferente invalida",
-      "Portao roda em worker remoto e merge acontece sem comando do owner",
-      "Teste prova que flag de ambiente sozinha continua nao autorizando",
-      "Portao oficial runner.py --quick passa"
+      "Registrar um ticket pelo Hub, pelo Telegram e por run_ticket --create nao abre PR; o ticket aparece na fila do Hub em segundos e no snapshot diario do git",
+      "Ultimos 7 dias apos o deploy: zero PRs ticket/queue-* e chore/oa-*",
+      "PR que altera core/harness/* mergeia sem --admin e sem acao do owner",
+      "PR que altera MISSION.md, FACTORY_RULES.md ou AGENTS.md so mergeia apos aprovacao do owner pelo Telegram; autorizacao sem assinatura valida e rejeitada pelo CI (teste)",
+      "Merge autonomo funciona com a GitHub App; a conta admin do owner nao e usada por nenhum processo da fabrica",
+      "Agente de desenvolvimento nao consegue ler GITHUB_TOKEN, DOKPLOY_API_KEY, tokens do Telegram nem o arquivo .env (teste que tenta ler e falha)",
+      "Script de bootstrap configura uma maquina nova a partir do cofre sem pedir segredo ja cadastrado",
+      "Hub mostra contagem semanal de acoes do owner por categoria; OA repetida gera ticket de automacao (teste)",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
     ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [
-      "USR-353"
+    "suggested_files": [
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "core/demands/store.py",
+      "core/owner_actions/",
+      "core/orchestrator/guard.py",
+      "core/governance/authorization.py",
+      "core/git/autonomy.py",
+      "core/line/agent_env.py",
+      "run_ticket.py",
+      "hub/backend/service.py",
+      ".github/workflows/ci.yml"
     ],
+    "estimated_complexity": "high",
+    "dependencies": [],
     "created_at": "2026-10-22T09:19:41.449353Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-344",
@@ -10397,8 +10431,8 @@
     "project_id": "darkfac",
     "title": "Run retomado apos o limite de 6h volta a waiting_human na primeira falta de rota (USR-346 parte 2)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-375 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10427,7 +10461,7 @@
       "USR-347"
     ],
     "created_at": "2026-10-22T15:13:08.756648Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-359",
@@ -10578,8 +10612,8 @@
     "project_id": "darkfac",
     "title": "Blue-green do Hub: rollback nao cobre falha do compose up nem a migracao, e VPS nao puxa a imagem privada do GHCR",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: codigo do rollback entregue (#611); falta pull do GHCR na VPS (OA-059), restaurar o compose legado no Dokploy (--restore-legacy, aguarda autorizacao do owner) e a prova da sonda de 1 s (anterior: 14eadcf243d8e5cf29556a188fa2865ca74ea9f9)",
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-369 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10602,7 +10636,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T12:34:17.800806Z",
-    "updated_at": "2026-10-23T17:03:43.425594Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-364",
@@ -10700,8 +10734,8 @@
     "project_id": "darkfac",
     "title": "Teste instavel test_line_lock::test_heartbeat_thread_refreshes_the_sidecar_while_held no grokbox",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-377 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10722,15 +10756,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-24T03:33:54.047867Z",
-    "updated_at": "2026-10-24T03:33:54.047867Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-368",
     "project_id": "darkfac",
     "title": "Portao no grokbox derruba testes de temporizacao (line_lock, suite_lock_stalled, usr328) sob carga xdist",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-377 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10753,12 +10787,12 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-24T04:33:55.793550Z",
-    "updated_at": "2026-10-24T04:33:55.793550Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-369",
     "project_id": "darkfac",
-    "title": "Trava de linha por host em modo frota: despachante nao consegue rodar runs em paralelo na mesma maquina",
+    "title": "Capacidade, infraestrutura e rede: 3 tickets em paralelo, despachante como servico, VPS leve, deploy confiavel e worker seguro",
     "origin": "user",
     "status": "planned",
     "delivery_evidence": null,
@@ -10766,32 +10800,71 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "plano-v0-20261024",
+      "bloco-c",
+      "planning-only"
     ],
-    "problem_statement": "Em 24/10/2026 o despachante continuo (USR-366) lancou USR-367 (notebook) e USR-368 (grokbox) a partir do Notebook; o segundo foi recusado por [TRAVA DE LINHA] (trava por maquina) e ficou em cooldown de infra de 10 min. Paralelismo efetivo = 1.",
+    "problem_statement": "Paralelismo efetivo e 1 (trava por maquina recusa o segundo run). O despachante e tarefa AtLogOn no notebook (so roda com o owner logado), guarda in_flight so em memoria e ignora falha de deploy; o agente sempre roda no notebook e a VM do Grok (5x mais rapida) so recebe testes. A VPS de 4 GB faz build de 4 servicos e tem limites de memoria somando ~6 GB; o n8n inativo reserva 1,28 GB. O job de CD do CI fica verde pulando o deploy quando falta DOKPLOY_DEPLOY_URL, e os botoes Deploy/Start do Dokploy reimplantam um SHA velho. O worker de testes expoe /system/exec com shell=True, token opcional e escuta em 0.0.0.0; nao ha ACL de Tailscale. Este bloco absorve USR-207 e USR-363 (deploy do Hub sem queda e rollback), USR-372 e USR-373 (worker do grokbox para de responder e cai do Tailscale). Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
-      "Em 24/10/2026 o despachante continuo (USR-366) lancou USR-367 (notebook) e USR-368 (grokbox) a partir do Notebook; o segundo foi recusado por [TRAVA DE LINHA] (trava por maquina) e ficou em cooldown de infra de 10 min. Paralelismo efetivo = 1."
+      "Em modo frota a trava passa a ser por host; o despachante distribui ate 3 tickets em hosts diferentes (grokbox, notebook, desktop) conforme saude, e o agente roda no host escolhido",
+      "Queda do grokbox ou do Tailscale e evento normal: lease expira, o ticket volta para a fila e retoma em outro host a partir do ultimo estagio concluido",
+      "Despachante instalado como servico do sistema (inicia com a maquina, sem login), com estado de execucao persistido",
+      "Todas as imagens (cloud e Hub) construidas no CI e publicadas no GHCR; nenhum build na VPS; n8n removido; soma dos limites de memoria ate 3,2 GB; concorrencia de build 1; deploy do Hub sem queda com rollback que cobre falha do compose up",
+      "CD do CI usa scripts/dokploy_redeploy.py (SHA de main e conferencia do /health) e falha alto se nao puder implantar; o compose no Dokploy fica fixado em imagem por SHA de modo que Deploy/Start nunca sobe versao antiga",
+      "Worker de testes: token obrigatorio gerado e distribuido pela fabrica (cofre do USR-343), escuta so no IP do Tailscale, sem /system/exec; ACL do Tailscale por tags (vps so alcanca worker:8080; nada alcanca dispositivos pessoais)",
+      "Hub: GETs com efeito colateral viram POST autenticado; parametros custom_url e remote_worker_url removidos em producao; assinatura do webhook do GitHub calculada sobre o corpo bruto; GITHUB_PAT fora da URL de build; defaults de senha removidos"
     ],
-    "non_goals": [],
-    "reachability_contract": "",
+    "non_goals": [
+      "Nao contratar VPS maior",
+      "Nao adicionar runner self-hosted do GitHub em maquina pessoal",
+      "Nao usar as GPUs Maxwell para agentes de codigo"
+    ],
+    "reachability_contract": "Owner ve no DarkHub os hosts ativos e os tickets em paralelo; deploy acontece sozinho apos merge.",
     "acceptance_criteria": [
-      "Em modo frota a trava e por host de portao (line.fleet-<host>.lock); fora dele continua por maquina",
-      "Recusa por trava nao vira cooldown de infra no despachante",
-      "Testes de dois hosts simultaneos e do mesmo host recusado"
+      "Tres tickets rodam ao mesmo tempo em tres hosts (teste de frota e execucao real registrada)",
+      "Derrubar a VM do Grok no meio de um ticket nao exige acao humana; o ticket termina em outro host",
+      "Reiniciar o notebook sem login: o despachante volta sozinho e retoma a fila",
+      "Nenhum build na VPS por 7 dias; uso de memoria da VPS abaixo de 80% no pico de deploy",
+      "CD do CI implanta o SHA de main e falha se nao conseguir; Deploy/Start manual no Dokploy sobe a mesma versao de main",
+      "Chamada ao worker sem token e recusada; /system/exec nao existe; worker nao responde fora do Tailscale",
+      "Varredura do Hub publico: nenhuma rota que altera estado responde sem credencial (teste automatizado contra a lista de rotas)",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
     ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
+    "suggested_files": [
+      "core/line/fleet_dispatcher.py",
+      "core/line/line_lock.py",
+      ".factory/config/line_fleet.json",
+      "scripts/install_fleet_dispatcher.ps1",
+      "core/harness/remote_worker.py",
+      "core/harness/remote_dispatch.py",
+      "scripts/grokbox/",
+      "deploy/dokploy/docker-compose.cloud.yml",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "deploy/dokploy/docker-compose.n8n.yml",
+      "scripts/dokploy_redeploy.py",
+      ".github/workflows/ci.yml",
+      ".github/workflows/hub-image.yml",
+      "hub/backend/webhooks.py",
+      "hub/backend/api.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-343"
+    ],
     "created_at": "2026-10-24T05:09:42.041470Z",
-    "updated_at": "2026-10-24T05:09:42.041470Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-370",
     "project_id": "darkfac",
     "title": "Completar isolamento de credenciais do agente: stage_build, child_env do run_ticket, capabilities por ticket e allowlist de rede",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-343 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10813,15 +10886,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-24T13:23:48.242972Z",
-    "updated_at": "2026-10-24T13:23:48.242972Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   },
   {
     "id": "USR-371",
     "project_id": "darkfac",
     "title": "Propagar project_id da demanda para pick() e deliver_branch() e ligar enforcement de exportacao (seguimento USR-174)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-375 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10842,6 +10915,409 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-24T13:39:10.374345Z",
-    "updated_at": "2026-10-24T13:39:10.374345Z"
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-372",
+    "project_id": "darkfac",
+    "title": "Worker remoto do portao para de responder no meio da suite (/health inalcancavel) e derruba entregas",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "30e26c1bebefda6d029eb3ee35f7d65d0d4e487a",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 24/10 a entrega do USR-174 falhou com gate_remote_unavailable: 'worker stopped responding for >120s mid-run and /health is unreachable (3 consecutive failed probes)' apos 155 s; USR-171 e USR-173 falharam antes com 100.77.130.5:8080 inalcancavel e 100.78.181.90:8080 ocupado >300s. Cada falha exige relancar --resume-delivery manualmente.",
+    "core_journey": [
+      "Em 24/10 a entrega do USR-174 falhou com gate_remote_unavailable: 'worker stopped responding for >120s mid-run and /health is unreachable (3 consecutive failed probes)' apos 155 s; USR-171 e USR-173 falharam antes com 100.77.130.5:8080 inalcancavel e 100.78.181.90:8080 ocupado >300s. Cada falha exige relancar --resume-delivery manualmente."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa da queda do worker diagnosticada com evidencia (log do worker/OOM/reinicio)",
+      "run_ticket repete automaticamente o portao em outro host quando a causa e gate_remote_unavailable, sem intervencao, com teste"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T18:27:22.730767Z",
+    "updated_at": "2026-10-24T19:57:32.547188Z"
+  },
+  {
+    "id": "USR-373",
+    "project_id": "darkfac",
+    "title": "grokbox congela por minutos e cai do Tailscale (relay, IP de saida rotativo): causa raiz das falhas gate_remote_unavailable",
+    "origin": "user",
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-369 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Diagnostico do owner em 24/10 15:47 (seguimento USR-372): grokbox up 4d12h, worker ok e ocioso, sem OOM em 12h, 5,7/16 GB livres. A VM congela por minutos (ate 699 s hoje); apos cada congelamento o watchdog do systemd aborta journald/udevd/timesyncd/logind. O Tailscale cai a cada congelamento e so fala por relay porque o IP publico de saida muda a cada conexao (35.173.84.246 e 3.217.165.30 em 6 min). Supervisor traz de volta em 4-6 min. Hipoteses: credito de CPU de instancia burstable esgotado/steal time no hypervisor; NAT simetrico sem IP fixo.",
+    "core_journey": [
+      "Diagnostico do owner em 24/10 15:47 (seguimento USR-372): grokbox up 4d12h, worker ok e ocioso, sem OOM em 12h, 5,7/16 GB livres. A VM congela por minutos (ate 699 s hoje); apos cada congelamento o watchdog do systemd aborta journald/udevd/timesyncd/logind. O Tailscale cai a cada congelamento e so fala por relay porque o IP publico de saida muda a cada conexao (35.173.84.246 e 3.217.165.30 em 6 min). Supervisor traz de volta em 4-6 min. Hipoteses: credito de CPU de instancia burstable esgotado/steal time no hypervisor; NAT simetrico sem IP fixo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa do congelamento identificada com metrica (steal time, creditos de CPU, eventos do hypervisor) e corrigida ou mitigada",
+      "grokbox conecta direto (sem relay) via IP de saida fixo, peer relay ou porta UDP liberada, ou decisao registrada",
+      "Despachante e portao tiram o grokbox da rotacao enquanto o /health falha, sem derrubar entregas"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T18:49:47.345792Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-374",
+    "project_id": "darkfac",
+    "title": "Desktop nao atualiza: owner_actions.json alterado localmente bloqueia o merge do node_sync",
+    "origin": "user",
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-343 (plano V0 de 24/10/2026, docs/plans/PLANO_V0_2026-10-24.md).",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "node_sync retry em 24/10 19:12Z: Desktop em fcbb10a nao chega em d928790; worker output 'Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json ... Aborting'. Algum processo no Desktop escreve no ledger versionado do checkout do worker, travando a convergencia.",
+    "core_journey": [
+      "node_sync retry em 24/10 19:12Z: Desktop em fcbb10a nao chega em d928790; worker output 'Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json ... Aborting'. Algum processo no Desktop escreve no ledger versionado do checkout do worker, travando a convergencia."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificado o processo que escreve owner_actions.json no checkout do Desktop e ele passa a escrever fora da arvore versionada ou via PR",
+      "node_sync preserva a alteracao local (backup branch) e converge mesmo com arquivo de ledger sujo, com teste"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T19:14:04.006561Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-375",
+    "project_id": "darkfac",
+    "title": "Motor unico: todo canal executa a mesma sequencia de estagios com artefatos obrigatorios e grill de owner",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "plano-v0-20261024",
+      "bloco-a1",
+      "planning-only"
+    ],
+    "problem_statement": "Existem tres motores sem dono unico: a linha DAG (core/line, Postgres, 37 commits), o run_ticket.py chamado pelo despachante (534 commits) e o chat. O caminho dominante vai direto do ticket ao desenvolvimento, sem grill, planejamento, revisao nem deploy; pesquisa e learning pack nao tem estagio em nenhum caminho. O Gate G1 e sintatico (core/demands/readiness.py aprova 'Quero um painel que mostre minhas vendas do mes'), o grill legado faz perguntas tecnicas fixas e .agents/rules/GEMINI.md induz perguntas de arquitetura ao owner. Ticket vindo do Telegram e gravado dentro do container e o feeder le a fila congelada na imagem. Este bloco absorve USR-355 (run retomado volta a waiting_human) e USR-371 (propagar project_id ate pick e deliver_branch), necessarios para projetos externos. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
+    "core_journey": [
+      "Definir a sequencia canonica: intake, grill do owner (entregas grandes ou ambiguas), planejamento com modelo de nivel alto, pesquisa (estagio do USR-376), desenvolvimento, validacao, revisao por outra familia, merge, deploy e smoke, documentacao e learning pack (estagios do USR-376)",
+      "Cada estagio grava um artefato com schema Pydantic validado antes do proximo: plano (SPEC.md + tickets.json), veredito de revisao, relatorio de deploy; ausencia ou schema invalido bloqueia o avanco",
+      "run_ticket.py e core/line/fleet_dispatcher.py passam a executar essa sequencia reaproveitando core/line/stage_*.py; o caminho direto para desenvolvimento e removido; run_ticket._run e quebrado em funcoes por estagio",
+      "Planejamento so usa modelos de nivel alto do registro; sem nenhum disponivel o ticket espera em vez de cair para modelo barato; o plano fatia blocos grandes em sub-tarefas executadas em sequencia dentro do mesmo ticket",
+      "G1 avalia conteudo: exige objetivo, criterio de sucesso verificavel e modo de aceite (automatico ou do owner); pergunta ao owner so nas categorias objetivo, sucesso, negocio, segredo novo e aceite (lista fechada em codigo); decisao tecnica vira ADR curto; cada pergunta traz opcao recomendada respondivel com um toque no Telegram ou no Hub; correcoes e entregas pequenas passam sem grill",
+      "Telegram, Hub e chat submetem ao mesmo motor pela API da fila do USR-343 (ou, antes dele, pelo arquivo canonico versionado); um unico alimentador; o chat vira console (submeter, acompanhar, responder)",
+      "Remover: perguntas tecnicas fixas de core/demands/grill.py, trecho de GEMINI.md sobre nao assumir parametros tecnicos, handlers de core/workflow sem chamador, segundo alimentador da fila"
+    ],
+    "non_goals": [
+      "Nao reescrever a linha DAG nem trocar Postgres por outro motor de workflow",
+      "Nao adotar framework externo de orquestracao (Archon, Temporal, LangGraph) neste bloco",
+      "Nao mudar o portao oficial"
+    ],
+    "reachability_contract": "Owner envia demanda pelo bot de operacao, pelo DarkHub ou pelo chat e acompanha estagio por estagio no DarkHub; responde o grill com um toque.",
+    "acceptance_criteria": [
+      "Teste de ponta a ponta nos tres pontos de entrada (run_ticket, despachante, linha): ticket sem plano, sem veredito de revisao ou sem relatorio de deploy nao chega ao merge",
+      "Demanda vaga ('Quero um painel que mostre minhas vendas do mes') vai para grill com no maximo 3 perguntas de owner, cada uma com opcao recomendada; nenhuma pergunta tecnica chega ao owner (teste com 10 demandas de exemplo)",
+      "Correcao pequena passa direto, sem grill, ate producao",
+      "Ticket criado pelo Telegram e executado sem passar por arquivo efemero do container (teste com redeploy no meio)",
+      "Ticket de projeto externo carrega project_id ate roteamento e entrega (absorve USR-371); run retomado apos 6h nao volta a waiting_human por falta de rota transitoria (absorve USR-355)",
+      "Planejamento com modelo barato e impossivel (teste do roteador de planejamento)",
+      "Nenhuma funcao do caminho de execucao com mais de 150 linhas",
+      "Ao entrar em producao, remove a tag planning-only dos blocos restantes do plano para que o despachante passe a executa-los com planejamento e fatiamento pelo motor",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/fleet_dispatcher.py",
+      "core/line/stage_grill.py",
+      "core/line/stage_planning.py",
+      "core/line/stage_build.py",
+      "core/line/stage_review.py",
+      "core/line/stage_release.py",
+      "core/line/bindings.py",
+      "core/workflow/successors.py",
+      "core/demands/readiness.py",
+      "core/demands/grill.py",
+      "core/line/owner_intake.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "core/integrations/telegram.py",
+      ".agents/rules/GEMINI.md"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [],
+    "created_at": "2026-10-24T20:33:41.067748Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-376",
+    "project_id": "darkfac",
+    "title": "Entrega completa: pesquisa condicional com ledger, documentacao verificada, learning pack e resumo diario ao owner",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "plano-v0-20261024",
+      "bloco-a2",
+      "planning-only"
+    ],
+    "problem_statement": "Combinados do owner que hoje dependem da iniciativa do agente: pesquisa com fontes registradas (ledger .factory/research parado em 15/09, sem estagio), learning pack (aparece no Antigravity e nao no Claude Code; nenhum estagio), manual do usuario atualizado a cada entrega (nao existe manual da fabrica; docs/ARCHITECTURE.md parado em 06/09) e relatorios uteis no Telegram (links hoje pouco uteis). O owner quer operar com 30 minutos de manha e 30 a noite. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
+    "core_journey": [
+      "Estagio de pesquisa: politica em codigo decide quando pesquisar (feature, arquitetura, integracao externa sim; correcao simples nao, com motivo registrado); consulta primeiro o ledger .factory/research/ por tema; so vai a web se o tema nao estiver la; grava fontes com URL e data, insights e como influenciaram o plano",
+      "Estagio de documentacao: atualiza docs/manual/ (uma pagina por funcionalidade ou fluxo, com cabecalho 'covers:' listando os caminhos de codigo) para leitura humana e consulta por agentes; o revisor confere manual x codigo",
+      "Checagem docs-sync no CI: PR que altera codigo coberto por uma pagina do manual sem alterar a pagina falha, salvo trailer Docs-Unchanged com motivo",
+      "Estagio de learning pack: gerado a partir do diff, dos testes e do ADR, com cada afirmacao conferida contra os arquivos alterados; niveis leigo e dev; publicado no Hub e enviado pelo bot do owner",
+      "Resumo diario pelo bot do owner: de manha, plano do dia e decisoes pendentes; a noite, entregas com links diretos para learning pack, PR e manual"
+    ],
+    "non_goals": [
+      "Nao criar site de documentacao separado; o manual e markdown no repositorio, exibido no Hub",
+      "Nao pesquisar em toda correcao de bug"
+    ],
+    "reachability_contract": "Owner le o resumo diario no Telegram, abre o learning pack e o manual no DarkHub; agentes consultam docs/manual/ e .factory/research/.",
+    "acceptance_criteria": [
+      "Ticket de feature nao chega ao merge sem artefato de pesquisa (fontes com URL e data) ou registro de pesquisa dispensada com motivo aceito pela politica (teste)",
+      "Segundo ticket sobre tema ja pesquisado reutiliza o ledger sem nova busca na web (teste)",
+      "Todo ticket entregue tem pagina do manual criada ou atualizada; docs-sync reprova PR que muda codigo coberto sem atualizar o manual (teste)",
+      "Learning pack gerado em 100% das entregas, nos tres harnesses de escrita, sem afirmacoes que contradizem o diff (teste com diff sintetico)",
+      "Resumo da manha e da noite chegam no Telegram do owner com links que abrem a pagina certa no Hub",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
+    ],
+    "suggested_files": [
+      "core/line/bindings.py",
+      "core/line/retrospective.py",
+      "core/research/",
+      "core/learning_pack/",
+      "core/notifications/",
+      "core/integrations/telegram.py",
+      "hub/backend/service.py",
+      ".github/workflows/ci.yml",
+      "docs/manual/"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-375"
+    ],
+    "created_at": "2026-10-24T20:33:41.067748Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-377",
+    "project_id": "darkfac",
+    "title": "Enxugar codigo e testes: arquivar o que nao roda, portao em camadas e suite menor e mais rapida",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "plano-v0-20261024",
+      "bloco-d",
+      "planning-only"
+    ],
+    "problem_statement": "Cerca de 12 a 15 mil linhas de core/ nao sao alcancadas por producao (handlers de core/workflow sem chamador, partes de core/orchestrator usadas so por testes, core/planning, core/pilots, core/security, core/game, core/marketing, core/knowledge, roteadores legados) e carregam ~600 testes. A suite tem 5.120 testes; roda local, no PR e de novo em main (Windows em 4 shards duas vezes); 3 testes esperam 30 s reais (DEAD_PROBE_GAP_SEC nao simulado); ha ~350-450 itens de testes de forma; core/harness/affected.py existe e nao e usado; testes de temporizacao oscilam no grokbox sob carga. Helpers copiados ate 13 vezes; hub/backend/service.py tem 3.925 linhas; PostgresControlStore.materialize definido duas vezes; styles.css duplicado (16 mil linhas). Este bloco absorve USR-367 e USR-368. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
+    "core_journey": [
+      "Arquivar ou remover o codigo sem uso em producao e seus testes; Canaletto e o jogo viram projetos separados fora do nucleo; spikes fora do portao",
+      "Portao em camadas: no PR, testes afetados (core/harness/affected.py) + smoke + lint; suite completa em main e a noite; Windows so em main",
+      "Testes de temporizacao usam relogio simulado (inclui os 3 de 30 s e os de line_lock e suite_lock); testes de forma saem do portao para um lint noturno",
+      "Helpers duplicados (_win_kwargs, _git, utc_now, _extract_json_object) em core/common/; hub/backend/service.py dividido por dominio; materialize duplicado e styles.css duplicado removidos",
+      "import-linter com contratos de camada (dominio nao importa HTTP; core nao importa hub) e complexidade 'nao piorar' no CI; varredura semanal de codigo morto (vulture) gera um ticket de limpeza"
+    ],
+    "non_goals": [
+      "Nao refatorar run_ticket, readiness e telegram (feito no USR-375)",
+      "Nao reescrever o frontend do Hub"
+    ],
+    "reachability_contract": "Owner ve no learning pack o antes/depois (linhas, testes, tempo da suite); agentes usam core/common/.",
+    "acceptance_criteria": [
+      "Suite completa com no maximo 4.000 testes e no maximo 120 s no Linux com -n auto",
+      "PR tipico roda em menos de 5 minutos no CI",
+      "Linhas de core/ reduzidas em pelo menos 10% sem perda de funcionalidade usada (grafo de imports anexado ao PR)",
+      "Nenhum teste de temporizacao depende de relogio real; USR-367/368 nao reproduzem no grokbox sob carga",
+      "import-linter e checagem de complexidade ativos no CI",
+      "Nenhum arquivo do nucleo acima de 1.500 linhas",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
+    ],
+    "suggested_files": [
+      "core/workflow/",
+      "core/orchestrator/",
+      "core/planning/",
+      "core/pilots/",
+      "core/security/",
+      "core/game/",
+      "core/marketing/",
+      "core/knowledge/",
+      "spikes/",
+      "harness.config.json",
+      "core/harness/affected.py",
+      ".github/workflows/ci.yml",
+      "core/harness/remote_dispatch.py",
+      "hub/backend/service.py",
+      "hub/frontend/styles.css"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [],
+    "created_at": "2026-10-24T20:33:41.067748Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-378",
+    "project_id": "darkfac",
+    "title": "Roteamento enxuto e custo real: um roteador, cascata justa entre assinaturas, OpenRouter para escrita barata e custo por ticket",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "plano-v0-20261024",
+      "bloco-e",
+      "planning-only"
+    ],
+    "problem_statement": "So core/line/routing.pick esta em producao, mas existem 6 roteadores paralelos (model_router, harness_router, benchmarks/router, qualified_routes, router_optimizer, subagent_routing) e a skill 03 manda usar o legado. Com CLAUDECODE=1 o Claude e preferido em todo ticket (372 commits Opus x 187 Sonnet); o Grok (plano de US$30) esta fora da cascata de desenvolvimento; o OpenRouter so entra como ultimo recurso de leitura e o teto openrouter_usd nunca e aplicado; MiniMax nao esta no registro; o Jev (core/pilots/jev_adapter.py) nao tem chamador; a politica Haiku nao esta ligada a producao. Cota desconhecida bloqueia tudo com mensagem enganosa; o probe do Claude faz POST com User-Agent falsificado. Eventos de uso nao tem ticket_id e o custo aparece zerado. Limiar critico diverge (10% x 15%). Plano: docs/plans/PLANO_V0_2026-10-24.md.",
+    "core_journey": [
+      "Um roteador so (core/line/routing.pick); remover os demais e o Jev; skill 03 reescrita apontando para ele",
+      "Grok entra na cascata de desenvolvimento; preferencia pelo harness do chat so para complexidade alta; o resto e distribuido por folga semanal dividida pelo tempo ate o reset",
+      "Canal de escrita barato via OpenRouter para tickets mecanicos e de complexidade baixa, com modelo escolhido por eval curta (5 a 10 tickets reais entre MiniMax, DeepSeek, GLM e Qwen Coder) e orcamento mensal aplicado em codigo",
+      "Politica Haiku ligada ao codigo de producao ou removida dos contratos",
+      "Cota desconhecida vira modo degradado (so tickets baixos); probe do Claude le rate_limits da CLI; limiar critico unico de 15%",
+      "Todo evento de uso grava ticket_id; custo de API propagado; custo implicito das assinaturas (delta da janela semanal x mensalidade) calculado por ticket e exibido no Hub"
+    ],
+    "non_goals": [
+      "Nao usar Ollama local para desenvolvimento",
+      "Nao contratar planos maiores"
+    ],
+    "reachability_contract": "Owner ve no DarkHub qual harness executou cada ticket e quanto custou; ajusta o teto mensal do OpenRouter por configuracao.",
+    "acceptance_criteria": [
+      "Nenhum roteador alem de core/line/routing.pick no codigo; skill 03 executa sem erro",
+      "Em uma semana de operacao, tickets de desenvolvimento distribuidos entre pelo menos 3 harnesses de escrita; Opus so em planejamento e complexidade alta",
+      "Ticket mecanico executado pelo canal OpenRouter ate producao; gasto mensal bloqueado ao atingir o teto configurado (teste)",
+      "Sem probe de cota disponivel, tickets baixos seguem rodando (teste)",
+      "Hub mostra custo por ticket aceito (API + rateio de assinatura), incluindo tentativas falhas",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
+    ],
+    "suggested_files": [
+      "core/line/routing.py",
+      "core/line/subagent_routing.py",
+      "core/line/operating_harness.py",
+      "core/line/agent_cli.py",
+      "core/router/",
+      "core/portfolio/router_optimizer.py",
+      "core/workflow/qualified_routes.py",
+      "core/pilots/jev_adapter.py",
+      "core/usage/adapters.py",
+      "core/usage/ticket_cost.py",
+      ".factory/config/line_routing.json",
+      ".factory/config/model_registry.json",
+      ".agents/skills/03-model-router/SKILL.md"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-375"
+    ],
+    "created_at": "2026-10-24T20:33:41.067748Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
+  },
+  {
+    "id": "USR-379",
+    "project_id": "darkfac",
+    "title": "Governanca e manual: MISSION e AGENTS como fonte unica curta, skills alinhadas ao codigo e manual completo da fabrica",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "plano-v0-20261024",
+      "bloco-f",
+      "planning-only"
+    ],
+    "problem_statement": "Regras repetidas em CLAUDE.md, AGENTS.md, FACTORY_RULES.md e um segundo AGENTS.md em .agents/rules (a regra Haiku aparece tres vezes); CLAUDE.md nao importa AGENTS.md; skills prometem o que o codigo nao faz (02, 03, 04, 17, 19); README cita 17 skills e modelos antigos; docs/ARCHITECTURE.md descreve a topologia de setembro; AGENTS.md declara V0 encerrada em 17/10 sem o criterio atual; nao existe manual que permita entregar a fabrica a outra pessoa; nao ha dicionario de dados de .factory/*.json; ha ~10 planos datados sobrepostos em docs/. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
+    "core_journey": [
+      "MISSION.md reescrito com a visao do grill de 24/10 (autonomia total exceto objetivo, sucesso, segredo novo e aceite; nunca ocioso; learning pack e manual como parte da entrega) e o criterio de V0",
+      "AGENTS.md como fonte unica com no maximo ~150 linhas, incluindo as regras de evolucao do plano (processo no codigo, um caminho, saldo de codigo, orcamento de testes, owner so para o que e dele, documentacao a cada entrega); CLAUDE.md e .agents/rules/GEMINI.md importam o AGENTS.md em vez de repetir",
+      "Hook Stop do Claude Code e hooks equivalentes do Codex verificam os artefatos obrigatorios antes de encerrar uma sessao que alterou codigo",
+      "Skills reescritas para descrever como usar o codigo atual; skills que so duplicam estagios do motor sao removidas",
+      "Manual completo em docs/manual/: visao geral, como operar (canais, grill, aceite, resumo diario), cada estagio do motor, roteamento e custo, infraestrutura, seguranca, recuperacao de falhas, como adotar um projeto novo; legivel por humano e por agente",
+      "README e docs/ARCHITECTURE.md atualizados; dicionario de dados de .factory/*.json; planos antigos movidos para docs/archive/"
+    ],
+    "non_goals": [
+      "Nao traduzir o manual para outro idioma",
+      "Nao gerar site estatico de documentacao"
+    ],
+    "reachability_contract": "Owner e qualquer pessoa leem docs/manual/ no GitHub ou no DarkHub; agentes leem AGENTS.md e o manual.",
+    "acceptance_criteria": [
+      "Nenhuma regra repetida entre CLAUDE.md, AGENTS.md, FACTORY_RULES.md e GEMINI.md (teste simples de duplicacao de paragrafos fora do portao principal)",
+      "AGENTS.md com no maximo ~150 linhas; CLAUDE.md e GEMINI.md importam o AGENTS.md",
+      "Sessao do Claude Code que altera codigo e tenta encerrar sem artefatos e bloqueada pelo hook (teste)",
+      "Uma pessoa que so leia docs/manual/ consegue operar a fabrica: checklist de leitura validado pelo owner",
+      "README lista as skills e modelos reais; ARCHITECTURE.md descreve o motor unico; dicionario cobre todos os .factory/*.json versionados",
+      "Manual do usuario e documentacao tecnica (docs/manual/) atualizados na mesma entrega, conferidos contra o codigo",
+      "Saldo de testes da suite nao aumenta: teste novo de comportamento substitui ou consolida testes existentes; nenhum teste de forma entra no portao",
+      "Learning pack da entrega (leigo + dev) publicado e enviado ao owner",
+      "Portao oficial verde, revisao por outra familia, merge e deploy com smoke verde"
+    ],
+    "suggested_files": [
+      "MISSION.md",
+      "AGENTS.md",
+      "FACTORY_RULES.md",
+      "CLAUDE.md",
+      ".agents/rules/GEMINI.md",
+      ".agents/rules/AGENTS.md",
+      ".agents/skills/",
+      ".claude/settings.json",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "docs/manual/"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-343",
+      "USR-375",
+      "USR-376"
+    ],
+    "created_at": "2026-10-24T20:33:41.067748Z",
+    "updated_at": "2026-10-24T20:33:41.067748Z"
   }
 ]

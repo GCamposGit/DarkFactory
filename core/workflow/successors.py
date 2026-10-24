@@ -166,7 +166,7 @@ def _run_wall_clock_exceeded(store: ControlStore, run_id: str, now_dt: datetime)
     by a retry count -- a 5-minute CI poll window alone would hit any
     reasonable count cap well before a slow CI run finishes.
     """
-    method = getattr(store, "get_run_created_at", None)
+    method = getattr(store, "get_run_budget_started_at", None) or getattr(store, "get_run_created_at", None)
     if method is None:
         return False
     try:

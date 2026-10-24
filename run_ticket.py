@@ -358,7 +358,9 @@ def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
     store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     ticket = _build_ticket(args, store)
     store.save_ticket(ticket)
-    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path, kind="queue")
+    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path, kind="queue",
+        project_id=ticket.project_id,
+    )
     if not report.ok:
         logger.error("Queue registration of %s failed (%s): %s", ticket.id, report.action, report.message)
     return ticket if report.ok else None
@@ -753,7 +755,7 @@ def _invoke_fix_agent(
     Best-effort: if no route is available or the call itself fails, the next focal/gate attempt simply
     fails again for the same reason, which the caller already treats as an (eventually final) failure.
     """
-    route = pick("development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE)
+    route = pick("development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE, project_id=ticket.project_id)
     if route is None:
         logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
         return None
@@ -990,6 +992,11 @@ def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
             lines.append(
                 f"  {entry['attempt']}. ERRO DE INFRAESTRUTURA ({entry['cause']}) em '{entry['stage']}'{detail} -- agente NAO reinvocado"
             )
+        elif entry["event"] == "gate_remote_retry":
+            lines.append(
+                f"  {entry['attempt']}. portao repetido em outro host ({entry['cause']}, "
+                f"retry {entry['retry']}, backoff {entry['backoff_s']:.0f}s)"
+            )
         else:
             lines.append(
                 f"  {entry['attempt']}. TIMEOUT ({entry['cause']}) em '{entry['stage']}' apos "
@@ -1093,6 +1100,66 @@ def _wait_gate_grokbox_if_needed(as_json: bool) -> None:
         grokbox_wake.wait_if_down(announce=None if as_json else (lambda msg: print(msg, file=sys.stderr)))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Grokbox wake wait failed: %s", exc)
+
+
+GATE_REMOTE_RETRIES = 2
+GATE_REMOTE_BACKOFF_S = (15.0, 45.0)
+_GATE_WORKER_URL_RE = re.compile(r"https?://[\w.\-]+:\d+")
+
+
+def _gate_remote_unavailable(gate_cmd: list[str], output: str) -> bool:
+    return "--remote-required" in gate_cmd and _GATE_REMOTE_REQUIRED_MARKER in output
+
+
+def _rotate_gate_workers(failed_output: str) -> str | None:
+    """USR-372: DARKFAC_TEST_WORKERS for the next attempt, without the host(s) that just failed.
+
+    Returns the previous env value (or None) so the caller can restore it; the new value only
+    ever excludes hosts named in the failure output, falling back to the default pool."""
+    from core.harness import remote_dispatch as rd
+
+    failed = set(_GATE_WORKER_URL_RE.findall(failed_output))
+    current = os.environ.get(rd.ENV_TEST_WORKERS) or rd.DEFAULT_WORKERS
+    pool = [u.strip() for u in current.split(",") if u.strip()]
+    for u in rd.DEFAULT_WORKERS.split(","):
+        if u not in pool:
+            pool.append(u)
+    kept = [u for u in pool if u not in failed] or pool
+    previous = os.environ.get(rd.ENV_TEST_WORKERS)
+    os.environ[rd.ENV_TEST_WORKERS] = ",".join(kept)
+    return previous
+
+
+def _retry_gate_remote_unavailable(
+    gate_cmd: list[str], gate_res: Any, target_worktree: Path, attempts_log: list[dict[str, Any]],
+    attempt: int, as_json: bool, cancelled: Any,
+) -> Any:
+    """USR-372: re-run the gate on another worker (bounded retries, backoff) while the cause is
+    gate_remote_unavailable; returns the last gate result."""
+    from core.harness import remote_dispatch as rd
+
+    for retry in range(GATE_REMOTE_RETRIES):
+        out = f"{gate_res.stdout or ''}\n{gate_res.stderr or ''}"
+        if not _gate_remote_unavailable(gate_cmd, out) or cancelled():
+            break
+        delay = GATE_REMOTE_BACKOFF_S[min(retry, len(GATE_REMOTE_BACKOFF_S) - 1)]
+        attempts_log.append({
+            "event": "gate_remote_retry", "attempt": attempt + 1, "stage": "gate",
+            "cause": GATE_CAUSE_REMOTE_UNAVAILABLE, "retry": retry + 1, "backoff_s": delay,
+        })
+        if not as_json:
+            print(f"[WORKER REMOTO INDISPONIVEL] nova tentativa {retry + 1}/{GATE_REMOTE_RETRIES} "
+                  f"em outro host apos {delay:.0f}s (USR-372).", file=sys.stderr)
+        time.sleep(delay)
+        previous = _rotate_gate_workers(out)
+        try:
+            gate_res = _run_bounded(gate_cmd, cwd=target_worktree, timeout_s=GATE_TIMEOUT_S)
+        finally:
+            if previous is None:
+                os.environ.pop(rd.ENV_TEST_WORKERS, None)
+            else:
+                os.environ[rd.ENV_TEST_WORKERS] = previous
+    return gate_res
 
 
 def _run_gate_with_self_correction(
@@ -1299,6 +1366,11 @@ def _run_gate_with_self_correction(
             gate_cmd,
             cwd=target_worktree,
             timeout_s=GATE_TIMEOUT_S,
+        )
+        if getattr(gate_res, "cancelled", False) is True or _cancelled():
+            return cancelled_payload()
+        gate_res = _retry_gate_remote_unavailable(
+            gate_cmd, gate_res, target_worktree, attempts_log, attempt, as_json, _cancelled
         )
         if getattr(gate_res, "cancelled", False) is True or _cancelled():
             return cancelled_payload()
@@ -1892,6 +1964,7 @@ def _deliver_worktree(
             delivery = git_mgr.deliver_branch(
                 ticket.id, ticket.title, cwd=target_worktree, base=project.default_branch,
                 merge=not project.requires_commercial_acceptance, kind="implementation",
+                project_id=ticket.project_id,
             )
             completion_report = delivery
             if delivery.ok and delivery.merge_sha and project.deploy is not None:
@@ -2289,7 +2362,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
                 "preflight", "failed", f"harness {target_harness} recusado: {quota_reason}", cause="quota_critical"
             )
             # Find recommended healthy harness
-            rec_route = pick("development", caps, mode=DEVELOPMENT_MODE)
+            rec_route = pick("development", caps, mode=DEVELOPMENT_MODE, project_id=ticket.project_id)
             if rec_route:
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
             return 2
@@ -2305,7 +2378,10 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         # Automatic router resolution via Dynamic Headroom, among harnesses that can write
         if operating_harness and not args.json:
             print(f"[+] Harness de operacao detectado: {operating_harness}")
-        route = pick("development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness)
+        route = pick(
+            "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
+            project_id=ticket.project_id,
+        )
         if route is None:
             progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
             print(
@@ -2649,6 +2725,8 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         if args.no_push:
             delivery_cmd.append("--no-push")
 
+        # USR-370: deliberately NOT scrubbed with build_agent_env: this child is the delivery executor
+        # (commit/push/PR/merge/deploy) and must keep GH/deploy credentials. Scrubbing applies to agents.
         child_env = dict(os.environ)
         # The delivery subprocess is part of THIS run, not a second launch (USR-250): it inherits the
         # line lock instead of trying to acquire (and refusing itself on) a lock its own parent holds.

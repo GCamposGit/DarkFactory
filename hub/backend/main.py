@@ -17,6 +17,7 @@ from starlette.responses import Response, JSONResponse
 
 from core.demands.models import DemandInput
 from hub.backend.api import get_hub_service, roadmap_router, router as api_router
+from hub.backend.auth import SAFE_METHODS, is_local_request, is_mutation_exempt, telemetry_key_valid
 from hub.backend.models import ProgressProjection, TaskDashboardReport
 from hub.backend.service import HubService
 
@@ -62,6 +63,7 @@ class SecurityContainmentMiddleware:
     Rejects foreign Host headers (preventing DNS rebinding).
     Rejects unauthorized Origin headers (preventing cross-origin attacks).
     Rejects invalid session tokens if sent.
+    Rejects state-changing requests without a credential (see hub.backend.auth).
     Enforces Cloudflare Access Zero Trust identity when CLOUDFLARE_ZERO_TRUST_REQUIRED is true.
     """
 
@@ -121,6 +123,22 @@ class SecurityContainmentMiddleware:
                     )
                     await response(scope, receive, send)
                     return
+
+            # 4. State-changing requests are default-deny unless local, owner session or machine key.
+            method = str(scope.get("method", "GET")).upper()
+            if (
+                method not in SAFE_METHODS
+                and not is_mutation_exempt(path)
+                and not session_header
+                and not is_local_request(scope.get("client"), headers)
+                and not telemetry_key_valid(headers.get(b"x-darkfac-telemetry-key", b"").decode("latin1"))
+            ):
+                response = JSONResponse(
+                    {"detail": "Authentication required", "login": "/api/auth/login"},
+                    status_code=401,
+                )
+                await response(scope, receive, send)
+                return
 
         await self.app(scope, receive, send)
 

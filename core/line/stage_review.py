@@ -22,6 +22,7 @@ outcome without invoking the agent again.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -98,6 +99,9 @@ class ReviewRound(BaseModel):
     verdict: str
     sha: Optional[str] = None
     forced: bool = False
+    # USR-171: binding of the verdict to the reviewed candidate and review policy.
+    candidate_digest: Optional[str] = None
+    policy_digest: Optional[str] = None
 
 
 MAX_REVIEW_AGENT_RETRIES: int = 5
@@ -187,6 +191,40 @@ def _get_diff(ws: RunWorkspace, default_branch: str) -> str:
     )
 
 
+def _candidate_digest(ws: RunWorkspace, default_branch: str) -> Optional[str]:
+    """sha256 of the full (never summarized) candidate diff; None when it cannot be computed."""
+    proc = workspace._run_git(
+        ["diff", f"origin/{default_branch}...HEAD", "--", *_DIFF_PATHSPEC], cwd=ws.path, check=False
+    )
+    if getattr(proc, "returncode", 0) != 0:
+        return None
+    return hashlib.sha256((proc.stdout or "").encode("utf-8")).hexdigest()
+
+
+def _policy_digest(routing_config: RoutingConfig) -> str:
+    """sha256 of the review policy: round cap, review route and prompt template."""
+    route = routing_config.stages.get("review")
+    material = {
+        "review_rounds": routing_config.run_caps.review_rounds,
+        "route": route.model_dump(mode="json") if route is not None else None,
+        "template": _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE),
+    }
+    blob = json.dumps(material, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def approval_binding_valid(
+    rnd: ReviewRound, candidate_digest: Optional[str], policy_digest: Optional[str]
+) -> bool:
+    """Fail-closed: an approval is reusable only for the same candidate and policy digests."""
+    return bool(
+        candidate_digest
+        and policy_digest
+        and rnd.candidate_digest == candidate_digest
+        and rnd.policy_digest == policy_digest
+    )
+
+
 def _render_review_md(round_num: int, verdict: ReviewVerdict) -> str:
     lines = [f"# Review round {round_num}", "", f"Verdict: {verdict.verdict}"]
     if verdict.blocking:
@@ -247,6 +285,34 @@ class ReviewStage:
         state = _load_review_state(ws)
         max_rounds = self.routing_config.run_caps.review_rounds
 
+        default_branch = project.default_branch or "main"
+        cur_candidate = _candidate_digest(ws, default_branch)
+        cur_policy = _policy_digest(self.routing_config)
+
+        # A failed diff command is not an empty candidate. Without a digest we
+        # cannot bind the review evidence to the tree that will be resumed or
+        # integrated, so do not ask the reviewer to approve an unverifiable
+        # snapshot.
+        if cur_candidate is None:
+            return StageResult(
+                outcome="retry",
+                cause_code="review_candidate_digest_unavailable",
+                output_refs=[],
+            )
+
+        if (
+            state.rounds
+            and state.rounds[-1].verdict == "approve"
+            and not state.rounds[-1].forced
+            and not approval_binding_valid(state.rounds[-1], cur_candidate, cur_policy)
+        ):
+            # USR-171: changed candidate/policy or missing evidence -> new independent review.
+            logger.warning(
+                "Review approval of round %s invalidated (digest mismatch)", state.rounds[-1].round
+            )
+            state.rounds[-1].verdict = "invalidated"
+            _write_review_state(ws, state)
+
         if state.rounds and state.rounds[-1].verdict == "approve":
             last = state.rounds[-1]
             last_sha = last.sha or workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}")
@@ -257,7 +323,7 @@ class ReviewStage:
                 )
             return StageResult(outcome="success", output_refs=[last_sha] if last_sha else [])
 
-        if state.rounds and len(state.rounds) > max_rounds:
+        if state.rounds and state.rounds[-1].verdict != "invalidated" and len(state.rounds) > max_rounds:
             last = state.rounds[-1]
             last_sha = last.sha or workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}")
             return StageResult(
@@ -285,7 +351,7 @@ class ReviewStage:
             )
         harness, model = route
 
-        diff_text = _get_diff(ws, project.default_branch or "main")
+        diff_text = _get_diff(ws, default_branch)
         template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
         prompt = fill_template(
             template,
@@ -356,7 +422,12 @@ class ReviewStage:
         workspace.write_context(ws, f"review-{round_num}.md", content)
 
         state.rounds.append(
-            ReviewRound(round=round_num, verdict="approve" if approved else "changes_required")
+            ReviewRound(
+                round=round_num,
+                verdict="approve" if approved else "changes_required",
+                candidate_digest=cur_candidate,
+                policy_digest=cur_policy,
+            )
         )
         state.agent_error_streak = 0
         _write_review_state(ws, state)

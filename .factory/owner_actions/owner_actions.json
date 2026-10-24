@@ -2573,6 +2573,148 @@
     {
       "id": "OA-063",
       "kind": "action",
+      "title": "Mesclar PR #645 (USR-173: verificacao de tipos no portao) com --admin e ativar o passo static_types no harness.config.json",
+      "priority": "medium",
+      "status": "done",
+      "why": "O PR toca core/harness/runner.py (protegido); o GUARD barra o agente no CI. Portao oficial passou. Para o mypy entrar no portao, harness.config.json (protegido) precisa trocar o passo syntax_and_types por syntax_only + static_types.",
+      "blocks": [
+        "USR-173"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Mesclar o PR com privilegio de admin",
+          "command": "gh pr merge 645 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Instalar o mypy fixado em cada host de portao (grokbox, Notebook, Desktop)",
+          "command": "python -m pip install mypy==1.13.0"
+        },
+        {
+          "text": "Em C:\\dev\\DarkFac\\harness.config.json, substituir o bloco do passo \"syntax_and_types\" por dois passos: {\"name\": \"syntax_only\", \"cmd\": \"python -m compileall -q core hub run_hub.py\", \"quick\": true, \"kind\": \"check\"} e {\"name\": \"static_types\", \"cmd\": \"python scripts/typecheck.py\", \"quick\": true, \"kind\": \"check\"}. Conferir se tests/test_run_ticket_gate_failure_classification.py e tests/test_worker_silence_resume.py dependem do nome antigo."
+        },
+        {
+          "text": "Publicar o harness.config.json por push direto (bypass admin), como nos demais protegidos"
+        },
+        {
+          "text": "Avisar no chat; o agente fecha o USR-173 e faz o deploy"
+        }
+      ],
+      "verify": "gh pr view 645 --repo GCamposGit/DarkFactory mostra MERGED e python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick imprime [CHECK-SCOPE] static types (mypy)",
+      "created_at": "2026-10-24T15:20:00Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-24T16:00:00Z"
+    },
+    {
+      "id": "OA-064",
+      "kind": "action",
+      "title": "Parar o DarkHub vulneravel e publicar o hotfix depois do merge do PR #657",
+      "priority": "critical",
+      "status": "done",
+      "why": "O deploy do hotfix de seguranca (#653) falhou no blue-green e o rollback religou a versao antiga: /api/session voltou a entregar o token de sessao para qualquer pessoa. O PR #657 corrige a checagem do blue-green.",
+      "blocks": [
+        "USR-369"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abrir o Dokploy (dokploy.ggcampos.com), entrar em Projects > darkfac-core > production > servico darkhub e clicar em Stop"
+        },
+        {
+          "text": "Conferir numa janela anonima que https://darkhub.ggcampos.com/api/session nao devolve mais o JSON com session_token"
+        },
+        {
+          "text": "Quando o PR #657 estiver mergeado (aviso no chat), publicar o Hub pelo script da fabrica; nunca pelos botoes Deploy/Start do Dokploy",
+          "command": "python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py --only darkhub"
+        }
+      ],
+      "verify": "https://darkhub.ggcampos.com/api/session numa janela anonima responde {\"detail\":\"Login required: /api/auth/login\"} e https://darkhub.ggcampos.com/health mostra o git_sha de main",
+      "created_at": "2026-10-24T20:33:41Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-24T22:53:21Z"
+    },
+    {
+      "id": "OA-065",
+      "kind": "action",
+      "title": "Confirmar no BotFather que o token antigo do bot exposto no historico publico do git foi revogado",
+      "priority": "high",
+      "status": "open",
+      "why": "Um token real de bot do Telegram foi versionado em .factory/telegram/config.json (commits 0c7514e e 8d4b239) e o repositorio e publico. O commit d6b641d diz que foi revogado, mas isso nao e verificavel pelo repositorio.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Telegram, abrir o @BotFather e enviar /mybots"
+        },
+        {
+          "text": "Para cada bot da fabrica (@darkfac_bot e @darkfac_ops_bot), abrir API Token e conferir que o token atual e diferente do que esta no historico (comparar so os ultimos 6 caracteres; o historico fica em git show 0c7514e:.factory/telegram/config.json)"
+        },
+        {
+          "text": "Se algum coincidir, tocar em Revoke current token e atualizar o token no Dokploy e nas maquinas (o bloco USR-343 passa a fazer isso pelo cofre)"
+        }
+      ],
+      "verify": "Nenhum token ativo dos bots coincide com o token versionado no historico",
+      "created_at": "2026-10-24T20:33:41Z",
+      "created_by": "claude",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-066",
+      "kind": "action",
+      "title": "Solicitar o developer token do Google Ads para o piloto da mansaodolago.com",
+      "priority": "medium",
+      "status": "open",
+      "why": "A fase M1 do piloto (USR-279) le dados do Google Ads; o acesso de producao a API exige um developer token aprovado pelo Google, o que pode levar dias. Comecar agora evita bloquear a prova da V0.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Entrar em https://ads.google.com com a conta que administra os anuncios da Mansao do Lago (se ainda nao houver, criar uma conta de administrador em https://ads.google.com/home/tools/manager-accounts/ e vincular a conta da Mansao)"
+        },
+        {
+          "text": "Na conta de administrador, abrir Admin > API Center (Central de API), preencher o formulario com nome da empresa, site www.mansaodolago.com e uso interno 'relatorios e recomendacoes para a propria empresa', aceitar os termos e enviar"
+        },
+        {
+          "text": "Anotar o developer token exibido (nivel Test ate a aprovacao) e, quando o Google aprovar o acesso Basic, avisar no chat; o token sera guardado no cofre pela fabrica"
+        }
+      ],
+      "verify": "API Center mostra o developer token com nivel de acesso Basic aprovado",
+      "created_at": "2026-10-24T20:33:41Z",
+      "created_by": "claude",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-067",
+      "kind": "action",
+      "title": "Preparar Instagram e Search Console da Mansao do Lago para o piloto",
+      "priority": "medium",
+      "status": "open",
+      "why": "A publicacao de posts pela API exige conta profissional do Instagram ligada a uma pagina do Facebook, e a auditoria de SEO precisa de acesso ao Search Console do site.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No app do Instagram da Mansao: Perfil > menu > Configuracoes > Tipo de conta e ferramentas > Mudar para conta profissional (escolher Empresa) se ainda for pessoal"
+        },
+        {
+          "text": "Ainda no Instagram: Configuracoes > Central de contas > adicionar a pagina do Facebook da Mansao (criar a pagina se nao existir)"
+        },
+        {
+          "text": "Em https://search.google.com/search-console confirmar que a propriedade www.mansaodolago.com esta verificada; se nao estiver, adicionar e verificar pelo metodo DNS sugerido"
+        }
+      ],
+      "verify": "Instagram aparece como conta Empresa ligada a pagina do Facebook e o Search Console mostra a propriedade verificada",
+      "created_at": "2026-10-24T20:33:41Z",
+      "created_by": "claude",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-068",
+      "kind": "action",
       "title": "USR-207: publicar o trigger restrito do workflow GHCR do Hub",
       "priority": "medium",
       "status": "open",
@@ -2612,7 +2754,7 @@
       "created_by": "codex"
     },
     {
-      "id": "OA-064",
+      "id": "OA-069",
       "kind": "action",
       "title": "USR-207 T5: executar a sonda versionada durante um deploy blue-green real",
       "priority": "high",
