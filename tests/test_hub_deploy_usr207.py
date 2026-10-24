@@ -78,7 +78,7 @@ def _hub_image_workflow_paths() -> set[str]:
     return paths
 
 
-def test_classifier_rebuild_paths_are_embedded_in_the_hub_image() -> None:
+def test_classifier_rebuild_paths_are_copied_by_dockerfile_hub() -> None:
     copied_sources = _dockerfile_copy_sources()
     missing_prefixes = sorted(prefix for prefix in dc.REBUILD_PREFIXES if prefix.rstrip("/") not in copied_sources)
     missing_files = sorted(path for path in dc.REBUILD_FILES if path not in copied_sources)
@@ -105,8 +105,17 @@ def test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger() ->
     )
 
 
-def test_run_hub_only_merge_is_data_only() -> None:
-    assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
+def test_ledger_only_merge_is_data_only_and_empty_diff_fails_closed() -> None:
+    for path in (
+        ".factory/demands/demands.json",
+        ".factory/owner_actions/owner_actions.json",
+        "docs/runbooks/deploy.md",
+        "run_hub.py",
+    ):
+        assert dc.classify(A, B, [path]) == (False, dc.REASON_DATA_ONLY)
+
+    assert dc.classify(A, B, []) == (True, dc.REASON_NO_DIFF)
+    assert dc.classify(A, B, None) == (True, dc.REASON_NO_DIFF)
 
 
 def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments() -> None:

@@ -1,20 +1,29 @@
-"""USR-207: classify changed paths to decide whether a Hub merge needs an image rebuild.
+"""Classify changed paths to decide whether a Hub merge needs an image rebuild.
 
-The Hub image (deploy/dokploy/Dockerfile.hub) embeds core/, hub/, scripts/, deploy/,
-requirements.txt and harness.config.json at runtime. Everything else (ledger under
-.factory/, docs/, tests/, CI config, root markdown) does not change the running Hub,
-so a merge that touches only those paths must not rebuild or recreate the container.
-Pure functions only; fail closed (unknown or empty diff => rebuild).
+``DOCKERFILE_RUNTIME_COPY_PREFIXES`` and ``DOCKERFILE_RUNTIME_COPY_FILES`` are the
+explicit mirror of runtime inputs copied by deploy/dokploy/Dockerfile.hub. Static
+tests keep that mirror and the GHCR workflow trigger aligned with the Dockerfile.
+The Dockerfile also copies docs/ and .factory/ as image metadata/seeds; those paths
+are deliberately excluded because they do not change the running Hub. Pure
+functions only; fail closed (unknown or empty diff => rebuild).
 """
 
 from __future__ import annotations
 
 from typing import Iterable
 
-REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/")
-# Keep this aligned with COPY sources in deploy/dokploy/Dockerfile.hub. In particular,
-# run_hub.py is not copied into the image and therefore cannot require a Hub rebuild.
-REBUILD_FILES: frozenset[str] = frozenset({"requirements.txt", "harness.config.json"})
+DOCKERFILE_RUNTIME_COPY_PREFIXES: tuple[str, ...] = (
+    "core/",
+    "hub/",
+    "scripts/",
+    "deploy/",
+)
+DOCKERFILE_RUNTIME_COPY_FILES: frozenset[str] = frozenset(
+    {"requirements.txt", "harness.config.json"}
+)
+# Compatibility names used by deploy planning and external callers.
+REBUILD_PREFIXES = DOCKERFILE_RUNTIME_COPY_PREFIXES
+REBUILD_FILES = DOCKERFILE_RUNTIME_COPY_FILES
 
 REASON_NO_DIFF = "diff desconhecido"
 REASON_RUNTIME = "toca caminho embutido na imagem"
@@ -34,7 +43,7 @@ def runtime_paths(paths: Iterable[str]) -> list[str]:
         p = _norm(raw)
         if not p:
             continue
-        if p in REBUILD_FILES or p.startswith(REBUILD_PREFIXES):
+        if p in DOCKERFILE_RUNTIME_COPY_FILES or p.startswith(DOCKERFILE_RUNTIME_COPY_PREFIXES):
             out.append(p)
     return out
 
