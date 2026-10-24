@@ -50,6 +50,6 @@
   ],
   "deadline": "2026-10-25T11:04:00.064928Z",
   "answers": {},
-  "notified": false,
+  "notified": true,
   "auto_resolved": []
 }
