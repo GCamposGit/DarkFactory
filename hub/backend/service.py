@@ -3488,7 +3488,7 @@ class HubService:
         """Aggregate a project's state across 5 core dimensions (DH-08)."""
         from core.projects.models import ProjectKind
         from core.portfolio.models import BudgetStatus
-        from core.roadmap.models import DeliveryStatus
+        from core.roadmap.models import DeliveryStatus, RoadmapFlag
 
         # 1. Dev Stage
         if p.id == "darkfac" or p.kind == ProjectKind.CORE:
@@ -3506,16 +3506,26 @@ class HubService:
         completion_pct = 0.0
         roadmap_health_status = "healthy"
         health_details: Dict[str, Any] = {}
+        roadmap_snapshot_error: Optional[str] = None
 
         try:
             snapshot = self.roadmap.get_snapshot(p.id)
             total_items = len(snapshot.items)
-            delivered_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.DELIVERED)
-            in_progress_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.IN_PROGRESS)
-            blocked_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.BLOCKED)
+            delivered_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.COMPLETED)
+            in_progress_items = sum(
+                1
+                for item in snapshot.items
+                if item.delivery_status in (DeliveryStatus.IMPLEMENTING, DeliveryStatus.VALIDATING)
+            )
+            blocked_items = sum(
+                1
+                for item in snapshot.items
+                if RoadmapFlag.BLOCKED in item.operational_flags or bool(item.blocking_dependency_ids)
+            )
             completion_pct = round((delivered_items / total_items) * 100.0, 1) if total_items > 0 else 0.0
         except Exception as exc:
-            logger.debug(f"Failed getting roadmap snapshot for '{p.id}': {exc}")
+            logger.warning(f"Failed getting roadmap snapshot for '{p.id}': {exc}")
+            roadmap_snapshot_error = str(exc)
 
         try:
             rh = self.roadmap.get_health(p.id)
@@ -3536,6 +3546,9 @@ class HubService:
             roadmap_health_status = "error"
             health_details = {"error": str(exc)}
 
+        if roadmap_snapshot_error is not None:
+            health_details["roadmap_snapshot_error"] = roadmap_snapshot_error
+
         # 3. Budget Summary
         b = self.budget_manager.get_budget(p.id)
         budget_summary = {
@@ -3551,7 +3564,12 @@ class HubService:
         if b.status == BudgetStatus.LOCAL_ONLY:
             overall_health = "warning"
             health_details["budget_warning"] = "Monthly limit exhausted (forced local_only)"
-        elif health_details.get("stale") or blocked_items > 0 or roadmap_health_status != "healthy":
+        elif (
+            roadmap_snapshot_error is not None
+            or health_details.get("stale")
+            or blocked_items > 0
+            or roadmap_health_status != "healthy"
+        ):
             overall_health = "warning"
         else:
             overall_health = "healthy"
@@ -3912,5 +3930,3 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
-
