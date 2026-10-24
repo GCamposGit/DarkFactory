@@ -10543,8 +10543,8 @@
     "project_id": "darkfac",
     "title": "Mesmo ticket vira duas demandas e dois runs ativos (USR-343: dem-f387275c284d e dem-db533d497a10)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "55752264c39b1685db29f28d1b44893860c13703",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -10571,7 +10571,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-23T10:37:36.139118Z",
-    "updated_at": "2026-10-23T11:28:24.687673Z"
+    "updated_at": "2026-10-24T04:59:25.953536Z"
   },
   {
     "id": "USR-363",
