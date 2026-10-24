@@ -10723,5 +10723,35 @@
     "dependencies": [],
     "created_at": "2026-10-24T03:33:54.047867Z",
     "updated_at": "2026-10-24T03:33:54.047867Z"
+  },
+  {
+    "id": "USR-368",
+    "project_id": "darkfac",
+    "title": "Portao no grokbox derruba testes de temporizacao (line_lock, suite_lock_stalled, usr328) sob carga xdist",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 23-24/10/2026 tres portoes no grokbox falharam cada um num teste diferente dependente de tempo real/threads: test_usr328_review_timeout (USR-345), test_line_lock::test_heartbeat_thread_refreshes_the_sidecar_while_held (USR-362), test_suite_lock_stalled::test_reap_enabled_terminates_the_stalled_holder_and_takes_the_slot[False] (USR-362). Todos passam no Notebook/Desktop. Provavel CPU/RAM saturada ou workers xdist demais no grokbox.",
+    "core_journey": [
+      "Em 23-24/10/2026 tres portoes no grokbox falharam cada um num teste diferente dependente de tempo real/threads: test_usr328_review_timeout (USR-345), test_line_lock::test_heartbeat_thread_refreshes_the_sidecar_while_held (USR-362), test_suite_lock_stalled::test_reap_enabled_terminates_the_stalled_holder_and_takes_the_slot[False] (USR-362). Todos passam no Notebook/Desktop. Provavel CPU/RAM saturada ou workers xdist demais no grokbox."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Medir CPU/RAM e workers xdist do grokbox durante o portao e ajustar (limite de workers por RAM/CPU no worker remoto)",
+      "Marcar/isolar testes de temporizacao para rodar no passo serial ou com folga por fator de carga",
+      "3 portoes seguidos no grokbox sem falha de temporizacao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T04:33:55.793550Z",
+    "updated_at": "2026-10-24T04:33:55.793550Z"
   }
 ]
