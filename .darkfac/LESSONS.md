@@ -1,0 +1,1 @@
+- [loop_cap:ci_pending:not_before=2026-10-24T00:41:46.621733+00:00] Acompanhar conclusao de checks do CI e politicas de branch antes de tentar merge da integracao.
