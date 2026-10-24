@@ -10842,5 +10842,34 @@
     "dependencies": [],
     "created_at": "2026-10-24T13:39:10.374345Z",
     "updated_at": "2026-10-24T13:39:10.374345Z"
+  },
+  {
+    "id": "USR-372",
+    "project_id": "darkfac",
+    "title": "Worker remoto do portao para de responder no meio da suite (/health inalcancavel) e derruba entregas",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 24/10 a entrega do USR-174 falhou com gate_remote_unavailable: 'worker stopped responding for >120s mid-run and /health is unreachable (3 consecutive failed probes)' apos 155 s; USR-171 e USR-173 falharam antes com 100.77.130.5:8080 inalcancavel e 100.78.181.90:8080 ocupado >300s. Cada falha exige relancar --resume-delivery manualmente.",
+    "core_journey": [
+      "Em 24/10 a entrega do USR-174 falhou com gate_remote_unavailable: 'worker stopped responding for >120s mid-run and /health is unreachable (3 consecutive failed probes)' apos 155 s; USR-171 e USR-173 falharam antes com 100.77.130.5:8080 inalcancavel e 100.78.181.90:8080 ocupado >300s. Cada falha exige relancar --resume-delivery manualmente."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa da queda do worker diagnosticada com evidencia (log do worker/OOM/reinicio)",
+      "run_ticket repete automaticamente o portao em outro host quando a causa e gate_remote_unavailable, sem intervencao, com teste"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T18:27:22.730767Z",
+    "updated_at": "2026-10-24T18:27:22.730767Z"
   }
 ]
