@@ -1,0 +1,159 @@
+[
+  {
+    "id": "T1",
+    "title": "Conciliar o que a imagem embute com o workflow GHCR e o classificador, com dados atualizados sem rebuild",
+    "goal": "Fazer Dockerfile.hub, .github/workflows/hub-image.yml e core/infra/deploy_classifier.py concordarem sobre o conjunto exato de caminhos que a imagem embute, e garantir que um merge que so mexe em .factory/ ou docs/ atualize os dados servidos pelo Hub sem reconstruir imagem nem recriar container.",
+    "files_hint": [
+      "deploy/dokploy/Dockerfile.hub",
+      "deploy/dokploy/docker-compose.hub.yml",
+      ".github/workflows/hub-image.yml",
+      "core/infra/deploy_classifier.py",
+      "core/orchestrator/compose_render.py",
+      "scripts/dokploy_redeploy.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "O conjunto de caminhos que disparam o workflow hub-image.yml, os COPY de runtime do Dockerfile.hub e REBUILD_PREFIXES/REBUILD_FILES do classificador sao derivados de uma unica fonte e nao divergem.",
+      "Merge que toca somente .factory/** ou docs/** nao dispara build de imagem nem recriacao de container, e o Hub passa a servir o conteudo novo desses caminhos apos o sync de dados.",
+      "Merge que toca core/, hub/, scripts/, deploy/, requirements.txt ou harness.config.json continua classificado como rebuild, e diff desconhecido/vazio continua fail-closed (rebuild).",
+      "O Hub sobe com o volume de dados vazio usando o seed embutido (fallback), sem erro em import time."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_image_paths_consistency.py: le as linhas COPY de deploy/dokploy/Dockerfile.hub, os paths do workflow hub-image.yml e as constantes do classificador e falha se divergirem.",
+      "tests/test_hub_deploy_usr207.py: caso novo cobrindo merge somente-.factory e somente-docs => sem rebuild, com sync de dados agendado; e merge em core/ => rebuild.",
+      "Teste de boot do Hub com diretorio de dados vazio provando o fallback para o seed."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Um unico deploy logico por merge (dedupe por sha, lock e autoDeploy verificado)",
+    "goal": "Garantir que cada merge na main produza no maximo uma operacao logica de atualizacao do Hub, com as fases de sobreposicao e retirada do blue/green contando como uma so, sem o deploy duplo autoDeploy + Manual deployment.",
+    "files_hint": [
+      "scripts/dokploy_redeploy.py",
+      "scripts/dokploy_bluegreen.py",
+      "core/orchestrator/bluegreen.py",
+      "core/infra/deploy_classifier.py",
+      "tests/test_dokploy_redeploy.py",
+      ".factory/owner_actions/owner_actions.json"
+    ],
+    "acceptance": [
+      "Ha um unico ponto de entrada de deploy do Hub; uma segunda invocacao para o mesmo sha termina em no-op explicito (motivo 'sha ja implantado') sem tocar o Dokploy.",
+      "Invocacoes concorrentes para o mesmo servico sao serializadas por lock: a segunda nao dispara um segundo deploy nem aborta a primeira.",
+      "As fases internas do blue/green (instalar overlap, gate por /health, cutover, retirada) aparecem como uma unica operacao logica nos logs e no resumo final.",
+      "O estado de autoDeploy do compose Darkhub e consultado pela API do Dokploy antes do deploy; se estiver ligado, o fluxo registra OA com passo a passo para desligar em vez de produzir deploy duplo silencioso."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_dedupe.py: mesmo sha duas vezes => uma unica chamada de deploy no transporte fake; shas diferentes => duas operacoes.",
+      "Teste de lock: duas execucoes concorrentes simuladas resultam em um deploy e um no-op.",
+      "Teste do verificador de autoDeploy: payload com autoDeploy ligado gera o OA e nao dispara deploy duplicado."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Sonda de 1 s atravessando a troca e portao de zero indisponibilidade no blue/green",
+    "goal": "Executar uma sonda HTTPS de 1 segundo no dominio publico durante todo o deploy blue/green, reprovar a troca se qualquer amostra nao for 200 (timeout e erro de conexao contam como falha) e gravar a evidencia com confirmacao de que o novo sha passou a servir.",
+    "files_hint": [
+      "scripts/dokploy_bluegreen.py",
+      "core/orchestrator/bluegreen.py",
+      "core/infra/availability_probe.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "A sonda roda em paralelo ao deploy, a 1 amostra por segundo, no endereco publico HTTPS /health, do inicio da instalacao do overlap ate a retirada da cor antiga.",
+      "Qualquer amostra diferente de 200, incluindo timeout e erro de conexao, marca o deploy como reprovado e mantem a cor anterior servindo.",
+      "Ao final o relatorio traz total de amostras, falhas, duracao e o sha servido antes e depois, confirmando que a nova versao assumiu.",
+      "A evidencia do deploy real fica gravada em arquivo versionavel de evidencias, referenciada no relatorio do ticket."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_cutover_probe.py: sonda injetada com amostras todas 200 => deploy aprovado; uma amostra 502, um timeout e um erro de conexao => reprovado e sem cutover.",
+      "Teste de cadencia: a sonda coleta aproximadamente uma amostra por segundo na janela simulada e nao perde a janela da troca.",
+      "Teste de que o relatorio registra sha anterior e novo e falha se o novo sha nao estiver servindo ao final."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Frontend 100% no helper unico: eliminar o ultimo fetch cru e travar com guarda",
+    "goal": "Fazer toda chamada HTTP do frontend do Hub passar por hubNetFetch, incluindo hub/frontend/live.js, e impedir regressao com uma guarda automatizada, preservando a regra de nao repetir automaticamente metodos mutaveis.",
+    "files_hint": [
+      "hub/frontend/live.js",
+      "hub/frontend/hub_net.js",
+      "hub/frontend/infra.js",
+      "tests/test_hub_frontend_no_internal_codes.py"
+    ],
+    "acceptance": [
+      "Nenhum modulo de hub/frontend chama fetch diretamente; a unica chamada crua vive em hub_net.js.",
+      "Durante indisponibilidade do Hub o usuario ve o aviso 'Hub atualizando, reconectando...' e os paineis se recuperam sozinhos, sem mensagem 'Failed to fetch' em nenhum painel, incluindo o da telemetria de infraestrutura.",
+      "Requisicoes nao idempotentes continuam sem repeticao automatica e os dados ainda nao enviados sao preservados durante a recuperacao.",
+      "O banner some quando a ultima requisicao em retry conclui."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_frontend_single_fetch_helper.py: varre hub/frontend/*.js e falha se houver chamada fetch( fora de hub_net.js.",
+      "Teste do helper: GET com 502 seguido de 200 => sucesso com banner exibido e depois escondido; POST com erro de rede => nao repete e propaga o erro.",
+      "Teste de que nenhum modulo do frontend exibe o texto 'Failed to fetch' ao usuario."
+    ],
+    "smoke": [
+      "/",
+      "/health"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Memoria do Hub sob carga e durante a sobreposicao, com OOMKilled monitorado",
+    "goal": "Medir o uso real de memoria do container do Hub com todas as abas abertas mais refresh e durante a sobreposicao blue+green, ajustar o limite no compose com base na evidencia (partindo de 512 MB, sem ampliar a VPS) e monitorar OOMKilled.",
+    "files_hint": [
+      "deploy/dokploy/docker-compose.hub.yml",
+      "core/infra/metrics.py",
+      "core/infra/availability_probe.py",
+      "scripts/dokploy_redeploy.py",
+      "docs/"
+    ],
+    "acceptance": [
+      "Existe um coletor reproduzivel que registra pico de memoria do container sob carga (todas as abas + refresh) e durante a janela de sobreposicao dos dois containers, com a folga restante da VPS.",
+      "O limite de memoria no compose fica justificado pela medicao registrada: mantido em 512 MB ou alterado citando o pico medido e a folga para a sobreposicao.",
+      "OOMKilled do container do Hub e detectado e vira alerta no mesmo canal ops, sem depender de alguem olhar o Dokploy.",
+      "A evidencia da medicao (pico, folga, decisao do limite) fica gravada em arquivo versionavel e referenciada no relatorio."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_memory_evidence.py: parser da medicao calcula pico e folga corretamente e falha quando o pico mais a sobreposicao excedem a memoria disponivel da VPS.",
+      "Teste do detector de OOMKilled: estado de container com OOMKilled true gera exatamente um alerta e nao repete enquanto o estado nao mudar.",
+      "Teste de consistencia entre o limite declarado no compose e o valor registrado na evidencia."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T6",
+    "title": "Verificar a sonda externa em operacao real e fechar o container legado",
+    "goal": "Comprovar que a sonda externa de disponibilidade esta de fato executando fora da VPS no agendamento ja registrado e que o alerta no Telegram ops dispara quando /health falha por mais de 2 minutos, alem de encerrar OA-058 (remocao do container legado darkhub-cloud-247).",
+    "files_hint": [
+      "core/infra/availability_probe.py",
+      "scripts/",
+      "tests/test_baseline_probes.py",
+      ".factory/owner_actions/owner_actions.json"
+    ],
+    "acceptance": [
+      "Ha uma verificacao executavel que confirma que a sonda rodou recentemente a partir de um no externo a VPS (ultimo tick dentro da janela esperada) e falha de forma explicita quando o agendamento parou.",
+      "Falha continua de /health por mais de 120 s produz exatamente um alerta no Telegram ops e uma unica mensagem de recuperacao ao voltar, sem repeticao a cada tick.",
+      "Se a sonda estiver sem executar ou o envio ao Telegram falhar, o fluxo registra OA com passo a passo em vez de ficar silencioso.",
+      "OA-058 e verificado: container legado darkhub-cloud-247 ausente apos a migracao, ou OA atualizado com o passo a passo pendente e o criterio de verificacao."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_availability_probe_liveness.py: estado com ultimo tick recente => ok; tick antigo ou ausente => falha explicita e OA registrado.",
+      "Teste do ciclo de alerta: falhas por 119 s nao alertam, por 121 s alertam uma vez, e a recuperacao envia uma unica mensagem.",
+      "Teste de que falha no envio ao Telegram nao derruba o tick e produz o registro de intervencao."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  }
+]
