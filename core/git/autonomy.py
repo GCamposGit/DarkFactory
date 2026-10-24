@@ -997,6 +997,7 @@ class GitAutonomyManager:
         kind: Literal["queue", "implementation", "registry"] = "implementation",
         *,
         supervise_queue: bool = True,
+        project_id: str = "darkfac",
     ) -> DeliveryReport:
         """Commit, push, open PR, merge (squash) and clean up a ticket branch.
 
@@ -1007,6 +1008,13 @@ class GitAutonomyManager:
         """
         target = cwd or self.root
         runner = gh_runner or _run_gh
+        try:  # USR-174: per-project data policy gates every delivery (fail-closed, structured)
+            from core.enterprise.enforcement import DELIVERY_PROVIDER, DataPolicyError, enforce_data_policy
+
+            enforce_data_policy(project_id, "delivery", provider=DELIVERY_PROVIDER)
+        except DataPolicyError as exc:
+            logger.error("deliver_branch refused by data policy: %s", exc)
+            return DeliveryReport(ok=False, action="error", message=f"Delivery refused by data policy: {exc}")
         if kind == "queue" and merge and supervise_queue:
             # USR-238: every registration also reports queue PRs that stayed open too long.
             queue_registration.check_stalled_queue_prs(target, runner, manager_factory=self._child_manager)
