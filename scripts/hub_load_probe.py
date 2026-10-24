@@ -45,6 +45,10 @@ def _get(url: str, timeout: float) -> tuple[int, dict[str, Any] | None, float]:
             return int(response.status), payload, (time.perf_counter() - started) * 1000
     except urllib.error.HTTPError as exc:
         return int(exc.code), None, (time.perf_counter() - started) * 1000
+    except (urllib.error.URLError, TimeoutError, OSError):
+        # Keep transport outages in the report as failed samples. In particular,
+        # an outage during a deploy must not discard the evidence collected so far.
+        return 0, None, (time.perf_counter() - started) * 1000
 
 
 def run_probe(
@@ -85,6 +89,8 @@ def run_probe(
     def sample_health() -> None:
         status, payload, latency = _get(f"{base_url}/health?memory=true", timeout)
         row: dict[str, Any] = {"status": status, "latency_ms": latency, "sampled_at": time.time()}
+        if status != 200 or payload is None:
+            abort_reason.append(f"/health probe failed during load (HTTP {status})")
         if payload:
             memory = payload.get("memory") or {}
             row.update({

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -447,6 +448,46 @@ def test_load_probe_report_calculates_peak_and_p95_from_samples() -> None:
     ])
     assert report["peak_memory_bytes"] == 250
     assert report["latency_p95_ms"] == 30
+
+
+def test_load_probe_records_transport_failure_as_non_200_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_urlopen(*args: Any, **kwargs: Any) -> Any:
+        raise urllib.error.URLError("connection reset")
+
+    monkeypatch.setattr(hub_load_probe.urllib.request, "urlopen", fail_urlopen)
+
+    status, payload, latency = hub_load_probe._get("https://hub.example/api/cloud/status", 1)
+
+    assert status == 0
+    assert payload is None
+    assert latency >= 0
+
+
+def test_load_probe_aborts_and_writes_report_when_health_drops_mid_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = {"health": 0}
+
+    def fake_get(url: str, timeout: float) -> tuple[int, dict[str, Any] | None, float]:
+        if "/health" in url:
+            calls["health"] += 1
+            if calls["health"] == 1:
+                return 200, {
+                    "status": "ok", "git_sha": "a", "instance_id": "instance-a",
+                    "memory": {"current_bytes": 100, "oom_kill_count": 0},
+                }, 1.0
+            return 0, None, 2.0
+        return 200, None, 3.0
+
+    monkeypatch.setattr(hub_load_probe, "_get", fake_get)
+    output = tmp_path / "report.json"
+    report = hub_load_probe.run_probe(
+        "https://hub.example", duration_seconds=0.01, concurrency=1, timeout=1, output=output,
+    )
+
+    assert report["aborted"] is True
+    assert "health" in report["abort_reason"].lower()
+    assert output.exists()
 
 
 # --------------------------------------------------------------------------- frontend (static)
