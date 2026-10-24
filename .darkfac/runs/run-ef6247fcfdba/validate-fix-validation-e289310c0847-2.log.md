@@ -1,18 +1,18 @@
 # development attempt log
 
 - iteration: 2
-- harness: claude
-- model: sonnet
+- harness: codex
+- model: -
 - error_kind: -
-- duration_s: 1800.108
+- duration_s: 1800.013
 - note: validate failed (exit 124)
 
 ## Output (redacted, first 2000 chars)
 
 ```text
-verdict=FAILED (Exit code 124 in 1800.11s)
+verdict=FAILED (Exit code 124 in 1800.01s)
 
-Tests failed with exit code 124. Summary: Exit code 124 in 1800.11s
+Tests failed with exit code 124. Summary: Exit code 124 in 1800.01s
 ```
 
 ## Raw output tail (redacted, last 3000 chars)
