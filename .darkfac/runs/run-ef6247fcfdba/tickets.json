@@ -1,0 +1,108 @@
+[
+  {
+    "id": "T1",
+    "title": "Ultimo fetch cru do frontend: /live passa pelo helper hubNetFetch",
+    "goal": "Eliminar a excecao de live.js para que toda chamada de rede do Hub use um unico helper com backoff e banner, sem nunca mostrar 'Failed to fetch' e sem empilhar requisicoes no polling da pagina /live.",
+    "files_hint": [
+      "hub/frontend/hub_net.js",
+      "hub/frontend/live.js",
+      "hub/frontend/live.html",
+      "tests/test_hub_deploy_usr207.py",
+      "tests/js/hub_net.test.cjs"
+    ],
+    "acceptance": [
+      "hubNetFetch aceita um orcamento de tentativas por chamada (ex.: options.hubNetMaxAttempts); o comportamento atual (janela ~85 s) permanece o padrao quando a opcao nao e passada.",
+      "hub/frontend/live.html carrega /static/hub_net.js antes de /static/live.js.",
+      "fetchSnapshot de live.js usa hubNetFetch com uma unica tentativa, preservando o AbortController de 8 s, a cadencia de 10 s e a propagacao intacta de AbortError.",
+      "Nenhum arquivo de hub/frontend/*.js alem de hub_net.js contem fetch cru: a allowlist RAW_FETCH_ALLOWED do teste estatico fica apenas com hub_net.js.",
+      "Falha de rede em /api/line/live exibe o banner 'Hub atualizando, reconectando...', dispara o vigia de /health e a pagina se recupera sozinha, sem texto cru de erro.",
+      "python scripts/line_validate.py passa na arvore final."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py: RAW_FETCH_ALLOWED reduzida a {'hub_net.js'} e teste estatico de que live.html carrega hub_net.js antes de live.js.",
+      "tests/js/hub_net.test.cjs: com hubNetMaxAttempts=1 o helper nao repete, marca o banner e inicia o vigia; AbortError continua propagando; o padrao sem a opcao mantem a sequencia de backoff atual."
+    ],
+    "smoke": [
+      "/health",
+      "/live",
+      "/api/line/live"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Sonda de 1 s de indisponibilidade do Hub dentro do repositorio, com resumo testado",
+    "goal": "Trazer para o repositorio, com testes e caminho absoluto documentado, a sonda que produz a evidencia de zero downtime (hoje o roteiro aponta para um script fora do repo), contando timeout e erro de conexao como falha.",
+    "files_hint": [
+      "core/infra/downtime_probe.py",
+      "scripts/hub_downtime_probe.py",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_downtime_probe.py"
+    ],
+    "acceptance": [
+      "core/infra/downtime_probe.py amostra GET /health do dominio publico uma vez por segundo (agenda sem drift acumulado) e grava JSONL com ts, status, sha, latency_ms e error; timeout ou erro de conexao viram status 0 (falha), nunca excecao que mate a sonda.",
+      "summarize(samples) e funcao pura e devolve total, non200, maior sequencia consecutiva de falha e shas distintos observados.",
+      "scripts/hub_downtime_probe.py e casca fina sobre o modulo (padrao de scripts/dokploy_bluegreen.py), aceita --url/--seconds/--out/--expect-switch e sai 0 somente com non200 == 0; com --expect-switch tambem exige >= 2 shas distintos. Qualquer outro caso sai 1 com o resumo no stdout.",
+      "Prober, relogio e escrita sao injetaveis: os testes rodam a sonda inteira sem rede e sem dormir.",
+      "docs/proposals/USR-207-zero-downtime.md secao 2.2b usa o comando do repo com caminho absoluto (python C:\\dev\\DarkFac\\scripts\\hub_downtime_probe.py ...) em vez do script externo, e mantem OA-058 registrada como a prova operacional pendente.",
+      "python scripts/line_validate.py passa na arvore final."
+    ],
+    "tests_to_add": [
+      "tests/test_hub_downtime_probe.py: todas as amostras 200 => exit 0; uma amostra 502 => exit 1 e sequencia de falha correta; excecao do prober contada como falha; troca de sha no meio => 2 shas distintos e --expect-switch satisfeito; --expect-switch com sha unico => exit 1; summarize puro sem I/O.",
+      "tests/test_hub_downtime_probe.py: teste estatico de que o comando citado em docs/proposals/USR-207-zero-downtime.md corresponde as flags reais do CLI."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Hub le o proprio cgroup: memoria e OOMKilled expostos em /health?memory=1",
+    "goal": "Dar ao Hub a leitura confiavel do uso de memoria e do contador de OOM do proprio container, sem onerar o caminho padrao do /health usado pela sonda de 1 s e pelo HEALTHCHECK.",
+    "files_hint": [
+      "core/infra/container_memory.py",
+      "hub/backend/main.py",
+      "tests/test_container_memory.py"
+    ],
+    "acceptance": [
+      "core/infra/container_memory.py le cgroup v2 (memory.current, memory.peak, memory.max, memory.events oom_kill) com fallback v1 (memory.usage_in_bytes, memory.limit_in_bytes, memory.max_usage_in_bytes, memory.failcnt) e devolve modelo Pydantic v2 com used_mb, peak_mb, limit_mb, percent_of_limit e oom_kills.",
+      "A raiz do cgroup e injetavel (pathlib.Path) para teste; fora de container, com arquivos ausentes, ilegiveis, corrompidos ou com limite 'max', devolve estado desconhecido sem levantar excecao.",
+      "GET /health?memory=1 inclui o bloco de memoria; GET /health sem a flag mantem exatamente o payload atual (status, git_sha, e disco apenas com ?disk=1).",
+      "python scripts/line_validate.py passa na arvore final."
+    ],
+    "tests_to_add": [
+      "tests/test_container_memory.py: arvores falsas de cgroup em tmp_path para v2, v1, ausente, ilegivel e limite ilimitado; percent_of_limit e peak_mb calculados corretamente.",
+      "tests/test_container_memory.py: via TestClient, /health sem flag nao ganha chave nova e /health?memory=1 traz o bloco; leitura que levanta excecao nao derruba o endpoint."
+    ],
+    "smoke": [
+      "/health",
+      "/health?memory=1"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Memoria do Hub sob carga: amostrador com alerta de OOM e script de medicao com criterio de decisao",
+    "goal": "Fechar o criterio de aceite de memoria: monitorar OOMKilled continuamente com alerta no Telegram de ops e produzir, com um comando, a evidencia de pico sob carga que autoriza (ou nao) mudar o limite de 512 MB.",
+    "files_hint": [
+      "core/infra/container_memory.py",
+      "hub/backend/main.py",
+      "scripts/hub_memory_load.py",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_container_memory.py"
+    ],
+    "acceptance": [
+      "Um amostrador em thread, registrado no _lifespan do Hub, le o proprio cgroup periodicamente, guarda o pico desde o boot e alerta o Telegram de ops ao atingir >= 80% do limite e a cada aumento do contador de oom_kill, com dedupe por janela (mesma convencao de core/infra/disk_guard.py).",
+      "Relogio, amostrador e notificador sao injetaveis; falha do notificador ou limite ilegivel nunca levanta excecao nem bloqueia o startup do Hub (apenas log), e o amostrador nao inicia quando nao ha limite de cgroup legivel.",
+      "scripts/hub_memory_load.py aceita --base-url, --concurrency, --seconds e --out, gera carga concorrente nos endpoints documentados (/api/cloud/status, /api/usage/accounts, /api/telemetry/tickets), e escreve relatorio JSON com pico percentual, p95 de latencia e oom_kills lidos de /health?memory=1; o construtor do relatorio e funcao pura testada sem rede.",
+      "docs/proposals/USR-207-zero-downtime.md secao 3 passa a descrever a medicao por esses dois comandos (caminho absoluto PowerShell), mantem o criterio de decisao (pico >= 80% de 512 MB ou OOMKilled/RestartCount crescendo => subir para 768 MB e remedir) e registra explicitamente que o limite de 512 MB permanece ate a evidencia existir.",
+      "python scripts/line_validate.py passa na arvore final."
+    ],
+    "tests_to_add": [
+      "tests/test_container_memory.py: amostrador alerta em 80%, nao repete dentro da janela, alerta de novo apos a janela, alerta em aumento de oom_kill, nao alerta sem limite conhecido e engole excecao do notificador.",
+      "tests/test_container_memory.py: construtor puro do relatorio de carga (p95, pico, contagem de erros) e parsing de argumentos de scripts/hub_memory_load.py sem efetuar requisicoes."
+    ],
+    "smoke": [
+      "/health?memory=1",
+      "/api/cloud/status"
+    ]
+  }
+]
