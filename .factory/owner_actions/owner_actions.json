@@ -2569,6 +2569,40 @@
       "created_at": "2026-10-24T04:00:00Z",
       "created_by": "claude",
       "resolved_at": "2026-10-23T21:00:00Z"
+    },
+    {
+      "id": "OA-063",
+      "kind": "action",
+      "title": "Mesclar PR #645 (USR-173: verificacao de tipos no portao) com --admin e ativar o passo static_types no harness.config.json",
+      "priority": "medium",
+      "status": "open",
+      "why": "O PR toca core/harness/runner.py (protegido); o GUARD barra o agente no CI. Portao oficial passou. Para o mypy entrar no portao, harness.config.json (protegido) precisa trocar o passo syntax_and_types por syntax_only + static_types.",
+      "blocks": [
+        "USR-173"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Mesclar o PR com privilegio de admin",
+          "command": "gh pr merge 645 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Instalar o mypy fixado em cada host de portao (grokbox, Notebook, Desktop)",
+          "command": "python -m pip install mypy==1.13.0"
+        },
+        {
+          "text": "Em C:\\dev\\DarkFac\\harness.config.json, substituir o bloco do passo \"syntax_and_types\" por dois passos: {\"name\": \"syntax_only\", \"cmd\": \"python -m compileall -q core hub run_hub.py\", \"quick\": true, \"kind\": \"check\"} e {\"name\": \"static_types\", \"cmd\": \"python scripts/typecheck.py\", \"quick\": true, \"kind\": \"check\"}. Conferir se tests/test_run_ticket_gate_failure_classification.py e tests/test_worker_silence_resume.py dependem do nome antigo."
+        },
+        {
+          "text": "Publicar o harness.config.json por push direto (bypass admin), como nos demais protegidos"
+        },
+        {
+          "text": "Avisar no chat; o agente fecha o USR-173 e faz o deploy"
+        }
+      ],
+      "verify": "gh pr view 645 --repo GCamposGit/DarkFactory mostra MERGED e python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick imprime [CHECK-SCOPE] static types (mypy)",
+      "created_at": "2026-10-24T15:20:00Z",
+      "created_by": "claude"
     }
   ]
 }
