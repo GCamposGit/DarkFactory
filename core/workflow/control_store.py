@@ -412,6 +412,22 @@ class SQLiteControlStore:
                     PRIMARY KEY (run_id, question_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS tickets (
+                    project_id TEXT NOT NULL,
+                    ticket_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (project_id, ticket_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS owner_actions (
+                    action_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS fleet_reservations (
                     reservation_id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
@@ -1608,6 +1624,36 @@ class SQLiteControlStore:
             raise
         finally:
             conn.close()
+
+    def upsert_ticket(self, project_id: str, ticket_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
+        """Idempotent write of one queue ticket (USR-343): source of truth for the development queue."""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO tickets (project_id, ticket_id, status, payload, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(project_id, ticket_id) DO UPDATE SET status=excluded.status, "
+                "payload=excluded.payload, updated_at=excluded.updated_at",
+                (project_id, ticket_id, status, json.dumps(payload, ensure_ascii=False), now.isoformat()),
+            )
+
+    def list_tickets(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        sql, params = "SELECT payload FROM tickets", ()
+        if project_id:
+            sql, params = sql + " WHERE project_id = ?", (project_id,)
+        with self._connect() as conn:
+            return [json.loads(r["payload"]) for r in conn.execute(sql + " ORDER BY ticket_id", params)]
+
+    def upsert_owner_action(self, action_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO owner_actions (action_id, status, payload, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(action_id) DO UPDATE SET status=excluded.status, "
+                "payload=excluded.payload, updated_at=excluded.updated_at",
+                (action_id, status, json.dumps(payload, ensure_ascii=False), now.isoformat()),
+            )
+
+    def list_owner_actions(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            return [json.loads(r["payload"]) for r in conn.execute("SELECT payload FROM owner_actions ORDER BY action_id")]
 
     def get_grill_answers(self, run_id: str) -> dict[str, str]:
         """Grill answers recorded for `run_id`, as `{question_id: choice}` (raw callback choice)."""

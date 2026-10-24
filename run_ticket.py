@@ -288,7 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--queue-only",
         action="store_true",
-        help="With --create: register the ticket in the development queue (isolated worktree, PR, merge) without running it",
+        help="With --create: register the ticket in the development queue (control store, no PR) without running it",
     )
     parser.add_argument(
         "--allow-dirty-shared-checkout",
@@ -346,24 +346,15 @@ def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
 
 
 def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
-    """Register a planned ticket on origin/main from a throwaway worktree (never the shared checkout)."""
-    from core.git.autonomy import GitAutonomyManager
-    from core.git.ticket_workspace import WorkspaceError, create_workspace
+    """Register a planned ticket in the control store (USR-343): no worktree, no PR, no merge."""
+    from core.demands.queue_store import register_ticket
 
+    ticket = _build_ticket(args, DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json"))
     try:
-        workspace = create_workspace("queue", cwd=PROJECT_ROOT, unique_branch=True)
-    except WorkspaceError as exc:
-        logger.error("Queue registration: could not create the worktree: %s", exc)
+        return register_ticket(ticket)
+    except Exception as exc:  # noqa: BLE001 - reported to the caller as a failed registration
+        logger.error("Queue registration of %s failed in the control store: %s", ticket.id, exc)
         return None
-    store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
-    ticket = _build_ticket(args, store)
-    store.save_ticket(ticket)
-    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path, kind="queue",
-        project_id=ticket.project_id,
-    )
-    if not report.ok:
-        logger.error("Queue registration of %s failed (%s): %s", ticket.id, report.action, report.message)
-    return ticket if report.ok else None
 
 
 # Runtime state that git reports as modified in the shared checkout without being another
@@ -2280,7 +2271,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         if args.queue_only:
             queued = _queue_ticket_isolated(args)
             if queued is None:
-                print("[ERRO] Não foi possível registrar o ticket na fila (fetch/worktree/entrega falhou).", file=sys.stderr)
+                print("[ERRO] Não foi possível registrar o ticket na fila (control store indisponível).", file=sys.stderr)
                 return 1
             print(f"[+] Ticket {queued.id} registrado na fila de desenvolvimento: '{queued.title}'")
             return 0
