@@ -1,0 +1,19 @@
+{
+  "sha": "e289310c0847f413cf08b2445622fcf3a6529bf8",
+  "commands": {
+    "setup": {
+      "ran": true,
+      "ok": true,
+      "exit_code": 0,
+      "duration_s": 2.078
+    },
+    "validate": {
+      "ran": true,
+      "ok": false,
+      "exit_code": 1,
+      "duration_s": 1796.824,
+      "log": "verdict=FAILED (1 failed, 5086 passed, 27 skipped in 1796.82s)\n\nTests failed with exit code 1. Summary: 1 failed, 5086 passed, 27 skipped in 1796.82s"
+    }
+  },
+  "started_at": 1792825446.5341816
+}
