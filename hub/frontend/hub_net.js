@@ -41,7 +41,45 @@ function hubNetRetryable(method, error, response) {
   return Boolean(error) && HUB_NET_SAFE_METHODS.includes(method);
 }
 
+const HUB_NET_TOKEN_KEY = "darkhub_session_token";
+
+function hubNetStoredToken() {
+  if (typeof window !== "undefined" && window && window.sessionToken) return window.sessionToken;
+  try {
+    return localStorage.getItem(HUB_NET_TOKEN_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+function hubNetForgetToken() {
+  if (typeof window !== "undefined" && window) window.sessionToken = null;
+  try {
+    localStorage.removeItem(HUB_NET_TOKEN_KEY);
+  } catch (_) {}
+}
+
+// Attach the owner session to every request (state-changing routes require it remotely). A stale
+// token (rotated on the server) is dropped and the request replayed once without it.
+function hubNetHasSession(headers) {
+  if (!headers) return false;
+  if (typeof headers.has === "function") return headers.has("X-Hub-Session");
+  return Object.keys(headers).some((name) => name.toLowerCase() === "x-hub-session");
+}
+
 async function hubNetFetch(url, options = {}) {
+  const token = hubNetHasSession(options && options.headers) ? null : hubNetStoredToken();
+  if (!token) return hubNetFetchRaw(url, options);
+  const headers = new Headers((options && options.headers) || {});
+  headers.set("X-Hub-Session", token);
+  const response = await hubNetFetchRaw(url, { ...options, headers });
+  if (response.status !== 401) return response;
+  hubNetForgetToken();
+  headers.delete("X-Hub-Session");
+  return hubNetFetchRaw(url, { ...options, headers });
+}
+
+async function hubNetFetchRaw(url, options = {}) {
   const method = String((options && options.method) || "GET").toUpperCase();
   let lastError = null;
   let lastResponse = null;

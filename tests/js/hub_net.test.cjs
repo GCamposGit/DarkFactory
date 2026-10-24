@@ -50,3 +50,22 @@ test("503 do proxy e repetido; POST com erro de rede nao e reenviado", async () 
   await assert.rejects(() => b.ctx.__fetch("/api/x", { method: "POST" }), /Hub atualizando/);
   assert.equal(b.calls.length, 1);
 });
+
+test("injeta a sessao salva e descarta token rotacionado repetindo sem ele", async () => {
+  const seen = [];
+  const store = { darkhub_session_token: "velho" };
+  const queue = [{ ok: false, status: 401 }, { ok: true, status: 200 }];
+  const ctx = {
+    document: { body: { appendChild() {} }, getElementById: () => null, createElement: () => ({ style: {}, setAttribute() {} }) },
+    window: {}, console, Headers,
+    localStorage: { getItem: (k) => store[k] || null, removeItem: (k) => { delete store[k]; } },
+    setTimeout: (fn) => { fn(); return 0; },
+    fetch: async (url, options) => { seen.push(options.headers ? options.headers.get("X-Hub-Session") : null); return queue.shift(); },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(source + "\n;this.__fetch = hubNetFetch;", ctx);
+  const res = await ctx.__fetch("/api/x", { method: "POST" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, ["velho", null]);
+  assert.equal(store.darkhub_session_token, undefined);
+});

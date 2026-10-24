@@ -66,6 +66,8 @@ services:
       - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
       - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
+      # Hub re-registers both bot webhooks on start, pushing the webhook secret (derived if unset).
+      - DARKHUB_TELEGRAM_AUTO_WEBHOOK=${DARKHUB_TELEGRAM_AUTO_WEBHOOK:-true}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - N8N_URL=${N8N_URL:-https://n8n.ggcampos.com}
       - N8N_API_KEY=${N8N_API_KEY:-}

@@ -276,7 +276,9 @@ def test_webhook_sends_each_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         return True
 
     monkeypatch.setattr("core.integrations.telegram.TelegramGateway.send_message", _capture)
-    body = service.process_telegram_webhook(payload)
+    from core.integrations.telegram_webhooks import effective_webhook_secret
+
+    body = service.process_telegram_webhook(payload, secret_token_header=effective_webhook_secret())
 
     assert body["action"] == "tickets"
     assert len(body["response_parts"]) >= 2

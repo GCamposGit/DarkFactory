@@ -137,6 +137,66 @@ def test_session_token_authentication(access_service: HubService):
     assert res_ok.status_code == 200
 
 
+def test_remote_callers_need_a_credential_to_change_state(access_service: HubService, monkeypatch):
+    """The public Hub never hands out the session and rejects anonymous state changes."""
+    remote = TestClient(app, client=("203.0.113.9", 4000))
+    proxied = TestClient(app)  # loopback peer, but relayed by a proxy -> remote
+    assert remote.get("/api/session").status_code == 401
+    assert proxied.get("/api/session", headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 401
+    assert remote.get("/api/services").status_code == 200  # read-only panels stay public
+
+    body = {"title": "x"}
+    denied = remote.post("/api/demands/tickets", json=body)
+    assert denied.status_code == 401 and denied.json()["login"] == "/api/auth/login"
+    assert remote.post("/api/webhooks/test", json={}).status_code == 401
+
+    session = {"X-Hub-Session": access_service.session_token}
+    assert remote.post("/api/demands/tickets", json=body, headers=session).status_code != 401
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "machine-key")
+    machine = {"X-DarkFac-Telemetry-Key": "machine-key"}
+    assert remote.post("/api/demands/tickets", json=body, headers=machine).status_code != 401
+    assert TestClient(app).post("/api/demands/tickets", json=body).status_code != 401  # owner's own machine
+
+
+def test_telegram_login_link_grants_the_session_once_valid(access_service: HubService, monkeypatch):
+    from hub.backend.auth import make_login_code, verify_login_code
+
+    token = access_service.session_token
+    code = make_login_code(token, now=1000)
+    assert verify_login_code(code, token, now=1500)
+    assert not verify_login_code(code, token, now=1700)  # expired after 10 minutes
+    assert not verify_login_code(code[:-1] + "0", token, now=1500)
+    assert not verify_login_code(code, "rotated-token", now=1500)
+
+    remote = TestClient(app, client=("203.0.113.9", 4000))
+    sent = []
+    monkeypatch.setattr(HubService, "send_owner_login_link", lambda self: sent.append(1) or "sent")
+    assert remote.post("/api/auth/telegram-link").status_code == 200 and sent == [1]
+    page = remote.get("/api/auth/telegram-callback", params={"code": make_login_code(token)})
+    assert page.status_code == 200 and token in page.text and page.headers["cache-control"] == "no-store"
+    assert remote.get("/api/auth/telegram-callback", params={"code": "1-bad"}).status_code == 401
+
+
+def test_telegram_webhook_requires_secret_derived_from_bot_token(access_service: HubService, monkeypatch):
+    from core.integrations.telegram_webhooks import effective_webhook_secret, register_telegram_webhooks
+
+    monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    assert effective_webhook_secret() == ""  # webhook managed by hand: nothing derived
+    monkeypatch.setenv("DARKHUB_TELEGRAM_AUTO_WEBHOOK", "true")
+    secret = effective_webhook_secret()
+    assert secret and secret != "123:abc"
+    monkeypatch.setattr(HubService, "_heal_telegram_webhooks", lambda self: None)
+    forged = access_service.process_telegram_webhook({"update_id": 1, "message": {}}, secret_token_header=None)
+    assert forged["authorized"] is False
+
+    calls = []
+    register_telegram_webhooks(
+        {"TELEGRAM_BOT_TOKEN": "123:abc"}, http=lambda m, u, p: calls.append(p) or {"ok": True}, force=True
+    )
+    assert calls and calls[0]["secret_token"] == secret
+
+
 # ---------------------------------------------------------------------------
 # 4. SSRF Destination Policy Tests
 # ---------------------------------------------------------------------------

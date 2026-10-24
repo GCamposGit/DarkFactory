@@ -123,10 +123,25 @@ async function initSession() {
       try {
         localStorage.setItem("darkhub_session_token", data.session_token);
       } catch (_) {}
+    } else if (res.status === 401 && !hubNetStoredToken()) {
+      showLoginBanner();
     }
   } catch (err) {
     // Graceful offline fallback
   }
+}
+
+// Remote access without a session: read-only panels keep working; actions need the Telegram login.
+function showLoginBanner() {
+  if (document.getElementById("hub-login-banner")) return;
+  const el = document.createElement("a");
+  el.id = "hub-login-banner";
+  el.href = "/api/auth/login";
+  el.textContent = "Modo leitura. Toque aqui para entrar pelo Telegram e liberar as acoes.";
+  el.style.cssText =
+    "position:fixed;bottom:0;left:0;right:0;z-index:99998;padding:10px 16px;text-align:center;" +
+    "font:14px system-ui,sans-serif;background:#1d4ed8;color:#fff;text-decoration:none;";
+  document.body.appendChild(el);
 }
 
 async function initApp() {

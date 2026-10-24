@@ -10871,5 +10871,64 @@
     "dependencies": [],
     "created_at": "2026-10-24T18:27:22.730767Z",
     "updated_at": "2026-10-24T18:27:22.730767Z"
+  },
+  {
+    "id": "USR-373",
+    "project_id": "darkfac",
+    "title": "grokbox congela por minutos e cai do Tailscale (relay, IP de saida rotativo): causa raiz das falhas gate_remote_unavailable",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Diagnostico do owner em 24/10 15:47 (seguimento USR-372): grokbox up 4d12h, worker ok e ocioso, sem OOM em 12h, 5,7/16 GB livres. A VM congela por minutos (ate 699 s hoje); apos cada congelamento o watchdog do systemd aborta journald/udevd/timesyncd/logind. O Tailscale cai a cada congelamento e so fala por relay porque o IP publico de saida muda a cada conexao (35.173.84.246 e 3.217.165.30 em 6 min). Supervisor traz de volta em 4-6 min. Hipoteses: credito de CPU de instancia burstable esgotado/steal time no hypervisor; NAT simetrico sem IP fixo.",
+    "core_journey": [
+      "Diagnostico do owner em 24/10 15:47 (seguimento USR-372): grokbox up 4d12h, worker ok e ocioso, sem OOM em 12h, 5,7/16 GB livres. A VM congela por minutos (ate 699 s hoje); apos cada congelamento o watchdog do systemd aborta journald/udevd/timesyncd/logind. O Tailscale cai a cada congelamento e so fala por relay porque o IP publico de saida muda a cada conexao (35.173.84.246 e 3.217.165.30 em 6 min). Supervisor traz de volta em 4-6 min. Hipoteses: credito de CPU de instancia burstable esgotado/steal time no hypervisor; NAT simetrico sem IP fixo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa do congelamento identificada com metrica (steal time, creditos de CPU, eventos do hypervisor) e corrigida ou mitigada",
+      "grokbox conecta direto (sem relay) via IP de saida fixo, peer relay ou porta UDP liberada, ou decisao registrada",
+      "Despachante e portao tiram o grokbox da rotacao enquanto o /health falha, sem derrubar entregas"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T18:49:47.345792Z",
+    "updated_at": "2026-10-24T18:49:47.345792Z"
+  },
+  {
+    "id": "USR-374",
+    "project_id": "darkfac",
+    "title": "Desktop nao atualiza: owner_actions.json alterado localmente bloqueia o merge do node_sync",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "node_sync retry em 24/10 19:12Z: Desktop em fcbb10a nao chega em d928790; worker output 'Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json ... Aborting'. Algum processo no Desktop escreve no ledger versionado do checkout do worker, travando a convergencia.",
+    "core_journey": [
+      "node_sync retry em 24/10 19:12Z: Desktop em fcbb10a nao chega em d928790; worker output 'Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json ... Aborting'. Algum processo no Desktop escreve no ledger versionado do checkout do worker, travando a convergencia."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificado o processo que escreve owner_actions.json no checkout do Desktop e ele passa a escrever fora da arvore versionada ou via PR",
+      "node_sync preserva a alteracao local (backup branch) e converge mesmo com arquivo de ledger sujo, com teste"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T19:14:04.006561Z",
+    "updated_at": "2026-10-24T19:14:04.006561Z"
   }
 ]

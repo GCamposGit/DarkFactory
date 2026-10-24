@@ -13,6 +13,8 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Requ
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse, StreamingResponse
 
+from hub.backend.auth import is_local_request, verify_login_code
+
 from hub.backend.webhooks import (
     CloudGatewayStatus,
     DokployDeployTrigger,
@@ -485,10 +487,68 @@ class SessionInfoResponse(BaseModel):
 
 @router.get("/session", response_model=SessionInfoResponse)
 def get_session_info(
+    request: Request,
     service: HubService = Depends(get_hub_service),
 ) -> SessionInfoResponse:
-    """Return active local session token for client authentication (DF-08)."""
+    """Return the session token to local clients only (DF-08); remote owners log in via Telegram."""
+    if not is_local_request(request.scope.get("client"), dict(request.scope.get("headers", []))):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login required: /api/auth/login")
     return SessionInfoResponse(session_token=service.session_token)
+
+
+_LOGIN_PAGE = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>DarkHub - Entrar</title>
+<style>body{font:16px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:grid;place-items:center;
+min-height:100vh;margin:0;padding:16px}main{max-width:360px;text-align:center}button{font:inherit;padding:12px 20px;
+border:0;border-radius:8px;background:#3b82f6;color:#fff;cursor:pointer}#msg{margin-top:16px;min-height:24px}</style>
+</head><body><main><h1>DarkHub</h1><p>O acesso remoto usa um link de uso unico enviado ao seu Telegram.</p>
+<button id="send">Enviar link pelo Telegram</button><p id="msg"></p></main><script>
+document.getElementById("send").addEventListener("click", async () => {
+  const msg = document.getElementById("msg");
+  msg.textContent = "Enviando...";
+  try {
+    const res = await fetch("/api/auth/telegram-link", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    msg.textContent = res.ok ? "Link enviado. Abra o Telegram e toque em Entrar." : (data.detail || "Falha ao enviar.");
+  } catch (_) { msg.textContent = "Hub indisponivel, tente de novo."; }
+});
+</script></body></html>"""
+
+_LOGIN_DONE_PAGE = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>DarkHub</title></head><body><script>
+try { localStorage.setItem("darkhub_session_token", __TOKEN__); } catch (_) {}
+window.location.replace("/");
+</script></body></html>"""
+
+_NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+
+
+@router.get("/auth/login", include_in_schema=False)
+def auth_login_page() -> Response:
+    return Response(_LOGIN_PAGE, media_type="text/html", headers=_NO_STORE)
+
+
+@router.post("/auth/telegram-link")
+def auth_send_telegram_link(service: HubService = Depends(get_hub_service)) -> Dict[str, Any]:
+    """Send a one-time login link to the owner's Telegram chat (rate limited, owner chat only)."""
+    outcome = service.send_owner_login_link()
+    if outcome == "rate_limited":
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Aguarde 1 minuto e tente de novo.")
+    if outcome != "sent":
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram indisponivel.")
+    return {"sent": True}
+
+
+@router.get("/auth/telegram-callback", include_in_schema=False)
+def auth_telegram_callback(code: str = Query(default=""), service: HubService = Depends(get_hub_service)) -> Response:
+    if not verify_login_code(code, service.session_token):
+        return Response(
+            "Link invalido ou expirado. Peca outro em /api/auth/login.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            headers=_NO_STORE,
+        )
+    page = _LOGIN_DONE_PAGE.replace("__TOKEN__", json.dumps(service.session_token))
+    return Response(page, media_type="text/html", headers=_NO_STORE)
 
 
 @router.get("/health/ping", response_model=HealthCheckResult)
