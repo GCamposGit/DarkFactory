@@ -2576,6 +2576,9 @@ class HubService:
 
     def export_services_data(self) -> ExportCatalogResponse:
         """Exports full catalog of services with timestamp and version."""
+        from core.enterprise.enforcement import enforce_data_policy
+
+        enforce_data_policy("darkfac", "export")
         services = self.list_services()
         now_iso = datetime.now(timezone.utc).isoformat()
         return ExportCatalogResponse(
@@ -2660,6 +2663,9 @@ class HubService:
 
     def export_learning_pack_anki(self, pack_id: str) -> Optional[str]:
         """Returns Anki TSV formatted deck for a learning pack."""
+        from core.enterprise.enforcement import enforce_data_policy
+
+        enforce_data_policy("darkfac", "export")
         store = LearningPackStore()
         pack = store.load_pack(pack_id)
         if not pack:
