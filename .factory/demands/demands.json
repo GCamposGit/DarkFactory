@@ -10783,5 +10783,64 @@
     "dependencies": [],
     "created_at": "2026-10-24T05:09:42.041470Z",
     "updated_at": "2026-10-24T05:09:42.041470Z"
+  },
+  {
+    "id": "USR-370",
+    "project_id": "darkfac",
+    "title": "Completar isolamento de credenciais do agente: stage_build, child_env do run_ticket, capabilities por ticket e allowlist de rede",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-172 entregou primeira fatia: build_agent_env aplicado em core/line/agent_cli._run_bounded. Restam sem scrub: core/line/stage_build.py (comandos de verificacao em shell, ~linha 229) e run_ticket.py child_env (~linha 2671); capabilities por ticket nao sao lidas do spec; allowlist de rede esta so documentada (not_enforced) em .factory/config/agent_env_policy.json.",
+    "core_journey": [
+      "USR-172 entregou primeira fatia: build_agent_env aplicado em core/line/agent_cli._run_bounded. Restam sem scrub: core/line/stage_build.py (comandos de verificacao em shell, ~linha 229) e run_ticket.py child_env (~linha 2671); capabilities por ticket nao sao lidas do spec; allowlist de rede esta so documentada (not_enforced) em .factory/config/agent_env_policy.json."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "stage_build e child_env do run_ticket usam build_agent_env com teste de processo filho provando ausencia de segredos de deploy/backup",
+      "capabilities declaradas no ticket sao repassadas ao builder com teste",
+      "allowlist de rede aplicada por mecanismo real ou ticket com decisao registrada de inviabilidade"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T13:23:48.242972Z",
+    "updated_at": "2026-10-24T13:23:48.242972Z"
+  },
+  {
+    "id": "USR-371",
+    "project_id": "darkfac",
+    "title": "Propagar project_id da demanda para pick() e deliver_branch() e ligar enforcement de exportacao (seguimento USR-174)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-174 criou core/enterprise/enforcement.py, pick(project_id=) e deliver_branch(project_id='darkfac'), mas run_ticket.py e demais chamadores nao passam o project_id real da demanda; o efeito export nao tem chamador. Assim a politica por projeto so vale na entrega e sempre como darkfac.",
+    "core_journey": [
+      "USR-174 criou core/enterprise/enforcement.py, pick(project_id=) e deliver_branch(project_id='darkfac'), mas run_ticket.py e demais chamadores nao passam o project_id real da demanda; o efeito export nao tem chamador. Assim a politica por projeto so vale na entrega e sempre como darkfac."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "run_ticket.py e despachante passam o project_id da demanda para pick e deliver_branch, com teste de caminho real para projeto local_only",
+      "exportacoes do Hub/ledger chamam enforce_data_policy(effect='export') com teste de bloqueio"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-24T13:39:10.374345Z",
+    "updated_at": "2026-10-24T13:39:10.374345Z"
   }
 ]
