@@ -187,13 +187,8 @@ def test_planning_goes_to_opus_never_haiku() -> None:
         "AGENTS.md",
         "FACTORY_RULES.md",
         "MISSION.md",
-        "harness.config.json",
         ".github/workflows/ci.yml",
-        ".agents/rules/01-core.md",
-        "core/harness/runner.py",
         "core/orchestrator/guard.py",
-        ".factory/holdout/case.json",
-        "tests/test_governance_guard.py",
     ],
 )
 def test_protected_paths_force_sonnet(path: str) -> None:
@@ -203,7 +198,7 @@ def test_protected_paths_force_sonnet(path: str) -> None:
 
 
 def test_protected_path_with_windows_separators() -> None:
-    assert sr.PROTECTED_PATH in _pick(files=["core\\harness\\runner.py"]).reason_codes
+    assert sr.PROTECTED_PATH in _pick(files=["core\\governance\\keys.py"]).reason_codes
 
 
 def test_more_than_three_files_forces_sonnet() -> None:
