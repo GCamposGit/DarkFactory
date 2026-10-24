@@ -11,7 +11,7 @@
   "deny_patterns": [
     "^DOKPLOY", "BACKUP", "^GH_ADMIN", "^GITHUB_ADMIN", "^POSTGRES", "^PG(PASSWORD|USER|HOST)$",
     "^TELEGRAM", "^CLOUDFLARE", "^CF_API", "^AWS_", "^AZURE_", "^GCP_", "^DARKFAC_.*(TOKEN|SECRET|PASSWORD|KEY)",
-    "(PASSWORD|PASSWD)$", "_SECRET(_KEY)?$", "^SSH_AUTH_SOCK$", "^DEPLOY"
+    "(PASSWORD|PASSWD)$", "_SECRET(_KEY)?$", "^SSH_AUTH_SOCK$", "^DEPLOY", "^SOPS_", "^AGE_"
   ],
   "network_allowlist": {
     "status": "infeasible_documented",

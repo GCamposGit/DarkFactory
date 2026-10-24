@@ -1,0 +1,5 @@
+# USR-343 S5: configuracao do SOPS. Preencha "age" com as chaves PUBLICAS (age1...)
+# de cada maquina/owner que pode ler o cofre, separadas por virgula. Vazio = nao cifra.
+creation_rules:
+  - path_regex: secrets/.*\.enc\.yaml$
+    age: ""   # ex.: "age1abc...,age1def..."
