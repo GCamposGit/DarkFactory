@@ -10,6 +10,7 @@ Exit 0 ok, 1 deploy failed (previous colour kept), 2 usage/credentials.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -21,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.orchestrator.bluegreen import BlueGreenError, parse_state, run_bluegreen_deploy  # noqa: E402
+from core.infra.deploy_probe import DeployProbe, alert_non200  # noqa: E402
 from core.orchestrator.compose_render import (  # noqa: E402
     ComposeRenderError,
     render_darkhub_compose,
@@ -108,7 +110,17 @@ def main(argv: Optional[Sequence[str]] = None, env: Optional[Dict[str, str]] = N
             time.sleep(1)
         return True
 
+    def deployments_for_sha() -> int:
+        deployments = dr.fetch_service_status(transport, service).get("deployments")
+        if not isinstance(deployments, list):
+            return 0
+        return sum(
+            1 for item in deployments
+            if isinstance(item, dict) and sha in json.dumps(item).lower()
+        )
+
     try:
+        deploy_probe = DeployProbe(target_sha=sha)
         final = run_bluegreen_deploy(
             source=source,
             new_sha=sha,
@@ -117,10 +129,22 @@ def main(argv: Optional[Sequence[str]] = None, env: Optional[Dict[str, str]] = N
             sha_is_serving=sha_is_serving,
             wait_ghcr=lambda s: wait_for_ghcr_image(s),
             sleep_fn=time.sleep,
+            deploy_probe=deploy_probe,
+            deployments_for_sha=deployments_for_sha,
         )
     except Exception as exc:  # BlueGreenError, GHCR, Dokploy
+        result = deploy_probe.finish() if "deploy_probe" in locals() else None
+        if result is not None:
+            print(f"deploy probe: samples={result.sample_count} non200={result.non200} shas={','.join(result.observed_shas)}", file=sys.stderr)
+            alert_non200(result)
         print(f"blue-green deploy failed: {exc}", file=sys.stderr)
         return dr.EXIT_DEPLOY_FAILED
+    result = final.probe_result
+    if result is not None:
+        print(f"deploy probe: samples={result.sample_count} non200={result.non200} shas={','.join(result.observed_shas)} deployments_for_sha={result.deployments_for_sha} duplicate_deployment={result.duplicate_deployment}")
+        alert_non200(result)
+        if result.non200:
+            return dr.EXIT_DEPLOY_FAILED
     print(f"blue-green ok: active={final.active} sha={final.sha_of(final.active)}")
     return dr.EXIT_OK
 

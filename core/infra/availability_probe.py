@@ -15,6 +15,7 @@ import json
 import logging
 import sys
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,14 +47,35 @@ class ProbeState:
             return cls()
 
 
-def http_probe(url: str = DEFAULT_URL, timeout: float = 5.0) -> bool:
-    """True when /health answers 2xx within ``timeout``; never raises."""
+def http_probe_response(url: str = DEFAULT_URL, timeout: float = 5.0) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """Return ``(status, git_sha, error)`` for /health; never raises."""
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return 200 <= int(response.status) < 300
-    except Exception:
-        return False
+            status = int(response.status)
+            try:
+                payload = json.loads(response.read().decode("utf-8"))
+                sha = payload.get("git_sha") if isinstance(payload, dict) else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                sha = None
+            return status, str(sha) if sha else None, None
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+            sha = payload.get("git_sha") if isinstance(payload, dict) else None
+        except Exception:
+            sha = None
+        return int(exc.code), str(sha) if sha else None, None
+    except Exception as exc:
+        detail = getattr(exc, "reason", None)
+        timed_out = isinstance(exc, TimeoutError) or isinstance(detail, TimeoutError)
+        return None, None, "timeout" if timed_out else "connection_error"
+
+
+def http_probe(url: str = DEFAULT_URL, timeout: float = 5.0) -> bool:
+    """True when /health answers 2xx within ``timeout``; never raises."""
+    status, _sha, _error = http_probe_response(url, timeout)
+    return status is not None and 200 <= status < 300
 
 
 def tick(

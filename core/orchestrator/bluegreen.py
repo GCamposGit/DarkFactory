@@ -20,12 +20,15 @@ Design (see docs/proposals/USR-207-zero-downtime.md section 2.2):
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import time
 import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
+
+from core.infra.deploy_probe import DeployProbe, DeployProbeResult, alert_non200
 
 from core.orchestrator.compose_render import (
     IMAGE_SOURCE_BUILD,
@@ -75,6 +78,7 @@ class BlueGreenState:
     active: str
     blue_sha: str
     green_sha: str
+    probe_result: Optional[DeployProbeResult] = None
 
     def sha_of(self, color: str) -> str:
         return self.blue_sha if color == "blue" else self.green_sha
@@ -149,6 +153,8 @@ def run_bluegreen_deploy(
     sleep_fn: Callable[[float], None] = lambda _s: None,
     interval: float = 5.0,
     remove_legacy: Optional[Callable[[], bool]] = None,
+    deploy_probe: Optional[DeployProbe] = None,
+    deployments_for_sha: Optional[Callable[[], int]] = None,
 ) -> BlueGreenState:
     """Run overlap -> health gate -> cutover. Returns the final state.
 
@@ -172,6 +178,11 @@ def run_bluegreen_deploy(
     else:
         overlap_state = planned
         running = COLORS
+    if deploy_probe is not None:
+        try:
+            deploy_probe.start()
+        except Exception as exc:  # noqa: BLE001 - telemetry must not prevent deployment
+            logger.warning("blue-green probe could not start: %s", type(exc).__name__)
     try:
         apply_compose(render_bluegreen_compose(source, overlap_state, running))
         for _ in range(health_attempts):
@@ -203,8 +214,33 @@ def run_bluegreen_deploy(
                 restore_note = f"RESTORE FAILED ({restore_exc})"
         else:
             restore_note = "no previous compose to restore"
+        if deploy_probe is not None:
+            _finish_deploy_probe(deploy_probe, deployments_for_sha)
         raise BlueGreenError(f"{exc}; {restore_note}") from exc
+    probe_result = _finish_deploy_probe(deploy_probe, deployments_for_sha) if deploy_probe is not None else None
+    if probe_result is not None:
+        final = BlueGreenState(final.active, final.blue_sha, final.green_sha, probe_result)
     return final
+
+
+def _finish_deploy_probe(
+    probe: DeployProbe, deployments_for_sha: Optional[Callable[[], int]]
+) -> Optional[DeployProbeResult]:
+    try:
+        probe.stop()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("blue-green probe stop failed: %s", type(exc).__name__)
+    count = 0
+    if deployments_for_sha is not None:
+        try:
+            count = deployments_for_sha()
+        except Exception as exc:  # noqa: BLE001 - deployment listing is best effort evidence
+            logger.warning("blue-green deployment count unavailable: %s", type(exc).__name__)
+    try:
+        return probe.finish(deployments_for_sha=count)
+    except Exception as exc:  # noqa: BLE001 - evidence never masks deploy outcome
+        logger.warning("blue-green probe finalization failed: %s", type(exc).__name__)
+        return None
 
 
 DokployRequest = Callable[[str, str, Optional[dict]], Any]
@@ -222,8 +258,10 @@ def run_bluegreen_via_dokploy(
     poll_interval: float = 5.0,
     sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
+    deploy_probe: Optional[DeployProbe] = None,
 ) -> BlueGreenState:
     """Blue-green over the Dokploy API (``request(method, path, json_body) -> parsed JSON``)."""
+    active_probe = deploy_probe or DeployProbe(target_sha=new_sha)
     query = urllib.parse.urlencode({"composeId": compose_id})
 
     def one() -> dict:
@@ -267,11 +305,29 @@ def run_bluegreen_via_dokploy(
         except Exception:  # noqa: BLE001 - endpoint may not exist in this Dokploy version
             return False
 
-    return run_bluegreen_deploy(
-        source=source, new_sha=new_sha, read_compose=read_compose, apply_compose=apply_compose,
-        sha_is_serving=sha_is_serving, wait_ghcr=wait_ghcr, sleep_fn=sleep_fn,
-        remove_legacy=remove_legacy,
-    )
+    def deployments_for_sha() -> int:
+        deployments = one().get("deployments")
+        if not isinstance(deployments, list):
+            return 0
+        count = 0
+        for deployment in deployments:
+            if isinstance(deployment, dict) and new_sha.lower() in json.dumps(deployment).lower():
+                count += 1
+        return count
+
+    try:
+        result = run_bluegreen_deploy(
+            source=source, new_sha=new_sha, read_compose=read_compose, apply_compose=apply_compose,
+            sha_is_serving=sha_is_serving, wait_ghcr=wait_ghcr, sleep_fn=sleep_fn,
+            remove_legacy=remove_legacy, deploy_probe=active_probe,
+            deployments_for_sha=deployments_for_sha,
+        )
+    except Exception:
+        alert_non200(active_probe.finish())
+        raise
+    if result.probe_result is not None:
+        alert_non200(result.probe_result)
+    return result
 
 
 __all__ = [

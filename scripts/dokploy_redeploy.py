@@ -57,6 +57,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.git.safe_show import safe_show
 from core.orchestrator.bluegreen import BlueGreenError, is_bluegreen, run_bluegreen_via_dokploy
+from core.infra.deploy_probe import DeployProbe
 from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
@@ -1115,6 +1116,7 @@ def _run_main(
     triggered: List[Service] = []
     baselines: Dict[str, Optional[Deployment]] = {}
     for svc in selected:
+        deploy_probe: Optional[DeployProbe] = None
         try:
             baseline_payload = fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
@@ -1138,18 +1140,44 @@ def _run_main(
                 if is_bluegreen(baseline_payload.get("composeFile"), env):
                     # USR-339: never overwrite a blue-green compose with the single-container render.
                     print(f"[{svc.name}] blue-green deploy (USR-339)", file=out, flush=True)
-                    (bluegreen_runner or run_bluegreen_via_dokploy)(
+                    deploy_probe = DeployProbe(target_sha=expected_sha) if bluegreen_runner is None else None
+                    bluegreen_result = (bluegreen_runner or run_bluegreen_via_dokploy)(
                         request=transport, compose_id=svc.service_id, source=darkhub_compose,
                         new_sha=expected_sha, sha_is_serving=_bluegreen_serving(health_client),
                         deploy_timeout=args.timeout, poll_interval=args.poll_interval,
                         sleep_fn=sleep_fn, clock_fn=clock_fn,
                         wait_ghcr=lambda s: wait_for_ghcr_tag(s, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn),
+                        deploy_probe=deploy_probe,
                     )
+                    probe_result = getattr(bluegreen_result, "probe_result", None)
+                    if probe_result is not None:
+                        print(
+                            f"[{svc.name}] deploy probe: samples={probe_result.sample_count} "
+                            f"non200={probe_result.non200} shas={','.join(probe_result.observed_shas)} "
+                            f"deployments_for_sha={probe_result.deployments_for_sha} "
+                            f"duplicate_deployment={probe_result.duplicate_deployment}",
+                            file=out, flush=True,
+                        )
+                        if probe_result.non200:
+                            all_ok = False
+                            other_failure = True
+                            print(f"[{svc.name}] FAILED: availability probe observed non-200 responses", file=err, flush=True)
+                            continue
                     print(f"[{svc.name}] blue-green ok", file=out, flush=True)
                     continue
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
             trigger_deploy(transport, svc)
         except (DokployUsageError, BlueGreenError) as exc:
+            failed_probe = deploy_probe
+            if isinstance(failed_probe, DeployProbe):
+                probe_result = failed_probe.finish()
+                print(
+                    f"[{svc.name}] deploy probe: samples={probe_result.sample_count} "
+                    f"non200={probe_result.non200} shas={','.join(probe_result.observed_shas)} "
+                    f"deployments_for_sha={probe_result.deployments_for_sha} "
+                    f"duplicate_deployment={probe_result.duplicate_deployment}",
+                    file=out, flush=True,
+                )
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
             all_ok = False
             other_failure = True

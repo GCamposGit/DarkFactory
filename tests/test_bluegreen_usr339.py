@@ -164,6 +164,53 @@ def test_restore_failure_is_reported() -> None:
     assert len(calls) == 2
 
 
+def test_deploy_probe_starts_before_overlap_and_stops_after_cutover() -> None:
+    events: List[str] = []
+
+    class Probe:
+        def start(self) -> None:
+            events.append("probe-start")
+
+        def stop(self) -> None:
+            events.append("probe-stop")
+
+        def finish(self, *, deployments_for_sha: int = 0):
+            events.append(f"probe-finish:{deployments_for_sha}")
+            return None
+
+    run_bluegreen_deploy(
+        source=SRC, new_sha=C, read_compose=lambda: None,
+        apply_compose=lambda _compose: events.append("apply"),
+        sha_is_serving=lambda _sha: True, deploy_probe=Probe(),
+        deployments_for_sha=lambda: 2,
+    )
+    assert events == ["probe-start", "apply", "apply", "probe-stop", "probe-finish:2"]
+
+
+def test_deploy_probe_stops_after_failed_health_and_preserves_rollback() -> None:
+    events: List[str] = []
+
+    class Probe:
+        def start(self) -> None:
+            events.append("probe-start")
+
+        def stop(self) -> None:
+            events.append("probe-stop")
+
+        def finish(self, *, deployments_for_sha: int = 0):
+            events.append("probe-finish")
+            return None
+
+    with pytest.raises(BlueGreenError):
+        run_bluegreen_deploy(
+            source=SRC, new_sha=C, read_compose=lambda: SRC,
+            apply_compose=lambda compose: events.append("restore" if compose == SRC else "apply"),
+            sha_is_serving=lambda _sha: False, health_attempts=1, deploy_probe=Probe(),
+        )
+    assert events[0] == "probe-start"
+    assert events[-3:] == ["restore", "probe-stop", "probe-finish"]
+
+
 def test_restore_legacy_cli_only_updates_without_marker(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     from scripts import dokploy_bluegreen as bg
     from scripts import dokploy_redeploy as dr
