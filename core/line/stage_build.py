@@ -139,6 +139,8 @@ class TicketSpec(BaseModel):
     acceptance: list[str] = Field(default_factory=list)
     tests_to_add: list[str] = Field(default_factory=list)
     smoke: list[str] = Field(default_factory=list)
+    # USR-370: env names the ticket explicitly grants to the agent (bypass the credential scrub).
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class CommandRunResult(BaseModel):
@@ -204,6 +206,7 @@ def run_shell_commands(
     *,
     timeout_s: int = 1800,
     env: Optional[dict[str, str]] = None,
+    capabilities: Iterable[str] = (),
 ) -> CommandRunResult:
     """Run each command in `commands` sequentially in `cwd`, stopping at the first failure.
 
@@ -211,6 +214,11 @@ def run_shell_commands(
     `"python -m pytest -q"`); `shell=True` is required to support them as
     written, mirroring how a human or CI runner would invoke them.
     """
+    if env is None:
+        # USR-370: inherited host env is scrubbed of deploy/backup/DB/delivery credentials. An explicit
+        # `env` is the product environment (declared secrets) and is passed through untouched.
+        from core.line.agent_env import build_agent_env
+        env = build_agent_env(capabilities=capabilities)
     combined: list[str] = []
     start = time.perf_counter()
     exit_code = 0
@@ -534,6 +542,7 @@ class DevelopmentStage:
                         model=cli_model,
                         effort=cli_effort,
                         timeout_s=self.agent_timeout_s,
+                        capabilities=list(ticket.capabilities),
                     )
                 )
                 record_result(agent_result, config=self.routing_config)

@@ -165,7 +165,8 @@ def test_telegram_login_link_grants_the_session_once_valid(access_service: HubSe
     code = make_login_code(token, now=1000)
     assert verify_login_code(code, token, now=1500)
     assert not verify_login_code(code, token, now=1700)  # expired after 10 minutes
-    assert not verify_login_code(code[:-1] + "0", token, now=1500)
+    wrong_digit = "1" if code[-1] == "0" else "0"
+    assert not verify_login_code(code[:-1] + wrong_digit, token, now=1500)
     assert not verify_login_code(code, "rotated-token", now=1500)
 
     remote = TestClient(app, client=("203.0.113.9", 4000))
