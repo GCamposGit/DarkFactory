@@ -2575,7 +2575,7 @@
       "kind": "action",
       "title": "Mesclar PR #645 (USR-173: verificacao de tipos no portao) com --admin e ativar o passo static_types no harness.config.json",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "O PR toca core/harness/runner.py (protegido); o GUARD barra o agente no CI. Portao oficial passou. Para o mypy entrar no portao, harness.config.json (protegido) precisa trocar o passo syntax_and_types por syntax_only + static_types.",
       "blocks": [
         "USR-173"
@@ -2602,7 +2602,8 @@
       ],
       "verify": "gh pr view 645 --repo GCamposGit/DarkFactory mostra MERGED e python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick imprime [CHECK-SCOPE] static types (mypy)",
       "created_at": "2026-10-24T15:20:00Z",
-      "created_by": "claude"
+      "created_by": "claude",
+      "resolved_at": "2026-10-24T16:00:00Z"
     }
   ]
 }
