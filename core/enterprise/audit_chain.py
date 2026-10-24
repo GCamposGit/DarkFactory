@@ -9,6 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, List, Optional
@@ -24,10 +27,28 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ENTERPRISE_DIR = Path(".factory") / "enterprise"
 GENESIS_HASH = "0" * 64
+_PROCESS_LOCK = threading.Lock()
+
+
+class AuditReadError(Exception):
+    """Structured failure reading the audit log (fail-closed signal)."""
+
+    def __init__(self, code: str, message: str, line: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.line = line
 
 
 class ImmutableAuditChain:
-    """Manages an immutable, append-only hash-chained audit log."""
+    """Manages a tamper-evident, append-only hash-chained audit log.
+
+    Guarantees: modification, reordering, deletion of a middle record or any
+    unparsable/unreadable line is detected by ``verify_integrity`` (fail-closed).
+    A hash chain alone cannot detect deletion of the *tail* records; that is not
+    claimed. Writers are serialized by a process lock plus a lock file.
+    ``load_events`` is a lenient display reader that skips corrupt lines; it
+    must not be used as verification evidence.
+    """
 
     def __init__(self, root: Optional[Path] = None, log_file: Optional[Path] = None) -> None:
         self.root = Path(root) if root else project_root()
@@ -45,7 +66,42 @@ class ImmutableAuditChain:
         event_id: Optional[str] = None,
     ) -> AuditEvent:
         """Append a new tamper-evident audit event to the chain."""
-        events = self.load_events()
+        with _PROCESS_LOCK, self._file_lock():
+            return self._append_locked(
+                actor_id, project_id, action, resource, payload, event_id
+            )
+
+    def _file_lock(self) -> Any:
+        chain = self
+
+        class _Lock:
+            def __enter__(self_inner) -> "_Lock":
+                path = chain.log_file.with_suffix(chain.log_file.suffix + ".lock")
+                deadline = time.monotonic() + 10.0
+                while True:
+                    try:
+                        self_inner.fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                        self_inner.path = path
+                        return self_inner
+                    except FileExistsError:
+                        try:
+                            if time.time() - path.stat().st_mtime > 30:
+                                path.unlink(missing_ok=True)  # stale lock
+                                continue
+                        except OSError:
+                            pass
+                        if time.monotonic() > deadline:
+                            raise AuditReadError("lock_timeout", f"Cannot lock {path}")
+                        time.sleep(0.01)
+
+            def __exit__(self_inner, *exc: Any) -> None:
+                os.close(self_inner.fd)
+                self_inner.path.unlink(missing_ok=True)
+
+        return _Lock()
+
+    def _append_locked(self, actor_id, project_id, action, resource, payload, event_id) -> AuditEvent:
+        events = self._read_strict()  # refuse to extend a corrupt/unreadable chain
         seq = len(events)
         prev_hash = events[-1].event_hash if events else GENESIS_HASH
 
@@ -76,6 +132,31 @@ class ImmutableAuditChain:
 
         return event
 
+    def _read_strict(self) -> List[AuditEvent]:
+        """Read all events; raise AuditReadError on any malformed line or I/O error."""
+        if not self.log_file.is_file():
+            return []
+        events: List[AuditEvent] = []
+        try:
+            with self.log_file.open("r", encoding="utf-8") as f:
+                for line_idx, line in enumerate(f):
+                    line_str = line.strip()
+                    if not line_str:
+                        continue
+                    try:
+                        events.append(AuditEvent.model_validate(json.loads(line_str)))
+                    except Exception as exc:
+                        raise AuditReadError(
+                            "malformed_line",
+                            f"Malformed audit line {line_idx} in {self.log_file}: {exc}",
+                            line_idx,
+                        ) from exc
+        except AuditReadError:
+            raise
+        except (OSError, UnicodeDecodeError) as exc:
+            raise AuditReadError("read_failure", f"Cannot read {self.log_file}: {exc}") from exc
+        return events
+
     def load_events(self, project_id: Optional[str] = None) -> List[AuditEvent]:
         """Load and parse events from disk, optionally filtered by project."""
         if not self.log_file.is_file():
@@ -99,12 +180,24 @@ class ImmutableAuditChain:
 
     def verify_integrity(self, project_id: Optional[str] = None) -> AuditChainVerificationResult:
         """Mathematically verify the hash chain integrity from genesis to head."""
-        all_events = self.load_events(project_id=None)  # Must verify global chain sequence
+        try:
+            all_events = self._read_strict()  # Must verify global chain sequence
+        except AuditReadError as err:
+            logger.error("Audit verification blocked: %s", err)
+            return AuditChainVerificationResult(
+                is_valid=False,
+                total_events=0,
+                error_message=str(err),
+                status="unreadable",
+                error_code=err.code,
+                error_line=err.line,
+            )
         if not all_events:
             return AuditChainVerificationResult(
                 is_valid=True,
                 total_events=0,
                 error_message="Audit chain is empty (valid genesis state).",
+                status="absent" if not self.log_file.is_file() else "intact",
             )
 
         expected_prev = GENESIS_HASH
@@ -115,6 +208,8 @@ class ImmutableAuditChain:
                     is_valid=False,
                     total_events=len(all_events),
                     tampered_event_id=evt.event_id,
+                    status="tampered",
+                    error_code="chain_violation",
                     error_message=f"Sequence anomaly: expected {idx}, got {evt.sequence}.",
                 )
 
@@ -124,6 +219,8 @@ class ImmutableAuditChain:
                     is_valid=False,
                     total_events=len(all_events),
                     tampered_event_id=evt.event_id,
+                    status="tampered",
+                    error_code="chain_violation",
                     error_message=f"Broken hash link at event {evt.event_id}. Expected prev_hash {expected_prev[:12]}..., got {evt.prev_hash[:12]}...",
                 )
 
@@ -135,6 +232,8 @@ class ImmutableAuditChain:
                     is_valid=False,
                     total_events=len(all_events),
                     tampered_event_id=evt.event_id,
+                    status="tampered",
+                    error_code="chain_violation",
                     error_message=f"Tampered content at event {evt.event_id}. Recomputed hash {recomputed[:12]}... does not match recorded {evt.event_hash[:12]}...",
                 )
 
