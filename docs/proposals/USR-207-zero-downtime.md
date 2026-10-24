@@ -108,18 +108,15 @@ Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de 
 
 ## 3. Memoria: como medir antes de mexer nos 512 MB
 
-Nao alterar o limite agora. Evidencia necessaria para mudar:
+O endpoint existente `GET /health?memory=true` inclui `memory.current`, limite e contador `oom_kill` do cgroup (v2, com fallback v1), mais um identificador de instancia para detectar reinicializacao. Sem o parametro, o payload publico original de `/health` permanece intacto. A sonda externa de um minuto persiste o ultimo tick, o contador OOM e o estado dos alertas. Ela avisa uma vez por incremento de OOM, alerta uso >=85% depois de dois ticks consecutivos e envia recuperacao quando o uso volta abaixo do limite de alerta. O comando `python -m core.infra.availability_probe --status` imprime a idade do ultimo tick e sai com codigo 1 quando o agendamento esta stale (padrao: 180 s).
 
-1. Coletar na VPS, durante pelo menos uma semana util e incluindo ao menos 3 deploys e uma rajada de telemetria:
+Nao alterar o limite de 512M sem medicao. Para coletar a carga de cinco minutos a partir de uma checkout sincronizada no Notebook/Desktop (nunca na VPS), execute primeiro uma rodada curta e leve para conferir conectividade; depois rode o perfil de aceite:
 
-```bash
-docker stats --no-stream --format "{{.Name}} {{.MemUsage}} {{.MemPerc}}" darkhub-cloud-247   # a cada 30 s via cron
-docker inspect -f "{{.State.OOMKilled}} {{.RestartCount}}" darkhub-cloud-247
-dmesg -T | grep -i "out of memory"
-free -m
+```powershell
+python C:\dev\DarkFac\scripts\hub_load_probe.py --url https://darkhub.ggcampos.com --duration 30 --concurrency 2 --output C:\dev\DarkFac\hub-load-smoke.json
+python C:\dev\DarkFac\scripts\hub_load_probe.py --url https://darkhub.ggcampos.com --duration 300 --concurrency 20 --output C:\dev\DarkFac\hub-load-report.json
 ```
 
-2. Carga sintetica contra o container (do Notebook): 20 requisicoes simultaneas em `/api/cloud/status`, `/api/usage/accounts` e `/api/telemetry/tickets` por 5 min, anotando o pico de `MemUsage` e a latencia p95.
-3. Observar o pico durante o build local atual (RAM da VPS ~79%): a memoria que falta e do build, nao do runtime; com a imagem vinda do GHCR esse pico some.
-4. Criterio para subir o limite: pico RSS do container >= 80% de 512 MB em operacao normal OU `OOMKilled=true`/`RestartCount` crescendo. Subir para o proximo degrau (768 MB) e remedir; aumentar a VPS so se `free -m` mostrar a VPS sem folga com o limite novo (non-goal do ticket: nao aumentar a VPS sem medicao).
-5. Registrar os numeros em `docs/` (ou no ticket) antes da mudanca de `deploy.resources.limits.memory`.
+A sonda envia 20 requisicoes concorrentes rotacionadas entre `/api/cloud/status`, `/api/usage/accounts` e `/api/telemetry/tickets`; amostra `/health` para memoria, OOM, SHA e identidade da instancia. Ela aborta e grava o JSON se o processo/sha mudar ou se `oom_kill` subir. O relatorio contem pico de memoria, estimativa de pico com duas cores simultaneas (`blue_green_overlap_peak_memory_bytes`), p95 de latencia dos tres endpoints e amostras brutas. Em caso de abort por OOM ou reinicializacao, nao repita a carga ate investigar.
+
+Registre tambem, no mesmo periodo, memoria total/disponivel da VPS, OOMKilled/restart count de ambas as cores e pelo menos tres deploys blue-green. Compare o pico agregado observado das duas cores com a RAM fisica e os demais servicos da VPS. O limite so pode ser ajustado apos esse relatorio estar anexado aqui; sem evidencia, o compose permanece em 512M. Nenhuma medicao de producao foi coletada nesta implementacao.

@@ -14,8 +14,10 @@ from typing import Any, Callable, Dict, List, Optional
 import pytest
 
 from core.infra import availability_probe as probe_mod
+from core.infra import container_memory
 from core.infra import deploy_classifier as dc
 from scripts import dokploy_redeploy as mod
+from scripts import hub_load_probe
 
 
 @pytest.fixture(autouse=True)
@@ -355,6 +357,96 @@ def test_probe_state_roundtrip_and_corrupt_file(tmp_path: Path) -> None:
     assert probe_mod.load_state(path) == probe_mod.ProbeState(5.0, True)
     path.write_text("{garbage", encoding="utf-8")
     assert probe_mod.load_state(path) == probe_mod.ProbeState()
+
+
+def test_container_memory_reads_cgroup_v2_and_unbounded_limit(tmp_path: Path) -> None:
+    (tmp_path / "memory.current").write_text("12345\n", encoding="utf-8")
+    (tmp_path / "memory.max").write_text("max\n", encoding="utf-8")
+    (tmp_path / "memory.events").write_text("low 0\nhigh 1\nmax 0\noom 0\noom_kill 2\n", encoding="utf-8")
+
+    result = container_memory.read_container_memory(cgroup_v2=tmp_path, cgroup_v1=tmp_path / "missing")
+
+    assert result == {
+        "available": True, "version": 2, "current_bytes": 12345,
+        "limit_bytes": None, "oom_kill_count": 2,
+    }
+    missing = tmp_path / "partial"
+    missing.mkdir()
+    (missing / "memory.current").write_text("42", encoding="utf-8")
+    assert container_memory.read_container_memory(cgroup_v2=missing, cgroup_v1=tmp_path / "absent")["available"] is True
+    assert container_memory.read_container_memory(cgroup_v2=missing, cgroup_v1=tmp_path / "absent")["oom_kill_count"] is None
+
+
+def test_container_memory_falls_back_to_v1_and_never_raises(tmp_path: Path) -> None:
+    v1 = tmp_path / "v1"
+    v1.mkdir()
+    (v1 / "memory.usage_in_bytes").write_text("500\n", encoding="utf-8")
+    (v1 / "memory.limit_in_bytes").write_text("1000\n", encoding="utf-8")
+    (v1 / "memory.oom_control").write_text("oom_kill 3\nunder_oom 0\n", encoding="utf-8")
+
+    assert container_memory.read_container_memory(cgroup_v2=tmp_path / "absent", cgroup_v1=v1) == {
+        "available": True, "version": 1, "current_bytes": 500,
+        "limit_bytes": 1000, "oom_kill_count": 3,
+    }
+    assert container_memory.read_container_memory(cgroup_v2=tmp_path / "absent", cgroup_v1=tmp_path / "absent2")["available"] is False
+
+
+def test_health_memory_query_exposes_cgroup_data_without_changing_default_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+    from hub.backend.main import app
+
+    monkeypatch.setattr(container_memory, "read_container_memory", lambda: {"available": True, "current_bytes": 12})
+    client = TestClient(app)
+    standard = client.get("/health")
+    measured = client.get("/health?memory=true")
+    assert "memory" not in standard.json() and "instance_id" not in standard.json()
+    assert measured.json()["memory"] == {"available": True, "current_bytes": 12}
+    assert measured.json()["instance_id"]
+
+
+def test_memory_alerts_once_for_oom_and_recovers_and_requires_two_high_ticks() -> None:
+    state = probe_mod.ProbeState()
+    sent: List[str] = []
+    now = [100.0]
+    values = {"status": "ok", "git_sha": "a", "memory": {"available": True, "current_bytes": 90, "limit_bytes": 100, "oom_kill_count": 0}}
+
+    def step() -> None:
+        probe_mod.tick(state, probe=lambda: values, send=lambda message: sent.append(message) or True, now=lambda: now[0])
+        now[0] += 60
+
+    values["memory"]["current_bytes"] = 90
+    step()
+    assert not sent  # one high tick is quiet
+    step()
+    assert len(sent) == 1 and "85%" in sent[0]
+    step()
+    assert len(sent) == 1
+    values["memory"]["current_bytes"] = 20
+    step()
+    assert len(sent) == 2 and "recuper" in sent[-1].lower()
+    values["memory"]["oom_kill_count"] = 1
+    step()
+    step()
+    assert len(sent) == 4 and "oom_kill" in sent[-2].lower() and "recuper" in sent[-1].lower()
+
+
+def test_probe_status_fails_when_last_tick_is_stale_and_passes_when_recent(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "probe.json"
+    probe_mod.save_state(path, probe_mod.ProbeState(last_tick_ts=100.0))
+    assert probe_mod.main(path=path, status=True, now=1000.0, stale_after_seconds=300) != 0
+    assert "idade" in capsys.readouterr().out.lower()
+    probe_mod.save_state(path, probe_mod.ProbeState(last_tick_ts=950.0))
+    assert probe_mod.main(path=path, status=True, now=1000.0, stale_after_seconds=300) == 0
+
+
+def test_load_probe_report_calculates_peak_and_p95_from_samples() -> None:
+    report = hub_load_probe.summarize_samples([
+        {"latency_ms": 10, "memory_current_bytes": 100, "git_sha": "a", "oom_kill_count": 0},
+        {"latency_ms": 20, "memory_current_bytes": 250, "git_sha": "a", "oom_kill_count": 0},
+        {"latency_ms": 30, "memory_current_bytes": 150, "git_sha": "a", "oom_kill_count": 0},
+    ])
+    assert report["peak_memory_bytes"] == 250
+    assert report["latency_p95_ms"] == 30
 
 
 # --------------------------------------------------------------------------- frontend (static)

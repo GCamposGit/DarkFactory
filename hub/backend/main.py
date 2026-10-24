@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 import os
 import urllib.parse
+import uuid
 from starlette.types import ASGIApp, Scope, Receive, Send
 from starlette.responses import Response, JSONResponse
 
@@ -21,6 +22,7 @@ from hub.backend.service import HubService
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
+HUB_INSTANCE_ID = uuid.uuid4().hex
 
 ALLOWED_HOSTS = {
     "localhost",
@@ -183,14 +185,19 @@ app.include_router(roadmap_router, prefix="/api")
 app.include_router(roadmap_router)
 
 @app.get("/health", include_in_schema=False)
-def get_health(disk: bool = False) -> Dict[str, Any]:
-    """Liveness plus the deployed commit (USR-65) and optional disk space capacity (USR-122)."""
+def get_health(disk: bool = False, memory: bool = False) -> Dict[str, Any]:
+    """Liveness, deployed commit, and best-effort container memory counters."""
     from core.infra.git_sha import current_git_sha
 
     data: Dict[str, Any] = {
         "status": "ok",
         "git_sha": current_git_sha(BASE_DIR.parent, use_env=True),
     }
+    if memory:
+        from core.infra.container_memory import read_container_memory
+
+        data["instance_id"] = HUB_INSTANCE_ID
+        data["memory"] = read_container_memory()
     if disk:
         from core.infra.vps_cleanup import get_local_disk_usage
 
