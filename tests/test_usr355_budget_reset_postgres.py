@@ -66,19 +66,19 @@ def test_ddl_adds_budget_column_idempotently() -> None:
 
 def test_resume_of_no_route_park_resets_budget() -> None:
     store, log = _store("no_route_available")
-    assert store.resume_job(KEY, NOW)
+    assert store.resume_job(KEY, now=NOW)
     assert any("UPDATE runs SET budget_reset_at" in sql for sql, _ in log)
 
 
 def test_resume_of_other_park_keeps_budget() -> None:
     store, log = _store("ci_pending")
-    assert store.resume_job(KEY, NOW)
+    assert store.resume_job(KEY, now=NOW)
     assert not any("UPDATE runs SET budget_reset_at" in sql for sql, _ in log)
 
 
 def test_budget_column_failure_never_breaks_resume_or_lookup() -> None:
     store, _ = _store("no_route_available", fail_budget=True)
-    assert store.resume_job(KEY, NOW) is True
+    assert store.resume_job(KEY, now=NOW) is True
     store.get_run_budget_started_at("r1")  # degrades to created_at, must not raise
 
 
