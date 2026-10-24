@@ -325,8 +325,7 @@ def test_probe_state_roundtrip_and_corrupt_file(tmp_path: Path) -> None:
 
 # --------------------------------------------------------------------------- frontend (static)
 
-# live.js belongs to the /live page (USR-208), which has its own polling/backoff; every other module uses hub_net.js.
-RAW_FETCH_ALLOWED = {"hub_net.js", "live.js"}
+RAW_FETCH_ALLOWED = {"hub_net.js"}
 
 
 def test_no_raw_fetch_outside_the_helper() -> None:
@@ -345,6 +344,12 @@ def test_helper_is_loaded_before_every_module_and_shows_banner_text() -> None:
     scripts = re.findall(r'<script src="/static/([\w.]+)\?v=', html)
     assert scripts[0] == "hub_net.js"
     assert "Hub atualizando, reconectando..." in (FRONTEND / "hub_net.js").read_text(encoding="utf-8")
+
+
+def test_live_page_loads_helper_before_live_module() -> None:
+    html = (FRONTEND / "live.html").read_text(encoding="utf-8")
+    scripts = re.findall(r'<script src="/static/([\w.]+)\?v=', html)
+    assert scripts.index("hub_net.js") < scripts.index("live.js")
 
 
 def test_hub_net_node_behaviour() -> None:

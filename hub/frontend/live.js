@@ -1319,7 +1319,12 @@
     const ctl = new AbortController();
     conn.abort = ctl;
     const timer = setTimeout(function () { ctl.abort(); }, FETCH_TIMEOUT_MS);
-    return fetch(SNAPSHOT_URL, { signal: ctl.signal, headers: { Accept: 'application/json' }, cache: 'no-store' })
+    return window.hubNetFetch(SNAPSHOT_URL, {
+      signal: ctl.signal,
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      hubNetMaxAttempts: 1
+    })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .finally(function () { clearTimeout(timer); });
   }

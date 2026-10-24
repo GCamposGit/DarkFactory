@@ -43,14 +43,21 @@ function hubNetRetryable(method, error, response) {
 
 async function hubNetFetch(url, options = {}) {
   const method = String((options && options.method) || "GET").toUpperCase();
+  const requestedAttempts = Number(options && options.hubNetMaxAttempts);
+  const maxAttempts = Number.isFinite(requestedAttempts) && requestedAttempts > 0
+    ? Math.max(1, Math.floor(requestedAttempts))
+    : HUB_NET_DELAYS_MS.length + 1;
+  // Keep the helper-only control out of the browser's RequestInit object.
+  const fetchOptions = { ...options };
+  delete fetchOptions.hubNetMaxAttempts;
   let lastError = null;
   let lastResponse = null;
   let marked = false;
-  for (let attempt = 0; attempt <= HUB_NET_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     lastError = null;
     lastResponse = null;
     try {
-      const response = await fetch(url, options);
+      const response = await fetch(url, fetchOptions);
       if (!HUB_NET_RETRY_STATUS.includes(response.status)) {
         if (marked) hubNetState.retrying = Math.max(0, hubNetState.retrying - 1);
         if (hubNetState.retrying === 0) hubNetSetBanner(false);
@@ -64,13 +71,13 @@ async function hubNetFetch(url, options = {}) {
       }
       lastError = error;
     }
-    if (attempt === HUB_NET_DELAYS_MS.length || !hubNetRetryable(method, lastError, lastResponse)) break;
+    if (attempt + 1 >= maxAttempts || !hubNetRetryable(method, lastError, lastResponse)) break;
     if (!marked) {
       marked = true;
       hubNetState.retrying += 1;
     }
     hubNetSetBanner(true);
-    await hubNetSleep(HUB_NET_DELAYS_MS[attempt]);
+    await hubNetSleep(HUB_NET_DELAYS_MS[Math.min(attempt, HUB_NET_DELAYS_MS.length - 1)]);
   }
   if (marked) hubNetState.retrying = Math.max(0, hubNetState.retrying - 1);
   if (lastResponse) {
