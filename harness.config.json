@@ -1,8 +1,14 @@
 {
   "steps": [
     {
-      "name": "syntax_and_types",
+      "name": "syntax_only",
       "cmd": "python -m compileall -q core hub run_hub.py",
+      "quick": true,
+      "kind": "check"
+    },
+    {
+      "name": "static_types",
+      "cmd": "python scripts/typecheck.py",
       "quick": true,
       "kind": "check"
     },
