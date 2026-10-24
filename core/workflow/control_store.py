@@ -442,6 +442,13 @@ class SQLiteControlStore:
                 """
             )
             self._migrate_jobs_columns(conn)
+            self._migrate_runs_columns(conn)
+
+    def _migrate_runs_columns(self, conn: sqlite3.Connection) -> None:
+        """Idempotent ALTER for `runs.budget_reset_at` (USR-355)."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "budget_reset_at" not in existing:
+            conn.execute("ALTER TABLE runs ADD COLUMN budget_reset_at TEXT")
 
     def _migrate_jobs_columns(self, conn: sqlite3.Connection) -> None:
         """Idempotent ALTERs for columns added after the initial CREATE TABLE (HF-27-08).
@@ -1666,6 +1673,18 @@ class SQLiteControlStore:
         try:
             conn.execute("BEGIN IMMEDIATE")
             cur = conn.cursor()
+            # USR-355: a job parked on a missing route that gets resumed (probe saw a route) starts
+            # a fresh wall-clock budget, else the old run clock re-parks it on the first miss.
+            cur.execute(
+                """
+                SELECT cause_code FROM jobs
+                WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ? AND iteration = ?
+                  AND status IN ('waiting_human', 'waiting_dependency')
+                """,
+                (job_key.run_id, job_key.ticket_id, job_key.plan_version, job_key.stage, job_key.iteration),
+            )
+            parked = cur.fetchone()
+            reset_budget = bool(parked) and str(parked[0] or "").startswith("no_route_available")
             cur.execute(
                 """
                 UPDATE jobs
@@ -1676,6 +1695,8 @@ class SQLiteControlStore:
                 (now_iso, now_iso, job_key.run_id, job_key.ticket_id, job_key.plan_version, job_key.stage, job_key.iteration),
             )
             resumed = cur.rowcount > 0
+            if resumed and reset_budget:
+                cur.execute("UPDATE runs SET budget_reset_at = ? WHERE run_id = ?", (now_iso, job_key.run_id))
             if resumed:
                 # Heal legacy rows: a run closed as `completed` while this job was
                 # parked is live again (idempotent; same transaction).
@@ -1810,6 +1831,27 @@ class SQLiteControlStore:
             return int(value) if value is not None else -1
         finally:
             conn.close()
+
+    def get_run_budget_started_at(self, run_id: str) -> str | None:
+        """Start of the run's wall-clock budget: `created_at`, or the last no-route resume if later (USR-355)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT created_at, budget_reset_at FROM runs WHERE run_id = ?", (run_id,))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        created, reset = row["created_at"], row["budget_reset_at"]
+        if not reset:
+            return created
+        try:
+            a = datetime.fromisoformat(str(created)); b = datetime.fromisoformat(str(reset))
+            a = a if a.tzinfo else a.replace(tzinfo=UTC); b = b if b.tzinfo else b.replace(tzinfo=UTC)
+            return reset if b > a else created
+        except ValueError:
+            return created
 
     def get_run_created_at(self, run_id: str) -> str | None:
         """ISO `created_at` of `run_id`'s `runs` row, or `None` if unknown.
