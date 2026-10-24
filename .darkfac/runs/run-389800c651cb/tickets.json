@@ -1,0 +1,113 @@
+[
+  {
+    "id": "T1",
+    "title": "Caminhos embutidos na imagem do Hub com uma unica fonte de verdade (classificador x Dockerfile x workflow)",
+    "goal": "Garantir que todo sha que o classificador manda deployar tenha imagem GHCR publicada e que merges que nao mudam a imagem nao reconstruam nem recriem nada: alinhar core/infra/deploy_classifier.py aos COPY de deploy/dokploy/Dockerfile.hub e travar por teste estatico a cobertura pelo gatilho de .github/workflows/hub-image.yml, sem editar o workflow protegido.",
+    "files_hint": [
+      "core/infra/deploy_classifier.py",
+      "tests/test_hub_deploy_usr207.py",
+      "deploy/dokploy/Dockerfile.hub",
+      ".github/workflows/hub-image.yml"
+    ],
+    "acceptance": [
+      "Os caminhos de rebuild do classificador citam o COPY do Dockerfile.hub como fonte da verdade e nenhum entra na lista sem estar de fato copiado para a imagem (run_hub.py, que nao e copiado, nunca pede rebuild)",
+      "Um merge que toca somente .factory/demands/**, .factory/owner_actions/** ou docs/ e classificado como dados: sem rebuild e sem recriacao de container",
+      "Teste estatico prova que todo caminho de rebuild do classificador esta coberto pelos paths do gatilho de .github/workflows/hub-image.yml; ao falhar, a mensagem instrui a abrir acao do owner (OA) por ser caminho protegido, nunca a editar o workflow",
+      "Fail-closed preservado: diff None ou vazio continua resultando em rebuild, e caminhos de runtime atuais (core/, hub/, scripts/, deploy/, requirements.txt, harness.config.json) continuam gerando exatamente uma operacao de deploy",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py::test_classifier_rebuild_paths_are_copied_by_dockerfile_hub",
+      "tests/test_hub_deploy_usr207.py::test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger",
+      "tests/test_hub_deploy_usr207.py::test_ledger_only_merge_is_data_only_and_empty_diff_fails_closed"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Uma unica espera da tag GHCR, com recusa imediata e acionavel para a imagem privada",
+    "goal": "Unificar as duas esperas da imagem (core/orchestrator/compose_render.wait_for_ghcr_image e scripts/dokploy_redeploy.wait_for_ghcr_tag) numa so e dar erro acionavel quando a tag privada nao pode ser verificada, sem fallback para build na VPS e sem escrever no Dokploy antes de a imagem existir.",
+    "files_hint": [
+      "scripts/dokploy_redeploy.py",
+      "core/orchestrator/compose_render.py",
+      "core/orchestrator/deployment_adapter.py",
+      "tests/test_compose_render.py",
+      "tests/test_dokploy_redeploy.py"
+    ],
+    "acceptance": [
+      "scripts/dokploy_redeploy.wait_for_ghcr_tag delega para compose_render.wait_for_ghcr_image mantendo o timeout atual, a injecao de probe/sleep/clock e a traducao de erro para os mesmos codigos de saida do CLI",
+      "Sem GHCR_TOKEN e sem GITHUB_PAT, um probe 401/403 recusa na hora (zero sleeps) com mensagem citando GHCR_TOKEN com read:packages e a OA-053, e deixando claro que a imagem e privada por decisao do owner",
+      "Com token configurado, 404 seguido de 200 prossegue; no esgotamento do prazo a mensagem traz o ultimo status HTTP observado e nao propoe build na VPS",
+      "Nenhum POST ao Dokploy (compose.update/compose.deploy) acontece quando a espera falha, no CLI, no DokployDeploymentAdapter e no caminho blue-green",
+      "Nenhuma mensagem de log ou erro imprime token ou segredo",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_compose_render.py::test_ghcr_wait_refuses_at_once_when_no_token_and_registry_answers_401",
+      "tests/test_compose_render.py::test_ghcr_wait_polls_404_then_succeeds_and_timeout_reports_last_status",
+      "tests/test_dokploy_redeploy.py::test_cli_ghcr_wait_delegates_to_shared_waiter_and_keeps_exit_codes",
+      "tests/test_dokploy_redeploy.py::test_no_dokploy_write_when_ghcr_wait_refuses",
+      "tests/test_dokploy_redeploy.py::test_ghcr_wait_error_never_prints_token"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Memoria e OOMKilled do container do Hub medidos e visiveis, limite ajustado so com evidencia",
+    "goal": "Fechar o criterio de memoria do USR-207: coletar memoria usada/limite e eventos OOMKilled do container do Hub em core/infra/metrics.py, mostra-los no painel de infraestrutura (via hubNetFetch, sem fetch cru) e registrar a medicao sob carga em docs, mantendo 512 MB enquanto a evidencia nao justificar outro valor.",
+    "files_hint": [
+      "core/infra/metrics.py",
+      "hub/frontend/infra.js",
+      "scripts/hub_memory_report.py",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "docs/proposals/USR-207-zero-downtime.md",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "A telemetria de containers expoe, por container, memoria usada, limite configurado e contagem de OOMKilled/restarts quando a fonte fornece, e degrada para desconhecido (sem excecao e sem zero falso) quando nao fornece",
+      "O painel de infraestrutura do Hub mostra memoria e OOMKilled do darkhub usando exclusivamente o helper hubNetFetch; nenhum fetch cru novo entra em hub/frontend/",
+      "Um script determinista (sem rede obrigatoria, com transporte injetavel) produz o relatorio de memoria do Hub e e o comando citado na documentacao com caminho absoluto do PowerShell",
+      "O limite de memoria do servico do Hub permanece 512 MB; qualquer alteracao vem acompanhada do relatorio de medicao citado na documentacao, incluindo a sobreposicao de dois containers do blue-green",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py::test_container_metrics_expose_memory_and_oomkilled",
+      "tests/test_hub_deploy_usr207.py::test_container_metrics_unknown_memory_does_not_report_zero",
+      "tests/test_hub_deploy_usr207.py::test_hub_memory_report_script_is_deterministic_with_injected_transport",
+      "tests/test_hub_deploy_usr207.py::test_infra_panel_uses_hubnetfetch_only"
+    ],
+    "smoke": [
+      "/health",
+      "/api/cloud/status"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Proposta USR-207 no estado entregue e agendamento da sonda externa travado por teste",
+    "goal": "Reescrever docs/proposals/USR-207-zero-downtime.md para o que esta de fato em main (workflow GHCR, DARKHUB_IMAGE_SOURCE, blue-green no Traefik, hubNetFetch, sonda com alerta no Telegram ops), nomear o que ficou fora (USR-363, OA-058) e cobrir por teste o bloco de agendamento da sonda para continuar colavel no PowerShell.",
+    "files_hint": [
+      "docs/proposals/USR-207-zero-downtime.md",
+      "core/infra/availability_probe.py",
+      "tests/test_hub_deploy_usr207.py"
+    ],
+    "acceptance": [
+      "As secoes descrevem o estado entregue (nada marcado como proposto para o que ja esta em main) e nomeiam explicitamente os residuos: rollback de falha do compose up e pull da imagem privada (USR-363) e remocao do container legado (OA-058)",
+      "A documentacao registra a decisao do owner de manter a imagem GHCR privada com pull autenticado e aponta a OA-059 como a acao que habilitou o pull na VPS",
+      "O bloco de agendamento da sonda usa Register-ScheduledTask, caminho absoluto do interpretador e nenhuma aspa aninhada que quebre ao colar no PowerShell, verificado por teste estatico; nenhum schtasks",
+      "Todo comando de terminal citado na proposta usa caminho absoluto, e o alerta no Telegram ops por falha de /health acima de 2 min esta descrito conforme o comportamento de core/infra/availability_probe.py (coberto por teste do limiar)",
+      "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick passa"
+    ],
+    "tests_to_add": [
+      "tests/test_hub_deploy_usr207.py::test_proposal_probe_schedule_block_is_powershell_paste_safe",
+      "tests/test_hub_deploy_usr207.py::test_proposal_declares_delivered_state_and_open_residuals",
+      "tests/test_hub_deploy_usr207.py::test_availability_probe_alerts_after_two_minutes_of_failures"
+    ],
+    "smoke": [
+      "/health"
+    ]
+  }
+]
