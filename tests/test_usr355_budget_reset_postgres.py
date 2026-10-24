@@ -10,7 +10,7 @@ from core.orchestrator.adapters.control_postgres import POSTGRES_DDL, PostgresCo
 from core.orchestrator.cloud_worker import CloudWorker
 from core.workflow.control_contracts import JobKey
 
-NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(microsecond=0)
 KEY = JobKey(run_id="r1", ticket_id="T", plan_version="1.0", stage="development", iteration=0)
 
 
