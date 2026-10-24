@@ -583,19 +583,13 @@ def test_load_probe_aborts_and_writes_report_when_health_drops_mid_run(
 
 # --------------------------------------------------------------------------- frontend (static)
 
-# The network helper is the only frontend module allowed to call fetch directly.
-RAW_FETCH_ALLOWED = {"hub_net.js"}
-
-
 def test_no_raw_fetch_outside_the_helper() -> None:
-    offenders = []
+    raw_fetch_files = []
     for js in sorted(FRONTEND.glob("*.js")):
-        if js.name in RAW_FETCH_ALLOWED:
-            continue
-        for n, line in enumerate(js.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"(?<![\w.$])fetch\(", line) and not line.lstrip().startswith("//"):
-                offenders.append(f"{js.name}:{n}")
-    assert offenders == []
+        source = js.read_text(encoding="utf-8")
+        if re.search(r"(?<![\w.$])fetch\(", source):
+            raw_fetch_files.append(js.name)
+    assert raw_fetch_files == ["hub_net.js"]
 
 
 def test_helper_is_loaded_before_every_module_and_shows_banner_text() -> None:

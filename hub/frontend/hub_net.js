@@ -10,8 +10,35 @@ const HUB_NET_DELAYS_MS = [500, 1000, 2000, 3000, 5000, 8000, 10000, 10000, 1000
 const HUB_NET_SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
 const hubNetState = { retrying: 0, watcher: false };
 
-function hubNetSleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function hubNetAbortError(signal) {
+  if (signal && signal.reason && signal.reason.name === "AbortError") return signal.reason;
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function hubNetSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(hubNetAbortError(signal));
+      return;
+    }
+    let timer;
+    const cleanup = () => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+    };
+    const finish = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(hubNetAbortError(signal));
+    };
+    timer = setTimeout(finish, ms);
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function hubNetSetBanner(visible) {
@@ -70,7 +97,15 @@ async function hubNetFetch(url, options = {}) {
       hubNetState.retrying += 1;
     }
     hubNetSetBanner(true);
-    await hubNetSleep(HUB_NET_DELAYS_MS[attempt]);
+    try {
+      await hubNetSleep(HUB_NET_DELAYS_MS[attempt], options && options.signal);
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        if (marked) hubNetState.retrying = Math.max(0, hubNetState.retrying - 1);
+        if (hubNetState.retrying === 0) hubNetSetBanner(false);
+      }
+      throw error;
+    }
   }
   if (marked) hubNetState.retrying = Math.max(0, hubNetState.retrying - 1);
   if (lastResponse) {

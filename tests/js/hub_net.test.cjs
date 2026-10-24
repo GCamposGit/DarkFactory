@@ -6,7 +6,7 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "..", "hub", "frontend", "hub_net.js"), "utf8");
 
-function load(responses) {
+function load(responses, timers = {}) {
   const calls = [];
   const banner = { hidden: true, style: {}, setAttribute() {}, id: "" };
   const document = {
@@ -17,7 +17,8 @@ function load(responses) {
   const queue = [...responses];
   const ctx = {
     document, window: {}, console,
-    setTimeout: (fn) => { fn(); return 0; }, // instant backoff
+    setTimeout: timers.setTimeout || ((fn) => { fn(); return 0; }), // instant backoff
+    clearTimeout: timers.clearTimeout || clearTimeout,
     fetch: async (url, options) => {
       calls.push([url, (options && options.method) || "GET"]);
       const next = queue.length > 1 ? queue.shift() : queue[0];
@@ -53,6 +54,19 @@ test("GET do snapshot repete apos 503 e preserva o AbortController", async () =>
   const noRetry = load([aborted, ok]);
   await assert.rejects(() => noRetry.ctx.__fetch("/api/line/snapshot", { signal: controller.signal }), (error) => error.name === "AbortError");
   assert.equal(noRetry.calls.length, 1);
+});
+
+test("AbortController cancela o backoff antes de iniciar outra requisicao", async () => {
+  const controller = new AbortController();
+  const retry = load([{ ok: false, status: 503 }, { ok: true, status: 200 }], { setTimeout, clearTimeout });
+  const pending = retry.ctx.__fetch("/api/line/snapshot", { signal: controller.signal });
+
+  // A primeira resposta foi processada e o helper entrou no backoff de 500 ms.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  controller.abort();
+
+  await assert.rejects(pending, (error) => error.name === "AbortError");
+  assert.equal(retry.calls.length, 1);
 });
 
 test("503 do proxy e repetido; POST com erro de rede nao e reenviado", async () => {
