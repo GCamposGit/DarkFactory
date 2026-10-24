@@ -1,19 +1,21 @@
 {
-  "sha": "8b46dc86af1197feb310a5b57afd746861e37f88",
+  "sha": "8a9071c8dcf5f941f69c555080969dc927138ce9",
   "commands": {
     "setup": {
       "ran": true,
       "ok": true,
       "exit_code": 0,
-      "duration_s": 2.297
+      "duration_s": 2.247
     },
     "validate": {
       "ran": true,
-      "ok": false,
-      "exit_code": 124,
-      "duration_s": 1800.102,
-      "log": "verdict=FAILED (Exit code 124 in 1800.10s)\n\nTests failed with exit code 124. Summary: Exit code 124 in 1800.10s"
+      "ok": true,
+      "exit_code": 0,
+      "duration_s": 191.572
+    },
+    "build": {
+      "ran": false
     }
   },
-  "started_at": 1792879432.1845746
+  "started_at": 1792881908.3729558
 }
