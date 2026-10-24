@@ -2005,3 +2005,11 @@ def test_darkhub_without_marker_keeps_single_container_path(monkeypatch: pytest.
     assert calls == []
     assert transport.post_calls[0][1] == "/api/compose.update"
     assert transport.post_calls[1][1] == "/api/compose.deploy"
+
+
+def test_bluegreen_serving_accepts_the_new_sha_alternating_with_the_old_colour() -> None:
+    # Traefik round-robins between both healthy colours during the overlap.
+    new, old = "a" * 40, "b" * 40
+    alternating = iter([old, new] * 10)
+    assert mod._bluegreen_serving(lambda: {"git_sha": next(alternating)})(new)
+    assert not mod._bluegreen_serving(lambda: {"git_sha": old})(new)

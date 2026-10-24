@@ -976,13 +976,18 @@ def _bluegreen_serving(health_client: Optional[Callable[[], Dict[str, Any]]]) ->
     probe = health_client or fetch_darkhub_health
 
     def serving(expected: str) -> bool:
-        for _ in range(3):
+        # During the overlap both colours are healthy and Traefik round-robins between them, so the
+        # new sha alternates with the old one: require it in 2 of 6 probes, never 3 in a row.
+        seen = 0
+        for _ in range(6):
             try:
-                if str(probe().get("git_sha", "")).lower() != expected:
-                    return False
+                if str(probe().get("git_sha", "")).lower() == expected:
+                    seen += 1
             except Exception:
-                return False
-        return True
+                continue
+            if seen >= 2:
+                return True
+        return False
 
     return serving
 
