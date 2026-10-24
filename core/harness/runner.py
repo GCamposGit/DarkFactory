@@ -30,6 +30,7 @@ from core.paths import project_root
 
 PROJECT_ROOT = project_root()
 STEP_TIMEOUT_LOG_DIR = Path(".factory") / "test_logs" / "step-timeouts"
+STEP_FAILURE_LOG_DIR = Path(".factory") / "test_logs" / "step-failures"
 WINDOWS_XDIST_MAX_WORKERS = 4
 
 # Ensure UTF-8 output on Windows
@@ -219,6 +220,57 @@ def _pytest_counts(output: str) -> tuple[int, int, int]:
     return discovered_count, passed_count, skipped_count
 
 
+_FAILED_TEST_LINE = re.compile(r"^(?:FAILED|ERROR)\s+\S+", re.MULTILINE)
+
+
+def extract_failure_report(output: str, *, max_lines: int = 400) -> str:
+    """Return failing test ids plus the traceback sections of a pytest run (USR-359).
+
+    Keeps every ``FAILED``/``ERROR`` summary line (full node id) and the
+    ``FAILURES``/``ERRORS`` sections, capped, so a remote verdict never loses
+    which test failed. Falls back to the output tail when nothing matches.
+    """
+
+    lines = output.splitlines()
+    ids = [ln for ln in lines if _FAILED_TEST_LINE.match(ln)]
+    sections: list[str] = []
+    capture = False
+    for ln in lines:
+        if re.match(r"^=+ (FAILURES|ERRORS) =+$", ln):
+            capture = True
+        elif capture and re.match(r"^=+ (short test summary info|warnings summary|\d+ .*in [\d.]+s).*=+$", ln):
+            capture = False
+        if capture:
+            sections.append(ln)
+    parts = ["failed_test_ids:", *ids[:max_lines]]
+    if len(ids) > max_lines:
+        parts.append(f"... {len(ids) - max_lines} more")
+    if sections:
+        parts += ["", "tracebacks:", *sections[:max_lines]]
+    if not ids and not sections:
+        parts += ["(no FAILED/ERROR lines found; output tail follows)", *lines[-max_lines:]]
+    return "\n".join(parts) + "\n"
+
+
+def _record_step_failure(step: HarnessStepConfig, output: str, returncode: int) -> None:
+    """Persist failing test ids and tracebacks of a failed test step as a durable artifact."""
+    safe_step = re.sub(r"[^A-Za-z0-9_.-]+", "-", step.name).strip(".-") or "step"
+    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    log_path = PROJECT_ROOT / STEP_FAILURE_LOG_DIR / f"{timestamp}-{time.time_ns()}-{safe_step}.log"
+    report = sanitize_child_output(extract_failure_report(output))
+    contents = f"step: {step.name}\nexit_code: {returncode}\n{report}"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(contents, encoding="utf-8")
+    except OSError as log_error:
+        print(f"[STEP_FAILURE_LOG] unable to persist failure report: {log_error}", file=sys.stderr)
+        return
+    print(f"[STEP_FAILURE_LOG] {log_path}")
+    for ln in contents.splitlines():
+        if _FAILED_TEST_LINE.match(ln):
+            print(f"[FAILED_TEST] {ln[:300]}")
+
+
 def _is_test_step(step: HarnessStepConfig) -> bool:
     return step.kind == "test" or (step.kind is None and "pytest" in step.cmd.casefold())
 
@@ -342,6 +394,8 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         if returncode == 5 and os.environ.get(test_shards.SHARD_ENV, "").strip() and _is_test_step(step):
             returncode = 0  # a shard may legitimately select no test (e.g. the serial step)
         execution = StepExecution(step.name, returncode, discovered, passed, skipped)
+        if returncode != 0 and _is_test_step(step):
+            _record_step_failure(step, output, returncode)
         marker = MARKER_STEP_PASS if execution.passed else MARKER_STEP_FAIL
         suffix = "" if execution.passed else f" (exit code: {process.returncode})"
         print(f"{marker} {step.name}{suffix}")
