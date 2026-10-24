@@ -1,0 +1,27 @@
+diff --git a/.github/workflows/hub-image.yml b/.github/workflows/hub-image.yml
+index 0000000..0000000 100644
+--- a/.github/workflows/hub-image.yml
++++ b/.github/workflows/hub-image.yml
+@@ -1,18 +1,20 @@
+ name: Hub image (GHCR)
+ 
+ # USR-207: build the Hub image on GitHub (not on the 2 vCPU VPS) and publish it to GHCR.
+ # Only runs when something the image embeds changes (see core/infra/deploy_classifier.py).
++concurrency:
++  group: hub-image-${{ github.ref }}
++  cancel-in-progress: false
++
+ on:
+   push:
+     branches: [main]
+     paths:
+       - "core/**"
+       - "hub/**"
+       - "scripts/**"
+       - "deploy/**"
+-      - "docs/**"
+-      - ".factory/**"
+       - "requirements.txt"
+       - "harness.config.json"
+ 
+ permissions:

@@ -6,6 +6,7 @@ import io
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -80,29 +81,62 @@ def _hub_image_workflow_paths() -> set[str]:
 
 def test_classifier_rebuild_paths_are_embedded_in_the_hub_image() -> None:
     copied_sources = _dockerfile_copy_sources()
-    missing_prefixes = sorted(prefix for prefix in dc.REBUILD_PREFIXES if prefix.rstrip("/") not in copied_sources)
-    missing_files = sorted(path for path in dc.REBUILD_FILES if path not in copied_sources)
-
-    assert not missing_prefixes and not missing_files, (
-        "deploy classifier rebuild paths must be sources of COPY instructions in "
-        "deploy/dokploy/Dockerfile.hub; missing prefixes="
-        f"{missing_prefixes}, missing files={missing_files}"
-    )
+    expected_paths = {f"{path}/**" for path in copied_sources if path not in {"docs", ".factory", "requirements.txt", "harness.config.json"}}
+    # The explicit hub/data COPY is covered by the broader hub/** source.
+    expected_paths.discard("hub/data/**")
+    expected_paths.update({"requirements.txt", "harness.config.json"})
+    assert set(dc.runtime_image_paths()) == expected_paths
 
 
 def test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger() -> None:
     workflow_paths = _hub_image_workflow_paths()
-    missing_prefixes = sorted(
-        prefix for prefix in dc.REBUILD_PREFIXES if f"{prefix}**" not in workflow_paths
-    )
-    missing_files = sorted(path for path in dc.REBUILD_FILES if path not in workflow_paths)
+    missing = sorted(set(dc.runtime_image_paths()) - workflow_paths)
 
-    assert not missing_prefixes and not missing_files, (
-        "classifier rebuild paths are not covered by the Hub image workflow trigger. "
-        "The workflow is protected by core/orchestrator/guard.py; open an owner action "
-        "to update .github/workflows/hub-image.yml. Missing prefixes="
-        f"{missing_prefixes}, missing files={missing_files}"
+    assert not missing, f"workflow trigger misses runtime image paths: {missing}"
+
+
+def test_proposed_hub_image_trigger_exactly_matches_runtime_paths_and_serializes_builds() -> None:
+    patch = (ROOT / "docs" / "proposals" / "USR-207-hub-image-trigger.patch").read_text(encoding="utf-8")
+    lines = patch.splitlines()
+    paths_index = next(
+        (index for index, line in enumerate(lines) if line.startswith(("+", " ")) and re.match(r"^[+ ]\s+paths:\s*$", line)),
+        None,
     )
+    assert paths_index is not None, "proposed workflow patch must restrict push.paths"
+    proposed_paths: set[str] = set()
+    for line in lines[paths_index + 1 :]:
+        if line.startswith("-"):
+            continue
+        if not line.startswith(("+", " ")):
+            break
+        content = line[1:]
+        match = re.match(r"^\s+-\s+(['\"]?)(.*?)\1\s*$", content)
+        if match:
+            proposed_paths.add(match.group(2))
+        elif content.strip():
+            break
+    assert proposed_paths == set(dc.runtime_image_paths())
+    assert "+concurrency:" in patch and "+  group: hub-image-${{ github.ref }}" in patch
+    assert "+  cancel-in-progress: false" in patch
+
+
+def test_hub_image_workflow_checker_reports_synthetic_trigger_divergence(tmp_path: Path) -> None:
+    synthetic = tmp_path / "hub-image-trigger-out-of-sync.yml"
+    synthetic.write_text('on:\n  push:\n    paths:\n      - "core/**"\n', encoding="utf-8")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "hub_image_workflow_check.py"), "--workflow", str(synthetic)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    finally:
+        synthetic.unlink(missing_ok=True)
+    assert result.returncode != 0
+    assert "faltam" in result.stdout.lower()
+    assert "sobram" in result.stdout.lower()
 
 
 def test_run_hub_only_merge_is_data_only() -> None:

@@ -2569,6 +2569,47 @@
       "created_at": "2026-10-24T04:00:00Z",
       "created_by": "claude",
       "resolved_at": "2026-10-23T21:00:00Z"
+    },
+    {
+      "id": "OA-063",
+      "kind": "action",
+      "title": "USR-207: publicar o trigger restrito do workflow GHCR do Hub",
+      "priority": "medium",
+      "status": "open",
+      "why": "O workflow .github/workflows/hub-image.yml e protegido. O classificador, checker, teste e patch estao prontos; ate aplicar o patch, merges somente de docs/.factory ainda disparam rebuild desnecessario. O patch restringe paths aos COPY runtime do Dockerfile e serializa builds por ref.",
+      "blocks": [
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, crie uma worktree limpa a partir de origin/main para publicar somente a alteracao protegida.",
+          "command": "git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger -b chore/usr207-hub-image-trigger origin/main"
+        },
+        {
+          "text": "Confira que o patch protegido aplica sem conflito.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger apply --check C:\\dev\\DarkFac\\docs\\proposals\\USR-207-hub-image-trigger.patch"
+        },
+        {
+          "text": "Aplique o patch do workflow na worktree.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger apply C:\\dev\\DarkFac\\docs\\proposals\\USR-207-hub-image-trigger.patch"
+        },
+        {
+          "text": "Revise o diff e confirme que o checker termina com codigo 0 na worktree publicada.",
+          "command": "C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\python.exe C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger\\scripts\\hub_image_workflow_check.py"
+        },
+        {
+          "text": "Crie branch/PR para a alteracao protegida e aguarde os checks obrigatorios.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger add .github/workflows/hub-image.yml; git -C C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger commit -m \"ci(hub): restrict image rebuild paths [T3]\"; git -C C:\\dev\\DarkFac\\.worktrees\\usr207-hub-image-trigger push -u origin chore/usr207-hub-image-trigger; gh pr create --repo GCamposGit/DarkFactory --head chore/usr207-hub-image-trigger --base main --title \"ci(hub): restrict image rebuild paths [T3]\" --body \"Aplica docs/proposals/USR-207-hub-image-trigger.patch. O trigger passa a refletir os COPY runtime do Dockerfile.hub e serializa builds do Hub.\""
+        },
+        {
+          "text": "Depois do merge do PR, confirme que a checagem de alinhamento passa no checkout atualizado.",
+          "command": "C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\python.exe C:\\dev\\DarkFac\\scripts\\hub_image_workflow_check.py"
+        }
+      ],
+      "verify": "PR mergeado e python scripts/hub_image_workflow_check.py retorna codigo 0; o trigger lista exatamente os caminhos runtime derivados do Dockerfile.hub.",
+      "created_at": "2026-10-24T00:00:00Z",
+      "created_by": "codex"
     }
   ]
 }

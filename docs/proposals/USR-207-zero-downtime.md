@@ -37,7 +37,9 @@ Causa raiz: `docker compose up` recria o container parando o antigo antes de sub
 
 ### 2.1 Imagem construida fora da VPS
 
-Entregue: `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkhub:<sha>` para os merges cobertos pelo workflow. O compose pode ser renderizado em modo `ghcr` sem `build:`; o classificador de deploy segue as fontes `COPY` de `deploy/dokploy/Dockerfile.hub`. O teste `test_classifier_rebuild_paths_are_covered_by_hub_image_workflow_trigger` trava a cobertura do workflow; como `.github/workflows/*` e protegido pelo guard, divergencias devem virar acao do owner, sem editar o workflow neste ticket.
+Entregue: `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkhub:<sha>` para os merges cobertos pelo workflow. O compose pode ser renderizado em modo `ghcr` sem `build:`. `core.infra.deploy_classifier.runtime_image_paths()` deriva a lista dos `COPY` do `deploy/dokploy/Dockerfile.hub`; `docs/` e `.factory/` sao copiados somente como seeds e ficam fora dos caminhos runtime. Assim, mudancas apenas nesses dados nao pedem nova imagem. `python scripts/hub_image_workflow_check.py` compara o trigger real com essa fonte unica e retorna codigo diferente de zero se houver caminhos sobrando ou faltando.
+
+O workflow atual ainda inclui `docs/**` e `.factory/**`, portanto continua sendo um superset seguro, mas reconstrui a imagem em merges que tocam apenas esses seeds. O patch restrito e serializado esta em `docs/proposals/USR-207-hub-image-trigger.patch`; teste automatizado exige que seus paths sejam exatamente os da funcao runtime e que o workflow atual nao perca nenhum caminho runtime. O workflow `.github/workflows/*` e protegido, entao a publicacao do patch foi registrada para o owner na OA-063.
 
 ### 2.1b Chave de ativacao (USR-339)
 

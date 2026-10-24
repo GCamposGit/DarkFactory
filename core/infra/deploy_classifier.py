@@ -9,12 +9,15 @@ Pure functions only; fail closed (unknown or empty diff => rebuild).
 
 from __future__ import annotations
 
+import fnmatch
+import re
+import shlex
+from pathlib import Path
 from typing import Iterable
 
-REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/")
-# Keep this aligned with COPY sources in deploy/dokploy/Dockerfile.hub. In particular,
-# run_hub.py is not copied into the image and therefore cannot require a Hub rebuild.
-REBUILD_FILES: frozenset[str] = frozenset({"requirements.txt", "harness.config.json"})
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DOCKERFILE = _REPO_ROOT / "deploy" / "dokploy" / "Dockerfile.hub"
+_SEED_ONLY_PREFIXES = ("docs/", ".factory/")
 
 REASON_NO_DIFF = "diff desconhecido"
 REASON_RUNTIME = "toca caminho embutido na imagem"
@@ -27,16 +30,51 @@ def _norm(path: str) -> str:
     return p[2:] if p.startswith("./") else p
 
 
-def runtime_paths(paths: Iterable[str]) -> list[str]:
-    """Paths among ``paths`` that the Hub image embeds."""
-    out: list[str] = []
-    for raw in paths:
-        p = _norm(raw)
-        if not p:
+def runtime_image_paths(dockerfile_path: Path | None = None) -> tuple[str, ...]:
+    """Return canonical trigger patterns for sources copied as Hub runtime.
+
+    The Dockerfile is the source of truth. ``docs/`` and ``.factory/`` are
+    copied only as image seeds; they are read fresh from the mounted/runtime
+    sources and do not require an image rebuild. Nested COPY directories are
+    collapsed under their parent pattern (for example ``hub/data`` under
+    ``hub/**``).
+    """
+    dockerfile = dockerfile_path or _DOCKERFILE
+    sources: set[str] = set()
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^\s*COPY\s+(.+?)\s+\S+\s*$", line, flags=re.IGNORECASE)
+        if not match:
             continue
-        if p in REBUILD_FILES or p.startswith(REBUILD_PREFIXES):
-            out.append(p)
-    return out
+        try:
+            source = shlex.split(match.group(1))[0]
+        except (ValueError, IndexError):
+            continue
+        source = _norm(source).rstrip("/")
+        if (
+            not source
+            or source in {prefix.rstrip("/") for prefix in _SEED_ONLY_PREFIXES}
+            or source.startswith(_SEED_ONLY_PREFIXES)
+        ):
+            continue
+        sources.add(source)
+
+    directories = {source for source in sources if (_REPO_ROOT / source).is_dir()}
+    paths = {
+        source if source not in directories else f"{source}/**"
+        for source in sources
+        if not any(source.startswith(f"{parent}/") for parent in directories if parent != source)
+    }
+    return tuple(sorted(paths))
+
+
+def runtime_paths(paths: Iterable[str]) -> list[str]:
+    """Return changed paths that match a Dockerfile-derived runtime pattern."""
+    patterns = runtime_image_paths()
+    return [
+        path
+        for raw in paths
+        if (path := _norm(raw)) and any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+    ]
 
 
 def needs_rebuild(changed_paths: Iterable[str] | None) -> bool:
