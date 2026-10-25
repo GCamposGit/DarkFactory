@@ -58,6 +58,9 @@ Na linha, `bindings.IntegrationStageAdapter` recusa a integracao (`stage_artifac
 
 ## Planejamento
 
+Rotas de planejamento: Claude Opus (`opus`) ou Codex `gpt-sol` (role `planning.codex`, tier `high`), ambos de nivel alto.
+O Codex roda com esforco `high` (pin do estagio) e o slug do CLI vem do `gateway_ids` do registro (`gpt-5.6-sol`).
+
 O estagio `planning` so roteia para modelos de nivel alto (`tier` `high` ou `frontier` em
 `.factory/config/model_registry.json`, lido por `core.models.registry`). Um harness sem modelo
 explicito (padrao do CLI) nao tem nivel declarado e nao e elegivel. O fallback do OpenRouter

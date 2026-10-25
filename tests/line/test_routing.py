@@ -486,6 +486,49 @@ def test_pick_dynamic_headroom_prefers_antigravity_over_critical_codex_claude():
     assert write_choice is None
 
 
+def test_planning_elects_codex_high_tier_model_when_claude_quota_is_unknown():
+    cfg = load_routing_config(default_config_path())
+    lookup = lambda provider: None if provider == "anthropic" else 80.0  # noqa: E731
+
+    choice = pick(
+        "planning",
+        ["harness:claude", "harness:codex"],
+        config=cfg,
+        quota_lookup=lookup,
+        cooldown_path=Path("does-not-exist.json"),
+    )
+
+    assert choice == ("codex", "gpt-sol")
+
+
+def test_planning_still_refuses_codex_without_a_high_tier_model():
+    cfg = RoutingConfig(stages={"planning": StageRoute(cascade=[("claude", "opus"), ("codex", None)])})
+    lookup = lambda provider: None if provider == "anthropic" else 80.0  # noqa: E731
+
+    choice = pick(
+        "planning",
+        ["harness:claude", "harness:codex"],
+        config=cfg,
+        quota_lookup=lookup,
+        cooldown_path=Path("does-not-exist.json"),
+    )
+
+    assert choice is None
+
+
+def test_planning_codex_model_and_effort_reach_the_cli_argv():
+    from core.line.agent_cli import AgentRequest, build_codex_argv
+
+    cfg = load_routing_config(default_config_path())
+    model, effort = harness_cli_pin("codex", "gpt-sol", stage="planning", config=cfg)
+    req = AgentRequest(prompt="x", cwd=Path("."), mode="read", harness="codex", model=model, effort=effort)
+
+    argv = build_codex_argv("codex", req, Path("out.txt"))
+
+    assert argv[argv.index("-m") + 1] == "gpt-5.6-sol"
+    assert 'model_reasoning_effort="high"' in argv
+
+
 def test_pick_skips_forbidden_autonomous_models():
     """Models like Fable and Astra must be strictly skipped autonomously."""
     custom_cfg = RoutingConfig(

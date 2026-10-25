@@ -58,7 +58,7 @@ from core.line import workspace
 from core.line import diagnostics
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.route_wait import RouteWaiter
-from core.line.routing import RoutingConfig, pick, record_result
+from core.line.routing import RoutingConfig, harness_cli_pin, pick, record_result
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageResult
 
@@ -312,7 +312,8 @@ def run_read_agent(
         if choice is None:
             break
         harness, model = choice
-        req = AgentRequest(prompt=prompt, cwd=cwd, mode="read", harness=harness, model=model)
+        cli_model, cli_effort = harness_cli_pin(harness, model, stage=stage, config=routing_config)
+        req = AgentRequest(prompt=prompt, cwd=cwd, mode="read", harness=harness, model=cli_model, effort=cli_effort)
         result = run_agent(req)
         last_result = result
         if result.ok:

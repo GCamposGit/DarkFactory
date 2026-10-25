@@ -176,7 +176,7 @@ def _default_routing_config() -> RoutingConfig:
                 openrouter_model=cheap_model,
             ),
             "planning": StageRoute(
-                cascade=[("claude", "opus"), ("codex", None), ("antigravity", None)],
+                cascade=[("claude", "opus"), ("codex", resolve_model("planning.codex")), ("antigravity", None)],
                 effort="high",
                 openrouter_ok=True,
                 openrouter_model=cheap_model,
@@ -504,7 +504,8 @@ def _resolve_cascade(
         if implementing_harness == "antigravity":
             return [("claude", None), ("codex", None), ("grok", None)]
         return [("claude", None), ("codex", None), ("grok", None), ("antigravity", None)]
-    return list(stage_cfg.cascade)
+    # Registry role references (`planning.codex`) become concrete model ids here.
+    return [(harness, _resolve_role_ref(model)) for harness, model in stage_cfg.cascade]
 
 
 def _split_exclude(
