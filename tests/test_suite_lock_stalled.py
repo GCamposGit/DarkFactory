@@ -27,6 +27,34 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _PID_IN_OUTPUT = re.compile(r"\bpid (\d+)\b")
 
 
+@pytest.fixture
+def simulated_lock_time(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Simulated clock for the waiter: ``_sleep`` advances a virtual offset instead of waiting.
+
+    ``suite_lock.time.monotonic`` is real time plus the offset, so deadlines, the stall
+    wait and the CPU window elapse instantly while the holder subprocess stays real.
+    """
+
+    offset = [0.0]
+    real_time = time
+
+    class _SimulatedTime:
+        def __getattr__(self, name: str) -> object:
+            return getattr(real_time, name)
+
+        @staticmethod
+        def monotonic() -> float:
+            return real_time.monotonic() + offset[0]
+
+    def _advance(seconds: float) -> None:
+        offset[0] += seconds
+        real_time.sleep(0.01)  # let the holder/OS make progress between polls
+
+    monkeypatch.setattr(suite_lock, "time", _SimulatedTime())
+    monkeypatch.setattr(suite_lock, "_sleep", _advance)
+    return offset
+
+
 @pytest.fixture(autouse=True)
 def _isolated_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     state_dir = tmp_path / "state"
@@ -213,6 +241,7 @@ def test_reap_is_off_unless_explicitly_enabled(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed(
+    simulated_lock_time: list[float],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
@@ -233,6 +262,7 @@ def test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed(
 
 
 def test_launcher_wrapper_stall_warning_uses_interpreter_pid_not_popen_pid(
+    simulated_lock_time: list[float],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """USR-187: a Windows python launcher makes Popen.pid differ from os.getpid().
@@ -263,6 +293,7 @@ def test_launcher_wrapper_stall_warning_uses_interpreter_pid_not_popen_pid(
 
 
 def test_stall_check_waits_for_the_configured_wait_before_sampling(
+    simulated_lock_time: list[float],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "3600")
@@ -280,6 +311,7 @@ def test_stall_check_waits_for_the_configured_wait_before_sampling(
 
 @pytest.mark.parametrize("through_launcher", [False, True])
 def test_reap_enabled_terminates_the_stalled_holder_and_takes_the_slot(
+    simulated_lock_time: list[float],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -400,6 +432,7 @@ def test_recycled_pid_is_not_mistaken_for_the_holder(tmp_path: Path, through_lau
 
 
 def test_detector_failure_never_breaks_lock_acquisition(
+    simulated_lock_time: list[float],
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")

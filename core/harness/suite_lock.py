@@ -313,6 +313,11 @@ def _reap_holder(pid: int) -> bool:
         return False
 
 
+def _sleep(seconds: float) -> None:
+    """Injectable sleeper (late-bound so patching ``time.sleep`` or ``_sleep`` both work)."""
+    time.sleep(seconds)
+
+
 class _StallWatch:
     """Detects a lock holder that is alive but idle (USR-147).
 
@@ -446,7 +451,7 @@ class SuiteLock:
                 stall_watch.check(directory, self._slots)
             except Exception as exc:  # noqa: BLE001 - diagnostics must never break locking
                 print(f"[SUITE_LOCK] stalled-holder check failed ({type(exc).__name__}: {exc})")
-            time.sleep(backoff)
+            _sleep(backoff)
             backoff = min(backoff * 1.5, _POLL_MAX_SEC)
 
     def _describe_first_busy(self, directory: Path) -> str:

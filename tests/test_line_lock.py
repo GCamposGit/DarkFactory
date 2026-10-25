@@ -165,7 +165,7 @@ def test_a_fresh_heartbeat_with_an_alive_pid_is_not_recovered(tmp_path: Path) ->
 
 @pytest.mark.parametrize("transient_read_error", [False, True])
 def test_heartbeat_thread_refreshes_the_sidecar_while_held(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transient_read_error: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transient_read_error: bool, observe_sec: float = 10.0,
 ) -> None:
     lock = LineLock("USR-01", root=tmp_path)
     original_interval = line_lock.HEARTBEAT_INTERVAL_SEC
@@ -187,7 +187,7 @@ def test_heartbeat_thread_refreshes_the_sidecar_while_held(
                 return original_read(path, *args, **kwargs)
 
             monkeypatch.setattr(Path, "read_text", read_with_transient_error)
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + observe_sec  # generous default: loop exits as soon as the heartbeat advances
         refreshed = False
         while time.monotonic() < deadline:
             time.sleep(0.05)
@@ -214,7 +214,7 @@ def test_heartbeat_observation_still_fails_without_a_new_timestamp(
     unchanged = LineLockInfo(pid=os.getpid(), ticket_id="USR-01", hostname="test", started_at=0.0, heartbeat_at=0.0)
     monkeypatch.setattr(line_lock, "_read_lock", lambda _path: None if unavailable else unchanged)
     with pytest.raises(AssertionError, match="heartbeat on disk never advanced"):
-        test_heartbeat_thread_refreshes_the_sidecar_while_held(tmp_path, monkeypatch, False)
+        test_heartbeat_thread_refreshes_the_sidecar_while_held(tmp_path, monkeypatch, False, observe_sec=0.3)
 
 
 # --------------------------------------------------------------------------

@@ -32,11 +32,11 @@ def test_deadline_kills_whole_tree_and_reports_duration(tmp_path: Path) -> None:
     script.write_text(_SLOW_CLI.format(flag=_NO_WINDOW), encoding="utf-8")
     pidfile = tmp_path / "child.pid"
     start = time.monotonic()
-    res = _run_bounded([sys.executable, str(script), str(pidfile)], timeout_s=3, grace_s=3)
+    res = _run_bounded([sys.executable, str(script), str(pidfile)], timeout_s=1, grace_s=2)
     elapsed = time.monotonic() - start
     assert res.timed_out is True
     assert res.returncode != 0
-    assert res.duration_s < 3 + 3 + 1 and elapsed < 15
+    assert res.duration_s < 1 + 2 + 1 and elapsed < 15
     deadline = time.monotonic() + 5
     while not pidfile.exists() and time.monotonic() < deadline:
         time.sleep(0.1)
