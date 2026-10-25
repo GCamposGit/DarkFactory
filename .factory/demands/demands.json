@@ -11585,5 +11585,31 @@
     "dependencies": [],
     "created_at": "2026-10-25T03:00:50.663797Z",
     "updated_at": "2026-10-25T03:00:50.663797Z"
+  },
+  {
+    "id": "USR-389",
+    "project_id": "darkfac",
+    "title": "Merge de PR com ledger-fast vermelho deixou o main vermelho (OA-071 com kind invalido)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "PR #699 (registro OA-071) foi mesclado com os checks ledger-fast e pr-validation em fail (gh pr checks 699). O item tinha kind 'approval', fora do schema (action|decision), e o main ficou vermelho em test_owner_actions_core::test_seeded_backlog_is_valid_and_complete (run 40192113384), corrigido no PR #706. Criterios de aceite: (1) ledger-fast e pr-validation sao checks obrigatorios no ruleset do main ou o caminho de merge autonomo (core.git.autonomy / scripts de envio) recusa mesclar com qualquer check em fail, com teste; (2) o registro de OA (core.owner_actions) valida kind/schema antes de gravar e recusa item invalido, com teste; (3) nenhum teste novo de forma.",
+    "core_journey": [
+      "PR #699 (registro OA-071) foi mesclado com os checks ledger-fast e pr-validation em fail (gh pr checks 699). O item tinha kind 'approval', fora do schema (action|decision), e o main ficou vermelho em test_owner_actions_core::test_seeded_backlog_is_valid_and_complete (run 40192113384), corrigido no PR #706. Criterios de aceite: (1) ledger-fast e pr-validation sao checks obrigatorios no ruleset do main ou o caminho de merge autonomo (core.git.autonomy / scripts de envio) recusa mesclar com qualquer check em fail, com teste; (2) o registro de OA (core.owner_actions) valida kind/schema antes de gravar e recusa item invalido, com teste; (3) nenhum teste novo de forma."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T12:26:49.553801Z",
+    "updated_at": "2026-10-25T12:26:49.553801Z"
   }
 ]
