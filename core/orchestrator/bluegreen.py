@@ -136,8 +136,13 @@ def run_bluegreen_deploy(
     sleep_fn: Callable[[float], None] = lambda _s: None,
     interval: float = 5.0,
     remove_legacy: Optional[Callable[[], bool]] = None,
+    restore_allowed: Optional[Callable[[str], bool]] = None,
 ) -> BlueGreenState:
     """Run overlap -> health gate -> cutover. Returns the final state.
+
+    On failure the previous compose is restored only if ``restore_allowed(previous)`` accepts it;
+    otherwise both colours are scaled to zero (the Hub goes offline instead of reviving a version
+    the caller refuses, e.g. one older than a security fix).
 
     ``apply_compose`` installs the compose in Dokploy and waits for ``compose up`` to finish.
     ``sha_is_serving(sha)`` is True only after ``_HEALTH_RETRIES`` consecutive probes of the public
@@ -181,6 +186,13 @@ def run_bluegreen_deploy(
         apply_compose(render_bluegreen_compose(source, final, (target,)))
     except Exception as exc:  # noqa: BLE001 - any failure after the first apply restores the previous compose
         logger.error("blue-green: deploy of %s failed (%s); restoring previous compose", new_sha[:12], exc)
+        if previous_compose and restore_allowed is not None and not restore_allowed(previous_compose):
+            try:
+                apply_compose(render_bluegreen_compose(source, planned, ()))
+                restore_note = "previous compose refused; both colours scaled to zero (Hub offline)"
+            except Exception as offline_exc:  # noqa: BLE001
+                restore_note = f"previous compose refused; OFFLINE FAILED ({offline_exc})"
+            raise BlueGreenError(f"{exc}; {restore_note}") from exc
         if previous_compose:
             try:
                 apply_compose(previous_compose)
@@ -209,6 +221,7 @@ def run_bluegreen_via_dokploy(
     poll_interval: float = 5.0,
     sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
+    restore_allowed: Optional[Callable[[str], bool]] = None,
 ) -> BlueGreenState:
     """Blue-green over the Dokploy API (``request(method, path, json_body) -> parsed JSON``)."""
     query = urllib.parse.urlencode({"composeId": compose_id})
@@ -257,7 +270,8 @@ def run_bluegreen_via_dokploy(
     return run_bluegreen_deploy(
         source=source, new_sha=new_sha, read_compose=read_compose, apply_compose=apply_compose,
         sha_is_serving=sha_is_serving, wait_ghcr=wait_ghcr, sleep_fn=sleep_fn,
-        remove_legacy=remove_legacy,
+        remove_legacy=remove_legacy, restore_allowed=restore_allowed,
+        health_attempts=60,  # ~5 min: a cold Hub pulls the image and refreshes benchmarks before healthy
     )
 
 

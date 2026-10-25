@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -7,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from core.governance import authorization as auth
+
+OWNER_KEY = Ed25519PrivateKey.generate()
 
 PROTECTED = "core/orchestrator/guard.py"
 
@@ -24,6 +30,10 @@ def repo(tmp_path: Path) -> Path:
     _git(tmp_path, "config", "user.name", "T")
     _git(tmp_path, "config", "user.email", "t@example.invalid")
     (tmp_path / "seed.txt").write_text("seed\n", encoding="utf-8")
+    pubkey = tmp_path / auth.OWNER_PUBKEY_PATH
+    pubkey.parent.mkdir(parents=True)
+    raw = OWNER_KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    pubkey.write_text(base64.b64encode(raw).decode("ascii") + "\n", encoding="utf-8")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "--quiet", "-m", "seed")
     _git(tmp_path, "checkout", "--quiet", "-b", "cand")
@@ -35,8 +45,8 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _publish(repo: Path, **overrides: object) -> None:
-    """Commit a record on the trusted base (main), then return to cand."""
+def _publish(repo: Path, *, signed: bool = True, **overrides: object) -> None:
+    """Commit an owner-signed record on the trusted base (main), then return to cand."""
     record: dict[str, object] = {
         "id": "AUTH-1",
         "ticket_id": "USR-228",
@@ -47,6 +57,8 @@ def _publish(repo: Path, **overrides: object) -> None:
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
     }
     record.update(overrides)
+    if signed:
+        record["signature"] = base64.b64encode(OWNER_KEY.sign(auth.canonical_payload(record))).decode("ascii")
     _git(repo, "checkout", "--quiet", "main")
     path = repo / auth.AUTHORIZATIONS_DIR / "AUTH-1.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +85,11 @@ def test_valid_commit_record_authorizes(repo: Path) -> None:
 
 
 def test_missing_record_blocks(repo: Path) -> None:
+    assert not _verify(repo).ok
+
+
+def test_unsigned_record_blocks(repo: Path) -> None:
+    _publish(repo, signed=False)
     assert not _verify(repo).ok
 
 
