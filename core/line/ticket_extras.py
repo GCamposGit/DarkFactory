@@ -63,7 +63,12 @@ def docs_sync_feedback(repo: Path, base: str = "origin/main", head: str = "HEAD"
     """
     from core.harness import docs_sync
 
-    violations = docs_sync.check(Path(repo), base, head)
+    try:
+        violations = docs_sync.check(Path(repo), base, head)
+    except RuntimeError:
+        raise
+    except (OSError, TypeError, ValueError) as exc:  # unreadable git output is infra, not a violation
+        raise RuntimeError(f"docs-sync sem leitura do git: {type(exc).__name__}: {exc}") from exc
     if not violations:
         return None
     lines = [f"- {v.covered_file} -> {v.page}" for v in violations]
