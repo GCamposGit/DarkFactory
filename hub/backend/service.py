@@ -17,27 +17,18 @@ from typing import Optional, Tuple, Any
 from core.paths import state_root
 from core.usage.ledger import ModelUsageLedger
 from core.usage.monitor import AccountUsageMonitor
-from core.usage.api_credits import (
-    ApiCreditsMonitor,
-)
+from core.usage.api_credits import ApiCreditsMonitor
 from core.roadmap.service import build_repository_roadmap_service
 from core.demands.service import DemandsService
 from core.demands.specifier import DemandSpecifier
 from core.demands.store import DemandsStore
-from core.harness.test_subagent import (
-    TestSubagentEngine,
-)
+from core.harness.test_subagent import TestSubagentEngine
 from core.infra.inventory import InventoryManager
-from core.infra.metrics import (
-    InfraMetricsReport,
-)
+from core.infra.metrics import InfraMetricsReport
 from core.workflow.line_live import LineLiveSnapshot, read_line_live
 from hub.backend.usage_sync_watch import UsageSyncWatch
 from core.owner_actions.remote_ledger import from_env as owner_actions_remote_from_env
-from core.owner_actions.store import (
-    ENV_PATH as OWNER_ACTIONS_ENV_PATH,
-    OwnerActionStore,
-)
+from core.owner_actions.store import ENV_PATH as OWNER_ACTIONS_ENV_PATH, OwnerActionStore
 
 from hub.backend.service_net import (  # noqa: F401  (re-exported public API)
     BLOCKED_METADATA_HOSTS,
@@ -242,7 +233,6 @@ class HubService(
         self._ensure_storage()
         self._cached_infra_metrics: Optional[Tuple[float, InfraMetricsReport]] = None
 
-
     @property
     def control_store(self) -> Any:
         """Accessor for canonical SQLiteControlStore (HF-13-02)."""
@@ -252,7 +242,6 @@ class HubService(
             control_db.parent.mkdir(parents=True, exist_ok=True)
             self._control_store = SQLiteControlStore(db_path=control_db)
         return self._control_store
-
 
     def _line_control_store(self) -> Any:
         """The store the production line's workers claim from.
@@ -273,7 +262,6 @@ class HubService(
                 self._line_store_cache = open_line_store(url=url)  # raises if unreachable, never a mock
             return self._line_store_cache
         return self._control_store if self._control_store is not None else self.control_store
-
 
     def get_line_live(self) -> LineLiveSnapshot:
         """Stage-by-stage live projection of the autonomous line (USR-138).

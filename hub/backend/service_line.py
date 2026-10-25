@@ -6,17 +6,10 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
-from hub.backend.models import (
-    TaskDashboardEvidence,
-    TaskDashboardItem,
-    TaskDashboardReport,
-    LineStatusResponse,
-)
+from hub.backend.models import TaskDashboardEvidence, TaskDashboardItem, TaskDashboardReport, LineStatusResponse
 from core.paths import state_root
 from core.audio.engine import TranscriptionResult
-from core.roadmap.models import (
-    DeliveryStatus,
-)
+from core.roadmap.models import DeliveryStatus
 from core.demands.models import (
     DemandInput,
     DemandSpecificationGuidance,
@@ -24,21 +17,14 @@ from core.demands.models import (
     GrillSession,
     UserTicket,
 )
-from core.harness.test_subagent import (
-    DistilledTestReport,
-    TestExecutionInstruction,
-    TestSubagentEngine,
-)
+from core.harness.test_subagent import DistilledTestReport, TestExecutionInstruction, TestSubagentEngine
 from core.workflow.job_board import GHOST_OPEN_JOB_CAUSE, JobBoardEntry, is_ghost_open_job, read_job_board
-
-
 
 
 logger = logging.getLogger("darkhub.service")
 
 
 class LineDemandsMixin:
-
     def submit_ticket_to_line(self, ticket_id: str) -> Any:
         """Push an existing demands.json ticket into the autonomous production line."""
         from core.line.owner_intake import submit_ticket_to_line
@@ -50,7 +36,6 @@ class LineDemandsMixin:
 
             return LineSubmission(ok=False, ticket_id=ticket_id, message=f"Store da linha indisponivel: {exc}")
         return submit_ticket_to_line(ticket_id, demands_store=self.demands_store, store=store)
-
 
     def cancel_line_run(self, target: str, user_id: int = 0, reason: str = "owner_cancelled") -> Any:
         """Cancel an in-flight production line run by ticket_id or run_id (USR-123)."""
@@ -68,11 +53,9 @@ class LineDemandsMixin:
             reason=reason,
         )
 
-
     def set_autonomous_intake_service(self, service: Any) -> None:
         """Inject an AutonomousIntakeService instance (HF-08-02)."""
         self._autonomous_intake_service = service
-
 
     def get_autonomous_intake_service(self) -> Any:
         """Get or initialize the autonomous intake service with ControlStore (HF-08-02)."""
@@ -91,7 +74,6 @@ class LineDemandsMixin:
             )
         return self._autonomous_intake_service
 
-
     def accept_autonomous_demand(
         self,
         command: Any,
@@ -101,11 +83,9 @@ class LineDemandsMixin:
         service = self.get_autonomous_intake_service()
         return service.accept(command, now=now)
 
-
     def run_tests(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Execute test suite via headless test subagent engine and return distilled report."""
         return self._dispatch_test_run(self.test_subagent_engine, instruction)
-
 
     @staticmethod
     def _dispatch_test_run(engine: TestSubagentEngine, instruction: TestExecutionInstruction) -> DistilledTestReport:
@@ -118,7 +98,6 @@ class LineDemandsMixin:
             return dispatch_test_run(engine, instruction)
         except NoTestWorkerAvailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-
 
     def get_task_dashboard(self) -> TaskDashboardReport:
         """Build a read-only projection of lifecycle, run, usage and evidence data from the canonical control store (DH-16)."""
@@ -177,14 +156,12 @@ class LineDemandsMixin:
             warnings=warnings,
         )
 
-
     def _dashboard_demand_titles(self) -> dict[str, str]:
         try:
             return {ticket.id: ticket.title for ticket in self.demands_service.list_tickets()}
         except Exception as exc:  # pragma: no cover - titles are cosmetic, never block the board
             logger.warning("Demand titles unavailable for task dashboard: %s", exc)
             return {}
-
 
     def get_line_status(self) -> LineStatusResponse:
         """Real-time status of the autonomous production line (USR-93)."""
@@ -267,7 +244,6 @@ class LineDemandsMixin:
             acceptance=acceptance_data,
         )
 
-
     @staticmethod
     def _control_dashboard_row(entry: JobBoardEntry, titles: dict[str, str]) -> dict[str, Any]:
         """Project one canonical control-store entry onto the dashboard row shape (USR-42)."""
@@ -314,14 +290,6 @@ class LineDemandsMixin:
         }
 
     @staticmethod
-    def _dashboard_priority(value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-
-    @staticmethod
     def _dashboard_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
         status_rank = {
             "WAITING_HUMAN": 0,
@@ -345,7 +313,6 @@ class LineDemandsMixin:
         }
         return status_rank.get(row["status"], 99), -row["priority"], row["task_id"]
 
-
     def guide_demand(
         self,
         demand: DemandInput,
@@ -356,11 +323,9 @@ class LineDemandsMixin:
         """Guide and structure a user demand using local model or deterministic script ($0)."""
         return self.demands_service.guide_demand(demand, force_heuristic=force_heuristic, timeout=timeout)
 
-
     def get_next_ticket_id(self, project_id: str = "darkfac") -> str:
         """Return the next sequential user demand ticket ID."""
         return self.demands_service.get_next_ticket_id(project_id)
-
 
     def create_demand_ticket(self, ticket: UserTicket) -> UserTicket:
         """Create and insert a specified user demand into the backlog and invalidate roadmap cache."""
@@ -378,7 +343,6 @@ class LineDemandsMixin:
 
         return saved
 
-
     def list_demand_tickets(
         self,
         project_id: Optional[str] = None,
@@ -388,11 +352,9 @@ class LineDemandsMixin:
         stat_enum = DeliveryStatus(status) if status else None
         return self.demands_service.list_tickets(project_id=project_id, status=stat_enum)
 
-
     def get_demand_ticket(self, ticket_id: str) -> Optional[UserTicket]:
         """Retrieve a single user demand ticket."""
         return self.demands_service.get_ticket(ticket_id)
-
 
     def update_demand_ticket_status(
         self,
@@ -406,7 +368,6 @@ class LineDemandsMixin:
             self.roadmap.store.clear(updated.project_id)
         return updated
 
-
     def start_demand_grill(
         self,
         ticket_id: str,
@@ -419,7 +380,6 @@ class LineDemandsMixin:
             ticket_id, force_heuristic=force_heuristic, timeout=timeout
         )
 
-
     def submit_demand_grill(
         self,
         ticket_id: str,
@@ -431,7 +391,6 @@ class LineDemandsMixin:
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(result.refined_ticket.project_id)
         return result
-
 
     async def transcribe_audio_request(
         self,
@@ -516,7 +475,6 @@ class LineDemandsMixin:
                 "details": live.details,
             })
         return results
-
 
     def execute_test_run(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Executes a test run via TestSubagentEngine with automatic failover."""

@@ -24,13 +24,10 @@ from core.acceptance.observability import HF15ObservabilityTracker
 from core.acceptance.rollback import HF15RollbackCoordinator
 
 
-
-
 logger = logging.getLogger("darkhub.service")
 
 
 class IntegrationsMixin:
-
     # ---------------------------------------------------------------------------
     # Cloud Gateway & Autonomous Webhooks Service Methods (USR-18 / INFRA-09 / DF-20)
     # ---------------------------------------------------------------------------
@@ -59,12 +56,10 @@ class IntegrationsMixin:
             self.handle_protected_publication_event(event_type, payload)
         return record
 
-
     def get_cloud_gateway_status(self) -> CloudGatewayStatus:
         """Returns the operational status of the Cloud 24/7 Dokploy Gateway."""
         engine = WebhookEngine(project_root=self.project_root)
         return engine.get_gateway_status()
-
 
     def get_webhook_events(
         self,
@@ -75,7 +70,6 @@ class IntegrationsMixin:
         engine = WebhookEngine(project_root=self.project_root)
         return engine.audit_store.get_events(limit=limit, event_type=event_type)
 
-
     def trigger_dokploy_deployment(
         self,
         service_name: str = "darkhub",
@@ -84,7 +78,6 @@ class IntegrationsMixin:
         """Triggers Dokploy PaaS auto-deploy webhook (INFRA-09)."""
         client = DokployDeployClient()
         return client.trigger_deploy(service_name=service_name, custom_url=custom_url)
-
 
     def telegram_status_summary(self) -> str:
         """Short, real factory status for the Telegram ``/status`` command (USR-197).
@@ -129,7 +122,6 @@ class IntegrationsMixin:
             runs=_runs,
             convergence=lambda: read_convergence_snapshot(state_root()),
         )
-
 
     def _build_telegram_gateway(self, role: str = "ops") -> TelegramGateway:
         """Constructs TelegramGateway with bound handlers to DarkHub core services.
@@ -290,7 +282,6 @@ class IntegrationsMixin:
             grill_text_handler=self.record_telegram_grill_reply,
         )
 
-
     def record_telegram_grill_reply(
         self, target: str, text: str, update_id: int, user_id: int = 0
     ) -> Dict[str, Any]:
@@ -310,7 +301,6 @@ class IntegrationsMixin:
         )
         return {"recorded": True, "action_id": action.id, "annotated_tickets": annotated, "resumed": bool(annotated)}
 
-
     def _heal_telegram_webhooks(self) -> None:
         """Re-push the webhook secret in the background (at most every 5 min) if updates arrive without it.
 
@@ -324,7 +314,6 @@ class IntegrationsMixin:
         from core.integrations.telegram_webhooks import register_telegram_webhooks
 
         threading.Thread(target=register_telegram_webhooks, daemon=True, name="telegram-webhook-heal").start()
-
 
     def process_telegram_webhook(
         self,
@@ -357,7 +346,6 @@ class IntegrationsMixin:
                 gateway.deliver_reply(chat_id, result)
         return result.model_dump()
 
-
     @staticmethod
     def _is_publication_callback(payload: Dict[str, Any]) -> bool:
         from core.governance.publication import is_publication_callback
@@ -365,11 +353,9 @@ class IntegrationsMixin:
         cb = payload.get("callback_query")
         return isinstance(cb, dict) and is_publication_callback(cb)
 
-
     def _publication_state(self) -> tuple[Path, Path]:
         base = state_root() / "protected_publication"
         return base / "pending.json", base / "audit.jsonl"
-
 
     def process_publication_callback(self, callback: Dict[str, Any]) -> Dict[str, Any]:
         """USR-343 S3: owner tap (Aprovar/Rejeitar) on a protected-file PR; signing happens here, never in agents."""
@@ -392,7 +378,6 @@ class IntegrationsMixin:
             result = {"ok": False, "reason": str(exc)}
         shown = {k: v for k, v in result.items() if k != "record"}
         return {"action": "protected_publication", "authorized": bool(result.get("ok")), **shown}
-
 
     def handle_protected_publication_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         """Notify the owner when a PR touching protected files opens/updates; sweep pending merges on check events."""
@@ -426,7 +411,6 @@ class IntegrationsMixin:
             except Exception:  # noqa: BLE001
                 logger.error("protected publication: could not write audit entry")
 
-
     def get_telegram_gateway_status(self) -> Dict[str, Any]:
         """Returns diagnostic status of Telegram Gateway (HF-14 / USR-110)."""
         gateway = self._build_telegram_gateway()
@@ -436,7 +420,6 @@ class IntegrationsMixin:
         status["webhooks"] = get_webhook_registration_status()
         return status
 
-
     def get_n8n_status(self, target_url: Optional[str] = None) -> Dict[str, Any]:
         """Probes n8n endpoint and returns health/instance report."""
         url = target_url or os.environ.get("N8N_URL", "https://n8n.ggcampos.com")
@@ -444,13 +427,11 @@ class IntegrationsMixin:
         report = probe.probe(target_url=url)
         return report.model_dump()
 
-
     def get_n8n_workflows(self, limit: int = 50) -> Dict[str, Any]:
         """Lists active workflows from remote n8n instance."""
         client = N8nApiClient()
         res = client.list_workflows(limit=limit)
         return res.model_dump()
-
 
     def sync_n8n_workflows(self, custom_path: Optional[str] = None, activate: bool = True) -> Dict[str, Any]:
         """Synchronizes workflow definitions to remote n8n instance."""
@@ -487,13 +468,11 @@ class IntegrationsMixin:
             }
         return {"success": False, "results": {}, "error": "n8n workflow path is not a file or directory"}
 
-
     def trigger_n8n_webhook(self, path_or_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Dispatches an autonomous event to an n8n webhook."""
         client = N8nApiClient()
         res = client.trigger_webhook(path_or_url=path_or_url, payload=payload)
         return res.model_dump()
-
 
     def get_hf15_status(self) -> Dict[str, Any]:
         """Returns HF-15 acceptance environment status and preflight report."""
@@ -514,7 +493,6 @@ class IntegrationsMixin:
             "metrics": metrics.model_dump(mode="json"),
         }
 
-
     def get_hf15_metrics(self) -> Dict[str, Any]:
         """Returns HF-15 metrics summary and SLA compliance."""
         env_mgr = HF15EnvironmentManager()
@@ -523,7 +501,6 @@ class IntegrationsMixin:
             ledger_path=root / "telemetry" / "observability_ledger.jsonl"
         )
         return tracker.get_metrics_summary().model_dump(mode="json")
-
 
     def trigger_hf15_rollback_drill(self, project_id: str = "proj-drill-01") -> Dict[str, Any]:
         """Triggers a verified rollback drill and returns the execution record."""
@@ -551,7 +528,6 @@ class IntegrationsMixin:
         )
         return record.model_dump(mode="json")
 
-
     def list_notifications(
         self,
         limit: int = 50,
@@ -566,13 +542,11 @@ class IntegrationsMixin:
         events = store.list_notifications(limit=limit, severity=sev, unread_only=unread_only)
         return [e.model_dump(mode="json") for e in events]
 
-
     def acknowledge_notification(self, notification_id: str) -> bool:
         """Marks an operational notification as acknowledged."""
         from core.notifications.store import NotificationStore
         store = NotificationStore()
         return store.mark_acknowledged(notification_id)
-
 
     def check_token_quotas(self, force: bool = False) -> List[Dict[str, Any]]:
         """Inspects all connected provider accounts and emits alerts for critical limits."""

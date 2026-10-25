@@ -5,9 +5,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 
-from core.roadmap.models import (
-    DeliveryStatus,
-)
+from core.roadmap.models import DeliveryStatus
 from hub.backend.models import (
     OwnerActionResolveResult,
     OwnerActionsReport,
@@ -19,12 +17,7 @@ from hub.backend.models import (
 from core.integrations.telegram import TelegramGateway
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
 from core.owner_actions.propagate import annotate_blocked_tickets
-from core.owner_actions.store import (
-    blocked_by as owner_action_blocked_by,
-    unblocks as owner_action_unblocks,
-)
-
-
+from core.owner_actions.store import blocked_by as owner_action_blocked_by, unblocks as owner_action_unblocks
 
 
 logger = logging.getLogger("darkhub.service")
@@ -67,7 +60,6 @@ def _queue_project(task: Any) -> str:
 
 
 class InterventionsMixin:
-
     def get_priority_interventions(
         self,
         project_id: Optional[str] = None,
@@ -244,7 +236,6 @@ class InterventionsMixin:
             unblocks=owner_action_unblocks(action, everything),
         )
 
-
     def _collect_owner_action_items(self) -> Tuple[List[PriorityInterventionItem], List[str]]:
         """Open owner actions as priority-queue items. Never raises: the queue must keep working."""
         try:
@@ -287,7 +278,6 @@ class InterventionsMixin:
                 )
             )
         return items, list(loaded.warnings)
-
 
     def _collect_usage_sync_items(self) -> List[PriorityInterventionItem]:
         """Critical item while the usage sync loop is refused or stale (USR-235); closes by itself."""
@@ -332,7 +322,6 @@ class InterventionsMixin:
             )
         ]
 
-
     def get_owner_actions(self, *, include_done: bool = False) -> OwnerActionsReport:
         """The owner action backlog, with dependency fields (GET /owner-actions)."""
         loaded = self.owner_action_store.load()
@@ -358,7 +347,6 @@ class InterventionsMixin:
             warnings=list(loaded.warnings),
         )
 
-
     def _owner_action_result(self, action: OwnerAction, annotated: List[str]) -> OwnerActionResolveResult:
         loaded = self.owner_action_store.load()
         by_id = {a.id: a for a in loaded.actions}
@@ -367,19 +355,16 @@ class InterventionsMixin:
             annotated_tickets=annotated,
         )
 
-
     def mark_owner_action_done(self, action_id: str, note: str = "") -> OwnerActionResolveResult:
         """Owner closed an `action` item in the DarkHub. Persists to the resolutions overlay."""
         action = self.owner_action_store.resolve(action_id, note=note, to_overlay=True)
         return self._owner_action_result(action, [])
-
 
     def answer_owner_decision(self, action_id: str, option_id: str, note: str = "") -> OwnerActionResolveResult:
         """Owner answered a `decision`: persist it and attach it to the tickets it blocks."""
         action = self.owner_action_store.resolve(action_id, option_id=option_id, note=note, to_overlay=True)
         annotated = annotate_blocked_tickets(action, self.demands_service.store)
         return self._owner_action_result(action, annotated)
-
 
     def notify_pending_grill(
         self,

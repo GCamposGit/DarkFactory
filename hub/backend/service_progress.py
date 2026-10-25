@@ -23,18 +23,14 @@ from core.roadmap.models import (
 )
 
 
-
-
 logger = logging.getLogger("darkhub.service")
 
 
 class ProgressMixin:
-
     def list_roadmap_projects(self) -> List[RoadmapProjectSummary]:
         """List projects with an isolated roadmap source."""
 
         return self.roadmap.list_projects()
-
 
     def get_roadmap(
         self,
@@ -61,18 +57,14 @@ class ProgressMixin:
             source_id=source_id,
         )
 
-
     def get_roadmap_item(self, project_id: str, item_id: str) -> Optional[RoadmapItem]:
         return self.roadmap.get_item(project_id, item_id)
-
 
     def get_roadmap_health(self, project_id: str) -> RoadmapHealth:
         return self.roadmap.get_health(project_id)
 
-
     def get_roadmap_source(self, project_id: str, source_id: str) -> Optional[RoadmapSourceDocument]:
         return self.roadmap.get_source_document(project_id, source_id)
-
 
     def get_progress_projection(
         self,
@@ -474,7 +466,6 @@ class ProgressMixin:
             game_summary=game_summary,
         )
 
-
     def get_portfolio_overview(self) -> PortfolioOverviewResponse:
         """Return the multi-project portfolio overview for DarkHub (DH-08)."""
         projects_descriptors = self.project_registry.list_projects()
@@ -518,7 +509,6 @@ class ProgressMixin:
             archetypes=arch_manifests,
         )
 
-
     def _portfolio_project_path(self, descriptor: Any) -> Optional[Path]:
         """Checkout path of a portfolio project.
 
@@ -531,7 +521,6 @@ class ProgressMixin:
         if getattr(descriptor, "id", None) == "darkfac" and (candidate is None or not candidate.exists()):
             return self.project_root
         return candidate
-
 
     def get_portfolio_project_detail(self, project_id: str) -> Optional[PortfolioProjectDetailResponse]:
         """Return deep-dive inspection response for a single adopted project (DH-08)."""
@@ -577,7 +566,6 @@ class ProgressMixin:
             roadmap_health=roadmap_health,
         )
 
-
     def get_portfolio_efficiency(self) -> Any:
         """Return aggregated portfolio capacity, WFQ queues, and budget telemetry (HF-23)."""
         from core.portfolio.models import PortfolioEfficiencyReport
@@ -592,12 +580,10 @@ class ProgressMixin:
             budgets=self.budget_manager.list_budgets(),
         )
 
-
     def get_portfolio_archetypes(self) -> List[Any]:
         """Return all available project archetypes from the factory catalog (HF-20)."""
         from core.archetypes.registry import get_registry as get_arch_reg
         return get_arch_reg().list_archetypes()
-
 
     def get_autonomy_plan(self) -> Dict[str, Any]:
         """Returns the compiled Continuous Autonomy Plan and execution DAG (DH-12)."""

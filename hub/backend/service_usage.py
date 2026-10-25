@@ -5,35 +5,18 @@ import time
 from datetime import datetime, timezone
 from typing import Optional, Any
 
-from hub.backend.models import (
-    UsageSyncPayload,
-    UsageSyncResponse,
-)
+from hub.backend.models import UsageSyncPayload, UsageSyncResponse
 from core.usage.ledger import infer_model_tier
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
-from core.usage.api_credits import (
-    ApiCreditsReport,
-    CreditAccountUpdateRequest,
-    ProviderCreditCard,
-)
-from core.infra.cards import (
-    InfraCard,
-    InfraCardsReport,
-    build_infra_cards_report,
-)
-from core.infra.metrics import (
-    InfraMetricsReport,
-    build_infra_metrics_report,
-)
-
-
+from core.usage.api_credits import ApiCreditsReport, CreditAccountUpdateRequest, ProviderCreditCard
+from core.infra.cards import InfraCard, InfraCardsReport, build_infra_cards_report
+from core.infra.metrics import InfraMetricsReport, build_infra_metrics_report
 
 
 logger = logging.getLogger("darkhub.service")
 
 
 class UsageMixin:
-
     def _record_model_call(
         self,
         *,
@@ -74,31 +57,25 @@ class UsageMixin:
         except Exception as exc:
             logger.warning("Model telemetry write failed: %s", exc)
 
-
     def get_telemetry_runs(self, filters: Any = None) -> Any:
         """Query paginated model telemetry runs with filters."""
         return self.telemetry_store.query_runs(filters)
-
 
     def get_telemetry_stats(self, filters: Any = None) -> Any:
         """Calculate analytical statistics across telemetry runs."""
         return self.telemetry_store.get_stats(filters)
 
-
     def list_telemetry_tickets(self) -> list[str]:
         """Return distinct tickets with recorded runs."""
         return self.telemetry_store.list_tickets()
-
 
     def record_telemetry_run(self, payload: Any) -> Any:
         """Record an incoming telemetry run directly into SQLite store."""
         return self.telemetry_store.record(payload)
 
-
     def get_account_usage(self, force: bool = False) -> Any:
         """Return a partial-success report for every known AI platform."""
         return self.account_usage_monitor.inspect(force=force)
-
 
     def request_account_refresh(self, target_node: Optional[str] = None) -> Any:
         """Record a refresh request for the metering host; never probe CLIs on a synced-only Hub."""
@@ -117,32 +94,26 @@ class UsageMixin:
             request = self.refresh_request_store.update(request.id, change) or request
         return request
 
-
     def get_model_usage(self, project_id: Optional[str] = None) -> Any:
         """Return project-wide model counters and recent attempts."""
         return self.model_usage_ledger.report(project_id=project_id)
-
 
     def record_model_usage(self, event: ModelCallEvent) -> Any:
         """Allow Codex, Grok, Gemini and other harnesses to report calls."""
         self.model_usage_ledger.record(event)
         return self.model_usage_ledger.report()
 
-
     def get_api_credits_report(self, force: bool = False) -> ApiCreditsReport:
         """Returns API credit balance and current month expenditure in USD ($)."""
         return self.api_credits_monitor.generate_report(force=force)
-
 
     def refresh_api_credits_report(self) -> ApiCreditsReport:
         """Forces live refresh of API credit balance and expenditures ($)."""
         return self.api_credits_monitor.refresh_report()
 
-
     def update_credit_account(self, provider_id: str, payload: CreditAccountUpdateRequest) -> ProviderCreditCard:
         """Updates and persists credit balances or notes for a provider."""
         return self.api_credits_monitor.update_account(provider_id, payload)
-
 
     def sync_usage_data(self, payload: UsageSyncPayload) -> UsageSyncResponse:
         """Persists incoming account quota and credit snapshots from a workstation or worker node."""
@@ -188,7 +159,6 @@ class UsageMixin:
             message=f"Synchronized {accounts_updated} account quotas and {credits_updated} credit balances from {payload.client_node_id}.",
         )
 
-
     def get_infra_cards_report(
         self,
         probe_liveness: bool = False,
@@ -204,7 +174,6 @@ class UsageMixin:
             project_id=project_id,
         )
 
-
     def get_infra_card(self, node_id: str, probe_liveness: bool = False, probe_timeout: float = 0.5) -> Optional[InfraCard]:
         """Returns a single infrastructure card by node ID."""
         report = self.get_infra_cards_report(probe_liveness=probe_liveness, probe_timeout=probe_timeout)
@@ -212,7 +181,6 @@ class UsageMixin:
             if card.id == node_id:
                 return card
         return None
-
 
     def get_infra_metrics_report(self, force_refresh: bool = False, timeout: float = 3.0) -> InfraMetricsReport:
         """Returns the real-time infrastructure metrics report (INFRA-11)."""

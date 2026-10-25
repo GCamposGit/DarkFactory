@@ -26,25 +26,9 @@ from hub.backend.models import (
 )
 from core.models import registry as _models
 from core.execution.providers import get_openrouter_api_key
-from core.content import (
-    ContentEngine,
-    AntiSlopLinter,
-    ContentRequest,
-    ContentType,
-    CONTENT_PRESETS,
-)
-from core.visual import (
-    VisualStudio,
-    VisualPromptSpec,
-    AssetType,
-    VisualTheme,
-    AspectRatio,
-)
-from core.learning_pack import (
-    LearningPackStore,
-    LearningPackGenerator,
-    LearningPackRenderer,
-)
+from core.content import ContentEngine, AntiSlopLinter, ContentRequest, ContentType, CONTENT_PRESETS
+from core.visual import VisualStudio, VisualPromptSpec, AssetType, VisualTheme, AspectRatio
+from core.learning_pack import LearningPackStore, LearningPackGenerator, LearningPackRenderer
 from core.benchmarks import (
     DOMAIN_METADATA,
     ensure_daily_benchmark,
@@ -54,13 +38,10 @@ from core.benchmarks import (
 )
 
 
-
-
 logger = logging.getLogger("darkhub.service")
 
 
 class AiStudioMixin:
-
     def get_ollama_status(self) -> OllamaStatusResponse:
         """Inspects local Ollama instance and lists installed models."""
         url = f"{self.ollama_base_url}/api/tags"
@@ -98,7 +79,6 @@ class AiStudioMixin:
                 models=[],
                 error=str(exc),
             )
-
 
     def generate_ollama(self, req_data: OllamaGenerateRequest) -> OllamaGenerateResponse:
         """Executes a prompt against local Ollama instance without streaming."""
@@ -152,7 +132,6 @@ class AiStudioMixin:
             logger.error(f"Error querying Ollama model {req_data.model}: {exc}")
             raise RuntimeError(f"Ollama generation failed: {exc}")
 
-
     def list_prompts(self, search: Optional[str] = None) -> List[PromptTemplate]:
         """Loads prompt templates catalog."""
         if not self.prompts_file.exists():
@@ -177,13 +156,11 @@ class AiStudioMixin:
             logger.error(f"Failed to read prompt templates: {exc}")
             return []
 
-
     def get_latest_benchmark_ledger(self) -> Dict[str, Any]:
         """Loads or builds latest daily benchmark ledger."""
         from core.benchmarks.fetcher import ensure_daily_benchmark
         ledger = ensure_daily_benchmark()
         return ledger.to_dict()
-
 
     def get_benchmark_frontier(self) -> Dict[str, Any]:
         """Builds Pareto efficiency frontier summary from latest ledger."""
@@ -194,13 +171,11 @@ class AiStudioMixin:
         summary = build_frontier_summary(ledger.date, all_models)
         return summary.to_dict()
 
-
     def refresh_benchmarks(self) -> Dict[str, Any]:
         """Forces an on-demand refresh of daily model benchmarks."""
         from core.benchmarks.fetcher import ensure_daily_benchmark
         ledger = ensure_daily_benchmark(force=True)
         return ledger.to_dict()
-
 
     def get_benchmark_proximity(self) -> Dict[str, Any]:
         """Calculates Frontier Proximity Index (FPI), epsilon gaps and challenger status."""
@@ -214,7 +189,6 @@ class AiStudioMixin:
             "models": [m.to_dict() for m in sorted(all_models, key=lambda m: (-(m.frontier_proximity_index or 0.0), -(m.coding_score or 0.0)))]
         }
 
-
     def get_top_candidates_for_tier(self, tier: str = "high", k: int = 3) -> List[Dict[str, Any]]:
         """Returns the top-3 speculative candidate models for a given tier."""
         from core.benchmarks.fetcher import ensure_daily_benchmark
@@ -223,7 +197,6 @@ class AiStudioMixin:
         all_models = list(ledger.models.values())
         candidates = get_top_candidates_for_tier(all_models, tier=tier, k=k)
         return [c.to_dict() for c in candidates]
-
 
     def get_empirical_ledger(self) -> Dict[str, Any]:
         """Returns cumulative empirical Dark Factory benchmark stats and Elo leaderboard."""
@@ -243,7 +216,6 @@ class AiStudioMixin:
             "recent_races": [r.to_dict() for r in ledger.history[-20:]],
         }
 
-
     def run_speculative_race(self, task_id: str, prompt: str, complexity: str = "high", offline: bool = False) -> Dict[str, Any]:
         """Executes a speculative cascade race."""
         from core.benchmarks.racing import SpeculativeRacingEngine
@@ -256,11 +228,9 @@ class AiStudioMixin:
         )
         return result.to_dict()
 
-
     def get_openrouter_key(self) -> Optional[str]:
         """Recovers OpenRouter API key from environment variable or Windows registry."""
         return get_openrouter_api_key()
-
 
     def get_openrouter_status(self) -> OpenRouterStatusResponse:
         """Inspects OpenRouter authentication, balance/usage, and curated frontier models."""
@@ -347,7 +317,6 @@ class AiStudioMixin:
                 models=curated_models,
                 error=f"Falha na autenticação com OpenRouter: {exc}",
             )
-
 
     def generate_openrouter(self, req_data: UnifiedGenerateRequest) -> UnifiedGenerateResponse:
         """Executes prompt against OpenRouter API with full latency, token and cost calculation."""
@@ -437,7 +406,6 @@ class AiStudioMixin:
             logger.error(f"OpenRouter generate failed for {req_data.model}: {exc}")
             raise RuntimeError(f"OpenRouter generation failed: {exc}")
 
-
     def generate_unified(self, req_data: UnifiedGenerateRequest) -> UnifiedGenerateResponse:
         """Dispatches generation to Ollama or OpenRouter."""
         if req_data.provider == PlaygroundProvider.OPENROUTER:
@@ -470,13 +438,11 @@ class AiStudioMixin:
         store = LearningPackStore()
         return store.list_packs()
 
-
     def get_learning_pack(self, pack_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve full structured JSON for a specific pack or 'latest'."""
         store = LearningPackStore()
         pack = store.load_pack(pack_id)
         return pack.to_dict() if pack else None
-
 
     def generate_learning_pack(
         self,
@@ -500,7 +466,6 @@ class AiStudioMixin:
             "rendered_md": rendered_md,
         }
 
-
     def export_learning_pack_anki(self, pack_id: str) -> Optional[str]:
         """Returns Anki TSV formatted deck for a learning pack."""
         from core.enterprise.enforcement import enforce_data_policy
@@ -511,7 +476,6 @@ class AiStudioMixin:
         if not pack:
             return None
         return LearningPackRenderer.render_anki_tsv(pack)
-
 
     def get_learning_pack_html(self, pack_id: str) -> Optional[str]:
         """Returns standalone interactive HTML content for a learning pack."""
@@ -538,7 +502,6 @@ class AiStudioMixin:
                 "target_metric_scale": meta.target_metric_scale,
             })
         return domains
-
 
     def get_domain_frontier(self, domain_key: str) -> Optional[Dict[str, Any]]:
         """Retrieve Pareto efficiency frontier for a specific domain."""
@@ -567,8 +530,6 @@ class AiStudioMixin:
             "frontier_count": len(frontier_models),
             "models": [m.to_dict() for m in frontier_models],
         }
-
-
 
     def route_task_benchmark(
         self,
@@ -619,7 +580,6 @@ class AiStudioMixin:
             "created_at": resp.created_at,
         }
 
-
     def lint_content(self, payload: ContentLintRequest) -> Dict[str, Any]:
         """Audits text content for AI slop and returns structured report."""
         linter = AntiSlopLinter(custom_banned_words=payload.custom_banned_words)
@@ -633,7 +593,6 @@ class AiStudioMixin:
             "violations": [v.to_dict() for v in report.violations],
             "top_fixes": report.top_fixes,
         }
-
 
     def list_content_presets(self) -> List[Dict[str, Any]]:
         """Lists all supported content presets and their defaults."""
@@ -668,7 +627,6 @@ class AiStudioMixin:
         res = studio.create_asset(spec)
         return res.to_dict()
 
-
     def illustrate_text(self, payload: VisualIllustrateRequest) -> Dict[str, Any]:
         """Semantically analyzes input text and renders matching visual asset."""
         studio = VisualStudio()
@@ -682,7 +640,6 @@ class AiStudioMixin:
             offline=payload.offline,
         )
         return res.to_dict()
-
 
     def list_visual_assets(self) -> List[Dict[str, Any]]:
         """Returns catalog of all saved visual assets."""

@@ -38,11 +38,9 @@ logger = logging.getLogger("darkhub.service")
 
 
 class CatalogMixin:
-
     # Shipped seed files a Dokploy volume mount can shadow; never touched: services.json,
     # catalog_meta.json, or anything else the owner may have edited in data_dir.
     _CLOUD_SEED_FILES: tuple[str, ...] = ("default_services.json", "default_prompts.json")
-
 
     def _apply_cloud_seed(self) -> None:
         """Overlay shipped catalog/prompt seeds from an image-level seed dir (USR-44).
@@ -75,7 +73,6 @@ class CatalogMixin:
             except OSError as exc:
                 logger.warning("Cloud seed refresh failed for %s: %s", filename, exc)
 
-
     def _ensure_storage(self) -> None:
         """Ensures the storage directory and initial files exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -91,14 +88,12 @@ class CatalogMixin:
 
         self._migrate_launch_metadata()
 
-
     def _resolve_launch_script_path(self, script_name: str) -> Path:
         """Resolve a catalog launch path relative to the shared project root."""
         script_path = Path(script_name)
         if not script_path.is_absolute():
             script_path = self.project_root / script_path
         return script_path.resolve()
-
 
     def _migrate_launch_metadata(self) -> None:
         """Refresh missing or obsolete launcher metadata from the shipped catalog.
@@ -161,7 +156,6 @@ class CatalogMixin:
     # Fields a catalog revision may refresh; URLs, favorites and pins stay owned by the user.
     _CATALOG_REVISION_FIELDS: tuple[str, ...] = ("name", "description", "tags", "category", "icon", "color")
 
-
     def _apply_catalog_revisions(self, current_items: List[Dict], default_items: List[Dict]) -> bool:
         """Propagate shipped catalog evolutions into a persisted ``services.json`` once (USR-42).
 
@@ -199,7 +193,6 @@ class CatalogMixin:
                 logger.warning("Catalog revision marker not persisted: %s", exc)
         return changed
 
-
     @staticmethod
     def _env_flag(name: str, default: bool = False) -> bool:
         value = os.getenv(name)
@@ -207,14 +200,12 @@ class CatalogMixin:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
 
-
     def _local_service_launch_enabled(self) -> bool:
         """Return whether this process is allowed to spawn local demo services."""
         return self._env_flag(
             "DARKHUB_ENABLE_LOCAL_SERVICE_LAUNCH",
             default=os.getenv("DARKHUB_ENV", "").strip().lower() != "production",
         )
-
 
     def _service_url_overrides(self) -> Dict[str, str]:
         """Read optional deployment-time URL overrides for externally hosted services."""
@@ -243,7 +234,6 @@ class CatalogMixin:
             overrides[service_id] = url.strip()
         return overrides
 
-
     def _apply_service_url_overrides(self, items: List[Dict]) -> List[Dict]:
         overrides = self._service_url_overrides()
         if not overrides:
@@ -259,7 +249,6 @@ class CatalogMixin:
             resolved_items.append(resolved_item)
         return resolved_items
 
-
     def _load_services_raw(self) -> List[Dict]:
         try:
             with open(self.services_file, "r", encoding="utf-8") as f:
@@ -269,7 +258,6 @@ class CatalogMixin:
         except Exception as exc:
             logger.error(f"Failed to read services from {self.services_file}: {exc}")
             return []
-
 
     def _save_services_raw(self, items: List[Dict]) -> None:
         temp_file = self.services_file.with_suffix(".tmp")
@@ -283,7 +271,6 @@ class CatalogMixin:
                 temp_file.unlink()
             logger.error(f"Error saving services: {exc}")
             raise
-
 
     def list_services(
         self,
@@ -325,7 +312,6 @@ class CatalogMixin:
 
         return results
 
-
     def get_service(self, service_id: str) -> Optional[ServiceItem]:
         raw_items = self._load_services_raw()
         for raw in raw_items:
@@ -337,11 +323,9 @@ class CatalogMixin:
                     return None
         return None
 
-
     def _generate_slug(self, name: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", name.strip().lower()).strip("-")
         return slug or "service"
-
 
     def create_service(self, create_data: ServiceCreate) -> ServiceItem:
         raw_items = self._load_services_raw()
@@ -377,7 +361,6 @@ class CatalogMixin:
         self._save_services_raw(raw_items)
         return new_item
 
-
     def update_service(self, service_id: str, update_data: ServiceUpdate) -> Optional[ServiceItem]:
         raw_items = self._load_services_raw()
         updated_item: Optional[ServiceItem] = None
@@ -400,7 +383,6 @@ class CatalogMixin:
             self._save_services_raw(raw_items)
         return updated_item
 
-
     def delete_service(self, service_id: str) -> bool:
         raw_items = self._load_services_raw()
         initial_count = len(raw_items)
@@ -411,13 +393,11 @@ class CatalogMixin:
             return True
         return False
 
-
     def toggle_favorite(self, service_id: str) -> Optional[ServiceItem]:
         service = self.get_service(service_id)
         if not service:
             return None
         return self.update_service(service_id, ServiceUpdate(is_favorite=not service.is_favorite))
-
 
     def toggle_pin(self, service_id: str) -> Optional[ServiceItem]:
         service = self.get_service(service_id)
@@ -425,30 +405,16 @@ class CatalogMixin:
             return None
         return self.update_service(service_id, ServiceUpdate(pinned=not service.pinned))
 
-
     @property
     def session_token(self) -> str:
         """Returns the current active local session token."""
         return self._session_token
-
 
     def validate_session(self, token: Optional[str]) -> bool:
         """Validates a provided session token against active local session."""
         if not token or not isinstance(token, str):
             return False
         return secrets.compare_digest(token.strip(), self._session_token)
-
-
-    def rotate_session(self) -> str:
-        """Rotates the session token."""
-        self._session_token = secrets.token_urlsafe(32)
-        if hasattr(self, "session_file") and self.session_file:
-            try:
-                self.session_file.write_text(self._session_token, encoding="utf-8")
-            except Exception:
-                pass
-        return self._session_token
-
 
     def send_owner_login_link(self, now: Optional[float] = None) -> str:
         """Send a one-time DarkHub login link to the owner's Telegram chat.
@@ -481,7 +447,6 @@ class CatalogMixin:
             except Exception as exc:  # noqa: BLE001 - login must degrade, never crash the Hub
                 logger.warning("login link: telegram role %s falhou: %s", role, exc.__class__.__name__)
         return "unavailable"
-
 
     def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
         """
@@ -572,7 +537,6 @@ class CatalogMixin:
                     error=str(get_exc),
                 )
 
-
     def _probe_service_urls(self, service: ServiceItem, timeout_sec: float) -> HealthCheckResult:
         """Probe a service's primary URL and configured fallbacks in order."""
         result = self.ping_url(service_id=service.id, url=service.url, timeout_sec=timeout_sec)
@@ -589,7 +553,6 @@ class CatalogMixin:
                 return fallback_result
 
         return result
-
 
     def launch_service(
         self,
@@ -698,7 +661,6 @@ class CatalogMixin:
                 message=f"Service '{service.name}' process spawned (PID: {proc.pid}), still warming up.",
             )
 
-
     def get_service_launch_target(self, service_id: str, max_wait_sec: float = 5.0) -> str:
         """
         Ensures local service is launched if applicable and returns its destination URL.
@@ -717,7 +679,6 @@ class CatalogMixin:
 
         return service.url
 
-
     def export_services_data(self) -> ExportCatalogResponse:
         """Exports full catalog of services with timestamp and version."""
         from core.enterprise.enforcement import enforce_data_policy
@@ -731,7 +692,6 @@ class CatalogMixin:
             count=len(services),
             services=services,
         )
-
 
     def import_services_data(self, req: ImportCatalogRequest) -> ImportCatalogResponse:
         """Imports and saves catalog with automatic backup."""
@@ -759,7 +719,6 @@ class CatalogMixin:
             total_count=len(final_items),
             message="Catálogo importado com sucesso!",
         )
-
 
     def reset_to_defaults(self) -> int:
         """Restores catalog from default_services.json."""
