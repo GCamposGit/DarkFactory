@@ -155,7 +155,7 @@ def test_dead_worker_is_abandoned_without_waiting_for_the_ceiling(
 ) -> None:
     monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.2)
     monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "60")
-    monkeypatch.setattr(remote_dispatch, "DEAD_PROBE_GAP_SEC", 0.02)  # USR-342: real gap is 15 s
+    monkeypatch.setattr(remote_dispatch, "_sleep", lambda _s: None)  # USR-342: real gap is 15 s
     worker = fake_worker_factory(poll_fails_for_sec=None)
     worker.stop()  # port closed: polls AND /health fail
 
@@ -171,6 +171,7 @@ def test_worker_with_failing_health_endpoint_counts_as_dead(
 ) -> None:
     monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.2)
     monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "60")
+    monkeypatch.setattr(remote_dispatch, "_sleep", lambda _s: None)  # no real 15 s probe gaps
     worker = fake_worker_factory(poll_fails_for_sec=None, health_ok=False)
 
     with pytest.raises(remote_dispatch._WorkerUnavailable, match="/health is unreachable"):

@@ -131,6 +131,13 @@ SLOW_WORKER_PROBE_INTERVAL_SEC = 10.0
 #: confirmation probes that follow the first failed ``/health`` probe.
 DEFAULT_WORKER_DEAD_PROBES = 3
 MAX_WORKER_DEAD_PROBES = 10
+
+
+def _sleep(seconds: float) -> None:
+    """Injectable sleeper (late-bound so patching ``time.sleep`` or ``_sleep`` both work)."""
+    time.sleep(seconds)
+
+
 DEAD_PROBE_GAP_SEC = 15.0  # USR-342: 3 probes span >= 30 s (a VM freeze/restore blip is not death)
 #: USR-178: a job abandoned for one of these causes is cancelled on the worker
 #: (best effort), so a half-alive worker is not left grinding a run nobody
@@ -618,7 +625,7 @@ def _confirm_worker_unreachable(base_url: str) -> tuple[dict[str, Any] | None, i
     timeout = max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC)
     failed = 1  # the probe that made the caller call this function
     while failed < needed:
-        time.sleep(DEAD_PROBE_GAP_SEC)
+        _sleep(DEAD_PROBE_GAP_SEC)
         alive = probe_health(base_url, timeout=timeout)
         if alive is not None:
             return alive, failed

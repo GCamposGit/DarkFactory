@@ -542,6 +542,7 @@ def test_worker_vanishing_mid_run_falls_back(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.05)
     monkeypatch.setattr(remote_dispatch, "POLL_INTERVAL_SEC", 0.01)
+    monkeypatch.setattr(remote_dispatch, "_sleep", lambda _s: None)  # no real 15 s probe gaps
 
     def _always_fails(*_args, **_kwargs):
         raise ConnectionError("worker unreachable")
