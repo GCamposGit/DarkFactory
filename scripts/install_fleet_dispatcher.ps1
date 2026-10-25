@@ -36,11 +36,20 @@ if ($DryRun) {
 $pythonPath = (Get-Command python.exe -ErrorAction Stop).Source
 $userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $credential = Get-Credential -UserName $userId -Message "Credencial da conta de servico do despachante (inicia no boot)"
+if ($null -eq $credential) { throw "Instalacao cancelada: a credencial da conta e obrigatoria." }
 $plainPassword = $credential.GetNetworkCredential().Password
-$xmlLines = & $pythonPath -m core.line.fleet_task_xml --user $userId --python $pythonPath --repo $repoRoot
-if ($LASTEXITCODE -ne 0) { throw "Nao foi possivel gerar o XML da tarefa" }
-Register-ScheduledTask -TaskName "DarkFac-Fleet-Dispatcher" -Xml ($xmlLines -join "`n") `
-    -User $userId -Password $plainPassword -Force | Out-Null
-$plainPassword = $null
+try {
+    Push-Location $repoRoot
+    try {
+        $xmlLines = & $pythonPath -m core.line.fleet_task_xml --user $userId --python $pythonPath --repo $repoRoot
+        if ($LASTEXITCODE -ne 0) { throw "Nao foi possivel gerar o XML da tarefa" }
+    } finally { Pop-Location }
+    Register-ScheduledTask -TaskName "DarkFac-Fleet-Dispatcher" -Xml ($xmlLines -join "`n") `
+        -User $userId -Password $plainPassword -Force | Out-Null
+} finally {
+    $plainPassword = $null
+    $credential = $null
+    $xmlLines = $null
+}
 Write-Output "[OK] Tarefa 'DarkFac-Fleet-Dispatcher' registrada (boot, conta de servico, reinicio em falha)."
 Write-Output "     Estado: $repoRoot\.factory\runs\fleet_dispatcher_state.json"

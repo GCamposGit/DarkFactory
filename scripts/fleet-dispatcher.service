@@ -10,7 +10,6 @@ User=darkfac
 Group=darkfac
 WorkingDirectory=/opt/darkfac
 EnvironmentFile=-/etc/darkfac/fleet-dispatcher.env
-Environment=DARKFAC_FLEET_LOG_DIR=/var/log/darkfac
 ExecStart=/opt/darkfac/.venv/bin/python -m core.line.fleet_dispatcher --loop
 Restart=always
 RestartSec=10

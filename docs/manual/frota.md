@@ -8,33 +8,78 @@ tratada como falha normal de infraestrutura, sem concluir o ticket.
 
 ## Notebook e Desktop (Windows)
 
-Instale a tarefa a partir do checkout principal atualizado, nunca de uma worktree. Abra
-PowerShell como o usuário que executará o serviço e rode:
+Instale a tarefa a partir do checkout principal atualizado, nunca de uma worktree.
+Use uma conta dedicada de serviço nos dois computadores, com senha gerenciada pela
+organização e direito de **Log on as a batch job**. Conceda a ela leitura/execução no
+checkout e no ambiente virtual, gravação em `.factory\runs` (estado) e na pasta de logs.
+Não a torne administradora local. O Python, o checkout e o estado da tarefa devem estar
+em caminhos locais permanentes, acessíveis antes de qualquer usuário entrar.
+
+O instalador usa o `python.exe` encontrado no `PATH`, o checkout onde o script está e o
+usuário atual como conta de serviço. São os campos `Command`, `WorkingDirectory` e
+`UserId` do XML produzido por `core.line.fleet_task_xml.generate_task_xml`. O XML ainda
+define gatilho `BootTrigger`, logon `Password`, nível `LeastPrivilege`, uma única
+instância e limite de execução ilimitado. Para ajustar os três caminhos/identidade,
+altere os valores no instalador e no gerador antes de registrar novamente.
+
+No PowerShell, como a conta de serviço, rode:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\install_fleet_dispatcher.ps1
 ```
 
-O instalador pede a senha da conta atual para registrar uma tarefa do Agendador com
-gatilho `At startup` e logon `Password`. O Agendador guarda a credencial protegida pelo
-Windows; a tarefa roda com privilégios mínimos, espera a rede quando disponível, e
-reinicia após falha a cada minuto. A conta precisa ter leitura do checkout e acesso às
-variáveis/credenciais operacionais necessárias. O log fica em
-`C:\dev\DarkFac\.factory\runs\fleet_dispatcher_logs\fleet-dispatcher.log`, com cinco
-arquivos rotacionados de até 10 MiB cada.
+Informe a senha da conta de serviço quando solicitada. O Agendador armazena a credencial
+protegida pelo Windows e executa a tarefa mesmo sem sessão interativa. A tarefa reinicia
+após falha a cada minuto, até 999 vezes. O instalador recusa execução a partir de uma
+worktree. Para trocar Python, checkout ou conta, ajuste os valores correspondentes e
+rode novamente o instalador no checkout principal.
+
+Configure variáveis operacionais no ambiente de sistema ou no ambiente da conta de
+serviço antes de iniciar a tarefa. `DARKFAC_FLEET_LOG_DIR` escolhe a pasta absoluta de
+log, que precisa permitir gravação para a conta. Sem ela, usa
+`C:\dev\DarkFac\.factory\runs\fleet_dispatcher_logs`. O arquivo
+`fleet-dispatcher.log` é UTF-8, limitado a 10 MiB com cinco cópias rotacionadas; as
+mensagens também seguem para o console do processo. Não coloque segredos em arquivos
+versionados ou argumentos da tarefa.
 
 Verifique em `Agendador de Tarefas > Biblioteca do Agendador de Tarefas >
-DarkFac-Fleet-Dispatcher > Propriedades > Disparadores` que o disparador é “Ao iniciar o
-sistema”. Em `Geral`, confira a conta efetiva e “Executar estando o usuário conectado ou
-não”. Para ver atividade, abra a aba `Histórico` e consulte o log rotativo acima.
+DarkFac-Fleet-Dispatcher > Propriedades`:
+
+- `Geral`: conta de serviço correta, “Executar estando o usuário conectado ou não” e
+  “Executar com privilégios mais altos” desmarcado.
+- `Disparadores`: “Ao iniciar o sistema”.
+- `Ações`: Python completo, argumentos `-m core.line.fleet_dispatcher --loop` e
+  diretório de início igual ao checkout.
+- `Configurações`: reinício após falha a cada minuto e instâncias simultâneas ignoradas.
+
+Confira `Histórico` e `Último Resultado da Execução`. Para acompanhar tarefa e log:
+
+```powershell
+Get-ScheduledTask -TaskName DarkFac-Fleet-Dispatcher | Get-ScheduledTaskInfo
+Get-Content C:\dev\DarkFac\.factory\runs\fleet_dispatcher_logs\fleet-dispatcher.log -Tail 100 -Wait
+```
+
+Se `DARKFAC_FLEET_LOG_DIR` apontar a outra pasta, use-a no segundo comando.
 
 ## grokbox (systemd)
 
 O arquivo versionado é [`scripts/fleet-dispatcher.service`](../../scripts/fleet-dispatcher.service).
-O exemplo assume usuário/grupo `darkfac`, checkout em `/opt/darkfac` e ambiente virtual
-em `/opt/darkfac/.venv`. Ajuste esses caminhos para o checkout implantado antes de
-instalar. Na VM, crie a conta de serviço se ainda não existir, garanta que o checkout e
-ambiente virtual pertençam a ela, instale a unit e crie o arquivo de ambiente:
+Ele aguarda `network-online.target`, usa `User=darkfac` e `Group=darkfac`, trabalha em
+`/opt/darkfac` e executa `/opt/darkfac/.venv/bin/python -m core.line.fleet_dispatcher
+--loop`. O `Restart=always` reinicia após encerramento normal ou falha, com espera
+explícita de dez segundos (`RestartSec=10`). `TimeoutStopSec=30` permite encerramento
+limpo, `LogsDirectory=darkfac` cria `/var/log/darkfac` com modo `0750`, e
+`WantedBy=multi-user.target` habilita a inicialização no boot.
+
+Os caminhos e a identidade são exemplos ajustáveis: revise `User`, `Group`,
+`WorkingDirectory`, `ExecStart`, `EnvironmentFile`, `LogsDirectory` e
+`LogsDirectoryMode` para a implantação. Use uma conta de sistema sem shell/login
+interativo (`/usr/sbin/nologin`) e conceda acesso de leitura/execução ao checkout e à
+venv, gravação ao estado sob `.factory/runs` e à pasta criada para logs. O arquivo de
+ambiente fica fora do checkout, pertence a `root:darkfac` e usa modo `0640`.
+
+Na VM grokbox, prepare a conta, checkout e venv; instale a unit e crie o ambiente
+externo:
 
 ```sh
 id -u darkfac >/dev/null 2>&1 || sudo useradd --system --home-dir /opt/darkfac --shell /usr/sbin/nologin darkfac
@@ -48,24 +93,30 @@ sudoedit /etc/systemd/system/fleet-dispatcher.service
 sudoedit /etc/darkfac/fleet-dispatcher.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now fleet-dispatcher.service
-sudo systemctl status fleet-dispatcher.service
 ```
 
-Na unit, confirme `User`, `Group`, `WorkingDirectory`, `ExecStart` e
-`DARKFAC_FLEET_LOG_DIR` contra os caminhos reais. No arquivo de ambiente, adicione cada
-variável operacional necessária ao checkout e aos workers. Campos opcionais para
-endereços customizados são `DARKFAC_FLEET_URL_GROKBOX` e
-`DARKFAC_FLEET_URL_DESKTOP` (valores são URLs base HTTP dos workers; defaults já estão
-no código). Não copie tokens ou senhas para a unit nem para este repositório; injete-os
-no arquivo local com permissões `0640` e propriedade `root:darkfac`.
+No ambiente externo, defina `DARKFAC_FLEET_LOG_DIR=/var/log/darkfac` e as variáveis
+operacionais necessárias aos workers. `EnvironmentFile=-/etc/darkfac/fleet-dispatcher.env`
+carrega esse arquivo; o prefixo `-` permite iniciar mesmo quando ele ainda não existe.
+Os endereços opcionais são `DARKFAC_FLEET_URL_GROKBOX` e
+`DARKFAC_FLEET_URL_DESKTOP` (URLs base HTTP; o código tem defaults). Não copie tokens
+ou senhas para a unit nem para o repositório; injete segredos apenas no arquivo local,
+com permissões restritas. `DARKFAC_FLEET_LOG_DIR` pode apontar a outra pasta absoluta,
+desde que o usuário do serviço possa gravar nela e que ela exista.
 
-`Restart=always` mantém o serviço ativo após encerramento ou falha do processo; systemd
-inicia-o em cada boot. Os logs da aplicação são gravados em
-`/var/log/darkfac/fleet-dispatcher.log`, com cinco cópias rotacionadas de até 10 MiB.
-Para observar o serviço: `sudo journalctl -u fleet-dispatcher.service -f`.
+Os logs são gravados em `$DARKFAC_FLEET_LOG_DIR/fleet-dispatcher.log`, codificados em
+UTF-8 e limitados a 10 MiB por arquivo com cinco cópias. A saída também é encaminhada ao
+journal. Verifique e consulte os logs:
+
+```sh
+sudo systemctl status fleet-dispatcher.service
+sudo systemctl is-enabled fleet-dispatcher.service
+sudo journalctl -u fleet-dispatcher.service -n 100 --no-pager
+sudo journalctl -u fleet-dispatcher.service -f
+sudo tail -n 100 -f /var/log/darkfac/fleet-dispatcher.log
+```
 
 Se grokbox ou a VM ficar indisponível, não apague nem altere manualmente a reserva:
-heartbeats cessam, o TTL expira, o reconciliador libera o slot e o job volta a ser
-elegível. Confira `fleet_reservations`/estado da fila e os logs do despachante após o
-host retornar. `Restart=always` cobre falhas do processo; recuperação de host morto é
-feita pelo lease e pela admissão normal da frota.
+heartbeats cessam, o TTL expira, o reconciliador libera o slot e o ticket `planned` volta
+a ser elegível em outro host. `Restart=always` cobre falhas do processo local; a
+recuperação de host morto vem do lease e da admissão normal da frota.

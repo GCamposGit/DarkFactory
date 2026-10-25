@@ -18,6 +18,7 @@ from core.workflow.control_contracts import (
     IntakeCommand,
     JobKey,
     RuntimeOwner,
+    StaleLeaseError,
     StageResult,
 )
 from core.workflow.control_store import SQLiteControlStore
@@ -205,6 +206,14 @@ def test_dead_host_reservation_expires_and_pending_ticket_is_admitted_elsewhere(
     expired = store.reconcile_fleet_reservations(recovered_at)
     assert [item.reservation_id for item in expired] == [reservation.reservation_id]
     assert store.get_reservation(reservation.reservation_id).status == "expired"
+    assert store.get_active_reservation_for_host("grokbox") is None
+
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        run_status = conn.execute("SELECT status FROM runs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+        job_status = conn.execute("SELECT status FROM jobs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+    assert run_status == "active"
+    assert job_status == "pending"
 
     coordinator = CloudCoordinator(
         store=store,
@@ -216,6 +225,40 @@ def test_dead_host_reservation_expires_and_pending_ticket_is_admitted_elsewhere(
 
     assert [item.host_id for item in admitted] == ["notebook"]
     assert admitted[0].run_id == receipt.run_id
+
+
+def test_expired_host_owner_cannot_finish_cycle_after_re_admission(store, monkeypatch):
+    monkeypatch.setenv(FLEET_MANAGED_ENV, "1")
+    now = datetime.now(UTC)
+    receipt = _accept(store, now)
+    reservation = _reserve(store, receipt, now, host="grokbox")
+    claim = store.claim(worker="grokbox-worker", capabilities=CAPS, now=now + timedelta(seconds=1))
+    assert claim is not None and claim.reservation_id == reservation.reservation_id
+
+    recovered_at = now + timedelta(seconds=300)
+    store.reconcile_fleet_reservations(recovered_at)
+    coordinator = CloudCoordinator(
+        store=store,
+        fleet_hosts=["notebook"],
+        host_health_prober=lambda host: host == "notebook",
+        capacity_probe=lambda: 2,
+    )
+    admitted = coordinator.admit_eligible_cycles(recovered_at)
+    assert [item.run_id for item in admitted] == [receipt.run_id]
+
+    with pytest.raises(StaleLeaseError):
+        store.finish(
+            claim,
+            StageResult(outcome="success", output_refs=["stale-output"]),
+            recovered_at + timedelta(seconds=1),
+        )
+
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        run_status = conn.execute("SELECT status FROM runs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+        job_status = conn.execute("SELECT status FROM jobs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+    assert run_status == "active"
+    assert job_status == "pending"
 
 
 # --------------------------------------------------------------------------- worker heartbeat

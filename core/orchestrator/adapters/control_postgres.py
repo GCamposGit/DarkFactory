@@ -852,7 +852,7 @@ class PostgresControlStore:
                         """
                         SELECT lease_id, run_id, ticket_id, plan_version, stage, iteration, fencing_token
                         FROM claims
-                        WHERE status = 'active' AND expires_at < %s
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
                         LIMIT %s
                         FOR UPDATE SKIP LOCKED
                         """,
@@ -1928,6 +1928,24 @@ class PostgresControlStore:
             metadata=meta if isinstance(meta, dict) else {},
         )
 
+    @staticmethod
+    def _requeue_expired_fleet_run(cur: Any, run_id: str, now_utc: datetime) -> None:
+        """Return in-flight jobs to pending when their owning fleet host loses its lease."""
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = 'pending', cause_code = 'FLEET_RESERVATION_EXPIRED',
+                fencing_token = fencing_token + 1, current_lease_id = NULL,
+                started_at = NULL, updated_at = %s
+            WHERE run_id = %s AND status = 'running'
+            """,
+            (now_utc, run_id),
+        )
+        cur.execute(
+            "UPDATE claims SET status = 'released' WHERE run_id = %s AND status = 'active'",
+            (run_id,),
+        )
+
     def reserve_cycle(
         self,
         project_id: str,
@@ -1960,15 +1978,25 @@ class PostgresControlStore:
                     # Advisory transaction lock serializes concurrent ceiling checks
                     cur.execute("SELECT pg_advisory_xact_lock(hashtext('darkfac_fleet_reservation_lock'))")
 
-                    # 1. Sweep expired active reservations to release slots
+                    # 1. Sweep expired reservations and return their in-flight jobs to pending.
+                    cur.execute(
+                        """
+                        SELECT run_id FROM fleet_reservations
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
+                        """,
+                        (now_utc,),
+                    )
+                    expiring_runs = [row[0] for row in cur.fetchall()]
                     cur.execute(
                         """
                         UPDATE fleet_reservations
                         SET status = 'expired'
-                        WHERE status = 'active' AND expires_at < %s
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
                         """,
                         (now_utc,),
                     )
+                    for expiring_run_id in expiring_runs:
+                        self._requeue_expired_fleet_run(cur, expiring_run_id, now_utc)
 
                     # 2. Check active ticket uniqueness
                     cur.execute(
@@ -2106,8 +2134,9 @@ class PostgresControlStore:
                         )
                     res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
                     res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                    if res_expires < now_utc:
+                    if res_expires <= now_utc:
                         cur.execute("UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = %s", (reservation_id,))
+                        self._requeue_expired_fleet_run(cur, row[3], now_utc)
                         conn.commit()
                         raise StaleLeaseError(f"Reservation '{reservation_id}' expired at {res_expires.isoformat()}.")
 
@@ -2384,7 +2413,7 @@ class PostgresControlStore:
                         """
                         UPDATE fleet_reservations
                         SET status = 'expired'
-                        WHERE status IN ('active', 'draining') AND expires_at < %s
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
                         RETURNING reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
                                   acquired_at, heartbeat_at, expires_at, metadata
                         """,
@@ -2395,6 +2424,7 @@ class PostgresControlStore:
                     for row in rows:
                         res = self._row_to_reservation(row)
                         expired.append(res)
+                        self._requeue_expired_fleet_run(cur, res.run_id, now_utc)
                         cur.execute(
                             """
                             INSERT INTO reconciliation_ledger (
