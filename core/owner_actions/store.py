@@ -190,8 +190,13 @@ class OwnerActionStore:
         remote_ref: str | None = "origin/main",
         dynamic_path: Path | str | None = None,
         remote_ledger: Any = None,
+        control: bool | None = None,
     ) -> None:
         self.path = Path(path) if path is not None else default_path()
+        # USR-343 S4b: the default project ledger is backed by the control store (None = auto-detect).
+        from core.owner_actions import control_queue
+
+        self.control = control_queue.is_default_ledger(self.path) if control is None else control
         self.dynamic_path = Path(dynamic_path) if dynamic_path is not None else None
         self.overlay_path = Path(overlay_path) if overlay_path is not None else None
         # Best-effort id reservation against a branch's unsynced base (USR-255); None disables it.
@@ -203,6 +208,11 @@ class OwnerActionStore:
 
     def _load_definitions(self) -> LoadResult:
         payload, warning = _read_json(self.path)
+        if self.control:
+            from core.owner_actions import control_queue
+
+            rows = control_queue.merge_rows(_raw_actions(payload), control_queue.list_control_rows())
+            payload, warning = {"schema_version": SCHEMA_VERSION, "actions": rows}, None
         if self.remote_ledger is not None:
             remote = self.remote_ledger.get()
             if remote is not None:
@@ -358,6 +368,8 @@ class OwnerActionStore:
     # ----------------------------------------------------------------- write
 
     def _mutate_definitions(self, fn: Callable[[dict[str, Any], list[Any]], Any]) -> Any:
+        if self.control:
+            return self._mutate_control(fn)
         with _file_lock(self.path):
             payload, warning = _read_json(self.path)
             if warning and self.path.exists():
@@ -374,6 +386,27 @@ class OwnerActionStore:
                 document["actions"] = []
             result = fn(document, document["actions"])
             _atomic_write_json(self.path, document)
+            return result
+
+    def _mutate_control(self, fn: Callable[[dict[str, Any], list[Any]], Any]) -> Any:
+        """Run ``fn`` over file+control rows and persist only the changed rows to the control store."""
+        import copy
+
+        from core.owner_actions import control_queue
+
+        with _file_lock(self.path):
+            payload, _warning = _read_json(self.path)
+            file_rows = _raw_actions(payload)
+            rows = copy.deepcopy(control_queue.merge_rows(file_rows, control_queue.list_control_rows()))
+            before = {str(r.get("id")): json.dumps(r, sort_keys=True) for r in rows if isinstance(r, dict)}
+            document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": rows}
+            result = fn(document, rows)
+            changed = [
+                r for r in rows
+                if isinstance(r, dict) and before.get(str(r.get("id"))) != json.dumps(r, sort_keys=True)
+            ]
+            if changed:
+                control_queue.write_rows(changed)
             return result
 
     def add(self, draft: OwnerActionDraft) -> OwnerAction:

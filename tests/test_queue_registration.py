@@ -47,6 +47,11 @@ def _main_owner_actions(bare: Path) -> list[dict]:
     return json.loads(shown.stdout).get("actions", [])
 
 
+def _control_actions() -> list[dict]:
+    """The owner-action backlog as held by the control store (USR-343 S4b: alerts no longer open PRs)."""
+    return [a.to_record() for a in OwnerActionStore(control=True).list_actions()]
+
+
 class MovingMainGh(FakeGh):
     """FakeGh where a concurrent registration lands on main right before the first N merge attempts.
 
@@ -111,7 +116,7 @@ def test_concurrent_registration_survives_main_moving_during_every_ci_window(que
 
 
 def test_registration_that_never_merges_leaves_a_visible_alert(queue_env) -> None:
-    """USR-246: the alert reaches main as its own autonomous PR, and the shared checkout stays clean."""
+    """USR-343 S4b: the alert goes to the control store (no PR, no push) and the shared checkout stays clean."""
     local, bare, other = queue_env
     # Exactly enough moves to defeat the ticket's own merge + 3 re-sync attempts (USR-238); any
     # further "pr merge" call -- namely the alert's own tiny single-file PR -- lands cleanly, so
@@ -119,8 +124,8 @@ def test_registration_that_never_merges_leaves_a_visible_alert(queue_env) -> Non
     gh = MovingMainGh(bare, other, moves=4)
     rep = _register(local, gh)
     assert not rep.ok and rep.pr_url
-    actions = _main_owner_actions(bare)
-    alerts = [a for a in actions if a["id"].startswith("OA-QR-")]
+    assert _main_owner_actions(bare) == []
+    alerts = [a for a in _control_actions() if a["id"].startswith("OA-QR-")]
     assert len(alerts) == 1
     assert alerts[0]["id"] == f"OA-QR-{rep.pr_url.rsplit('/', 1)[1]}"
     assert alerts[0]["status"] == "open"
@@ -177,7 +182,7 @@ def _row(number: int, created: str, mergeable: str = "CONFLICTING", state: str =
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
 
 
-def test_watchdog_lands_alert_as_its_own_pr_then_closes_it_once_the_pr_merges(queue_env) -> None:
+def test_watchdog_writes_alert_to_control_store_then_closes_it_once_the_pr_merges(queue_env) -> None:
     """USR-246: without an injected store, raise and close each commit via an isolated worktree.
 
     No `--allow-dirty-shared-checkout` escape hatch is needed afterwards: `local` -- the shared
@@ -189,15 +194,14 @@ def test_watchdog_lands_alert_as_its_own_pr_then_closes_it_once_the_pr_merges(qu
 
     raised = queue_registration.check_stalled_queue_prs(local, gh, now=NOW)
     assert [a.id for a in raised] == ["OA-QR-99"]
-    actions = _main_owner_actions(bare)
-    assert any(a["id"] == "OA-QR-99" and a["status"] == "open" for a in actions)
+    assert any(a["id"] == "OA-QR-99" and a["status"] == "open" for a in _control_actions())
+    assert _main_owner_actions(bare) == []  # no push, no PR for the alert
     assert shared_checkout_dirty_paths(local) == []
 
     gh.rows = []  # PR #99 merged (or closed) since the last scan
     closed = queue_registration.check_stalled_queue_prs(local, gh, now=NOW)
     assert closed == []
-    actions = _main_owner_actions(bare)
-    assert any(a["id"] == "OA-QR-99" and a["status"] == "done" for a in actions)
+    assert any(a["id"] == "OA-QR-99" and a["status"] == "done" for a in _control_actions())
     assert shared_checkout_dirty_paths(local) == []
 
 

@@ -2061,6 +2061,12 @@ def create_worker_app(
                     cwd=str(root_path),
                     **subp_kwargs,
                 )
+            try:  # USR-374: generated ledgers edited locally must not abort the pull
+                from core.infra.node_sync import reset_generated_ledgers
+
+                reset_generated_ledgers(root_path)
+            except Exception:  # noqa: BLE001
+                pass
             preserved_notes = preserve_files_unversioned_upstream(root_path, subp_kwargs)
             pull_res = subprocess.run(
                 "git pull",

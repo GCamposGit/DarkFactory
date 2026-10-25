@@ -68,40 +68,28 @@ def _fetcher(hub: OwnerActionStore):
     return lambda: [a.to_record() for a in hub.answered_decisions()]
 
 
-def _ledger_deliver(calls: list[Path]):
-    """Fake deliver: commit + push the worktree branch to origin main (no PR, no network)."""
-
-    def deliver(label: str, title: str, path: Path) -> Any:
-        calls.append(path)
-        _git("add", "-A", cwd=path)
-        _git("commit", "-m", title, cwd=path)
-        _git("push", "origin", "HEAD:main", cwd=path)
-        return SimpleNamespace(ok=True, message="")
-
-    return deliver
+def _origin_head(repo: Path) -> str:
+    return _git("ls-remote", "origin", "refs/heads/main", cwd=repo)
 
 
-def test_hub_answer_lands_in_repo_ledger_and_is_idempotent(tmp_path: Path, repo: Path) -> None:
+def test_hub_answer_is_persisted_without_any_push_and_is_idempotent(tmp_path: Path, repo: Path) -> None:
     hub = _hub_overlay(tmp_path, repo)
-    calls: list[Path] = []
-    deliver = _ledger_deliver(calls)
+    before = _origin_head(repo)
 
-    # Nothing answered yet: no worktree, no delivery.
-    assert sync_answers_to_repo(repo, _fetcher(hub), deliver=deliver).pending == []
-    assert calls == []
+    # Nothing answered yet: nothing pending.
+    assert sync_answers_to_repo(repo, _fetcher(hub)).pending == []
 
     hub.resolve("OA-001", option_id="B", note="vale 30 dias", answered_by="owner", to_overlay=True)
 
-    result = sync_answers_to_repo(repo, _fetcher(hub), deliver=deliver)
+    result = sync_answers_to_repo(repo, _fetcher(hub))
     assert result.error == ""
     assert result.delivered is True
     assert result.applied == ["OA-001"]
     assert result.annotated == {"OA-001": ["USR-1"]}
-    assert len(calls) == 1
 
-    # The commit reached origin/main: the repository (not the container) holds the annotation.
-    _git("fetch", "origin", cwd=repo)
-    _git("merge", "--ff-only", "origin/main", cwd=repo)
+    # USR-343 S4b: no worktree, no branch, no push -- origin is exactly where it was.
+    assert _origin_head(repo) == before
+    assert _git("branch", "--list", "ticket/*", cwd=repo).strip() == ""
     action = OwnerActionStore(repo / OWNER_ACTIONS_RELATIVE, remote_ref=None).get("OA-001")
     assert action is not None and action.status is ActionStatus.DONE
     assert action.answer is not None and action.answer.option_id == "B"
@@ -111,31 +99,26 @@ def test_hub_answer_lands_in_repo_ledger_and_is_idempotent(tmp_path: Path, repo:
     assert "[Decisao do owner OA-001]" in ticket.problem_statement
     assert "vale 30 dias" in ticket.problem_statement
 
-    # Second cycle: already annotated, so no new worktree, no new PR.
-    again = sync_answers_to_repo(repo, _fetcher(hub), deliver=deliver)
+    again = sync_answers_to_repo(repo, _fetcher(hub))
     assert again.pending == [] and again.delivered is False
-    assert len(calls) == 1
 
 
-def test_existing_remote_branch_skips_new_delivery(tmp_path: Path, repo: Path) -> None:
-    """Queue PR CI outlives the sync cycle: while the decision branch is on origin, no second PR."""
-    from core.owner_actions.answer_sync import branch_name
-
+def test_control_store_receives_the_answer_and_the_file_stays_untouched(
+    tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
     hub = _hub_overlay(tmp_path, repo)
     hub.resolve("OA-001", option_id="A", to_overlay=True)
-    calls: list[Path] = []
-    deliver = _ledger_deliver(calls)
-    assert branch_name("OA-001") == "ticket/oa-answer-oa-001"
+    file_before = (repo / OWNER_ACTIONS_RELATIVE).read_text(encoding="utf-8")
 
-    # Real default check against the local bare origin: branch not there yet -> delivered once.
-    _git("push", "origin", "HEAD:refs/heads/ticket/oa-answer-oa-001", cwd=repo)
-    first = sync_answers_to_repo(repo, _fetcher(hub), deliver=deliver)
-    assert first.pending == ["OA-001"] and first.delivered is False and calls == []
+    result = sync_answers_to_repo(repo, _fetcher(hub), control=True)
 
-    # Branch gone (merged and deleted) and ledger already updated on main -> nothing pending.
-    _git("push", "origin", "--delete", "ticket/oa-answer-oa-001", cwd=repo)
-    done = sync_answers_to_repo(repo, _fetcher(hub), deliver=deliver, in_flight=lambda b: False)
-    assert done.delivered is True and len(calls) == 1
+    assert result.applied == ["OA-001"]
+    assert (repo / OWNER_ACTIONS_RELATIVE).read_text(encoding="utf-8") == file_before
+    from core.owner_actions.control_queue import list_control_rows
+
+    row = next(r for r in list_control_rows() if r["id"] == "OA-001")
+    assert row["status"] == "done" and row["answer"]["option_id"] == "A"
 
 
 def test_annotation_alone_is_repaired_when_decision_is_done_but_ticket_lacks_tag(tmp_path: Path, repo: Path) -> None:
@@ -143,11 +126,8 @@ def test_annotation_alone_is_repaired_when_decision_is_done_but_ticket_lacks_tag
     hub = _hub_overlay(tmp_path, repo)
     hub.resolve("OA-001", option_id="A", to_overlay=True)
     OwnerActionStore(repo / OWNER_ACTIONS_RELATIVE, remote_ref=None).resolve("OA-001", option_id="A")
-    _git("commit", "-am", "agent answered", cwd=repo)
-    _git("push", "origin", "main", cwd=repo)
-    calls: list[Path] = []
 
-    result = sync_answers_to_repo(repo, _fetcher(hub), deliver=_ledger_deliver(calls))
+    result = sync_answers_to_repo(repo, _fetcher(hub))
 
     assert result.delivered is True and result.applied == []
     assert result.annotated == {"OA-001": ["USR-1"]}
@@ -157,14 +137,8 @@ def test_failures_never_raise_and_hide_nothing_sensitive(tmp_path: Path, repo: P
     def boom() -> list[dict[str, Any]]:
         raise RuntimeError("Hub answered HTTP 503")
 
-    result = sync_answers_to_repo(repo, boom, deliver=_ledger_deliver([]))
+    result = sync_answers_to_repo(repo, boom)
     assert result.delivered is False and "503" in result.error
-
-    hub = _hub_overlay(tmp_path, repo)
-    hub.resolve("OA-001", option_id="A", to_overlay=True)
-    failing = lambda label, title, path: SimpleNamespace(ok=False, message="ci vermelho")  # noqa: E731
-    result = sync_answers_to_repo(repo, _fetcher(hub), deliver=failing)
-    assert result.delivered is False and "ci vermelho" in result.error
 
 
 def test_answers_endpoint_requires_telemetry_key_and_lists_overlay_answers(

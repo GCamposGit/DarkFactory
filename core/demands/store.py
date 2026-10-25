@@ -233,7 +233,19 @@ class DemandsStore:
             if not updated:
                 raw_items.append(ticket_dump)
             self._write_raw(raw_items)
+            self._mirror_to_control(ticket)
             return ticket
+
+    def _mirror_to_control(self, ticket: UserTicket) -> None:
+        """USR-343 S4b: keep the control-store row in step with the ledger write (best effort)."""
+        from core.demands import queue_store
+
+        if os.environ.get("DARKFAC_DEMANDS_PATH") or not queue_store.is_default_ledger(self.path):
+            return
+        try:
+            queue_store.register_ticket(ticket)
+        except Exception as exc:  # noqa: BLE001 - the ledger write already succeeded
+            logger.warning("Control store not updated for %s: %s", ticket.id, exc)
 
     def next_ticket_id(self, project_id: str = "darkfac") -> str:
         with self._lock:
