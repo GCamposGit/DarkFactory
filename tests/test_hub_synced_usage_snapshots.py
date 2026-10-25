@@ -55,9 +55,20 @@ def _fixture_usage(provider_id: str, tmp_path: Path, monkeypatch):
     scratch = tmp_path / "scratch"
     if provider_id == "anthropic":
         adapter = ClaudeCodeAccountAdapter(ProviderSpec("anthropic", "Claude", family, "https://x"), scratch)
-        monkeypatch.setattr(ClaudeCodeAccountAdapter, "_extract_claude_oauth_info", lambda self: ("t", None, "Pro"))
-        monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", lambda *a, **k: _Headers(payload["headers"]))
-        usage = adapter._probe_claude_unified_ratelimits()
+        headers = payload["headers"]
+        cli_payload = {"loggedIn": True, "plan": "Pro", "rate_limits": {
+            "five_hour": {"used_percentage": float(headers["anthropic-ratelimit-unified-5h-utilization"]) * 100,
+                           "resets_at": headers["anthropic-ratelimit-unified-5h-reset"]},
+            "seven_day": {"used_percentage": float(headers["anthropic-ratelimit-unified-7d-utilization"]) * 100,
+                           "resets_at": headers["anthropic-ratelimit-unified-7d-reset"]},
+        }}
+
+        class CliResult:
+            returncode = 0
+            stdout = json.dumps(cli_payload)
+
+        monkeypatch.setattr("core.usage.adapters.subprocess.run", lambda *a, **k: CliResult())
+        usage = adapter._probe_claude_cli("claude")
     elif provider_id == "openai":
         adapter = CodexAccountAdapter(ProviderSpec("openai", "Codex", family, "https://x"), scratch)
         usage = record_probe(adapter._from_codex_response(payload), scratch)
