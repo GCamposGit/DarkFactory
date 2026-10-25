@@ -145,3 +145,23 @@ def test_notify_has_buttons_and_signing_key_is_denied_to_agents(port: FakePort) 
     from core.line.agent_env import build_agent_env
 
     assert "OWNER_SIGNING_KEY" not in build_agent_env({"OWNER_SIGNING_KEY": "x", "PATH": "p"})
+
+
+def test_failed_telegram_send_is_loud_and_audited(port: FakePort, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hub.backend.service import DarkHubService
+
+    class _Gateway:
+        def send_message(self, *a: object) -> bool:
+            return False
+
+    class _Stub:
+        _build_telegram_gateway = staticmethod(lambda role="ops": _Gateway())
+        _publication_state = staticmethod(lambda: (tmp_path / "p.json", tmp_path / "audit.jsonl"))
+
+    monkeypatch.setenv(pub.OWNER_CHAT_ENV, str(OWNER))
+    monkeypatch.setattr(pub, "RestGitHubPort", lambda: port)
+    DarkHubService.handle_protected_publication_event(
+        _Stub(), "pull_request", {"action": "synchronize", "pull_request": {"number": 1}}  # type: ignore[arg-type]
+    )
+    entry = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert entry["event"] == "notify_failed" and "telegram" in entry["reason"]
