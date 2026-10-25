@@ -62,7 +62,6 @@
     "core/owner_actions/models.py": 2,
     "core/owner_actions/protected_publish.py": 1,
     "core/portfolio/router_optimizer.py": 7,
-    "core/router/model_router.py": 26,
     "core/usage/adapters.py": 1,
     "core/visual/cloud_engine.py": 2,
     "core/workflow/qualified_routes.py": 52,
