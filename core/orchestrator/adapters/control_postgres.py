@@ -837,32 +837,6 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL finish failed: {exc}") from exc
 
-    def materialize(self, event: dict[str, Any], now: datetime) -> None:
-        if self.mock_mode:
-            return self._backend.materialize(event, now)
-
-        now_utc = now.astimezone(UTC)
-        outbox_id = event.get("outbox_id") or event.get("event_id")
-        if outbox_id is None:
-            raise OutboxNotFoundError("Event missing outbox_id.")
-
-        try:
-            with self._psycopg.connect(self.raw_url) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE outbox SET status = 'published', published_at = %s WHERE outbox_id = %s",
-                        (now_utc, int(outbox_id)),
-                    )
-                    if cur.rowcount == 0:
-                        cur.execute("SELECT status FROM outbox WHERE outbox_id = %s", (int(outbox_id),))
-                        if not cur.fetchone():
-                            raise OutboxNotFoundError(f"Outbox event '{outbox_id}' not found.")
-                    conn.commit()
-        except OutboxNotFoundError:
-            raise
-        except Exception as exc:
-            raise StoreUnavailableError(f"PostgreSQL materialize failed: {exc}") from exc
-
     def reconcile(self, now: datetime, cursor: str | None = None, limit: int = 100) -> ReconcilePage:
         if self.mock_mode:
             return self._backend.reconcile(now, cursor, limit)

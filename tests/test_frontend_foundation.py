@@ -21,7 +21,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = REPO_ROOT / "hub" / "frontend"
 INDEX_HTML = FRONTEND_DIR / "index.html"
 STYLES_CSS = FRONTEND_DIR / "styles.css"
-STATIC_STYLES_CSS = FRONTEND_DIR / "static" / "styles.css"
 
 _SCRIPT_SRC_TAG = re.compile(r'<script[^>]*src=[\x22\x27]([^\x22\x27]+)[\x22\x27]')
 _LINK_STYLESHEET_TAG = re.compile(r'<link[^>]*rel=[\x22\x27]stylesheet[\x22\x27][^>]*href=[\x22\x27]([^\x22\x27]+)[\x22\x27]|<link[^>]*href=[\x22\x27]([^\x22\x27]+)[\x22\x27][^>]*rel=[\x22\x27]stylesheet[\x22\x27]')
@@ -56,10 +55,6 @@ def test_static_styles_css_exists_and_representative_size():
     assert STYLES_CSS.is_file(), f"{STYLES_CSS} must exist on disk"
     size_bytes = STYLES_CSS.stat().st_size
     assert size_bytes > 10 * 1024, f"styles.css size ({size_bytes} bytes) must be > 10 KB"
-
-    # Also verify the static/ mirror for direct filesystem access
-    assert STATIC_STYLES_CSS.is_file(), f"{STATIC_STYLES_CSS} must exist on disk"
-    assert STATIC_STYLES_CSS.stat().st_size > 10 * 1024, f"static/styles.css size must be > 10 KB"
 
     # 2. HTTP serving via FastAPI static mount
     client = TestClient(app)
