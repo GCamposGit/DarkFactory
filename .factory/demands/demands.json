@@ -11561,8 +11561,8 @@
     "project_id": "darkfac",
     "title": "Blue-green do Hub derruba o Hub: gate de overlap falha e o restore reaplica compose offline",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #701 mesclado em main (fix(deploy): blue-green verifica a cor nova e nunca deixa o Hub sem replica); redeploy pos-merge pela sessao de 25/10",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11584,7 +11584,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T03:00:50.663797Z",
-    "updated_at": "2026-10-25T03:00:50.663797Z"
+    "updated_at": "2026-10-25T13:24:32.815022Z"
   },
   {
     "id": "USR-389",
