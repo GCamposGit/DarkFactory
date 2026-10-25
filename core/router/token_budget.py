@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field
+from core.models.registry import QUOTA_FLOOR_MIN
 
 from core.execution.contracts import (
     Budget,
@@ -149,7 +150,7 @@ def _quota_headroom(account: ProviderAccountUsage) -> Optional[float]:
 def _pressure_for(remaining_percent: Optional[float]) -> TokenPressure:
     if remaining_percent is None:
         return TokenPressure.UNKNOWN
-    if remaining_percent <= 10.0:
+    if remaining_percent <= QUOTA_FLOOR_MIN:
         return TokenPressure.CRITICAL
     if remaining_percent <= 25.0:
         return TokenPressure.STRESSED
@@ -210,7 +211,7 @@ def plan_token_stress(
         if account.provider_id in _PAID_API_PROVIDERS
         or (account.family == ProviderFamily.GATEWAY and not account.quota_supported)
     ]
-    use_paid_api = bool(not offline and paid_candidates and best_remaining is not None and best_remaining <= 15.0)
+    use_paid_api = bool(not offline and paid_candidates and best_remaining is not None and best_remaining <= QUOTA_FLOOR_MIN)
     if use_paid_api:
         best_account = paid_candidates[0]
         failover_required = best_account.provider_id != preferred_provider

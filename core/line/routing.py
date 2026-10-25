@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
 from core.line.operating_harness import resolve_operating_harness
-from core.models.registry import forbidden_markers, get_registry, resolve as resolve_model
+from core.models.registry import QUOTA_FLOOR_MIN, forbidden_markers, get_registry, resolve as resolve_model
 from core.paths import project_root, state_root
 
 logger = logging.getLogger(__name__)
@@ -40,11 +40,11 @@ logger = logging.getLogger(__name__)
 _CANONICAL_REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = _CANONICAL_REPO_ROOT
 
-# Critical pressure threshold is 15.0% (strict fail-closed)
+# Critical pressure threshold: the single quota floor of the model registry (strict fail-closed)
 _DEFAULT_PRESSURE_THRESHOLDS: dict[str, float] = {
     "guarded": 50.0,
     "stressed": 25.0,
-    "critical": 15.0,
+    "critical": QUOTA_FLOOR_MIN,
 }
 
 # USR-185: the never-autonomous markers (fable, astra, ...) come from the model registry.
@@ -182,7 +182,7 @@ def _default_routing_config() -> RoutingConfig:
                 openrouter_model=cheap_model,
             ),
             "development": StageRoute(
-                cascade=[("claude", "sonnet"), ("codex", None)],
+                cascade=[("claude", "sonnet"), ("codex", None), ("grok", resolve_model("development.grok"))],
                 openrouter_ok=False,  # write stage: OpenRouter is read-only, never a fallback here
                 openrouter_model=cheap_model,
                 harness_pins={
@@ -593,10 +593,56 @@ def _routable_candidates(
     return candidates
 
 
+_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60
+_MIN_HOURS_TO_RESET = 1.0  # avoids dividing by ~0 right before a reset
+
+
+def _default_weekly_slack(provider_id: str) -> Optional[float]:
+    """Weekly slack of `provider_id`: remaining % of its weekly window / hours until that window resets.
+
+    Higher means more quota to spend per hour left before the reset. `None` when the account has no
+    weekly window with a known reset (the ranking then falls back to the current headroom).
+    """
+    try:
+        from core.usage.adapters import build_default_adapters
+
+        for adapter in build_default_adapters(state_root() / "usage" / "providers"):
+            if adapter.spec.provider_id != provider_id:
+                continue
+            now = datetime.now(timezone.utc)
+            for window in adapter.inspect().windows:
+                weekly = (window.window_duration_minutes or 0) >= _WEEKLY_WINDOW_MINUTES or "weekly" in window.quota_id.lower()
+                reset = _parse_until(window.resets_at) if window.resets_at else None
+                if not weekly or window.remaining_percent is None or reset is None:
+                    continue
+                hours = max((_aware_utc(reset) - now).total_seconds() / 3600.0, _MIN_HOURS_TO_RESET)
+                return float(window.remaining_percent) / hours
+    except Exception as exc:  # pragma: no cover - defensive, only costs ranking precision
+        logger.debug("Weekly slack lookup failed for provider %s: %s", provider_id, exc)
+    return None
+
+
+def _slack_by_candidate(
+    stage: str, eligible: list[tuple[str, Optional[str], float]], slack_fn: Callable[[str], Optional[float]]
+) -> dict[tuple[str, Optional[str]], float]:
+    """Weekly slack per eligible `(harness, model)`; only the `development` stage ranks by slack."""
+    if stage != "development":
+        return {}
+    values = {(h, m): slack_fn(_HARNESS_TO_PROVIDER.get(h, h)) for h, m, _ in eligible}
+    return {key: value for key, value in values.items() if value is not None}
+
+
 def _rank_eligible(
-    stage: str, complexity: Optional[str], eligible: list[tuple[str, Optional[str], float]]
+    stage: str,
+    complexity: Optional[str],
+    eligible: list[tuple[str, Optional[str], float]],
+    slack: Optional[dict[tuple[str, Optional[str]], float]] = None,
 ) -> tuple[str, Optional[str]]:
-    """Winner among eligible `(harness, model, remaining)` candidates: complexity tier, then headroom."""
+    """Winner among eligible `(harness, model, remaining)` candidates: complexity tier, then slack/headroom.
+
+    `slack` (weekly remaining % / hours to reset, keyed by `(harness, model)`) orders the pool when EVERY
+    member has a value; otherwise the current headroom decides.
+    """
     comp = (complexity or "").lower().strip()
     if comp in ("high", "critical") or stage in ("planning", "architecture"):
         # High Intelligence tier: prioritize Opus or Sol
@@ -615,7 +661,10 @@ def _rank_eligible(
         # Medium complexity / default: Headroom Dinâmico (maior cota primeiro)
         tier = []
     pool = tier or eligible
-    pool.sort(key=lambda item: item[2], reverse=True)
+    if slack and all((item[0], item[1]) in slack for item in pool):
+        pool.sort(key=lambda item: (slack[(item[0], item[1])], item[2]), reverse=True)
+    else:
+        pool.sort(key=lambda item: item[2], reverse=True)
     return pool[0][0], pool[0][1]
 
 
@@ -650,6 +699,21 @@ def _policy_allows(project_id: str, harness: str) -> bool:
     return provider_allowed(project_id, harness)
 
 
+def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float]]]) -> bool:
+    """OpenRouter fallback requires a verified positive credit balance."""
+    if balance_lookup is not None:
+        bal = balance_lookup()
+        return bal is not None and bal > 0.0
+    try:
+        from core.usage.api_credits import ApiCreditsMonitor
+
+        card = ApiCreditsMonitor().inspect_openrouter()
+        return bool(card.is_connected and card.available_credit_usd is not None and card.available_credit_usd > 0.0)
+    except Exception as exc:
+        logger.warning("Failed to verify OpenRouter credits: %s", exc)
+        return False
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -668,6 +732,7 @@ def pick(
     unknown_quota_last_resort_ok: Optional[bool] = None,
     operating_harness: Optional[str] = None,
     project_id: Optional[str] = None,
+    slack_lookup: Optional[Callable[[str], Optional[float]]] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
@@ -683,7 +748,7 @@ def pick(
     1. Filter out accounts in cooldown, missing from host_caps, forbidden models,
        and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed except unknown quota
        for low-complexity development tickets).
-    1b. Operating-harness preference (`development` only): when the operating harness survived every
+    1b. Operating-harness preference (`development`, `complexity == "high"` only, USR-378): when the operating harness survived every
        filter above with known quota above the critical floor and no cooldown, it is elected before any
        headroom or complexity ranking. A harness outside the stage cascade takes part as an extra
        candidate that only this step can elect. If it did not survive, nothing changes (the 15% floor is
@@ -692,7 +757,9 @@ def pick(
        - High complexity / planning: prefers Claude Opus / GPT Sol if eligible,
          falling back to highest headroom.
        - Low complexity: prefers GPT Luna xhigh / Gemini Flash if eligible.
-       - Medium complexity / default: sorts strictly by remaining headroom descending.
+       - Medium complexity / default: development sorts by weekly slack (remaining % of the weekly window
+         divided by hours until its reset, higher first; headroom when any candidate lacks a reset);
+         other stages sort strictly by remaining headroom descending.
     2b. Low-complexity development can use unknown quota in degraded mode. Other stages retain the
        optional bootstrap (`DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`, or
        `unknown_quota_last_resort_ok=True`):
@@ -716,8 +783,11 @@ def pick(
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
     # The operating-harness preference is a development-only rule; other stages never even look it up.
-    operating = resolve_operating_harness(operating_harness) if stage == "development" else None
+    # USR-378: it applies to high-complexity tickets only; the rest is ranked by weekly slack.
+    is_high = (complexity or "").lower().strip() == "high"
+    operating = resolve_operating_harness(operating_harness) if stage == "development" and is_high else None
     extra_candidate = _extra_operating_candidate(_resolve_cascade(stage_cfg, implementing_harness), operating)
+    slack_fn = slack_lookup or (_default_weekly_slack if quota_lookup is None else (lambda _provider: None))
 
     # Candidate evaluation with fail-closed semantics
     # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
@@ -778,7 +848,7 @@ def pick(
             winner[0], next(item[2] for item in preferred if (item[0], item[1]) == winner), stage,
         )
     elif eligible:
-        winner = _rank_eligible(stage, complexity, eligible)
+        winner = _rank_eligible(stage, complexity, eligible, _slack_by_candidate(stage, eligible, slack_fn))
 
     # USR-382: unknown subscription quota is a degraded route for small development tickets only.
     # Keep the explicit last-resort bootstrap for non-development/read stages, but never let it
@@ -815,21 +885,7 @@ def pick(
         and (stage_cfg.openrouter_ok or all_exhausted)
         and spent_usd < cfg.run_caps.openrouter_usd
     ):
-        # OpenRouter fallback requires verified positive credit balance
-        has_credits = False
-        if openrouter_balance_lookup is not None:
-            bal = openrouter_balance_lookup()
-            has_credits = bal is not None and bal > 0.0
-        else:
-            try:
-                from core.usage.api_credits import ApiCreditsMonitor
-
-                credits_mon = ApiCreditsMonitor()
-                card = credits_mon.inspect_openrouter()
-                has_credits = card.is_connected and card.available_credit_usd is not None and card.available_credit_usd > 0.0
-            except Exception as exc:
-                logger.warning("Failed to verify OpenRouter credits: %s", exc)
-
+        has_credits = _openrouter_has_credits(openrouter_balance_lookup)
         if has_credits:
             return "openrouter", stage_cfg.openrouter_model
         logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
@@ -852,7 +908,7 @@ def _aware_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-def _default_quota_reset(provider_id: str, critical_threshold: float = 15.0) -> Optional[datetime]:
+def _default_quota_reset(provider_id: str, critical_threshold: float = QUOTA_FLOOR_MIN) -> Optional[datetime]:
     """When `provider_id` is expected back above the critical quota threshold, per `core.usage`.
 
     The account's snapshot lists quota windows with an optional `resets_at`; the account is usable
