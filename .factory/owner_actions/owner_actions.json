@@ -2752,6 +2752,50 @@
       "created_at": "2026-10-25T00:30:00Z",
       "created_by": "claude",
       "resolved_at": "2026-10-25T01:30:00Z"
+    },
+    {
+      "id": "OA-069",
+      "kind": "action",
+      "title": "Ativar aprovacao por toque no Telegram: publicar USR-343 S3, criar GitHub App e configurar o Hub",
+      "priority": "high",
+      "status": "open",
+      "why": "S3 toca core/governance/* (protegido) e nao pode aprovar a propria entrada; o agente nao publica mudanca de governanca. Depois disso, protegidos passam a ser aprovados por toque assinado e o merge sai pela GitHub App, sem --admin.",
+      "blocks": [
+        "USR-343"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Publicar a branch pronta (commit 900512ed)",
+          "command": "git -C C:\\dev\\DarkFac\\.claude\\worktrees\\agent-ae5975c1b1fd1969e push origin HEAD:refs/heads/slice/usr-343-s3-tap"
+        },
+        {
+          "text": "Abrir o PR",
+          "command": "gh pr create --repo GCamposGit/DarkFactory --head slice/usr-343-s3-tap --title \"feat(governance): aprovacao por toque no Telegram para protegidos [USR-343 S3]\" --body \"Fatia S3 do bloco USR-343 (Plano V0 24/10).\""
+        },
+        {
+          "text": "Esperar o CI e mesclar com admin (ultima vez)",
+          "command": "gh pr merge slice/usr-343-s3-tap --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Criar a GitHub App: github.com > foto > Settings > Developer settings > GitHub Apps > New GitHub App. Nome: darkfac-broker. Homepage URL: https://github.com/GCamposGit/DarkFactory. Webhook: desmarcar Active. Repository permissions: Contents = Read and write; Pull requests = Read and write; Checks = Read-only; Commit statuses = Read-only; Metadata = Read-only. Where can this app be installed: Only on this account. Clicar Create GitHub App."
+        },
+        {
+          "text": "Na pagina da App: anotar o App ID; em Private keys clicar Generate a private key (baixa um .pem). Depois Install App > Only select repositories > DarkFactory > Install; anotar o numero no fim da URL (installation id)."
+        },
+        {
+          "text": "Dokploy > projeto darkfac-cloud > servico do Hub > Environment: adicionar GH_APP_ID=<App ID>, GH_APP_INSTALLATION_ID=<installation id>, GH_APP_PRIVATE_KEY=<conteudo do .pem com \\n no lugar das quebras>, TELEGRAM_OWNER_CHAT_ID=<seu id numerico do Telegram>, OWNER_SIGNING_KEY=<conteudo de %USERPROFILE%\\.darkfac\\owner_ed25519.pem com \\n no lugar das quebras>. Salvar."
+        },
+        {
+          "text": "GitHub > DarkFactory > Settings > Webhooks: no webhook do Hub (/api/webhooks/github) marcar os eventos Pull requests, Check suites, Check runs e Statuses. Salvar."
+        },
+        {
+          "text": "Avisar no chat; o agente faz o redeploy e testa com um PR de exemplo em AGENTS.md"
+        }
+      ],
+      "verify": "gh pr view slice/usr-343-s3-tap --repo GCamposGit/DarkFactory mostra MERGED; um PR que altera AGENTS.md gera mensagem com botoes no Telegram e, apos o toque, e mesclado sem --admin",
+      "created_at": "2026-10-25T03:00:00Z",
+      "created_by": "claude"
     }
   ]
 }
