@@ -2902,7 +2902,7 @@ class HubService:
         """Processes an incoming GitHub webhook through WebhookEngine."""
         engine = WebhookEngine(project_root=self.project_root)
         webhook_secret = secret or os.getenv("GITHUB_WEBHOOK_SECRET")
-        return engine.process_webhook(
+        record = engine.process_webhook(
             event_type=event_type,
             delivery_id=delivery_id,
             payload=payload,
@@ -2910,6 +2910,9 @@ class HubService:
             secret=webhook_secret,
             require_secret=require_secret,
         )
+        if record.status == "processed":
+            self.handle_protected_publication_event(event_type, payload)
+        return record
 
     def get_cloud_gateway_status(self) -> CloudGatewayStatus:
         """Returns the operational status of the Cloud 24/7 Dokploy Gateway."""
@@ -3193,6 +3196,8 @@ class HubService:
                 "authorized": False,
                 "error": "Invalid X-Telegram-Bot-Api-Secret-Token",
             }
+        if self._is_publication_callback(payload):
+            return self.process_publication_callback(payload["callback_query"])
         gateway = self._build_telegram_gateway(role=role)
         result = gateway.process_update(payload)
         if not result.duplicate and reply_messages(result):
@@ -3203,6 +3208,60 @@ class HubService:
             if chat_id:
                 gateway.deliver_reply(chat_id, result)
         return result.model_dump()
+
+    @staticmethod
+    def _is_publication_callback(payload: Dict[str, Any]) -> bool:
+        from core.governance.publication import is_publication_callback
+
+        cb = payload.get("callback_query")
+        return isinstance(cb, dict) and is_publication_callback(cb)
+
+    def _publication_state(self) -> tuple[Path, Path]:
+        base = state_root() / "protected_publication"
+        return base / "pending.json", base / "audit.jsonl"
+
+    def process_publication_callback(self, callback: Dict[str, Any]) -> Dict[str, Any]:
+        """USR-343 S3: owner tap (Aprovar/Rejeitar) on a protected-file PR; signing happens here, never in agents."""
+        from core.governance import publication as pub
+
+        owner = (os.environ.get(pub.OWNER_CHAT_ENV) or "").strip()
+        pending, audit = self._publication_state()
+        try:
+            result = pub.handle_callback(
+                callback,
+                owner_chat_id=int(owner) if owner.lstrip("-").isdigit() else None,
+                port=pub.RestGitHubPort(),
+                key_loader=pub.load_signing_key,
+                pending_file=pending,
+                audit_log=audit,
+            )
+            if result.get("ok") and result.get("decision") == "approved":
+                pub.sweep_pending(pub.RestGitHubPort(), pending, audit)
+        except pub.PublicationError as exc:
+            result = {"ok": False, "reason": str(exc)}
+        shown = {k: v for k, v in result.items() if k != "record"}
+        return {"action": "protected_publication", "authorized": bool(result.get("ok")), **shown}
+
+    def handle_protected_publication_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        """Notify the owner when a PR touching protected files opens/updates; sweep pending merges on check events."""
+        from core.governance import publication as pub
+
+        owner = (os.environ.get(pub.OWNER_CHAT_ENV) or "").strip()
+        if not owner.lstrip("-").isdigit():
+            return
+        try:
+            port = pub.RestGitHubPort()
+            if event_type == "pull_request" and payload.get("action") in {"opened", "synchronize", "reopened"}:
+                gateway = self._build_telegram_gateway(role="ops")
+                number = int((payload.get("pull_request") or {}).get("number") or payload.get("number"))
+                pub.notify_owner(
+                    port, number, lambda chat, text, buttons: gateway.send_message(chat, text, buttons), int(owner)
+                )
+            elif event_type in {"check_suite", "check_run", "status"}:
+                pending, audit = self._publication_state()
+                pub.sweep_pending(port, pending, audit)
+        except Exception as exc:  # noqa: BLE001 - webhook processing must not fail because of this side channel
+            logger.warning("protected publication event failed: %s", type(exc).__name__)
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:
         """Returns diagnostic status of Telegram Gateway (HF-14 / USR-110)."""

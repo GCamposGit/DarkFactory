@@ -171,21 +171,7 @@ e o aviso Telegram original da `HumanRequest` continua sendo o unico (o espelho 
 | Cliquei em Marcar como feito e voltou 401 | Sessao do Hub expirada | Recarregue a pagina e tente de novo |
 | Portao reprova com "item OA-NNN duplicado ignorado" | Duas branches escolheram o mesmo `OA-NNN` sem ver a commit uma da outra; o rebase/merge juntou as duas sem conflito textual | Normalmente ja autocorrigido: `run_ticket`/`deliver_branch` renumeram a OA da branch logo apos o sync com `origin/main`, antes do portao (USR-255). Se persistir, edite o arquivo a mao, renumere a entrada duplicada da sua branch e rode `python C:\dev\DarkFac\scripts\owner_action.py list` para conferir |
 
-## 8. Publicacao de arquivo protegido por push direto (USR-313)
+## 8. Publicacao de arquivo protegido
 
-Incidente de 18/10/2026: o `core/harness/*` foi publicado por push direto trocando o portao completo por
-testes focados; o push direto pula o CI de PR e a main ficou vermelha. Um PR `owner/*` nao resolve: o
-`trusted-pr-policy` o reprova em segundos, sem rodar testes. A regra passa a ser:
-
-1. **Antes do push**, na worktree do commit candidato exato, rode os guardas rapidos
-   (`tests/test_clock_bomb_guard.py`, `tests/test_hub_coverage.py`, `tests/test_safe_git_state.py`,
-   `tests/test_harness_contract.py`) e depois o **portao oficial completo**:
-   `python C:\dev\DarkFac\core\harness\runner.py --quick` (worker remoto ou local). So publique se a saida
-   contiver `[HARNESS_PASS]`. Testes focados nunca substituem o portao completo.
-2. Publique com `git push origin HEAD:main` (mesmo SHA do portao).
-3. **Depois do push**, confira a main: `gh run list --branch main --limit 3` e `gh run watch`. Se ficar
-   vermelha, o agente abre o hotfix (o owner nao corrige).
-
-Gerador: `python C:\dev\DarkFac\scripts\owner_action.py protected-publish USR-NNN --files core/harness/x.py`
-registra a OA com esses passos na ordem (`core/owner_actions/protected_publish.py`). Toda OA de publicacao
-protegida deve usar esse comando.
+Substituida pela aprovacao por toque no Telegram (USR-343 S3): veja `docs/manual/governanca.md`, secao
+"Aprovacao por toque". Nao ha mais push direto nem OA de publicacao protegida.

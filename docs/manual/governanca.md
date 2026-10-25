@@ -26,4 +26,22 @@ Um registro JSON em `.factory/governance/authorizations/<id>.json`, assinado com
 2. `python -m core.governance.keys sign C:\caminho\registro.json`
 3. Coloque o arquivo em `.factory/governance/authorizations/` e leve a `main`.
 
-A aprovação por toque no Telegram (S3) automatizará esses passos.
+A aprovação por toque no Telegram (abaixo) automatiza esses passos.
+
+## Aprovacao por toque
+
+Quando um PR abre ou recebe novo commit tocando arquivos protegidos, o Hub avisa o owner no Telegram com numero do PR, caminhos protegidos, sha da cabeca e resumo do diff, mais os botoes **Aprovar** e **Rejeitar**.
+
+1. O toque chega ao webhook do Hub (segredo do webhook verificado) e so vale se `from.id` for igual a `TELEGRAM_OWNER_CHAT_ID`; qualquer outro remetente e recusado e auditado.
+2. O Hub (processo que nunca e agente) monta o registro de autorizacao (ticket, caminhos exatos, `candidate_kind=commit`, sha, validade de 24 h, aprovador `owner`), assina com a chave Ed25519 do owner e grava o JSON em `.factory/governance/authorizations/` na `main` pela API de contents, com o token do GitHub App.
+3. O PR fica pendente e e mergeado (squash, fixado no sha aprovado) assim que os checks obrigatorios ficarem verdes. Novo commit no PR muda o sha: o registro deixa de valer e o merge pendente e descartado; um novo aviso e enviado.
+4. Trilha de auditoria em `protected_publication/audit.jsonl` no diretorio de estado do Hub.
+
+### Configuracao unica (Dokploy, servico do DarkHub)
+
+1. Dokploy, projeto darkfac-cloud, servico darkhub, aba Environment.
+2. `TELEGRAM_OWNER_CHAT_ID` = seu id numerico do Telegram (o do chat privado com o bot).
+3. `OWNER_SIGNING_KEY` = conteudo PEM da chave privada gerada por `python -m core.governance.keys init` (rodado em `C:\dev\DarkFac`) (use `\n` no lugar das quebras de linha), ou coloque a chave no cofre SOPS com este nome. Nunca em ambiente de agente: a politica de ambiente de agentes bloqueia qualquer variavel com `SIGNING_KEY`.
+4. `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `GH_APP_PRIVATE_KEY` (GitHub App com contents e pull requests em escrita) e, se o repositorio nao for `GCamposGit/DarkFactory`, `DARKFAC_GH_REPO`.
+5. No GitHub, o webhook do repositorio deve enviar `pull_request`, `check_suite`, `check_run` e `status` para `/api/webhooks/github`.
+6. Salve e faca redeploy: `python C:\dev\DarkFac\scripts\dokploy_redeploy.py`.
