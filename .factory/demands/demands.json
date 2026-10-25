@@ -11466,5 +11466,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T02:34:48.353495Z",
     "updated_at": "2026-10-25T02:34:48.353495Z"
+  },
+  {
+    "id": "USR-385",
+    "project_id": "darkfac",
+    "title": "Quebrar funcoes acima de 200 linhas fora do run_ticket (fatia do USR-377)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Plano V0 Frente 6: dividir ReadinessGate.evaluate, TelegramGateway._handle_message e GitAutonomyManager._deliver em funcoes de ate 150 linhas, sem mudar comportamento. Nao mexer em run_ticket.py, core/line/stages.py, core/line/ticket_stages.py, core/owner_actions, core/git/queue_registration.py, core/infra/node_sync.py nem hub/backend/service.py (outras fatias em andamento).",
+    "core_journey": [
+      "Plano V0 Frente 6: dividir ReadinessGate.evaluate, TelegramGateway._handle_message e GitAutonomyManager._deliver em funcoes de ate 150 linhas, sem mudar comportamento. Nao mexer em run_ticket.py, core/line/stages.py, core/line/ticket_stages.py, core/owner_actions, core/git/queue_registration.py, core/infra/node_sync.py nem hub/backend/service.py (outras fatias em andamento)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Script AST mostra nenhuma funcao acima de 150 linhas nesses tres modulos",
+      "Testes existentes desses modulos passam sem alteracao",
+      "Saldo de linhas menor ou igual a zero ou justificado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T02:37:08.641142Z",
+    "updated_at": "2026-10-25T02:37:08.641142Z"
   }
 ]
