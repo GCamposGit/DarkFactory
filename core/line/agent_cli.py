@@ -496,6 +496,26 @@ def codex_sandbox_mode() -> str:
     return raw
 
 
+def _codex_cli_slug(model: str) -> str:
+    """Codex CLI slug for a registry model: a slash-free gateway id when declared.
+
+    The registry id of the planning model (role ``planning.codex``) is not a slug the Codex CLI knows; models
+    without such a gateway id are passed through unchanged.
+    """
+    try:
+        from core.models.registry import get_registry
+
+        low = model.strip().lower()
+        for entry in get_registry().models:
+            if entry.provider == "openai" and low in (n.strip().lower() for n in [entry.id, *entry.aliases]):
+                for gid in entry.gateway_ids:
+                    if gid and "/" not in gid:
+                        return gid
+    except Exception as exc:  # registry trouble must not break the call
+        logger.debug("codex slug lookup failed for %s: %s", model, exc)
+    return model
+
+
 def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[str]:
     """Build the Codex CLI argv for read or write mode. Prompt goes on stdin via trailing '-'.
 
@@ -518,7 +538,7 @@ def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[
         argv += ["--sandbox", sandbox]
     argv += ["--skip-git-repo-check", "--json"]
     if req.model:
-        argv += ["-m", req.model]
+        argv += ["-m", _codex_cli_slug(req.model)]
     # codex-cli 0.162.0 has no --effort flag (`codex exec --help`). The documented override is
     # `-c key=value`, and this build's config schema names the key `model_reasoning_effort`.
     # The value is parsed as TOML, so a quoted string matches the help example `-c model="o3"`.

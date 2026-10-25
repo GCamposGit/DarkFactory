@@ -88,6 +88,7 @@ Tabela gerada de `.factory/config/model_registry.json` por `python scripts/gener
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
+| `planning.codex` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |
