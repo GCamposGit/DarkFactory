@@ -5,7 +5,8 @@ from core.line import agent_cli
 from core.line.stage_build import TicketSpec, run_shell_commands
 
 SECRETS = {"DOKPLOY_TOKEN": "a", "BACKUP_S3_KEY": "b", "DATABASE_URL": "c", "GH_TOKEN": "d",
-           "POSTGRES_PASSWORD": "f", "AWS_SECRET_ACCESS_KEY": "h"}
+           "POSTGRES_PASSWORD": "f", "AWS_SECRET_ACCESS_KEY": "h",
+           "TELEGRAM_BOT_TOKEN": "t", "GH_APP_PRIVATE_KEY": "p", "FOO_SECRET": "s", "BAR": "b"}
 PROBE = "import os;print(os.environ.get('GH_TOKEN'),os.environ.get('DOKPLOY_TOKEN'))"
 
 
