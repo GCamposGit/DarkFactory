@@ -24,6 +24,8 @@ from typing import Any, Callable, Iterable, Optional, Protocol
 from core.git import ci_checks
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
+from core.line import stages as line_stages
+from core.line import workspace as line_workspace
 from core.line.route_wait import RouteWaiter, run_started_at_lookup
 from core.line.routing import RoutingConfig
 from core.projects.models import DeployTargetType, ProjectDescriptor
@@ -456,8 +458,30 @@ class IntegrationStageAdapter:
 
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
+        refused = require_merge_artifacts(project, context.claim.job_key.run_id)
+        if refused is not None:
+            return refused
         handler = stage_integration.IntegrationStageHandler(project, **self._handler_kwargs)
         return handler.handle(context)
+
+
+# USR-375 S4: nothing merges without the plan and an approving cross-family verdict on the branch.
+MERGE_PREREQUISITES: tuple[line_stages.Stage, ...] = (line_stages.Stage.PLAN, line_stages.Stage.REVIEW)
+
+
+def require_merge_artifacts(project: ProjectDescriptor, run_id: str) -> Optional[StageResult]:
+    """None when the run may merge; otherwise a `failed` result naming the missing stage artifact."""
+    try:
+        ws = line_workspace.checkout(project, run_id)
+    except line_workspace.WorkspaceError as exc:
+        return StageResult(outcome="retry", cause_code=f"workspace_checkout_failed: {exc}")
+    for stage in MERGE_PREREQUISITES:
+        try:
+            line_stages.require_artifact(stage, ws)
+        except line_stages.StageArtifactMissing as exc:
+            logger.warning("run %s refused before integration: %s", run_id, exc)
+            return StageResult(outcome="failed", cause_code=f"stage_artifact_missing:{exc.stage.value}:{exc.reason}")
+    return None
 
 
 class ReleaseStageAdapter:

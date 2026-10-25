@@ -18,7 +18,42 @@ Cada estagio deixa um artefato em `.darkfac/runs/<run_id>/`, validado por `requi
 | DEPLOY_SMOKE | `deploy_report.json` | `DeployReport` (`smoke_ok` true) |
 | RESEARCH, DOCS, LEARNING | opcionais | retornam `None` (USR-376) |
 
-Artefato ausente, vazio ou invalido levanta `StageArtifactMissing` (com `stage` e `reason`). O contrato ainda nao esta ligado ao `run_ticket` (slice S4).
+Artefato ausente, vazio ou invalido levanta `StageArtifactMissing` (com `stage` e `reason`). O contrato esta ligado ao `run_ticket`, ao `fleet_dispatcher` e a linha (slice S4, abaixo).
+
+## run_ticket executa a sequencia canonica (USR-375 S4)
+
+Nao existe mais caminho direto agente -> portao -> merge. O `run_ticket` (e o `fleet_dispatcher`, que so
+lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `require_artifact` antes de avancar:
+
+1. **INTAKE** grava `DEMAND.md`; **GRILL** grava `GRILL.md` com as decisoes do intake (G1 semantico, S6).
+   Correcao pequena (`estimate_ticket_size == small`) pula SOMENTE o GRILL.
+2. **PLAN** chama `stage_planning.run_planning` (modelo de nivel alto) e grava `SPEC.md` + `tickets.json`;
+   correcao pequena grava um plano minimo (um sub-ticket igual a demanda), sem agente.
+3. **BUILD** roda o agente de desenvolvimento uma vez por sub-ticket do plano, em sequencia, na mesma
+   worktree, e grava `progress.json` (`harness` = familia do implementador).
+4. Na entrega (`--resume-delivery`, processo novo): exige PLAN e BUILD; **VALIDATE** grava `validation.json`
+   depois do portao; **REVIEW** roda `stage_review.ReviewStage` com familia diferente do implementador e grava
+   `review_verdict.json` so na aprovacao (`changes_required` reinvoca o agente, comita e repete o portao);
+   **MERGE** grava `merge.json` (PR e SHA); **DEPLOY_SMOKE** grava `deploy_report.json`. Na DarkFac o deploy
+   pos-merge continua unico, pelo `fleet_dispatcher`/`scripts/dokploy_redeploy.py`, entao o relatorio sai com
+   `deployed=false` e `smoke_ok=null`: `require_artifact` aceita isso SO como "deploy pendente" e o ticket e
+   reportado como `merged_awaiting_deploy` (`[MERGE] ... aguardando deploy`), nunca como entregue. Um
+   `smoke_ok=null` com `deployed=true` e invalido. Sem plano ou veredito nao ha merge; sem relatorio de deploy
+   a execucao falha.
+5. **Sem rota elegivel** (nenhum modelo de nivel alto para PLAN, nenhum revisor de outra familia para REVIEW):
+   o resultado do `RouteWaiter` (`no_route_available not_before=...`) vira espera, nao falha. O `run_ticket`
+   sai com o codigo 75 (`EXIT_ROUTE_WAIT`, de `fleet_dispatcher.INFRA_EXIT_CODES`), com o marcador
+   `harness_infra_error: route_wait`; o despachante reenfileira com cooldown e o ticket continua `planned`
+   (no REVIEW a worktree e preservada para o `--resume-delivery`).
+
+Os artefatos do ticket ficam fora da worktree (que o merge remove), em
+`<state_root>/artifacts/ticket_runs/<ID>/.darkfac/runs/<ID>/` (`core/line/ticket_engine.py`). Uma execucao
+nova do launcher apaga os artefatos anteriores; a entrega apaga validacao, merge e deploy anteriores.
+Um `--resume-delivery` digitado pelo operador numa worktree anterior ao S4 (sem nenhum artefato) registra
+plano/build minimos e segue por VALIDATE, REVIEW e MERGE.
+
+Na linha, `bindings.IntegrationStageAdapter` recusa a integracao (`stage_artifact_missing:<ESTAGIO>`) sem
+`SPEC.md`/`tickets.json` e sem `review_verdict.json`, que o `ReviewStage` passou a gravar ao aprovar.
 
 
 ## Planejamento

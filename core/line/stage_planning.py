@@ -264,8 +264,15 @@ def run_planning(
     demand_text: Optional[str] = None,
     grill_reschedules_used: int = 0,
     human_requester: Optional[HumanRequester] = None,
+    ws: Optional[workspace.RunWorkspace] = None,
+    repo_dir: Optional[Path] = None,
+    publish: bool = True,
 ) -> StageResult:
     """Run (or reuse) the planning stage for `run_id`.
+
+    `run_ticket` (USR-375 S4) passes its own artifact `ws`, the ticket worktree as `repo_dir` (agent
+    cwd, commands, lessons) and `publish=False`: the plan is written to the context dir only, with no
+    commit or push (the ticket branch is delivered by `core.git.autonomy`).
 
     Requires the grill stage to have already committed `DEMAND.md`/
     `GRILL.md` on the run's branch (`workspace.checkout` will see them).
@@ -276,10 +283,11 @@ def run_planning(
     grill is rescheduled once (`retry:grill`, `grill_reschedules_used` says how many times that
     already happened) and then the run is parked as `waiting_human(grill_artifacts_missing)`.
     """
-    ws = workspace.checkout(project, run_id)
+    ws = ws or workspace.checkout(project, run_id)
+    repo = repo_dir or ws.path
     waiter = route_waiter or RouteWaiter()
 
-    existing = workspace.find_commit_by_job(ws, _job_key(run_id))
+    existing = workspace.find_commit_by_job(ws, _job_key(run_id)) if publish else None
     if existing:
         return StageResult(outcome="success", output_refs=[existing])
 
@@ -300,8 +308,8 @@ def run_planning(
             reschedules_used=grill_reschedules_used, human_requester=human_requester,
         )
 
-    commands_text = _render_commands(project, ws.path)
-    lessons_text = read_lessons(ws.path) or "(nenhuma)"
+    commands_text = _render_commands(project, repo)
+    lessons_text = read_lessons(repo) or "(nenhuma)"
 
     base_prompt = render_prompt(
         load_prompt("planning.md"),
@@ -318,7 +326,7 @@ def run_planning(
     excluded = diagnostics.failed_pairs(diagnostics.load_attempts(ws, STAGE))
     for attempt in range(MAX_REPROMPTS + 1):
         result = stage_grill.run_read_agent(
-            STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config, exclude=excluded
+            STAGE, prompt, repo, host_caps=host_caps, routing_config=routing_config, exclude=excluded
         )
         last_result = result
         if not result.ok:
@@ -371,6 +379,8 @@ def run_planning(
                 len(remaining_milestones),
             )
 
+    if not publish:
+        return StageResult(outcome="success", output_refs=[f"plan:{run_id}"])
     sha = workspace.commit(ws, "planning: SPEC + tickets", _job_key(run_id))
     workspace.push(ws)
     return StageResult(outcome="success", output_refs=[sha])

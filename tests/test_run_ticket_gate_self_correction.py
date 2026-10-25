@@ -604,7 +604,7 @@ def test_focal_test_fix_on_second_pass_reaches_merge_without_resume_delivery(tmp
     assert fix_calls == ["testes focais dos arquivos alterados"], "exactly one correction pass was needed"
 
     captured = capsys.readouterr()
-    assert "[SUCESSO] Ticket USR-245 entregue e validado com sucesso!" in captured.out
+    assert "[MERGE] Ticket USR-245 mergeado e validado; aguardando deploy" in captured.out  # USR-375 S4: smoke pendente
 
 
 def _gate_first_output_reinvokes(tmp_path: Path, stdout: str, returncode: int = 1) -> tuple[list[str], dict]:

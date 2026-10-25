@@ -129,6 +129,8 @@ def _reviewed(stage: Stage, directory: Path) -> BaseModel:
 
 def _deployed(stage: Stage, directory: Path) -> BaseModel:
     report = _json(stage, directory, DEPLOY_REPORT_FILE, DeployReport)
+    if report.pending:  # type: ignore[attr-defined]
+        return report  # accepted only as "deploy pending": the caller reports merged-awaiting-deploy
     if not report.smoke_ok:  # type: ignore[attr-defined]
         raise StageArtifactMissing(stage, "smoke falhou")
     return report
