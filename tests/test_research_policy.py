@@ -4,7 +4,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from core.research.policy import ResearchSourceRecord, run_research_stage
+from core.research.policy import ResearchSourceRecord, lookup, run_research_stage
 
 FEATURE = {"id": "USR-1", "item_type": "feature", "estimated_complexity": "high", "tags": [],
            "title": "Integracao webhook Telegram para alertas", "problem_statement": "Receber alertas via API externa."}
@@ -46,3 +46,12 @@ def test_same_topic_reuses_ledger_without_web_search(tmp_path):
 def test_source_without_url_is_rejected():
     with pytest.raises(ValidationError):
         ResearchSourceRecord(title="x", url="", accessed_at="2000-01-01", insight="i", influence="o")
+
+
+def test_unreadable_legacy_ledger_never_fails_lookup(tmp_path):
+    """Legacy ledgers (old enums/fields) broke the RESEARCH stage of every fleet ticket on 25/10."""
+    bad = tmp_path / "20000101_legacy"
+    bad.mkdir()
+    (bad / "ledger.json").write_text('{"ledger_id": "20000101_legacy", "query": "x", "sources": [{"canonical_url": "u"}]}', "utf-8")
+    run_research_stage(FEATURE, tmp_path, fake([]))
+    assert lookup(["x"], tmp_path) is not None

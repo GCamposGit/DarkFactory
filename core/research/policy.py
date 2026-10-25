@@ -117,7 +117,11 @@ def lookup(terms: list[str], ledger_root: Path, min_overlap: float = 0.6) -> lis
     mgr = KnowledgeLedgerManager(Path(ledger_root))
     found: list[ResearchLedger] = []
     for row in mgr.list_ledgers():
-        ledger = mgr.load_ledger(row["ledger_id"])
+        try:
+            ledger = mgr.load_ledger(row["ledger_id"])
+        except Exception as exc:  # noqa: BLE001 - one unreadable ledger must not fail the stage
+            logger.warning("ledger de pesquisa ilegivel ignorado (%s): %s", row.get("ledger_id"), exc)
+            continue
         if ledger is None or not ledger.sources:
             continue
         hay = (ledger.query + " " + ledger.summary_executive).lower()
