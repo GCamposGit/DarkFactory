@@ -17,7 +17,7 @@ POLICY_PATH = Path(__file__).resolve().parents[2] / ".factory" / "config" / "age
 _FALLBACK: dict = {
     "keep_names": ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "OPENROUTER_API_KEY"],
     "deny_names": ["GH_TOKEN", "GITHUB_TOKEN", "DATABASE_URL"],
-    "deny_patterns": ["^DOKPLOY", "BACKUP", "^GH_ADMIN", "^POSTGRES", "^TELEGRAM", "^AWS_", "(PASSWORD|PASSWD)$", "_SECRET(_KEY)?$"],
+    "deny_patterns": ["^DOKPLOY", "BACKUP", "^GH_ADMIN", "^POSTGRES", "^TELEGRAM", "^AWS_", "(PASSWORD|PASSWD)$", "_SECRET(_KEY)?$", "SIGNING_KEY"],
 }
 
 
