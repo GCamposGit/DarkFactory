@@ -88,7 +88,7 @@
     "docs/runbooks/grokbox_test_worker.md": 1,
     "docs/runbooks/owner_actions.md": 1,
     "hub/backend/models.py": 1,
-    "hub/backend/service.py": 3,
+    "hub/backend/service_ai.py": 3,
     "hub/backend/service_migrations.py": 1,
     "hub/data/default_services.json": 5,
     "hub/data/services.json": 5,
