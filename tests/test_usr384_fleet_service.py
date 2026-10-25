@@ -2,7 +2,7 @@
 
 import io
 import logging
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -25,10 +25,11 @@ def test_windows_task_xml_runs_at_boot_as_service_user_and_restarts(tmp_path: Pa
     assert root.findtext(f".//{q('RestartOnFailure')}/{q('Interval')}") == "PT1M"
     assert root.findtext(f".//{q('RestartOnFailure')}/{q('Count')}") == "999"
     assert root.findtext(f".//{q('Command')}") == "C:\\Python312\\python.exe"
-    assert Path(root.findtext(f".//{q('Command')}")).is_absolute()
+    assert PureWindowsPath(root.findtext(f".//{q('Command')}")).is_absolute()
     assert root.findtext(f".//{q('Arguments')}") == "-m core.line.fleet_dispatcher --loop"
     assert root.findtext(f".//{q('WorkingDirectory')}") == str(tmp_path.resolve())
-    assert Path(root.findtext(f".//{q('WorkingDirectory')}")).is_absolute()
+    working_directory = root.findtext(f".//{q('WorkingDirectory')}")
+    assert Path(working_directory).is_absolute() or PureWindowsPath(working_directory).is_absolute()
 
 
 def test_windows_task_xml_rejects_relative_executable_or_root(tmp_path: Path) -> None:

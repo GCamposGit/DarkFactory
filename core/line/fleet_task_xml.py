@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import xml.etree.ElementTree as ET
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 TASK_NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 ET.register_namespace("", TASK_NS)
@@ -12,7 +12,7 @@ ET.register_namespace("", TASK_NS)
 
 def generate_task_xml(user_id: str, python_path: Path, repo_root: Path) -> str:
     """Build a boot-triggered, restartable Task Scheduler 2.0 definition."""
-    if not user_id.strip() or not python_path.is_absolute() or not repo_root.is_absolute():
+    if not user_id.strip() or not _is_absolute_path(python_path) or not _is_absolute_path(repo_root):
         raise ValueError("user_id, python_path e repo_root absolutos sao obrigatorios")
     root = ET.Element(f"{{{TASK_NS}}}Task", {"version": "1.4"})
     reg = ET.SubElement(root, f"{{{TASK_NS}}}RegistrationInfo")
@@ -34,10 +34,23 @@ def generate_task_xml(user_id: str, python_path: Path, repo_root: Path) -> str:
     ET.SubElement(settings, f"{{{TASK_NS}}}ExecutionTimeLimit").text = "PT0S"
     actions = ET.SubElement(root, f"{{{TASK_NS}}}Actions", {"Context": "Author"})
     exec_node = ET.SubElement(actions, f"{{{TASK_NS}}}Exec")
-    ET.SubElement(exec_node, f"{{{TASK_NS}}}Command").text = str(python_path)
+    ET.SubElement(exec_node, f"{{{TASK_NS}}}Command").text = _path_for_task_xml(python_path)
     ET.SubElement(exec_node, f"{{{TASK_NS}}}Arguments").text = "-m core.line.fleet_dispatcher --loop"
-    ET.SubElement(exec_node, f"{{{TASK_NS}}}WorkingDirectory").text = str(repo_root)
+    ET.SubElement(exec_node, f"{{{TASK_NS}}}WorkingDirectory").text = _path_for_task_xml(repo_root)
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def _is_absolute_path(path: Path) -> bool:
+    """Accept native absolute paths and Windows paths when generating XML off Windows."""
+    return path.is_absolute() or PureWindowsPath(str(path)).is_absolute()
+
+
+def _path_for_task_xml(path: Path) -> str:
+    """Render Windows paths consistently even when this code runs on POSIX."""
+    windows_path = PureWindowsPath(str(path))
+    if windows_path.is_absolute():
+        return str(windows_path)
+    return str(path)
 
 
 def main() -> int:
