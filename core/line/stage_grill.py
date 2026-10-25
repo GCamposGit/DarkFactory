@@ -545,6 +545,22 @@ def resolve_callback_choice(question: _PendingQuestion, choice: str) -> str:
     return choice
 
 
+def one_tap_recommended_button(run_id: str, question: _PendingQuestion) -> Optional[dict[str, str]]:
+    """One-tap button that answers `question` with its `recommended` option (USR-375 S7).
+
+    The payload is the regular `cb:grill:<run_id>#<question_id>:<option index>` already routed by
+    the gateway to `build_telegram_line_grill_handler`, so recording reuses the same path as a
+    normal option button. `None` when there is no recommendation or it is not one of the options.
+    """
+    if not question.recommended or question.recommended not in question.options:
+        return None
+    index = question.options.index(question.recommended)
+    return {
+        "text": f"Aceitar recomendada ({question.id})"[:64],
+        "callback_data": f"cb:grill:{run_id}#{question.id}:{index}",
+    }
+
+
 def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str, list[list[dict[str, str]]]]:
     # The gateway sends with parse_mode=HTML, so agent text must be escaped.
     # Buttons carry the option *index*: Telegram caps callback_data at 64 bytes.
@@ -565,6 +581,9 @@ def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str,
         ]
         if row:
             buttons.append(row)
+        one_tap = one_tap_recommended_button(run_id, question)
+        if one_tap is not None:
+            buttons.append([one_tap])
 
     lines.append("")
     lines.append(f'🎙️ <b>Voz/Áudio:</b> Grave uma nota de voz nesta conversa ou <a href="{hub_url}">abra no DarkHub</a>.')

@@ -149,3 +149,74 @@ def test_from_env_disabled_and_interval(monkeypatch, store) -> None:
 def test_coordinator_without_database_url_has_no_feeder(store) -> None:
     coord = CloudCoordinator(store=store, port=0)
     assert coord._resolve_feeder_cycle() is None
+
+
+# --- USR-375 S7: entrada unica + um alimentador so + grill de um toque ---------------------------
+
+
+class _StubDemandsService:
+    """Stands in for DemandsService: persists a G1-complete ticket in the durable store."""
+
+    def __init__(self, demands: DemandsStore) -> None:
+        self.demands = demands
+
+    def create_ticket_from_input(self, demand, *, force_heuristic=False, timeout=None):
+        return _make_ticket(self.demands, "USR-940", title=demand.title, problem=demand.problem_statement)
+
+
+def test_telegram_submission_survives_redeploy_and_feeder_picks_it(tmp_path, store) -> None:
+    durable = tmp_path / "durable" / "demands.json"
+    durable.parent.mkdir()
+    outcome = owner_intake.submit_owner_demand(
+        "Detailed problem description with enough characters to satisfy G1 minimums",
+        source="telegram",
+        demands_service=_StubDemandsService(DemandsStore(path=durable)),
+    )
+    assert outcome.ticket_id == "USR-940" and outcome.source == "telegram"
+
+    # "Redeploy": new process objects, fresh ephemeral state dir; only the durable store remains.
+    fresh_state = tmp_path / "fresh_state"
+    fresh_state.mkdir()
+    reborn = DemandsStore(path=durable)
+    report = _cycle(reborn, store, _Clock(), max_active=3).run_once()
+    assert report.submitted_ids == ["USR-940"]
+    assert not list(fresh_state.iterdir())
+
+
+def test_single_feeder_start_in_cloud_coordinator() -> None:
+    src = (Path(__file__).resolve().parents[1] / "core" / "orchestrator" / "cloud_coordinator.py").read_text(
+        encoding="utf-8"
+    )
+    assert src.count(".maybe_run(") == 1
+    assert src.count("FeederCycle.from_env(") == 1
+    assert "BacklogFeeder(" not in src
+
+
+def test_one_tap_button_records_the_recommended_option(monkeypatch) -> None:
+    from datetime import datetime
+
+    from core.line import human, stage_grill
+
+    question = stage_grill._PendingQuestion(
+        id="q1", text="Canal?", kind="technical", options=["email", "telegram"], recommended="telegram"
+    )
+    button = stage_grill.one_tap_recommended_button("run-1", question)
+    assert button is not None and button["callback_data"] == "cb:grill:run-1#q1:1"
+    _, rows = stage_grill._build_message("run-1", [question])
+    assert any(b.get("callback_data") == button["callback_data"] for row in rows for b in row)
+
+    recorded: dict = {}
+
+    class _Store:
+        def find_job(self, run_id, stage, **kw):
+            return "job-1"
+
+        def record_grill_answer(self, run_id, qid, choice, at: datetime) -> None:
+            recorded[(run_id, qid)] = choice
+
+    monkeypatch.setattr(human, "resume_blocked_job", lambda *a, **k: True)
+    tail = button["callback_data"].partition("cb:grill:")[2]
+    run_id, rest = tail.split("#", 1)
+    qid, idx = rest.split(":", 1)
+    assert human.build_telegram_line_grill_handler(_Store())(run_id, qid, idx, 1) == {"resumed": True}
+    assert stage_grill.resolve_callback_choice(question, recorded[("run-1", "q1")]) == "telegram"

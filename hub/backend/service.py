@@ -3038,39 +3038,34 @@ class HubService:
             config = config.model_copy(update=updates)
 
         def _handle_demand(text: str, user_id: int) -> Dict[str, Any]:
-            from core.demands.models import DemandInput
+            from core.line.owner_intake import submit_owner_demand
 
-            ticket = self.demands_service.create_ticket_from_input(
-                DemandInput(
-                    title=f"Telegram: {text[:60].strip()}",
-                    problem_statement=text,
-                    project_id="darkfac",
-                ),
-                force_heuristic=True,
+            outcome = submit_owner_demand(
+                text,
+                source="telegram",
+                demands_service=self.demands_service,
+                title_prefix="Telegram: ",
+                submit_to_line=self.submit_ticket_to_line,
             )
-            response: Dict[str, Any] = {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
-            from core.line.owner_intake import autosubmit_enabled
-
-            if autosubmit_enabled():
-                submission = self.submit_ticket_to_line(ticket.id)
-                response["line_message"] = submission.message
-                if submission.run_id:
-                    response["line_run_id"] = submission.run_id
-                    response["status"] = self.get_demand_ticket(ticket.id).status.value
+            response: Dict[str, Any] = {"ticket_id": outcome.ticket_id, "title": outcome.title, "status": outcome.status}
+            if outcome.line_message is not None:
+                response["line_message"] = outcome.line_message
+            if outcome.line_run_id:
+                response["line_run_id"] = outcome.line_run_id
+                response["status"] = self.get_demand_ticket(outcome.ticket_id).status.value
             return response
 
         def _handle_project_demand(project_id: str, text: str, user_id: int) -> Dict[str, Any]:
-            from core.demands.models import DemandInput
+            from core.line.owner_intake import submit_owner_demand
 
-            ticket = self.demands_service.create_ticket_from_input(
-                DemandInput(
-                    title=f"Telegram: {text[:60].strip()}",
-                    problem_statement=text,
-                    project_id=project_id,
-                ),
-                force_heuristic=True,
+            outcome = submit_owner_demand(
+                text,
+                source="telegram",
+                demands_service=self.demands_service,
+                project_id=project_id,
+                title_prefix="Telegram: ",
             )
-            return {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
+            return {"ticket_id": outcome.ticket_id, "title": outcome.title, "status": outcome.status}
 
         def _handle_line(ticket_id: str, user_id: int) -> Dict[str, Any]:
             submission = self.submit_ticket_to_line(ticket_id)

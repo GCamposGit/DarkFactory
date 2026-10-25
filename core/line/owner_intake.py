@@ -586,3 +586,75 @@ def cancel_line_run(
         message=f"Run {run_id}{ticket_part} cancelado com sucesso ({jobs_count} jobs cancelados). Nova tentativa habilitada.",
     )
 
+
+
+# --------------------------------------------------------------------------
+# Entrada unica (USR-375 S7): Telegram, Hub and chat submit through one function
+# --------------------------------------------------------------------------
+
+
+class OwnerDemandResult(BaseModel):
+    """Outcome of `submit_owner_demand`."""
+
+    ticket_id: str
+    title: str = ""
+    status: str = ""
+    source: str = ""
+    queue_registered: bool = False
+    line_message: str | None = None
+    line_run_id: str | None = None
+
+
+def _register_in_canonical_queue(ticket: UserTicket, source: str) -> bool:
+    """Write the ticket to the control-store queue (USR-343 S4a) when that module exists.
+
+    TODO(USR-343 S4a): `core.demands.queue_store.register_ticket` is not on main yet; until it
+    lands the durable `DemandsStore` (demands.json under the shared state dir) is the canonical
+    queue. Once present this hook is picked up with no further change here.
+    """
+    try:
+        from core.demands.queue_store import register_ticket  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    register_ticket(ticket, source=source)
+    return True
+
+
+def submit_owner_demand(
+    text: str,
+    *,
+    source: str,
+    demands_service: Any,
+    project_id: str = "darkfac",
+    title_prefix: str = "",
+    submit_to_line: Any | None = None,
+) -> OwnerDemandResult:
+    """The single entry for owner demands (Telegram `/demand`, DarkHub, chat).
+
+    Creates the ticket through `demands_service` (durable `DemandsStore`), registers it in the
+    canonical queue and, when `autosubmit_enabled()`, pushes it to the line via `submit_to_line`
+    (a callable `ticket_id -> LineSubmission`). The backlog feeder then picks any ticket the
+    direct push did not take, so a redeploy loses nothing.
+    """
+    from core.demands.models import DemandInput
+
+    ticket = demands_service.create_ticket_from_input(
+        DemandInput(
+            title=f"{title_prefix}{text[:60].strip()}",
+            problem_statement=text,
+            project_id=project_id,
+        ),
+        force_heuristic=True,
+    )
+    result = OwnerDemandResult(
+        ticket_id=ticket.id,
+        title=ticket.title,
+        status=ticket.status.value,
+        source=source,
+        queue_registered=_register_in_canonical_queue(ticket, source),
+    )
+    if submit_to_line is not None and autosubmit_enabled():
+        submission = submit_to_line(ticket.id)
+        result.line_message = submission.message
+        result.line_run_id = submission.run_id
+    return result
