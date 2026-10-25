@@ -1,3 +1,4 @@
+<!-- covers: core/harness/runner.py -->
 # Portao em camadas (USR-377 S5)
 
 O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
