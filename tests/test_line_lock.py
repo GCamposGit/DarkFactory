@@ -385,3 +385,32 @@ def test_dead_pid_with_a_fresh_heartbeat_is_recovered_immediately(tmp_path: Path
         assert lock.acquired is True
     finally:
         lock.release()
+
+
+def test_fleet_mode_locks_per_host_in_parallel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
+    a = LineLock("USR-1", root=tmp_path, fleet_mode=True, host_id="grokbox")
+    b = LineLock("USR-2", root=tmp_path, fleet_mode=True, host_id="desktop")
+    c = LineLock("USR-3", root=tmp_path, fleet_mode=True, host_id="grokbox")
+    a.acquire()
+    try:
+        b.acquire()  # outro host, mesma maquina: permitido
+        try:
+            with pytest.raises(LineLockHeld):
+                c.acquire()  # mesmo host: recusado
+        finally:
+            b.release()
+    finally:
+        a.release()
+
+
+def test_non_fleet_mode_keeps_machine_wide_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
+    a = LineLock("USR-1", root=tmp_path, fleet_mode=False, host_id="grokbox")
+    b = LineLock("USR-2", root=tmp_path, fleet_mode=False, host_id="desktop")
+    a.acquire()
+    try:
+        with pytest.raises(LineLockHeld):
+            b.acquire()
+    finally:
+        a.release()
