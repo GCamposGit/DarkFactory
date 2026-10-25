@@ -20,7 +20,9 @@ if ($gitCmd) {
         $gitCommon = & git -C $repoRoot rev-parse --path-format=absolute --git-common-dir 2>$null
         $gitCommonRc = $LASTEXITCODE
         if ($gitDirRc -eq 0 -and $gitCommonRc -eq 0 -and $gitDir -and $gitCommon) {
-            $isSecondaryWorktree = ([string]$gitDir).TrimEnd('\') -ne ([string]$gitCommon).TrimEnd('\')
+            $normalizedGitDir = (([string]$gitDir).Trim() -replace '/', '\').TrimEnd('\').ToLowerInvariant()
+            $normalizedGitCommon = (([string]$gitCommon).Trim() -replace '/', '\').TrimEnd('\').ToLowerInvariant()
+            $isSecondaryWorktree = $normalizedGitDir -ne $normalizedGitCommon
         }
     } finally { $ErrorActionPreference = $previousPreference }
 }

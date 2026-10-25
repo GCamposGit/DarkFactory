@@ -496,7 +496,7 @@ class PostgresControlStore:
                             res_id, h_id, st, exp_at = res_row
                             res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
                             res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                            if res_expires < now_utc:
+                            if res_expires <= now_utc:
                                 continue  # Expired cycle reservation
                             res_host = str(h_id).lower()
                             worker_lower = worker.lower()
@@ -613,7 +613,7 @@ class PostgresControlStore:
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
                     exp_at = row[1] if hasattr(row[1], "astimezone") else datetime.fromisoformat(str(row[1])).astimezone(UTC)
-                    if exp_at < now_utc:
+                    if exp_at <= now_utc:
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' expired at {exp_at}.")
 
                     cur.execute(
@@ -635,7 +635,7 @@ class PostgresControlStore:
                             st, exp_at = res_row[0], res_row[1]
                             res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
                             res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                            if st not in ("active", "draining") or res_expires < now_utc:
+                            if st not in ("active", "draining") or res_expires <= now_utc:
                                 raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}).")
 
                     cur.execute(
@@ -701,7 +701,7 @@ class PostgresControlStore:
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
                     exp_at = claim_row[1] if hasattr(claim_row[1], "astimezone") else datetime.fromisoformat(str(claim_row[1])).astimezone(UTC)
-                    if exp_at < now_utc:
+                    if exp_at <= now_utc:
                         raise StaleLeaseError("Lease has expired.")
 
                     cur.execute(
@@ -711,6 +711,28 @@ class PostgresControlStore:
                     job_row = cur.fetchone()
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Fencing token mismatch on finish.")
+
+                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                        cur.execute(
+                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
+                            (claim.reservation_id,),
+                        )
+                        reservation_row = cur.fetchone()
+                        if not reservation_row:
+                            raise StaleLeaseError(
+                                f"Fleet cycle reservation '{claim.reservation_id}' is missing. Old owner cannot publish."
+                            )
+                        reservation_status, reservation_expiry = reservation_row
+                        res_expires = (
+                            reservation_expiry
+                            if hasattr(reservation_expiry, "astimezone")
+                            else datetime.fromisoformat(str(reservation_expiry))
+                        )
+                        res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+                        if reservation_status not in ("active", "draining") or res_expires <= now_utc:
+                            raise StaleLeaseError(
+                                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_status}). Old owner cannot publish."
+                            )
 
                     if result.outcome == "success":
                         cur.execute(
