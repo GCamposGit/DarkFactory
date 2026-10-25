@@ -663,6 +663,47 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL heartbeat failed: {exc}") from exc
 
+    @staticmethod
+    def _raise_if_cycle_reservation_inactive(cur: Any, claim: Claim) -> None:
+        """Reconciliation can deactivate a claim when its reservation expires; report the cycle fence cause."""
+        if not (claim.reservation_id and claim.reservation_id.startswith("fres-")):
+            return
+        cur.execute(
+            "SELECT status FROM fleet_reservations WHERE reservation_id = %s",
+            (claim.reservation_id,),
+        )
+        reservation_row = cur.fetchone()
+        if reservation_row and reservation_row[0] not in ("active", "draining"):
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_row[0]}). Old owner cannot publish."
+            )
+
+    @staticmethod
+    def _check_finish_reservation_fence(cur: Any, claim: Claim, now_utc: datetime) -> None:
+        """Fleet cycle claims may only publish while their reservation is active and unexpired (USR-281)."""
+        if not (claim.reservation_id and claim.reservation_id.startswith("fres-")):
+            return
+        cur.execute(
+            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
+            (claim.reservation_id,),
+        )
+        reservation_row = cur.fetchone()
+        if not reservation_row:
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is missing. Old owner cannot publish."
+            )
+        reservation_status, reservation_expiry = reservation_row
+        res_expires = (
+            reservation_expiry
+            if hasattr(reservation_expiry, "astimezone")
+            else datetime.fromisoformat(str(reservation_expiry))
+        )
+        res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+        if reservation_status not in ("active", "draining") or res_expires <= now_utc:
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_status}). Old owner cannot publish."
+            )
+
     def finish(self, claim: Claim, result: StageResult, now: datetime) -> None:
         if self.mock_mode:
             return self._backend.finish(claim, result, now)
@@ -685,19 +726,7 @@ class PostgresControlStore:
                     )
                     claim_row = cur.fetchone()
                     if not claim_row or claim_row[0] != "active":
-                        # Reconciliation can deactivate a claim when its
-                        # reservation expires; report the cycle fence cause.
-                        if claim.reservation_id and claim.reservation_id.startswith("fres-"):
-                            cur.execute(
-                                "SELECT status FROM fleet_reservations WHERE reservation_id = %s",
-                                (claim.reservation_id,),
-                            )
-                            reservation_row = cur.fetchone()
-                            if reservation_row and reservation_row[0] not in ("active", "draining"):
-                                st = reservation_row[0]
-                                raise StaleLeaseError(
-                                    f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}). Old owner cannot publish."
-                                )
+                        self._raise_if_cycle_reservation_inactive(cur, claim)
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
                     exp_at = claim_row[1] if hasattr(claim_row[1], "astimezone") else datetime.fromisoformat(str(claim_row[1])).astimezone(UTC)
@@ -712,16 +741,7 @@ class PostgresControlStore:
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Fencing token mismatch on finish.")
 
-                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
-                        cur.execute(
-                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
-                            (claim.reservation_id,),
-                        )
-                        reservation_row = cur.fetchone()
-                        if not reservation_row:
-                            raise StaleLeaseError(
-                                f"Fleet cycle reservation '{claim.reservation_id}' is missing. Old owner cannot publish."
-                            )
+                    self._check_finish_reservation_fence(cur, claim, now_utc)
                         reservation_status, reservation_expiry = reservation_row
                         res_expires = (
                             reservation_expiry
