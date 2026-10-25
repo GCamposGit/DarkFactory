@@ -11496,5 +11496,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T02:37:08.641142Z",
     "updated_at": "2026-10-25T02:37:08.641142Z"
+  },
+  {
+    "id": "USR-386",
+    "project_id": "darkfac",
+    "title": "Helpers duplicados para core/common (fatia S7a do USR-377)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Plano V0 Frente 6: _win_kwargs, _git, utc_now e _extract_json_object estao duplicados em ~13 lugares. Mover para core/common/ e substituir as chamadas mecanicamente. Excluir run_ticket.py, core/line/stages.py, core/line/ticket_stages.py, core/owner_actions, core/git/queue_registration.py, core/infra/node_sync.py e hub/backend/service.py (outras fatias em andamento); deixar TODO de import nesses.",
+    "core_journey": [
+      "Plano V0 Frente 6: _win_kwargs, _git, utc_now e _extract_json_object estao duplicados em ~13 lugares. Mover para core/common/ e substituir as chamadas mecanicamente. Excluir run_ticket.py, core/line/stages.py, core/line/ticket_stages.py, core/owner_actions, core/git/queue_registration.py, core/infra/node_sync.py e hub/backend/service.py (outras fatias em andamento); deixar TODO de import nesses."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "git grep mostra uma unica definicao de cada helper fora dos arquivos excluidos",
+      "Suite verde no portao",
+      "Saldo de linhas negativo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T02:39:49.740880Z",
+    "updated_at": "2026-10-25T02:39:49.740880Z"
   }
 ]
