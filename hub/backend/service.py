@@ -3242,21 +3242,32 @@ class HubService:
         from core.governance import publication as pub
 
         owner = (os.environ.get(pub.OWNER_CHAT_ENV) or "").strip()
+        _, audit = self._publication_state()
         if not owner.lstrip("-").isdigit():
+            if event_type == "pull_request":
+                logger.error("protected publication: %s missing/invalid; owner not notified", pub.OWNER_CHAT_ENV)
+                pub._audit(audit, {"event": "notify_failed", "reason": f"{pub.OWNER_CHAT_ENV} missing or invalid"})
             return
         try:
             port = pub.RestGitHubPort()
             if event_type == "pull_request" and payload.get("action") in {"opened", "synchronize", "reopened"}:
                 gateway = self._build_telegram_gateway(role="ops")
                 number = int((payload.get("pull_request") or {}).get("number") or payload.get("number"))
-                pub.notify_owner(
-                    port, number, lambda chat, text, buttons: gateway.send_message(chat, text, buttons), int(owner)
-                )
+
+                def _send(chat: int, text: str, buttons: list) -> None:
+                    if not gateway.send_message(chat, text, buttons):
+                        raise pub.PublicationError("telegram sendMessage falhou (token do bot ops/chat id?); ficou no outbox")
+
+                pub.notify_owner(port, number, _send, int(owner))
             elif event_type in {"check_suite", "check_run", "status"}:
                 pending, audit = self._publication_state()
                 pub.sweep_pending(port, pending, audit)
         except Exception as exc:  # noqa: BLE001 - webhook processing must not fail because of this side channel
-            logger.warning("protected publication event failed: %s", type(exc).__name__)
+            logger.error("protected publication event failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+            try:
+                pub._audit(audit, {"event": "notify_failed", "type": event_type, "reason": f"{type(exc).__name__}: {exc}"})
+            except Exception:  # noqa: BLE001
+                logger.error("protected publication: could not write audit entry")
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:
         """Returns diagnostic status of Telegram Gateway (HF-14 / USR-110)."""
