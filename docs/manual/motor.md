@@ -31,3 +31,17 @@ explicito (padrao do CLI) nao tem nivel declarado e nao e elegivel. O fallback d
 Sem modelo alto disponivel (cota, cooldown ou capacidade do host), `pick()` devolve `None` e o estagio
 espera pela semantica de `core/line/route_wait.py` (`retry` com `not_before`, e `waiting_human` somente
 apos o orcamento de relogio). Nunca ha queda para modelo barato e nenhum agente e invocado.
+
+## Estrutura do run_ticket (USR-375 S3)
+
+`run_ticket.py` e o launcher headless; `_run` agora so orquestra estagios, cada um com no maximo 150 linhas:
+`_stage_line_lock`, `_stage_check_harness`, `_stage_intake`, `_stage_preflight` (sonda do grokbox, tamanho,
+`_stage_route`, dry run), `_stage_workspace`, `_stage_build` (agente + retry), `_stage_deliver` (subprocesso
+`--resume-delivery`). O portao de autocorrecao e dividido em `_gate_focal_step`, `_gate_official_step`
+(`_gate_run_official`, `_gate_classify_failure`, `_gate_reinvoke_for_gate`) e `_gate_exhausted_result`, e a
+entrega em `_deliver_sync`, `_deliver_external_project` e `_deliver_worktree`.
+
+`core/line/ticket_stages.py` guarda os helpers sem dependencia de globais substituidas pelos testes
+(construtores de prompt, comando/ambiente da entrega, payloads e relatorios de falha, `GateState`).
+O fluxo que chama `pick`, `inspect_quotas`, `_run_bounded` etc. fica em `run_ticket.py` para que os
+`monkeypatch` existentes continuem valendo. Refatoracao pura: CLI, codigos de saida e mensagens inalterados.

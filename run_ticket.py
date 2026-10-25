@@ -48,7 +48,7 @@ from core.line.agent_cli import (
     run_agent,
     supports,
 )
-from core.line import gate_ram, grokbox_wake
+from core.line import gate_ram, grokbox_wake, ticket_stages
 from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.workflow import execution_registry
@@ -1153,6 +1153,331 @@ def _retry_gate_remote_unavailable(
     return gate_res
 
 
+def _gate_focal_step(
+    st: ticket_stages.GateState,
+    target_worktree: Path,
+    ticket: UserTicket,
+    as_json: bool,
+    progress: ProgressPublisher,
+    attempts_log: list[dict[str, Any]],
+) -> str:
+    """Focal pre-check of one attempt. STEP_PROCEED = focal passed (or no targets); else loop control."""
+    attempt = st.attempt
+    changed = _implementation_diff_paths(target_worktree)
+    focal_targets = _focal_test_targets(target_worktree, changed)
+    focal_report = _run_focal_tests(target_worktree, focal_targets) if focal_targets else None
+
+    if focal_report is None or focal_report.success:
+        return ticket_stages.STEP_PROCEED
+
+    st.last_output = focal_report.agent_feedback
+    st.last_exit_code = focal_report.exit_code or 1
+    if not as_json:
+        print(
+            f"[ERRO NOS TESTES FOCAIS]: {focal_report.concise_summary}\n{focal_report.agent_feedback}",
+            file=sys.stderr,
+        )
+
+    if _focal_failure_is_timeout(focal_report):
+        focal_timeout_limit = _focal_test_timeout_s(len(focal_targets))
+        st.last_cause = "focal_timeout"
+        attempts_log.append({
+            "event": "timeout",
+            "attempt": attempt + 1,
+            "stage": "focal",
+            "cause": st.last_cause,
+            "duration_s": round(focal_report.duration_seconds, 1),
+            "limit_s": focal_timeout_limit,
+        })
+        if not as_json:
+            print(
+                f"[TIMEOUT NO PRE-TESTE FOCAL]: {focal_report.duration_seconds:.1f}s "
+                f"(limite {focal_timeout_limit:.0f}s). Nao reinvocando o agente: timeout de "
+                f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
+                file=sys.stderr,
+            )
+        return ticket_stages.STEP_BREAK
+
+    st.last_cause = "focal_tests_failed"
+    if attempt >= GATE_FIX_ATTEMPTS:
+        return ticket_stages.STEP_BREAK
+    progress.phase(
+        "gate", "failed",
+        f"testes focais reprovados (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}): "
+        f"{focal_report.concise_summary}",
+        cause="focal_tests_failed",
+    )
+    if not as_json:
+        print(f"\n--> Reinvocando o agente na mesma worktree para corrigir ({', '.join(focal_targets)})...")
+    fix_result = _invoke_fix_agent(
+        target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback
+    )
+    return _gate_after_fix(st, target_worktree, ticket, "focal", fix_result, attempts_log)
+
+
+def _gate_after_fix(
+    st: ticket_stages.GateState,
+    target_worktree: Path,
+    ticket: UserTicket,
+    stage: str,
+    fix_result: Any,
+    attempts_log: list[dict[str, Any]],
+) -> str:
+    """Commits the fix agent's changes and logs the reinvocation; decides how the loop proceeds."""
+    attempt = st.attempt
+    fix_changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, stage)
+    if commit_error is not None:
+        st.last_cause = "fix_commit_failed"
+        st.last_output = commit_error
+        attempts_log.append(ticket_stages.infra_error_entry(attempt, stage, st.last_cause, error=commit_error))
+        return ticket_stages.STEP_BREAK
+    attempts_log.append(
+        ticket_stages.reinvocation_entry(attempt, stage, st.last_cause, fix_result, FIX_AGENT_TIMEOUT_S, fix_changed)
+    )
+    if _cancelled():
+        return ticket_stages.STEP_CANCEL
+    if not fix_changed:
+        st.last_cause = "fix_agent_no_changes"
+        return ticket_stages.STEP_BREAK
+    return ticket_stages.STEP_CONTINUE
+
+
+def _gate_build_command(target_worktree: Path) -> list[str]:
+    gate_cmd = [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"]
+    if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
+        # USR-366: o despachante da frota fixa o worker remoto do host (DARKFAC_TEST_WORKERS).
+        gate_cmd.append("--remote-required")
+    elif line_lock.is_fleet_mode():
+        gate_cmd.append("--local")
+    elif _gate_should_require_remote():
+        gate_cmd.append("--remote-required")
+    return gate_cmd
+
+
+def _gate_run_official(
+    st: ticket_stages.GateState,
+    target_worktree: Path,
+    progress: ProgressPublisher,
+    attempts_log: list[dict[str, Any]],
+    as_json: bool,
+    resume_cmd: str,
+) -> tuple[str, Any, Any]:
+    """Waits for grokbox/RAM, then runs the official gate. Returns (step, gate_cmd, gate_res)."""
+    attempt = st.attempt
+    # USR-310: grokbox estava fora no pre-flight -- da uma janela para ele acordar antes do portao.
+    _wait_gate_grokbox_if_needed(as_json)
+
+    # USR-262: gate local com 1 worker passa de GATE_TIMEOUT; espera RAM para 2+ workers ou falha explicito.
+    ram_wait = _wait_gate_ram_if_local(as_json)
+    if ram_wait is not None and not ram_wait.ok:
+        st.last_cause = gate_ram.CAUSE_INSUFFICIENT_RAM
+        st.last_exit_code = 1
+        st.last_output = (
+            f"{st.last_cause}: RAM livre {ram_wait.reading.available_gib:.1f} GiB, "
+            f"{ram_wait.reading.workers} workers possiveis (minimo {gate_ram.MIN_GATE_WORKERS}) "
+            f"apos {ram_wait.waited_s:.0f} s de espera; portao NAO executado. Retome com: {resume_cmd}"
+        )
+        attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", st.last_cause, error=st.last_output))
+        if not as_json:
+            print(f"[RAM INSUFICIENTE PARA O PORTAO]: {st.last_output}", file=sys.stderr)
+        return ticket_stages.STEP_BREAK, None, None
+
+    progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
+    if not as_json:
+        print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
+    # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
+    gate_cmd = _gate_build_command(target_worktree)
+    gate_res = _run_bounded(
+        gate_cmd,
+        cwd=target_worktree,
+        timeout_s=GATE_TIMEOUT_S,
+    )
+    if getattr(gate_res, "cancelled", False) is True or _cancelled():
+        return ticket_stages.STEP_CANCEL, gate_cmd, gate_res
+    gate_res = _retry_gate_remote_unavailable(
+        gate_cmd, gate_res, target_worktree, attempts_log, attempt, as_json, _cancelled
+    )
+    if getattr(gate_res, "cancelled", False) is True or _cancelled():
+        return ticket_stages.STEP_CANCEL, gate_cmd, gate_res
+    return ticket_stages.STEP_PROCEED, gate_cmd, gate_res
+
+
+def _gate_classify_failure(
+    st: ticket_stages.GateState,
+    gate_cmd: list[str],
+    gate_res: Any,
+    target_worktree: Path,
+    attempts_log: list[dict[str, Any]],
+    as_json: bool,
+    resume_cmd: str,
+) -> bool:
+    """Records the failed gate output and detects infra failures. True = stop the loop (no reinvocation)."""
+    attempt = st.attempt
+    st.last_output = f"{gate_res.stdout}\n{gate_res.stderr}"
+    st.last_exit_code = gate_res.returncode
+    # Keep the latest official gate diagnostics in the final payload, including when the
+    # in-place fixer makes no changes or exits with an infrastructure error.
+    st.failed_tests = failed_test_ids(st.last_output)
+    st.gate_log_tail = _tail_lines(st.last_output, count=40)
+    if not as_json:
+        print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
+
+    def _infra(cause: str, message: str) -> bool:
+        st.last_cause = cause
+        attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", cause))
+        if not as_json:
+            print(message, file=sys.stderr)
+        return True
+
+    if "--remote-required" in gate_cmd and _GATE_REMOTE_REQUIRED_MARKER in st.last_output:
+        return _infra(
+            GATE_CAUSE_REMOTE_UNAVAILABLE,
+            "[WORKER REMOTO INDISPONIVEL]: RAM local nao comporta 2+ workers; portao local "
+            f"evitado. Reenfileire/retome com: {resume_cmd} (USR-354).",
+        )
+    if _GATE_DIRTY_WORKTREE_MARKER in st.last_output:
+        return _infra(
+            "gate_dirty_worktree",
+            "[WORKTREE SUJA NO PORTÃO OFICIAL]: o portao recusou o candidato sujo. Nao reinvocando "
+            "o agente: e erro de infraestrutura do laco de autocorrecao (USR-249).",
+        )
+    if _gate_failure_is_timeout(gate_res):
+        st.last_cause = "gate_timeout"
+        attempts_log.append({
+            "event": "timeout",
+            "attempt": attempt + 1,
+            "stage": "gate",
+            "cause": st.last_cause,
+            "duration_s": round(gate_res.duration_s, 1),
+            "limit_s": GATE_TIMEOUT_S,
+        })
+        if not as_json:
+            print(
+                f"[TIMEOUT/INFRA NO PORTÃO OFICIAL]: {gate_res.duration_s:.1f}s "
+                f"(limite {GATE_TIMEOUT_S:.0f}s). Nao reinvocando o agente: timeout ou falha de "
+                f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
+                file=sys.stderr,
+            )
+        return True
+    if _gate_failure_is_infra_no_tests(st.last_output):
+        return _infra(
+            GATE_CAUSE_INFRA_NO_TESTS,
+            "[INFRA NO PORTÃO OFICIAL]: zero testes descobertos e um passo morto por sinal "
+            "(exit code negativo, ex.: SIGTERM). Nao reinvocando o agente: o candidato nao foi "
+            "exercitado; e falha de infraestrutura (USR-308).",
+        )
+    if _gate_failure_is_base_red(st.last_output, _implementation_diff_paths(target_worktree), target_worktree):
+        return _infra(
+            GATE_CAUSE_BASE_RED,
+            "[BASE VERMELHA SUSPEITA]: todos os testes reprovados estao em arquivos que o diff do "
+            "ticket nao toca nem referencia (base_red_suspected). Nao reinvocando o agente: "
+            "corrija a main e retome a entrega com o comando abaixo (USR-308).",
+        )
+    return False
+
+
+def _gate_reinvoke_for_gate(
+    st: ticket_stages.GateState,
+    gate_res: Any,
+    target_worktree: Path,
+    ticket: UserTicket,
+    progress: ProgressPublisher,
+    attempts_log: list[dict[str, Any]],
+    as_json: bool,
+) -> str:
+    st.last_cause = "gate_failed"
+    if st.attempt >= GATE_FIX_ATTEMPTS:
+        return ticket_stages.STEP_BREAK
+    attempt = st.attempt
+    progress.phase(
+        "gate", "failed",
+        f"portao oficial falhou (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}, codigo {gate_res.returncode}): "
+        f"{redacted_head((gate_res.stdout or gate_res.stderr or '')[-600:], 300)}",
+        cause="gate_failed",
+        worker=st.last_gate_worker,
+    )
+    if not as_json:
+        print("\n--> Reinvocando o agente na mesma worktree com o log destilado do portao...")
+    fix_result = _invoke_fix_agent(
+        target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(st.last_output)
+    )
+    return _gate_after_fix(st, target_worktree, ticket, "gate", fix_result, attempts_log)
+
+
+def _gate_official_step(
+    st: ticket_stages.GateState,
+    target_worktree: Path,
+    ticket: UserTicket,
+    resume_cmd: str,
+    skip_validation: bool,
+    as_json: bool,
+    progress: ProgressPublisher,
+    attempts_log: list[dict[str, Any]],
+) -> str:
+    """Official gate of one attempt: STEP_PASS when approved/skipped, else loop control."""
+    if skip_validation:
+        progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
+        return ticket_stages.STEP_PASS
+
+    step, gate_cmd, gate_res = _gate_run_official(st, target_worktree, progress, attempts_log, as_json, resume_cmd)
+    if step != ticket_stages.STEP_PROCEED:
+        return step
+
+    gate_output = f"{gate_res.stdout or ''}\n{gate_res.stderr or ''}"
+    st.last_gate_worker = _gate_execution_worker(gate_output)
+
+    if gate_res.returncode == 0:
+        progress.phase("gate", "succeeded", "portao oficial aprovado", worker=st.last_gate_worker)
+        if not as_json:
+            print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
+        return ticket_stages.STEP_PASS
+
+    if _gate_classify_failure(st, gate_cmd, gate_res, target_worktree, attempts_log, as_json, resume_cmd):
+        return ticket_stages.STEP_BREAK
+    return _gate_reinvoke_for_gate(st, gate_res, target_worktree, ticket, progress, attempts_log, as_json)
+
+
+def _gate_exhausted_result(
+    st: ticket_stages.GateState,
+    target_worktree: Path,
+    current_branch: str,
+    current_sha: str,
+    ticket: UserTicket,
+    resume_cmd: str,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    attempts_log: list[dict[str, Any]],
+) -> Any:
+    print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
+    print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
+    if attempts_log and not as_json:
+        print(_render_self_correction_log(attempts_log), file=sys.stderr)
+    attempts_tried = st.attempt + 1
+    progress.phase(
+        "gate", "failed",
+        f"{st.last_cause} apos {attempts_tried} tentativa(s): {redacted_head(st.last_output[-600:], 300)}",
+        cause=st.last_cause,
+        worker=st.last_gate_worker,
+    )
+    gate_payload = {
+        "exit_code": st.last_exit_code,
+        "ok": False,
+        "cause": st.last_cause,
+        "ticket_id": ticket.id,
+        "branch": current_branch,
+        "current_sha": current_sha,
+        "worktree": str(target_worktree),
+        "resume_command": resume_cmd,
+        "self_correction_log": attempts_log,
+        "failed_tests": st.failed_tests,
+        "gate_log_tail": st.gate_log_tail,
+    }
+    if as_json and not return_result:
+        print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
+    return gate_payload if return_result else gate_payload["exit_code"]
+
+
 def _run_gate_with_self_correction(
     target_worktree: Path,
     current_branch: str,
@@ -1184,341 +1509,42 @@ def _run_gate_with_self_correction(
     code once every attempt is exhausted or a timeout/infra failure is hit.
     """
     if ticket.project_id != "darkfac":
-        from core.projects.registry import get_project_registry
-        from core.projects.ticket_execution import ProjectExecutionError, validate_project_commands
+        # Client delivery always fails closed without its declared project gate (skip_validation ignored).
+        return ticket_stages.external_project_gate(
+            ticket, target_worktree, skip_validation, as_json, progress, GATE_TIMEOUT_S
+        )[1]
 
-        project = get_project_registry().get_project(ticket.project_id)
-        if project is None:
-            detail = f"Projeto '{ticket.project_id}' não existe em .factory/projects.json."
-            progress.phase("gate", "failed", detail, cause="project_not_registered")
-            return {"exit_code": 1, "ok": False, "cause": "project_not_registered", "error": detail}
-        if not project.commands.validate_cmds:
-            detail = (
-                f"Projeto {project.id} não declara commands.validate. Execute o Project Adoption Gateway "
-                "(skill 07) no onboarding e declare comandos de validação antes de executar tickets."
-            )
-            progress.phase("gate", "failed", detail, cause="project_validate_missing")
-            return {"exit_code": 1, "ok": False, "cause": "project_validate_missing", "error": detail}
-        if skip_validation:
-            # Client delivery always fails closed without its declared project gate.
-            skip_validation = False
-        failure_cause = "project_validate_failed"
-        try:
-            report = validate_project_commands(project, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
-            if report.ok and project.commands.build:
-                from core.projects.ticket_execution import run_project_commands
-                failure_cause = "project_build_failed"
-                report = run_project_commands(project.commands.build, target_worktree, timeout_s=int(GATE_TIMEOUT_S), project=project)
-            if report.ok and project.commands.smoke:
-                from core.projects.ticket_execution import run_project_commands
-                failure_cause = "project_smoke_failed"
-                report = run_project_commands(project.commands.smoke, target_worktree, timeout_s=int(GATE_TIMEOUT_S), project=project)
-        except ProjectExecutionError as exc:
-            detail = str(exc)
-            progress.phase("gate", "failed", detail, cause="project_validate_missing")
-            return {"exit_code": 1, "ok": False, "cause": "project_validate_missing", "error": detail}
-        if report.ok:
-            progress.phase("gate", "succeeded", "portão declarado pelo projeto aprovado")
-            if not as_json:
-                print("[+] Validação declarada pelo projeto aprovada: [HARNESS_PASS]!")
-            return None
-        detail = redact_secrets(report.combined_output)
-        progress.phase("gate", "failed", redacted_head(detail[-1200:], 600), cause=failure_cause)
-        if not as_json:
-            print(f"[ERRO NO PORTÃO DO PROJETO]:\n{detail}", file=sys.stderr)
-        return {
-            "exit_code": report.exit_code or 1,
-            "ok": False,
-            "cause": failure_cause,
-            "error": detail,
-            "worktree": str(target_worktree),
-        }
-
-    last_output = ""
-    last_cause = "gate_failed"
-    last_exit_code = 1
-    failed_tests: list[str] = []
-    gate_log_tail = ""
-    last_gate_worker: str | None = None
-
+    st = ticket_stages.GateState()
     for attempt in range(GATE_FIX_ATTEMPTS + 1):
+        st.attempt = attempt
         if _cancelled():
             return cancelled_payload()
 
-        changed = _implementation_diff_paths(target_worktree)
-        focal_targets = _focal_test_targets(target_worktree, changed)
-        focal_report = _run_focal_tests(target_worktree, focal_targets) if focal_targets else None
-
-        if focal_report is not None and not focal_report.success:
-            last_output = focal_report.agent_feedback
-            last_exit_code = focal_report.exit_code or 1
-            if not as_json:
-                print(
-                    f"[ERRO NOS TESTES FOCAIS]: {focal_report.concise_summary}\n{focal_report.agent_feedback}",
-                    file=sys.stderr,
-                )
-
-            if _focal_failure_is_timeout(focal_report):
-                focal_timeout_limit = _focal_test_timeout_s(len(focal_targets))
-                last_cause = "focal_timeout"
-                attempts_log.append({
-                    "event": "timeout",
-                    "attempt": attempt + 1,
-                    "stage": "focal",
-                    "cause": last_cause,
-                    "duration_s": round(focal_report.duration_seconds, 1),
-                    "limit_s": focal_timeout_limit,
-                })
-                if not as_json:
-                    print(
-                        f"[TIMEOUT NO PRE-TESTE FOCAL]: {focal_report.duration_seconds:.1f}s "
-                        f"(limite {focal_timeout_limit:.0f}s). Nao reinvocando o agente: timeout de "
-                        f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
-                        file=sys.stderr,
-                    )
-                break
-
-            last_cause = "focal_tests_failed"
-            if attempt >= GATE_FIX_ATTEMPTS:
-                break
-            progress.phase(
-                "gate", "failed",
-                f"testes focais reprovados (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}): "
-                f"{focal_report.concise_summary}",
-                cause="focal_tests_failed",
-            )
-            if not as_json:
-                print(f"\n--> Reinvocando o agente na mesma worktree para corrigir ({', '.join(focal_targets)})...")
-            fix_result = _invoke_fix_agent(
-                target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback
-            )
-            fix_changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "focal")
-            if commit_error is not None:
-                last_cause = "fix_commit_failed"
-                last_output = commit_error
-                attempts_log.append({
-                    "event": "infra_error", "attempt": attempt + 1, "stage": "focal", "cause": last_cause,
-                    "error": commit_error,
-                })
-                break
-            attempts_log.append({
-                "event": "reinvocation", "attempt": attempt + 1, "stage": "focal", "cause": last_cause,
-                "duration_s": round(fix_result.duration_s, 1) if fix_result else 0.0,
-                "limit_s": FIX_AGENT_TIMEOUT_S, "changed": fix_changed,
-            })
-            if _cancelled():
-                return cancelled_payload()
-            if not fix_changed:
-                last_cause = "fix_agent_no_changes"
-                break
+        step = _gate_focal_step(st, target_worktree, ticket, as_json, progress, attempts_log)
+        if step == ticket_stages.STEP_CANCEL:
+            return cancelled_payload()
+        if step == ticket_stages.STEP_BREAK:
+            break
+        if step == ticket_stages.STEP_CONTINUE:
             continue
 
         if _cancelled():
             return cancelled_payload()
 
-        if skip_validation:
-            progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
+        step = _gate_official_step(
+            st, target_worktree, ticket, resume_cmd, skip_validation, as_json, progress, attempts_log
+        )
+        if step == ticket_stages.STEP_PASS:
             return None
-
-        # USR-310: grokbox estava fora no pre-flight -- da uma janela para ele acordar antes do portao.
-        _wait_gate_grokbox_if_needed(as_json)
-
-        # USR-262: gate local com 1 worker passa de GATE_TIMEOUT; espera RAM para 2+ workers ou falha explicito.
-        ram_wait = _wait_gate_ram_if_local(as_json)
-        if ram_wait is not None and not ram_wait.ok:
-            last_cause = gate_ram.CAUSE_INSUFFICIENT_RAM
-            last_exit_code = 1
-            last_output = (
-                f"{last_cause}: RAM livre {ram_wait.reading.available_gib:.1f} GiB, "
-                f"{ram_wait.reading.workers} workers possiveis (minimo {gate_ram.MIN_GATE_WORKERS}) "
-                f"apos {ram_wait.waited_s:.0f} s de espera; portao NAO executado. Retome com: {resume_cmd}"
-            )
-            attempts_log.append({
-                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-                "error": last_output,
-            })
-            if not as_json:
-                print(f"[RAM INSUFICIENTE PARA O PORTAO]: {last_output}", file=sys.stderr)
-            break
-
-        progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
-        if not as_json:
-            print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
-        # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
-        gate_cmd = [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"]
-        if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
-            # USR-366: o despachante da frota fixa o worker remoto do host (DARKFAC_TEST_WORKERS).
-            gate_cmd.append("--remote-required")
-        elif line_lock.is_fleet_mode():
-            gate_cmd.append("--local")
-        elif _gate_should_require_remote():
-            gate_cmd.append("--remote-required")
-        gate_res = _run_bounded(
-            gate_cmd,
-            cwd=target_worktree,
-            timeout_s=GATE_TIMEOUT_S,
-        )
-        if getattr(gate_res, "cancelled", False) is True or _cancelled():
+        if step == ticket_stages.STEP_CANCEL:
             return cancelled_payload()
-        gate_res = _retry_gate_remote_unavailable(
-            gate_cmd, gate_res, target_worktree, attempts_log, attempt, as_json, _cancelled
-        )
-        if getattr(gate_res, "cancelled", False) is True or _cancelled():
-            return cancelled_payload()
-
-        gate_output = f"{gate_res.stdout or ''}\n{gate_res.stderr or ''}"
-        last_gate_worker = _gate_execution_worker(gate_output)
-
-        if gate_res.returncode == 0:
-            progress.phase("gate", "succeeded", "portao oficial aprovado", worker=last_gate_worker)
-            if not as_json:
-                print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
-            return None
-
-        last_output = f"{gate_res.stdout}\n{gate_res.stderr}"
-        last_exit_code = gate_res.returncode
-        # Keep the latest official gate diagnostics in the final payload, including when the
-        # in-place fixer makes no changes or exits with an infrastructure error.
-        failed_tests = failed_test_ids(last_output)
-        gate_log_tail = _tail_lines(last_output, count=40)
-        if not as_json:
-            print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
-
-        if "--remote-required" in gate_cmd and _GATE_REMOTE_REQUIRED_MARKER in last_output:
-            last_cause = GATE_CAUSE_REMOTE_UNAVAILABLE
-            attempts_log.append({
-                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-            })
-            if not as_json:
-                print(
-                    "[WORKER REMOTO INDISPONIVEL]: RAM local nao comporta 2+ workers; portao local "
-                    f"evitado. Reenfileire/retome com: {resume_cmd} (USR-354).",
-                    file=sys.stderr,
-                )
+        if step == ticket_stages.STEP_BREAK:
             break
 
-        if _GATE_DIRTY_WORKTREE_MARKER in last_output:
-            last_cause = "gate_dirty_worktree"
-            attempts_log.append({
-                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-            })
-            if not as_json:
-                print(
-                    "[WORKTREE SUJA NO PORTÃO OFICIAL]: o portao recusou o candidato sujo. Nao reinvocando "
-                    "o agente: e erro de infraestrutura do laco de autocorrecao (USR-249).",
-                    file=sys.stderr,
-                )
-            break
-
-        if _gate_failure_is_timeout(gate_res):
-            last_cause = "gate_timeout"
-            attempts_log.append({
-                "event": "timeout",
-                "attempt": attempt + 1,
-                "stage": "gate",
-                "cause": last_cause,
-                "duration_s": round(gate_res.duration_s, 1),
-                "limit_s": GATE_TIMEOUT_S,
-            })
-            if not as_json:
-                print(
-                    f"[TIMEOUT/INFRA NO PORTÃO OFICIAL]: {gate_res.duration_s:.1f}s "
-                    f"(limite {GATE_TIMEOUT_S:.0f}s). Nao reinvocando o agente: timeout ou falha de "
-                    f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
-                    file=sys.stderr,
-                )
-            break
-
-        if _gate_failure_is_infra_no_tests(last_output):
-            last_cause = GATE_CAUSE_INFRA_NO_TESTS
-            attempts_log.append({
-                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-            })
-            if not as_json:
-                print(
-                    "[INFRA NO PORTÃO OFICIAL]: zero testes descobertos e um passo morto por sinal "
-                    "(exit code negativo, ex.: SIGTERM). Nao reinvocando o agente: o candidato nao foi "
-                    "exercitado; e falha de infraestrutura (USR-308).",
-                    file=sys.stderr,
-                )
-            break
-
-        if _gate_failure_is_base_red(last_output, _implementation_diff_paths(target_worktree), target_worktree):
-            last_cause = GATE_CAUSE_BASE_RED
-            attempts_log.append({
-                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-            })
-            if not as_json:
-                print(
-                    "[BASE VERMELHA SUSPEITA]: todos os testes reprovados estao em arquivos que o diff do "
-                    "ticket nao toca nem referencia (base_red_suspected). Nao reinvocando o agente: "
-                    "corrija a main e retome a entrega com o comando abaixo (USR-308).",
-                    file=sys.stderr,
-                )
-            break
-
-        last_cause = "gate_failed"
-        if attempt >= GATE_FIX_ATTEMPTS:
-            break
-        progress.phase(
-            "gate", "failed",
-            f"portao oficial falhou (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}, codigo {gate_res.returncode}): "
-            f"{redacted_head((gate_res.stdout or gate_res.stderr or '')[-600:], 300)}",
-            cause="gate_failed",
-            worker=last_gate_worker,
-        )
-        if not as_json:
-            print("\n--> Reinvocando o agente na mesma worktree com o log destilado do portao...")
-        fix_result = _invoke_fix_agent(
-            target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(last_output)
-        )
-        fix_changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "gate")
-        if commit_error is not None:
-            last_cause = "fix_commit_failed"
-            last_output = commit_error
-            attempts_log.append({
-                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-                "error": commit_error,
-            })
-            break
-        attempts_log.append({
-            "event": "reinvocation", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
-            "duration_s": round(fix_result.duration_s, 1) if fix_result else 0.0,
-            "limit_s": FIX_AGENT_TIMEOUT_S, "changed": fix_changed,
-        })
-        if _cancelled():
-            return cancelled_payload()
-        if not fix_changed:
-            last_cause = "fix_agent_no_changes"
-            break
-
-    print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
-    print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
-    if attempts_log and not as_json:
-        print(_render_self_correction_log(attempts_log), file=sys.stderr)
-    attempts_tried = attempt + 1
-    progress.phase(
-        "gate", "failed",
-        f"{last_cause} apos {attempts_tried} tentativa(s): {redacted_head(last_output[-600:], 300)}",
-        cause=last_cause,
-        worker=last_gate_worker,
+    return _gate_exhausted_result(
+        st, target_worktree, current_branch, current_sha, ticket, resume_cmd, as_json, return_result,
+        progress, attempts_log,
     )
-    gate_payload = {
-        "exit_code": last_exit_code,
-        "ok": False,
-        "cause": last_cause,
-        "ticket_id": ticket.id,
-        "branch": current_branch,
-        "current_sha": current_sha,
-        "worktree": str(target_worktree),
-        "resume_command": resume_cmd,
-        "self_correction_log": attempts_log,
-        "failed_tests": failed_tests,
-        "gate_log_tail": gate_log_tail,
-    }
-    if as_json and not return_result:
-        print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
-    return gate_payload if return_result else gate_payload["exit_code"]
 
 
 def _cancelled() -> bool:
@@ -1830,6 +1856,108 @@ def _resume_delivery_scoped(
         return cancelled_payload()
 
 
+def _deliver_sync(
+    git_mgr: Any,
+    ticket: UserTicket,
+    target_worktree: Path,
+    current_branch: str,
+    resume_cmd: str,
+    no_commit: bool,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    cancelled_payload: Any,
+    external_project: bool,
+    base_branch: str,
+) -> tuple[bool, Any]:
+    """Commit pending changes and rebase on the base branch (steps 1-2 of the delivery).
+
+    Returns (True, result) when the delivery must stop here, else (False, current_sha).
+    """
+    progress.phase("gate", "running", f"sincronizando com origin/{base_branch} antes do portao")
+    if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
+        if not as_json:
+            print("[+] Comitando alterações pendentes antes do rebase...")
+        git_mgr.commit_ticket(
+            ticket_id=ticket.id,
+            title=ticket.title,
+            scope="core" if not ticket.tags else ticket.tags[0].replace("user-", ""),
+            cwd=target_worktree,
+        )
+
+    current_sha = git_mgr.get_current_sha(target_worktree)
+
+    # 2. Rebase on origin/main
+    if _cancelled():
+        return True, cancelled_payload()
+    if not as_json:
+        print(f"--> Sincronizando e rebaseando branch em origin/{base_branch}...")
+    if external_project:
+        ok, conflict_files, msg = rebase_on_project_base(target_worktree, base_branch)
+    else:
+        ok, conflict_files, msg = rebase_on_origin_main(target_worktree)
+    if not ok:
+        return True, ticket_stages.rebase_conflict_result(
+            ticket, target_worktree, current_branch, current_sha, resume_cmd, base_branch,
+            conflict_files, msg, progress, as_json, return_result,
+        )
+
+    current_sha = git_mgr.get_current_sha(target_worktree)
+
+    owner_action_changes = (
+        repair_owner_action_duplicates_before_gate(git_mgr, ticket.id, target_worktree)
+        if not external_project else []
+    )
+    if owner_action_changes:
+        if not as_json:
+            print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
+        current_sha = git_mgr.get_current_sha(target_worktree)
+    return False, current_sha
+
+
+def _deliver_external_project(
+    git_mgr: Any,
+    ticket: UserTicket,
+    target_worktree: Path,
+    no_push: bool,
+    progress: ProgressPublisher,
+    project: Any,
+) -> Any:
+    """Branch delivery (PR/merge/deploy/smoke) of a ticket from an external project."""
+    if git_mgr.is_dirty(cwd=target_worktree):
+        git_mgr.commit_ticket(
+            ticket_id=ticket.id, title=ticket.title, cwd=target_worktree,
+            custom_message=f"feat: {ticket.title} [{ticket.id}]",
+        )
+    if no_push:
+        return None
+    delivery = git_mgr.deliver_branch(
+        ticket.id, ticket.title, cwd=target_worktree, base=project.default_branch,
+        merge=not project.requires_commercial_acceptance, kind="implementation",
+        project_id=ticket.project_id,
+    )
+    if delivery.ok and delivery.merge_sha and project.deploy is not None:
+        progress.phase("deploy", "running", f"deploy pós-merge do projeto {project.id}")
+        release_error = _release_external_project(
+            project, ticket, delivery, progress, git_mgr.root
+        )
+        if release_error:
+            progress.phase("deploy", "failed", release_error, cause="project_release_failed")
+            delivery.ok = False
+            delivery.action = "error"
+            delivery.message = release_error
+        else:
+            progress.phase("deploy", "succeeded", f"deploy e smoke do projeto {project.id} aprovados")
+    elif delivery.ok and delivery.merge_sha and project.smoke:
+        smoke_error = _smoke_external_project(project)
+        if smoke_error:
+            progress.phase("deploy", "failed", smoke_error, cause="project_smoke_failed")
+            delivery.ok = False
+            delivery.action = "error"
+            delivery.message = smoke_error
+    return delivery
+
+
 def _deliver_worktree(
     git_mgr: Any,
     ticket: UserTicket,
@@ -1854,76 +1982,13 @@ def _deliver_worktree(
         from core.projects.registry import get_project_registry
         project = get_project_registry().get_project(ticket.project_id)
     base_branch = project.default_branch if project is not None else "main"
-    progress.phase("gate", "running", f"sincronizando com origin/{base_branch} antes do portao")
-    if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
-        if not as_json:
-            print("[+] Comitando alterações pendentes antes do rebase...")
-        git_mgr.commit_ticket(
-            ticket_id=ticket.id,
-            title=ticket.title,
-            scope="core" if not ticket.tags else ticket.tags[0].replace("user-", ""),
-            cwd=target_worktree,
-        )
-
-    current_sha = git_mgr.get_current_sha(target_worktree)
-
-    # 2. Rebase on origin/main
-    if _cancelled():
-        return cancelled_payload()
-    if not as_json:
-        print(f"--> Sincronizando e rebaseando branch em origin/{base_branch}...")
-    if external_project:
-        ok, conflict_files, msg = rebase_on_project_base(target_worktree, base_branch)
-    else:
-        ok, conflict_files, msg = rebase_on_origin_main(target_worktree)
-    if not ok:
-        print("\n" + "=" * 68, file=sys.stderr)
-        print(
-            f"[ERRO DE CONFLITO NO REBASE] Conflito ao rebasear a branch {current_branch} em origin/{base_branch}.",
-            file=sys.stderr,
-        )
-        if conflict_files:
-            print("Arquivos conflitantes:", file=sys.stderr)
-            for cf in conflict_files:
-                print(f"  - {cf}", file=sys.stderr)
-        else:
-            print(f"Detalhes do erro: {msg}", file=sys.stderr)
-        print(f"\nWorktree preservada para resolução manual em: {target_worktree}", file=sys.stderr)
-        print("Para retomar a entrega após resolver o conflito, execute:", file=sys.stderr)
-        print(f"  {resume_cmd}", file=sys.stderr)
-        print("=" * 68 + "\n", file=sys.stderr)
-
-        progress.phase(
-            "gate",
-            "failed",
-            f"conflito no rebase em origin/main: {', '.join(conflict_files[:5]) or msg}",
-            cause="rebase_conflict",
-        )
-        conflict_payload = {
-            "exit_code": 2,
-            "ok": False,
-            "cause": "rebase_conflict",
-            "ticket_id": ticket.id,
-            "branch": current_branch,
-            "current_sha": current_sha,
-            "worktree": str(target_worktree),
-            "conflict_files": conflict_files,
-            "resume_command": resume_cmd,
-        }
-        if as_json and not return_result:
-            print(json.dumps(conflict_payload, indent=2, ensure_ascii=False))
-        return conflict_payload if return_result else 2
-
-    current_sha = git_mgr.get_current_sha(target_worktree)
-
-    owner_action_changes = (
-        repair_owner_action_duplicates_before_gate(git_mgr, ticket.id, target_worktree)
-        if not external_project else []
+    finished, synced = _deliver_sync(
+        git_mgr, ticket, target_worktree, current_branch, resume_cmd, no_commit, as_json,
+        return_result, progress, cancelled_payload, external_project, base_branch,
     )
-    if owner_action_changes:
-        if not as_json:
-            print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
-        current_sha = git_mgr.get_current_sha(target_worktree)
+    if finished:
+        return synced
+    current_sha = synced
 
     # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245)
     if _cancelled():
@@ -1944,39 +2009,9 @@ def _deliver_worktree(
         return cancelled_payload()
     completion_report = None
     if external_project and project is not None and not no_commit:
-        if git_mgr.is_dirty(cwd=target_worktree):
-            git_mgr.commit_ticket(
-                ticket_id=ticket.id, title=ticket.title, cwd=target_worktree,
-                custom_message=f"feat: {ticket.title} [{ticket.id}]",
-            )
-        if no_push:
-            completion_report = None
-        else:
-            delivery = git_mgr.deliver_branch(
-                ticket.id, ticket.title, cwd=target_worktree, base=project.default_branch,
-                merge=not project.requires_commercial_acceptance, kind="implementation",
-                project_id=ticket.project_id,
-            )
-            completion_report = delivery
-            if delivery.ok and delivery.merge_sha and project.deploy is not None:
-                progress.phase("deploy", "running", f"deploy pós-merge do projeto {project.id}")
-                release_error = _release_external_project(
-                    project, ticket, delivery, progress, git_mgr.root
-                )
-                if release_error:
-                    progress.phase("deploy", "failed", release_error, cause="project_release_failed")
-                    delivery.ok = False
-                    delivery.action = "error"
-                    delivery.message = release_error
-                else:
-                    progress.phase("deploy", "succeeded", f"deploy e smoke do projeto {project.id} aprovados")
-            elif delivery.ok and delivery.merge_sha and project.smoke:
-                smoke_error = _smoke_external_project(project)
-                if smoke_error:
-                    progress.phase("deploy", "failed", smoke_error, cause="project_smoke_failed")
-                    delivery.ok = False
-                    delivery.action = "error"
-                    delivery.message = smoke_error
+        completion_report = _deliver_external_project(
+            git_mgr, ticket, target_worktree, no_push, progress, project
+        )
     elif not no_commit:
         completion_report = git_mgr.complete_ticket(
             ticket_id=ticket.id,
@@ -1991,80 +2026,24 @@ def _deliver_worktree(
     current_sha = git_mgr.get_current_sha(target_worktree) if target_worktree.exists() else current_sha
 
     if not delivered:
-        error_msg = completion_report.message if completion_report else "complete_ticket failed"
-        print("\n" + "=" * 68, file=sys.stderr)
-        print(f"[ERRO NA ENTREGA DO TICKET {ticket.id}]:", file=sys.stderr)
-        print(f"  Motivo: {error_msg}", file=sys.stderr)
-        print(f"  Branch: {current_branch}", file=sys.stderr)
-        print(f"  SHA: {current_sha}", file=sys.stderr)
-        print(f"  Worktree preservada: {target_worktree}", file=sys.stderr)
-        print("\nPara retomar a entrega deste ticket após solucionar o problema, execute:", file=sys.stderr)
-        print(f"  {resume_cmd}", file=sys.stderr)
-        print("=" * 68 + "\n", file=sys.stderr)
-
-        delivery_report = (
-            completion_report if external_project else completion_report.delivery
-        ) if completion_report else None
-        fail_cause = (
-            delivery_report.action
-            if delivery_report is not None and delivery_report.action == "staged_inspect_failed"
-            else "delivery_failed"
+        return ticket_stages.delivery_failure_result(
+            ticket, completion_report, external_project, target_worktree, current_branch, current_sha,
+            resume_cmd, progress, as_json, return_result,
         )
-        progress.set_outcome(error_msg, fail_cause)
-        fail_payload = {
-            "exit_code": 1,
-            "ok": False,
-            "cause": fail_cause,
-            "ticket_id": ticket.id,
-            "error": error_msg,
-            "branch": current_branch,
-            "current_sha": current_sha,
-            "worktree": str(target_worktree),
-            "resume_command": resume_cmd,
-        }
-        if as_json and not return_result:
-            print(json.dumps(fail_payload, indent=2, ensure_ascii=False))
-        return fail_payload if return_result else 1
 
-    if delivered and not external_project:
+    if not external_project:
         progress.phase(
             "deploy", "skipped", "deploy pos-merge nao faz parte do run_ticket (scripts/dokploy_redeploy.py)"
         )
-    if delivered:
-        try:
-            git_mgr.sweep_stale(cwd=git_mgr.root)
-        except Exception as exc:
-            logger.warning("Sweep after delivery warning: %s", exc)
+    try:
+        git_mgr.sweep_stale(cwd=git_mgr.root)
+    except Exception as exc:
+        logger.warning("Sweep after delivery warning: %s", exc)
 
-    if not as_json:
-        if completion_report:
-            delivered_sha = (
-                getattr(completion_report, "commit_sha", None)
-                or getattr(completion_report, "merge_sha", None)
-                or current_sha
-            )
-            print(
-                f"[+] Autonomia Git: Ticket {ticket.id} concluído, comitado "
-                f"({delivered_sha}) e sincronizado com sucesso."
-            )
-        print(f"\n[SUCESSO] Ticket {ticket.id} entregue e validado com sucesso!")
-
-    success_payload = {
-        "exit_code": 0,
-        "ok": True,
-        "ticket_id": ticket.id,
-        "branch": current_branch,
-        "commit_sha": getattr(completion_report, "commit_sha", None) if completion_report else current_sha,
-        "worktree": str(target_worktree),
-    }
-    if completion_report and getattr(completion_report, "sync_result", None):
-        success_payload["sync_action"] = completion_report.sync_result.action
-    if attempts_log:
-        success_payload["self_correction_log"] = attempts_log
-    if as_json and not return_result:
-        print(json.dumps(success_payload, indent=2, ensure_ascii=False))
-
-    return success_payload if return_result else 0
+    return ticket_stages.delivery_success_result(
+        ticket, completion_report, target_worktree, current_branch, current_sha, attempts_log,
+        as_json, return_result,
+    )
 
 
 def _describe_workspace(workspace: TicketWorkspace) -> str:
@@ -2183,63 +2162,43 @@ def _resume_delivery_target(args: argparse.Namespace) -> Optional[str]:
     )
 
 
-def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: contextlib.ExitStack) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    # 00. Cancel mode (USR-166): only writes the control file the running launcher watches
-    if args.cancel:
-        return _request_cancel(args)
-
-    resume_target = _resume_delivery_target(args)
-
+def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resume_target: Optional[str]) -> Optional[int]:
+    """Line lock (USR-250): one run_ticket at a time per shared checkout. Returns an exit code on refusal."""
     # 000. Line lock (USR-250): one run_ticket (this main flow, or a standalone --resume-delivery) at a
     # time per shared checkout. Acquired before anything else -- quota probe, ticket creation, worktree --
     # so a second launch is refused on the spot instead of discovering the collision after paying for it.
     # The delivery subprocess this same run later spawns for itself inherits the lock (ENV_INHERITED,
     # set on its environment below) instead of trying to acquire it a second time.
-    if _needs_line_lock(args):
-        lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
-        fleet_mode = getattr(args, "fleet", False) or line_lock.is_fleet_mode()
-        host_id = getattr(args, "host_id", None) or line_lock.resolve_host_id()
-        project_id = getattr(args, "project", "darkfac") or "darkfac"
-        if fleet_mode:
-            os.environ["DARKFAC_FLEET_MODE"] = "1"
-        try:
-            stack.enter_context(
-                line_lock.guard(
-                    lock_label,
-                    fleet_mode=fleet_mode,
-                    host_id=host_id,
-                    project_id=project_id,
-                    # USR-330: a manual start reserves ticket/project in the canonical store (the same
-                    # unique-active-ticket reservation the line's admission takes) before any effect.
-                    require_reservation=bool(resume_target or args.ticket_id),
-                )
+    if not _needs_line_lock(args):
+        return None
+    lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
+    fleet_mode = getattr(args, "fleet", False) or line_lock.is_fleet_mode()
+    host_id = getattr(args, "host_id", None) or line_lock.resolve_host_id()
+    project_id = getattr(args, "project", "darkfac") or "darkfac"
+    if fleet_mode:
+        os.environ["DARKFAC_FLEET_MODE"] = "1"
+    try:
+        stack.enter_context(
+            line_lock.guard(
+                lock_label,
+                fleet_mode=fleet_mode,
+                host_id=host_id,
+                project_id=project_id,
+                # USR-330: a manual start reserves ticket/project in the canonical store (the same
+                # unique-active-ticket reservation the line's admission takes) before any effect.
+                require_reservation=bool(resume_target or args.ticket_id),
             )
-        except line_lock.LineLockHeld as exc:
-            print(f"\n{exc}\n", file=sys.stderr)
-            return 2
-        except line_lock.ReservationConflictError as exc:
-            print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
-            return 2
-
-    # 0. Resume delivery mode (USR-116): rebase, validate, and deliver an existing worktree in a fresh process
-    if args.resume_delivery:
-        target_ticket_id = resume_target
-        if not target_ticket_id:
-            print("[ERRO] --resume-delivery requer um TICKET_ID.", file=sys.stderr)
-            return 1
-        return resume_delivery(
-            ticket_id=target_ticket_id,
-            worktree_path=Path(args.worktree) if args.worktree else None,
-            skip_validation=args.skip_validation,
-            no_commit=args.no_commit,
-            no_push=args.no_push,
-            as_json=args.json,
         )
+    except line_lock.LineLockHeld as exc:
+        print(f"\n{exc}\n", file=sys.stderr)
+        return 2
+    except line_lock.ReservationConflictError as exc:
+        print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
+        return 2
+    return None
 
 
+def _stage_check_harness(args: argparse.Namespace) -> Optional[int]:
     # Fail before any side effect (quota probe, ticket creation, agent call) when the requested harness
     # cannot do what development needs: capabilities are declared, never assumed.
     if args.harness and not (args.create and args.queue_only) and not supports(args.harness, DEVELOPMENT_MODE):
@@ -2253,89 +2212,58 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             file=sys.stderr,
         )
         return 2
+    return None
 
-    quotas = inspect_quotas()
-    if not args.json:
-        print(format_quota_report(quotas))
 
-    override_granted = check_explicit_override(args.prompt, args.force)
-
-    # 1. Ticket resolution or creation
+def _stage_intake(args: argparse.Namespace) -> tuple[Optional[UserTicket], int]:
+    """Ticket resolution or creation. Returns (ticket, 0) to continue, or (None, exit_code) to stop."""
     store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
-    ticket: Optional[UserTicket] = None
-
     if args.create:
         if not args.title:
             print("[ERRO] --title é obrigatório para criar um novo ticket.", file=sys.stderr)
-            return 1
+            return None, 1
         if args.queue_only:
             queued = _queue_ticket_isolated(args)
             if queued is None:
                 print("[ERRO] Não foi possível registrar o ticket na fila (control store indisponível).", file=sys.stderr)
-                return 1
+                return None, 1
             print(f"[+] Ticket {queued.id} registrado na fila de desenvolvimento: '{queued.title}'")
-            return 0
+            return None, 0
         # The row is NOT written to the shared checkout's ledger: it is added to the ticket's own
         # worktree ledger below and travels in the implementation commit (USR-69/USR-75).
         ticket = _build_ticket(args, store)
         if not args.json:
             print(f"\n[+] Novo ticket criado: {ticket.id} - '{ticket.title}'")
-    elif args.ticket_id:
+        return ticket, 0
+    if args.ticket_id:
         ticket = store.get_ticket(args.ticket_id)
         if ticket is None:  # USR-335: checkout compartilhado atrasado; procurar no ledger de origin/main
             ticket = _ticket_from_origin_main(args.ticket_id, PROJECT_ROOT)
         if ticket is None:
             print(f"[ERRO] Ticket {args.ticket_id} não encontrado no backlog.", file=sys.stderr)
-            return 1
+            return None, 1
         if not args.json:
             print(f"\n[+] Ticket carregado: {ticket.id} - '{ticket.title}'")
-    else:
-        # No ticket specified; display quota report and exit
-        if not args.json:
-            print("\nNenhum ticket especificado. Use: python run_ticket.py <TICKET_ID> ou python run_ticket.py --create --title '...'")
-        return 0
+        return ticket, 0
+    # No ticket specified; display quota report and exit
+    if not args.json:
+        print("\nNenhum ticket especificado. Use: python run_ticket.py <TICKET_ID> ou python run_ticket.py --create --title '...'")
+    return None, 0
 
-    # Live line board (USR-140): best-effort phase events. Held until the run is known not to be a dry
-    # run; a publishing failure can never block or change the outcome of this launcher.
-    progress = open_progress(ticket.id, ticket.project_id, ticket.title)
-    progress.hold()
-    box.append(progress)
-    progress.phase("preflight", "running", "cota, tamanho do ticket e roteamento")
 
-    # 1a. Grokbox health probe + wake email (USR-310): a dead probe or a failed email
-    # only logs -- it never blocks or changes this run's outcome. Skipped under pytest
-    # (same guard as the delivery subprocess bypass below): the probe/email are already
-    # offline-safe on their own, but leaving "down" state in the real .factory of the
-    # checkout the suite runs from would make an unrelated test's gate wait for real.
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
-        try:
-            grokbox_wake.preflight_check()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Grokbox preflight check failed: %s", exc)
+_DEV_CAPS = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
 
-    # 1b. Ticket size and quota risk estimation (USR-113)
-    ticket_size, size_reasons = estimate_ticket_size(ticket)
-    if ticket_size == "large" and not args.json:
-        box_lines = [
-            "=" * 68,
-            " [AVISO: TICKET ESTIMADO COMO GRANDE - RISCO DE COTA (USR-113)]",
-            f" Ticket {ticket.id} possui características de alta complexidade/tamanho:",
-            *[f"   - {r}" for r in size_reasons],
-            " Risco: pode estourar o timeout do agente (1800s) e consumir cota elevada.",
-            " Recomendação: considere quebrar este ticket em demandas menores.",
-            "=" * 68,
-        ]
-        print("\n" + "\n".join(box_lines) + "\n", file=sys.stderr)
 
-    # 2. Routing Decision
-    caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
-    selected_harness: Optional[str] = None
-    selected_model: Optional[str] = None
-    # The harness the owner operates the factory through is the preferred developer while its quota is
-    # above the critical floor (USR-109); None when no signal exists (pump, worker, cloud).
-    operating_harness = detect_operating_harness()
-    route_reason = "headroom"
-
+def _stage_route(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    quotas: dict[str, Any],
+    override_granted: bool,
+    progress: ProgressPublisher,
+    operating_harness: Optional[str],
+) -> Any:
+    """Routing decision. Returns (harness, model, reason) or an int exit code."""
+    caps = _DEV_CAPS
     if args.harness:
         target_harness = args.harness.lower().strip()
         harness_info = quotas.get(target_harness)
@@ -2358,86 +2286,42 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
             return 2
 
-        selected_harness = target_harness
-        route_reason = "explicit_harness"
         if not args.json:
             if harness_info and harness_info["is_critical"] and override_granted:
                 print(f"[AVISO] Override explícito do usuário ativo: executando em {target_harness} com quota crítica ou desconhecida.")
             else:
                 print(f"[+] Harness explicitamente selecionado: {target_harness}")
-    else:
-        # Automatic router resolution via Dynamic Headroom, among harnesses that can write
-        if operating_harness and not args.json:
-            print(f"[+] Harness de operacao detectado: {operating_harness}")
-        route = pick(
-            "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
-            project_id=ticket.project_id,
+        return target_harness, None, "explicit_harness"
+
+    # Automatic router resolution via Dynamic Headroom, among harnesses that can write
+    if operating_harness and not args.json:
+        print(f"[+] Harness de operacao detectado: {operating_harness}")
+    route = pick(
+        "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
+        project_id=ticket.project_id,
+    )
+    if route is None:
+        progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
+        print(
+            "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
+            file=sys.stderr,
         )
-        if route is None:
-            progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
-            print(
-                "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
-                file=sys.stderr,
-            )
-            return 2
-        selected_harness, selected_model = route
-        preferred_operating = operating_harness is not None and selected_harness == operating_harness
-        if preferred_operating:
-            route_reason = "operating_harness_preferred"
-        if not args.json:
-            print(
-                f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} "
-                f"(Modelo: {selected_model or 'default'}, modo: {DEVELOPMENT_MODE})"
-                + (" (preferencia: harness de operacao)" if preferred_operating else "")
-            )
-
-    if args.dry_run:
-        progress.discard()
-        result_payload = {
-            "ticket_id": ticket.id,
-            "title": ticket.title,
-            "estimated_size": ticket_size,
-            "size_reasons": size_reasons,
-            "selected_harness": selected_harness,
-            "selected_model": selected_model,
-            "mode": DEVELOPMENT_MODE,
-            "override_granted": override_granted,
-            "operating_harness": operating_harness,
-            "route_reason": route_reason,
-            "dry_run": True,
-        }
-        if args.json:
-            print(json.dumps(result_payload, indent=2))
-        else:
-            print(
-                f"\n[DRY RUN] Execução concluída sem alterações. "
-                f"Rota validada: {selected_harness} (modo: {DEVELOPMENT_MODE})"
-            )
-        return 0
-
-    progress.phase(
-        "preflight",
-        "succeeded",
-        f"rota {selected_harness} (modelo {selected_model or 'default'}, motivo {route_reason})",
-        harness=selected_harness,
-    )
-    progress.release()
-    # USR-208: every ticket and phase is an execution with its own id in Hub Live (best effort, never raises).
-    exec_tracker = execution_registry.attach_progress(
-        progress, ticket.id, harness=selected_harness, model=selected_model, title=ticket.title
-    )
-
-    # Cancellation scope (USR-166): the same token/guards the line uses (USR-152), fed by the per-ticket
-    # control file and termination signals. `_run_bounded` kills the agent's process tree when it fires.
-    stack.enter_context(
-        local_cancel.watch(
-            ticket.id, progress.run_id, fresh=progress.owns_run, not_before=local_cancel.LAUNCHED_AT
+        return 2
+    selected_harness, selected_model = route
+    preferred_operating = operating_harness is not None and selected_harness == operating_harness
+    if not args.json:
+        print(
+            f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} "
+            f"(Modelo: {selected_model or 'default'}, modo: {DEVELOPMENT_MODE})"
+            + (" (preferencia: harness de operacao)" if preferred_operating else "")
         )
-    )
-    if _cancelled():
-        return _abort_cancelled(progress, ticket.id, args.json)
+    return selected_harness, selected_model, ("operating_harness_preferred" if preferred_operating else "headroom")
 
-    # 3. Own worktree (USR-69): the agent, the gate and the commit never touch the shared checkout
+
+def _stage_workspace(
+    args: argparse.Namespace, ticket: UserTicket, progress: ProgressPublisher
+) -> tuple[Optional[TicketWorkspace], int]:
+    """Own worktree (USR-69): the agent, the gate and the commit never touch the shared checkout."""
     from core.git.ticket_workspace import WorkspaceError
 
     progress.phase("workspace", "running", "criando worktree propria a partir de origin/main")
@@ -2446,80 +2330,41 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     except SharedCheckoutDirty as exc:
         progress.phase("workspace", "failed", "checkout compartilhado sujo", cause="shared_checkout_dirty")
         print(f"[ERRO] {exc}", file=sys.stderr)
-        return 3
+        return None, 3
     except (WorkspaceError, RuntimeError) as exc:
         progress.phase("workspace", "failed", str(exc), cause="workspace_error")
         print(f"[ERRO] Não foi possível criar a worktree do ticket {ticket.id}: {exc}", file=sys.stderr)
-        return 1
+        return None, 1
     progress.phase("workspace", "succeeded", _describe_workspace(workspace))
     if not args.json:
         print(
             f"[+] Worktree própria: {workspace.path} "
             f"(branch {workspace.branch}, base {workspace.base_ref}@{workspace.base_sha[:12]})"
         )
-    if _cancelled():
-        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
+    return workspace, 0
 
-    # 4. Execution Phase
-    mcp_healthy, mcp_reasons = check_optional_mcp_servers()
-    if not mcp_healthy and not args.json:
-        print(f"[!] Integração opcional MCP indisponível ({'; '.join(mcp_reasons)}). Continuando em modo degradado.")
-    dev_prompt = (
-        f"Voce e o agente de desenvolvimento autonomo da DarkFac.\n"
-        f"Implemente o seguinte ticket:\n"
-        f"ID: {ticket.id}\n"
-        f"Titulo: {ticket.title}\n"
-        f"Problema: {ticket.problem_statement}\n"
-        f"Criterios de Aceite:\n" + "\n".join(f"- {c}" for c in ticket.acceptance_criteria) + "\n\n"
-        f"Escreva/ajuste testes unitarios e o codigo funcional.\n"
-        f"Voce trabalha numa worktree propria deste ticket (branch {workspace.branch}); "
-        f"nao leia nem altere arquivos fora dela e nao faca commit, push nem merge: a fabrica entrega.\n"
-    )
 
-    if not args.json:
-        print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
-
-    before_headroom = quotas.get(selected_harness, {}).get("headroom")
+def _run_dev_agent(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    quotas: dict[str, Any],
+    selected_harness: Optional[str],
+    selected_model: Optional[str],
+    progress: ProgressPublisher,
+) -> Any:
+    """Runs the development agent with the line's retry policy; returns the retry report."""
+    dev_prompt = ticket_stages.build_dev_prompt(ticket, workspace)
 
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
-        from core.git.autonomy import GitAutonomyManager
-        git_mgr = GitAutonomyManager(workspace.main_root)
-        existing_changes = [
-            p for p in git_mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE
-        ]
-        # A preserved worktree (USR-225) may hold commits already; they count as work too.
-        try:
-            from core.git.autonomy import _run_git
-
-            committed = _run_git(["diff", "--name-only", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
-        except Exception as exc:  # noqa: BLE001 - the continuation hint is best effort
-            logger.debug("Could not list committed changes in %s: %s", workspace.path, exc)
-            committed = None
-        if committed is not None and committed.returncode == 0:
-            committed_paths = [p.strip() for p in committed.stdout.splitlines() if p.strip()]
-            existing_changes = list(
-                dict.fromkeys(existing_changes + [p for p in committed_paths if p != LEDGER_RELATIVE])
-            )
-        continuation_prompt = ""
-        if existing_changes:
-            changed_preview = ", ".join(existing_changes[:8])
-            if len(existing_changes) > 8:
-                changed_preview += f" (+{len(existing_changes) - 8} arquivos)"
-            continuation_prompt = (
-                f"\n\n[AVISO DE CONTINUAÇÃO - WORKTREE JÁ INICIADA (USR-113)]\n"
-                f"Uma tentativa anterior foi interrompida (ex.: tempo limite atingido), mas o trabalho já iniciado foi PRESERVADO nesta worktree.\n"
-                f"Arquivos já criados ou alterados: {changed_preview}.\n"
-                f"NÃO recomece a implementação do zero nem descarte o que foi feito. Inspecione o estado atual dos arquivos na worktree, "
-                f"continue o desenvolvimento a partir de onde parou, ajuste os testes unitários e garanta que todos os critérios de aceite passem.\n"
-            )
-
+        continuation = ticket_stages.continuation_prompt(workspace, LEDGER_RELATIVE)
         cli_model, cli_effort = harness_cli_pin(
             harness, model, stage="development", config=load_routing_config()
         )
         return AgentRequest(
             prompt=headless_development_preamble(
                 harness, quotas.get(harness, {}).get("headroom")
-            ) + dev_prompt + continuation_prompt,
+            ) + dev_prompt + continuation,
             cwd=workspace.path,
             mode=DEVELOPMENT_MODE,
             harness=harness,
@@ -2538,10 +2383,10 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     # Same failure policy as the production line (core.line.agent_retry): transient failures repeat with
     # backoff, then the harness is excluded and the next healthy one is tried. An explicit --harness is
     # honoured: it may retry but never falls through to another harness.
-    report = agent_retry.run_with_retry(
+    return agent_retry.run_with_retry(
         _build_request,
         (selected_harness, selected_model),
-        host_caps=caps,
+        host_caps=_DEV_CAPS,
         stage="development",
         mode=DEVELOPMENT_MODE,
         config=load_routing_config(),
@@ -2551,6 +2396,67 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         pinned=bool(args.harness),
         on_event=_report_progress,
     )
+
+
+def _stage_agent_failure(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    report: Any,
+    selected_harness: Optional[str],
+    before_headroom: Any,
+    ticket_size: str,
+    progress: ProgressPublisher,
+) -> int:
+    failure = format_agent_failure(report)
+    timed_out = (
+        report.result is not None and report.result.error_kind == "timeout"
+    )
+    failure_cause = "agent_timeout" if timed_out else "agent_failed"
+    if timed_out:
+        # USR-256: no ledger field exists for a failure reason; the cause goes to the progress
+        # board and the resume command to stderr (the ticket stays `planned`).
+        failure += (
+            f"\n[i] Causa: agent_timeout. Worktree preservada: {workspace.path}\n"
+            f"[i] Para retomar: python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery "
+            f"{ticket.id} --worktree {workspace.path}"
+        )
+    progress.phase("agent", "failed", failure, cause=failure_cause)
+    print(failure, file=sys.stderr)
+    quotas_after = inspect_quotas()
+    after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
+    cost_record = record_ticket_quota_cost(
+        ticket_id=ticket.id,
+        harness=selected_harness,
+        before_headroom=before_headroom,
+        after_headroom=after_headroom,
+        duration_s=report.total_duration_s,
+    )
+    if not args.json:
+        print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
+    _report_workspace_fate(workspace, args.json)
+    if args.json:
+        print(json.dumps({
+            "ok": False,
+            "ticket_id": ticket.id,
+            "estimated_size": ticket_size,
+            "quota_usage": cost_record,
+            "attempts": [a.model_dump() for a in report.attempts],
+        }, indent=2, ensure_ascii=False))
+    return 1
+
+
+def _stage_agent_early_exit(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    report: Any,
+    selected_harness: Optional[str],
+    before_headroom: Any,
+    ticket_size: str,
+    progress: ProgressPublisher,
+) -> Optional[int]:
+    """Cancellation, protected-path block and agent failure after the agent returned; None to proceed."""
     cancelled_by_owner = (
         report.result is not None and report.result.error_kind == "cancelled"
     ) or _cancelled()
@@ -2592,49 +2498,184 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             file=sys.stderr,
         )
     if (not report.ok or report.result is None) and not advance_after_timeout:
-        failure = format_agent_failure(report)
-        timed_out = (
-            report.result is not None and report.result.error_kind == "timeout"
+        return _stage_agent_failure(
+            args, ticket, workspace, report, selected_harness, before_headroom, ticket_size, progress
         )
-        failure_cause = "agent_timeout" if timed_out else "agent_failed"
-        if timed_out:
-            # USR-256: no ledger field exists for a failure reason; the cause goes to the progress
-            # board and the resume command to stderr (the ticket stays `planned`).
-            failure += (
-                f"\n[i] Causa: agent_timeout. Worktree preservada: {workspace.path}\n"
-                f"[i] Para retomar: python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery "
-                f"{ticket.id} --worktree {workspace.path}"
-            )
-        progress.phase("agent", "failed", failure, cause=failure_cause)
-        print(failure, file=sys.stderr)
-        quotas_after = inspect_quotas()
-        after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
-        cost_record = record_ticket_quota_cost(
+    return None
+
+
+def _stage_agent_no_changes(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    agent_result: Any,
+    selected_harness: Optional[str],
+    ticket_size: str,
+    cost_record: Any,
+    progress: ProgressPublisher,
+) -> int:
+    reason = (
+        "[ERRO] O agente terminou sem alterar nenhum arquivo de implementacao; "
+        "o ticket NAO foi marcado como concluido."
+    )
+    agent_tail = redact_secrets(agent_result.text).strip()[-1500:]
+    progress.phase(
+        "agent", "failed", "o agente terminou sem alterar nenhum arquivo de implementacao",
+        cause="agent_no_changes", harness=selected_harness,
+    )
+    print(reason, file=sys.stderr)
+    print(f"[i] Saida final do agente: {agent_tail or '(vazia)'}", file=sys.stderr)
+    _report_workspace_fate(workspace, args.json)
+    if args.json:
+        print(json.dumps({
+            "ok": False, "cause": "agent_no_changes", "ticket_id": ticket.id,
+            "estimated_size": ticket_size,
+            "quota_usage": cost_record,
+            "workspace": str(workspace.path), "branch": workspace.branch,
+            "agent_tail": agent_tail,
+        }, indent=2, ensure_ascii=False))
+    return 4
+
+
+def _stage_deliver(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    progress: ProgressPublisher,
+    exec_tracker: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Delivery phase (4b, 5, 6) in a fresh, isolated Python process (USR-116), or in-process under tests.
+
+    Spawning a fresh process ensures all modules (DemandsStore, UserTicket, GitAutonomyManager)
+    are loaded from current disk state, preventing in-memory schema drift or ValueError
+    caused by background commits to the shared checkout during long agent runs.
+    """
+    run_script = PROJECT_ROOT / "run_ticket.py"
+    use_subprocess = run_script.is_file() and not os.environ.get("PYTEST_CURRENT_TEST")
+
+    if not use_subprocess:
+        # In-process execution (for tests or embedded environments)
+        res = resume_delivery(
             ticket_id=ticket.id,
-            harness=selected_harness,
-            before_headroom=before_headroom,
-            after_headroom=after_headroom,
-            duration_s=report.total_duration_s,
+            worktree_path=workspace.path,
+            skip_validation=args.skip_validation,
+            no_commit=args.no_commit,
+            no_push=args.no_push,
+            as_json=args.json,
+            return_result=True,
+            progress=progress,
         )
-        if not args.json:
-            print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
-        _report_workspace_fate(workspace, args.json)
+        exit_code = res.get("exit_code", 0) if isinstance(res, dict) else int(res)
+        return exit_code, (res if isinstance(res, dict) else {"ok": exit_code == 0})
+
+    if not args.json:
+        print("\n--> Disparando fase de entrega em processo novo isolado (USR-116)...")
+    delivery_cmd = ticket_stages.delivery_command(run_script, ticket.id, workspace.path, args)
+    child_env = ticket_stages.delivery_child_env(progress, exec_tracker)
+    # Bounded runner (USR-166): a cancellation of this launcher also kills the delivery's process tree.
+    delivery_proc = _run_bounded(
+        delivery_cmd,
+        cwd=PROJECT_ROOT,
+        env=child_env,
+        timeout_s=DELIVERY_TIMEOUT_S,
+    )
+    exit_code = delivery_proc.returncode
+    if not args.json and delivery_proc.stderr:
+        print(delivery_proc.stderr, file=sys.stderr, end="")
+    completion_info, stdout_was_json = ticket_stages.parse_delivery_output(delivery_proc, exit_code)
+    if not args.json and not (exit_code == 0 and completion_info.get("ok", False)) \
+            and exit_code != EXIT_CANCELLED and completion_info.get("cause") != "cancelled":
+        _report_delivery_child_failure(
+            delivery_proc, completion_info, stdout_was_json, ticket.id, workspace.path
+        )
+    return exit_code, completion_info
+
+
+def _stage_preflight(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    quotas: dict[str, Any],
+    override_granted: bool,
+    progress: ProgressPublisher,
+) -> Any:
+    """Grokbox probe, size estimation, routing and dry run. Returns a route dict, or an int exit code."""
+    # 1a. Grokbox health probe + wake email (USR-310): a dead probe or a failed email
+    # only logs -- it never blocks or changes this run's outcome. Skipped under pytest
+    # (same guard as the delivery subprocess bypass below): the probe/email are already
+    # offline-safe on their own, but leaving "down" state in the real .factory of the
+    # checkout the suite runs from would make an unrelated test's gate wait for real.
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
+            grokbox_wake.preflight_check()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Grokbox preflight check failed: %s", exc)
+
+    # 1b. Ticket size and quota risk estimation (USR-113)
+    ticket_size, size_reasons = estimate_ticket_size(ticket)
+    if ticket_size == "large" and not args.json:
+        ticket_stages.print_large_ticket_warning(ticket, size_reasons)
+
+    # 2. Routing Decision
+    # The harness the owner operates the factory through is the preferred developer while its quota is
+    # above the critical floor (USR-109); None when no signal exists (pump, worker, cloud).
+    operating_harness = detect_operating_harness()
+    routed = _stage_route(args, ticket, quotas, override_granted, progress, operating_harness)
+    if isinstance(routed, int):
+        return routed
+    selected_harness, selected_model, route_reason = routed
+
+    if args.dry_run:
+        progress.discard()
+        result_payload = ticket_stages.dry_run_payload(
+            ticket, ticket_size, size_reasons, selected_harness, selected_model, DEVELOPMENT_MODE,
+            override_granted, operating_harness, route_reason,
+        )
         if args.json:
-            print(json.dumps({
-                "ok": False,
-                "ticket_id": ticket.id,
-                "estimated_size": ticket_size,
-                "quota_usage": cost_record,
-                "attempts": [a.model_dump() for a in report.attempts],
-            }, indent=2, ensure_ascii=False))
-        return 1
+            print(json.dumps(result_payload, indent=2))
+        else:
+            print(
+                f"\n[DRY RUN] Execução concluída sem alterações. "
+                f"Rota validada: {selected_harness} (modo: {DEVELOPMENT_MODE})"
+            )
+        return 0
+    return {
+        "harness": selected_harness, "model": selected_model, "reason": route_reason,
+        "ticket_size": ticket_size,
+    }
+
+
+def _stage_build(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    quotas: dict[str, Any],
+    route: dict[str, Any],
+    progress: ProgressPublisher,
+) -> Any:
+    """Development agent run. Returns an int exit code, or a dict with the agent outcome."""
+    selected_harness = route["harness"]
+    selected_model = route["model"]
+    ticket_size = route["ticket_size"]
+    # 4. Execution Phase
+    mcp_healthy, mcp_reasons = check_optional_mcp_servers()
+    if not mcp_healthy and not args.json:
+        print(f"[!] Integração opcional MCP indisponível ({'; '.join(mcp_reasons)}). Continuando em modo degradado.")
+    if not args.json:
+        print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
+
+    before_headroom = quotas.get(selected_harness, {}).get("headroom")
+    report = _run_dev_agent(args, ticket, workspace, quotas, selected_harness, selected_model, progress)
+    early = _stage_agent_early_exit(
+        args, ticket, workspace, report, selected_harness, before_headroom, ticket_size, progress
+    )
+    if early is not None:
+        return early
 
     agent_result = report.result
     if report.route is not None:
         selected_harness, selected_model = report.route  # the harness that actually did the work
     if agent_result.model:
         selected_model = agent_result.model  # the model the CLI reported, not only the cascade alias
-    selected_effort = agent_result.effort
 
     quotas_after = inspect_quotas()
     after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
@@ -2658,27 +2699,9 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         path for path in git_mgr.changed_paths(workspace.path) if path != LEDGER_RELATIVE
     ]
     if not implementation_paths:
-        reason = (
-            "[ERRO] O agente terminou sem alterar nenhum arquivo de implementacao; "
-            "o ticket NAO foi marcado como concluido."
+        return _stage_agent_no_changes(
+            args, ticket, workspace, agent_result, selected_harness, ticket_size, cost_record, progress
         )
-        agent_tail = redact_secrets(agent_result.text).strip()[-1500:]
-        progress.phase(
-            "agent", "failed", "o agente terminou sem alterar nenhum arquivo de implementacao",
-            cause="agent_no_changes", harness=selected_harness,
-        )
-        print(reason, file=sys.stderr)
-        print(f"[i] Saida final do agente: {agent_tail or '(vazia)'}", file=sys.stderr)
-        _report_workspace_fate(workspace, args.json)
-        if args.json:
-            print(json.dumps({
-                "ok": False, "cause": "agent_no_changes", "ticket_id": ticket.id,
-                "estimated_size": ticket_size,
-                "quota_usage": cost_record,
-                "workspace": str(workspace.path), "branch": workspace.branch,
-                "agent_tail": agent_tail,
-            }, indent=2, ensure_ascii=False))
-        return 4
 
     agent_summary = redacted_head(agent_result.text, 800)
     progress.phase(
@@ -2687,88 +2710,100 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if not args.json:
         print(f"[+] Desenvolvimento concluído pelo {selected_harness.upper()}.")
         print(f"[i] Resumo do agente: {agent_summary or '(vazio)'}")
+    return {
+        "agent_result": agent_result, "harness": selected_harness, "model": selected_model,
+        "effort": agent_result.effort, "cost_record": cost_record, "agent_summary": agent_summary,
+    }
 
-    # 4b, 5, 6: Execute delivery phase in a fresh, isolated Python process (USR-116).
-    # Spawning a fresh process ensures all modules (DemandsStore, UserTicket, GitAutonomyManager)
-    # are loaded from current disk state, preventing in-memory schema drift or ValueError
-    # caused by background commits to the shared checkout during long agent runs.
-    run_script = PROJECT_ROOT / "run_ticket.py"
-    use_subprocess = run_script.is_file() and not os.environ.get("PYTEST_CURRENT_TEST")
 
-    completion_info: dict[str, Any] = {}
-    exit_code = 0
+def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: contextlib.ExitStack) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-    if use_subprocess:
-        if not args.json:
-            print("\n--> Disparando fase de entrega em processo novo isolado (USR-116)...")
+    # 00. Cancel mode (USR-166): only writes the control file the running launcher watches
+    if args.cancel:
+        return _request_cancel(args)
 
-        delivery_cmd = [
-            sys.executable,
-            str(run_script),
-            "--resume-delivery", ticket.id,
-            "--worktree", str(workspace.path),
-            "--json",
-        ]
-        if args.skip_validation:
-            delivery_cmd.append("--skip-validation")
-        if args.no_commit:
-            delivery_cmd.append("--no-commit")
-        if args.no_push:
-            delivery_cmd.append("--no-push")
+    resume_target = _resume_delivery_target(args)
+    locked = _stage_line_lock(args, stack, resume_target)
+    if locked is not None:
+        return locked
 
-        # USR-370: deliberately NOT scrubbed with build_agent_env: this child is the delivery executor
-        # (commit/push/PR/merge/deploy) and must keep GH/deploy credentials. Scrubbing applies to agents.
-        child_env = dict(os.environ)
-        # The delivery subprocess is part of THIS run, not a second launch (USR-250): it inherits the
-        # line lock instead of trying to acquire (and refusing itself on) a lock its own parent holds.
-        child_env = line_lock.mark_inherited(child_env)
-        # The delivery subprocess joins this run for cancellation too: it must honour the request the
-        # parent watches and never erase it as "stale" (it starts later than the request was written).
-        child_env[local_cancel.ENV_PARENT] = progress.run_id
-        if exec_tracker is not None:
-            child_env[execution_registry.ENV_EXECUTION_ID] = exec_tracker.root_id  # USR-208: stages nest under it
-        if progress.enabled:
-            # The delivery subprocess joins this run: same run id, so the board shows one run.
-            child_env[ENV_RUN_ID] = progress.run_id
-        if progress.warning:
-            # USR-154: the user was already warned; the subprocess must not repeat it.
-            child_env[ENV_WARNED] = "1"
-        # Bounded runner (USR-166): a cancellation of this launcher also kills the delivery's process tree.
-        delivery_proc = _run_bounded(
-            delivery_cmd,
-            cwd=PROJECT_ROOT,
-            env=child_env,
-            timeout_s=DELIVERY_TIMEOUT_S,
-        )
-        exit_code = delivery_proc.returncode
-        if not args.json and delivery_proc.stderr:
-            print(delivery_proc.stderr, file=sys.stderr, end="")
-        stdout_was_json = True
-        try:
-            completion_info = json.loads(delivery_proc.stdout)
-            if not isinstance(completion_info, dict):
-                raise ValueError("delivery JSON is not an object")
-        except Exception:
-            stdout_was_json = False
-            completion_info = {"ok": exit_code == 0, "error": delivery_proc.stderr or delivery_proc.stdout}
-        if not args.json and not (exit_code == 0 and completion_info.get("ok", False))                 and exit_code != EXIT_CANCELLED and completion_info.get("cause") != "cancelled":
-            _report_delivery_child_failure(
-                delivery_proc, completion_info, stdout_was_json, ticket.id, workspace.path
-            )
-    else:
-        # In-process execution (for tests or embedded environments)
-        res = resume_delivery(
-            ticket_id=ticket.id,
-            worktree_path=workspace.path,
+    # 0. Resume delivery mode (USR-116): rebase, validate, and deliver an existing worktree in a fresh process
+    if args.resume_delivery:
+        target_ticket_id = resume_target
+        if not target_ticket_id:
+            print("[ERRO] --resume-delivery requer um TICKET_ID.", file=sys.stderr)
+            return 1
+        return resume_delivery(
+            ticket_id=target_ticket_id,
+            worktree_path=Path(args.worktree) if args.worktree else None,
             skip_validation=args.skip_validation,
             no_commit=args.no_commit,
             no_push=args.no_push,
             as_json=args.json,
-            return_result=True,
-            progress=progress,
         )
-        exit_code = res.get("exit_code", 0) if isinstance(res, dict) else int(res)
-        completion_info = res if isinstance(res, dict) else {"ok": exit_code == 0}
+
+    refused = _stage_check_harness(args)
+    if refused is not None:
+        return refused
+
+    quotas = inspect_quotas()
+    if not args.json:
+        print(format_quota_report(quotas))
+
+    override_granted = check_explicit_override(args.prompt, args.force)
+
+    # 1. Ticket resolution or creation
+    ticket, intake_exit = _stage_intake(args)
+    if ticket is None:
+        return intake_exit
+
+    # Live line board (USR-140): best-effort phase events. Held until the run is known not to be a dry
+    # run; a publishing failure can never block or change the outcome of this launcher.
+    progress = open_progress(ticket.id, ticket.project_id, ticket.title)
+    progress.hold()
+    box.append(progress)
+    progress.phase("preflight", "running", "cota, tamanho do ticket e roteamento")
+
+    route = _stage_preflight(args, ticket, quotas, override_granted, progress)
+    if isinstance(route, int):
+        return route
+
+    progress.phase(
+        "preflight",
+        "succeeded",
+        f"rota {route['harness']} (modelo {route['model'] or 'default'}, motivo {route['reason']})",
+        harness=route["harness"],
+    )
+    progress.release()
+    # USR-208: every ticket and phase is an execution with its own id in Hub Live (best effort, never raises).
+    exec_tracker = execution_registry.attach_progress(
+        progress, ticket.id, harness=route["harness"], model=route["model"], title=ticket.title
+    )
+
+    # Cancellation scope (USR-166): the same token/guards the line uses (USR-152), fed by the per-ticket
+    # control file and termination signals. `_run_bounded` kills the agent's process tree when it fires.
+    stack.enter_context(
+        local_cancel.watch(
+            ticket.id, progress.run_id, fresh=progress.owns_run, not_before=local_cancel.LAUNCHED_AT
+        )
+    )
+    if _cancelled():
+        return _abort_cancelled(progress, ticket.id, args.json)
+
+    # 3. Own worktree (USR-69)
+    workspace, ws_exit = _stage_workspace(args, ticket, progress)
+    if workspace is None:
+        return ws_exit
+    if _cancelled():
+        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
+
+    built = _stage_build(args, ticket, workspace, quotas, route, progress)
+    if isinstance(built, int):
+        return built
+
+    exit_code, completion_info = _stage_deliver(args, ticket, workspace, progress, exec_tracker)
 
     delivery_done = exit_code == 0 and completion_info.get("ok", False)
     if (
@@ -2784,25 +2819,11 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         progress.set_outcome(f"entrega falhou: {failure_text}", str(completion_info.get("cause") or "delivery_failed"))
 
     if args.json:
-        payload = {
-            "ok": delivered,
-            "ticket_id": ticket.id,
-            "estimated_size": ticket_size,
-            "quota_usage": cost_record,
-            "harness": selected_harness,
-            "model": selected_model,
-            "effort": selected_effort,
-            "duration_s": agent_result.duration_s,
-            "workspace": str(workspace.path),
-            "branch": workspace.branch,
-            "agent_summary": agent_summary,
-        }
-        if "commit_sha" in completion_info:
-            payload["commit_sha"] = completion_info["commit_sha"]
-        if "sync_action" in completion_info:
-            payload["sync_action"] = completion_info["sync_action"]
-        if not delivered and "error" in completion_info:
-            payload["error"] = completion_info["error"]
+        payload = ticket_stages.final_json_payload(
+            ticket, route["ticket_size"], built["cost_record"], built["harness"], built["model"],
+            built["effort"], built["agent_result"], workspace, built["agent_summary"], delivered,
+            completion_info,
+        )
         print(json.dumps(payload, indent=2, ensure_ascii=False))
 
     return exit_code
