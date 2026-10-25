@@ -187,7 +187,22 @@ class DemandsStore:
                     tickets.append(ticket)
                 except Exception as exc:
                     logger.warning(f"Skipping corrupted demand row in {self.path}: {exc}")
+            tickets = self._with_control_queue(tickets, project_id, status)
             return sorted(tickets, key=lambda t: t.id)
+
+    def _with_control_queue(
+        self, tickets: list[UserTicket], project_id: str | None, status: DeliveryStatus | None
+    ) -> list[UserTicket]:
+        """USR-343: the control store is read first for the project ledger; demands.json is the fallback."""
+        from core.demands import queue_store
+
+        if os.environ.get("DARKFAC_DEMANDS_PATH") or not queue_store.is_default_ledger(self.path):
+            return tickets
+        merged = queue_store.merge_tickets(tickets, queue_store.list_queue_tickets())
+        return [
+            t for t in merged
+            if (not project_id or t.project_id == project_id) and (not status or t.status == status)
+        ]
 
     def get_ticket(self, ticket_id: str) -> UserTicket | None:
         with self._lock:

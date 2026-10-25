@@ -1,4 +1,35 @@
-# Fila de demandas
+# Fila de tickets (USR-343)
+
+A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
+está definida, senão o SQLite local `.factory/control.db`. Tabelas (criadas com
+`CREATE TABLE IF NOT EXISTS`):
+
+- `tickets (project_id, ticket_id, status, payload, updated_at)`
+- `owner_actions (action_id, status, payload, updated_at)`
+
+## Registrar um ticket
+
+```powershell
+python C:\dev\DarkFac\run_ticket.py --create --queue-only --title "Titulo" --problem "Problema" --criteria "Criterio"
+```
+
+O comando grava o ticket (status `planned`) no control store e termina. Não cria worktree
+`ticket/queue-*`, PR nem merge. O Telegram usa o mesmo caminho.
+
+## Leitura
+
+`core.demands.store.DemandsStore` (usado pelo despachante, Hub e `/tickets`) lê o control store
+primeiro e complementa com `.factory/demands/demands.json` (fallback e histórico). Em conflito
+de ID vale o control store, exceto quando o ledger já marca o ticket como `completed` ou
+`cancelled`. Se o control store estiver inacessível, a leitura cai para o `demands.json`.
+Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
+
+## Ainda por vir (S4b)
+
+Hub, escritores de `owner_actions`, `scripts/snapshot_queue.py` (snapshot diário no git) e
+`node_sync`.
+
+# Fila de demandas (entrada)
 
 ## Entrada unica
 

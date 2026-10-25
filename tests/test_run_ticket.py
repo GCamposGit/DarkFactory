@@ -116,7 +116,9 @@ def test_skills_synchronization_has_19_run_ticket() -> None:
     assert agent_skill.read_text(encoding="utf-8") == claude_skill.read_text(encoding="utf-8")
 
 
-def test_queue_only_registers_ticket_without_running_agent(capsys: pytest.CaptureFixture[str]) -> None:
+def test_queue_only_registers_ticket_without_running_agent(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """--create --queue-only files the ticket in the queue and never invokes an agent."""
     queued = run_ticket.UserTicket(id="USR-99", project_id="darkfac", title="Defeito X", problem_statement="p")
     with patch("run_ticket._queue_ticket_isolated", return_value=queued) as queue,          patch("run_ticket.run_agent") as agent:
@@ -126,8 +128,22 @@ def test_queue_only_registers_ticket_without_running_agent(capsys: pytest.Captur
     agent.assert_not_called()
     assert "USR-99" in capsys.readouterr().out
 
+    # USR-343: the real registration lands in the control store; no worktree/PR path is touched.
+    from core.demands import queue_store
 
-def test_queue_only_fails_when_queue_delivery_fails(capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    queue_store._store.cache_clear()
+    args = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--title", "Defeito Y"])
+    with patch.object(run_ticket.DemandsStore, "next_ticket_id", return_value="USR-998"),             patch("core.git.ticket_workspace.create_workspace") as workspace:
+        ticket = run_ticket._queue_ticket_isolated(args)
+    workspace.assert_not_called()
+    assert ticket is not None and ticket.id == "USR-998"
+    assert [t.id for t in queue_store.list_queue_tickets()] == ["USR-998"]
+    queue_store._store.cache_clear()
+
+
+def test_queue_only_fails_when_control_store_is_unavailable(capsys: pytest.CaptureFixture[str]) -> None:
     with patch("run_ticket._queue_ticket_isolated", return_value=None):
         exit_code = main(["--create", "--queue-only", "--title", "Defeito X"])
     assert exit_code == 1

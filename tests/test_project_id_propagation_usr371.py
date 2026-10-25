@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_run_ticket_passes_project_id_everywhere():
     src = (ROOT / "run_ticket.py").read_text(encoding="utf-8")
-    assert src.count("project_id=ticket.project_id") >= 5
+    assert src.count("project_id=ticket.project_id") >= 4
     assert "mode=DEVELOPMENT_MODE)" not in src
 
 

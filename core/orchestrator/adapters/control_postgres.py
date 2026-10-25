@@ -187,6 +187,22 @@ CREATE TABLE IF NOT EXISTS grill_answers (
     PRIMARY KEY (run_id, question_id)
 );
 
+CREATE TABLE IF NOT EXISTS tickets (
+    project_id VARCHAR(160) NOT NULL,
+    ticket_id VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    payload JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, ticket_id)
+);
+
+CREATE TABLE IF NOT EXISTS owner_actions (
+    action_id VARCHAR(64) PRIMARY KEY,
+    status VARCHAR(32) NOT NULL,
+    payload JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS fleet_reservations (
     reservation_id VARCHAR(160) PRIMARY KEY,
     project_id VARCHAR(160) NOT NULL,
@@ -1404,6 +1420,63 @@ class PostgresControlStore:
                 conn.commit()
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL record_grill_answer failed: {exc}") from exc
+
+    def upsert_ticket(self, project_id: str, ticket_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
+        if self.mock_mode:
+            return self._backend.upsert_ticket(project_id, ticket_id, status, payload, now)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO tickets (project_id, ticket_id, status, payload, updated_at) "
+                        "VALUES (%s, %s, %s, %s::jsonb, %s) ON CONFLICT (project_id, ticket_id) DO UPDATE "
+                        "SET status = EXCLUDED.status, payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at",
+                        (project_id, ticket_id, status, json.dumps(payload, ensure_ascii=False), now.astimezone(UTC)),
+                    )
+                conn.commit()
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL upsert_ticket failed: {exc}") from exc
+
+    def list_tickets(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        if self.mock_mode:
+            return self._backend.list_tickets(project_id)
+        sql, params = "SELECT payload::text FROM tickets", ()
+        if project_id:
+            sql, params = sql + " WHERE project_id = %s", (project_id,)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql + " ORDER BY ticket_id", params)
+                    return [json.loads(row[0]) for row in cur.fetchall()]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL list_tickets failed: {exc}") from exc
+
+    def upsert_owner_action(self, action_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
+        if self.mock_mode:
+            return self._backend.upsert_owner_action(action_id, status, payload, now)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO owner_actions (action_id, status, payload, updated_at) "
+                        "VALUES (%s, %s, %s::jsonb, %s) ON CONFLICT (action_id) DO UPDATE "
+                        "SET status = EXCLUDED.status, payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at",
+                        (action_id, status, json.dumps(payload, ensure_ascii=False), now.astimezone(UTC)),
+                    )
+                conn.commit()
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL upsert_owner_action failed: {exc}") from exc
+
+    def list_owner_actions(self) -> list[dict[str, Any]]:
+        if self.mock_mode:
+            return self._backend.list_owner_actions()
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT payload::text FROM owner_actions ORDER BY action_id")
+                    return [json.loads(row[0]) for row in cur.fetchall()]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL list_owner_actions failed: {exc}") from exc
 
     def get_grill_answers(self, run_id: str) -> dict[str, str]:
         """Grill answers recorded for `run_id`, as `{question_id: choice}` (raw callback choice)."""
