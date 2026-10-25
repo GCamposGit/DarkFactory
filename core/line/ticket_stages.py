@@ -200,7 +200,7 @@ def delivery_failure_result(
 
 def delivery_success_result(
     ticket: Any, completion_report: Any, target_worktree: Path, current_branch: str, current_sha: str,
-    attempts_log: list[dict[str, Any]], as_json: bool, return_result: bool,
+    attempts_log: list[dict[str, Any]], as_json: bool, return_result: bool, awaiting_deploy: bool = False,
 ) -> Any:
     if not as_json:
         if completion_report:
@@ -213,7 +213,13 @@ def delivery_success_result(
                 f"[+] Autonomia Git: Ticket {ticket.id} concluído, comitado "
                 f"({delivered_sha}) e sincronizado com sucesso."
             )
-        print(f"\n[SUCESSO] Ticket {ticket.id} entregue e validado com sucesso!")
+        if awaiting_deploy:
+            print(
+                f"\n[MERGE] Ticket {ticket.id} mergeado e validado; aguardando deploy pos-merge "
+                "(smoke ainda nao rodou): merged-awaiting-deploy, nao entregue."
+            )
+        else:
+            print(f"\n[SUCESSO] Ticket {ticket.id} entregue e validado com sucesso!")
 
     success_payload = {
         "exit_code": 0,
@@ -222,6 +228,7 @@ def delivery_success_result(
         "branch": current_branch,
         "commit_sha": getattr(completion_report, "commit_sha", None) if completion_report else current_sha,
         "worktree": str(target_worktree),
+        "status": "merged_awaiting_deploy" if awaiting_deploy else "delivered",
     }
     if completion_report and getattr(completion_report, "sync_result", None):
         success_payload["sync_action"] = completion_report.sync_result.action
@@ -385,6 +392,8 @@ def final_json_payload(
         payload["commit_sha"] = completion_info["commit_sha"]
     if "sync_action" in completion_info:
         payload["sync_action"] = completion_info["sync_action"]
+    if "status" in completion_info:
+        payload["status"] = completion_info["status"]
     if not delivered and "error" in completion_info:
         payload["error"] = completion_info["error"]
     return payload

@@ -457,6 +457,33 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _offline_ticket_stage_agents(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`run_ticket` PLAN/REVIEW call real planning/review agents (USR-375 S4); tests of other behaviour
+    get a deterministic plan and an approving verdict instead. A module that exercises the stage
+    contract itself sets `REAL_TICKET_STAGES = True` and injects its own doubles."""
+
+    run_ticket = sys.modules.get("run_ticket")
+    if run_ticket is None or getattr(request.module, "REAL_TICKET_STAGES", False):
+        return
+    from core.line import ticket_engine
+    from core.line import workspace as line_workspace
+    from core.line.stage_review import ReviewVerdict
+    from core.line.stages import VERDICT_FILE
+    from core.workflow.control_contracts import StageResult
+
+    def plan(ticket: Any, _workspace: Any, rws: Any) -> None:
+        ticket_engine.write_minimal_plan(rws, ticket)
+        return None
+
+    def review(_ticket: Any, _worktree: Any, rws: Any) -> StageResult:
+        line_workspace.write_context(rws, VERDICT_FILE, ReviewVerdict(verdict="approve").model_dump_json())
+        return StageResult(outcome="success", output_refs=["test"])
+
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", plan)
+    monkeypatch.setattr(run_ticket, "_review_candidate", review)
+
+
+@pytest.fixture(autouse=True)
 def _reset_node_liveness_cache() -> None:
     """The short liveness cache must not leak a node status between tests (USR-217)."""
 

@@ -51,6 +51,15 @@ def test_require_artifact_absent_malformed_valid(stage, tmp_path):
         workspace.write_context(ws, name, content)
     assert require_artifact(stage, ws) is not None
 
+    if stage is Stage.DEPLOY_SMOKE:
+        # USR-375 S4: smoke not run is accepted only as "deploy pending"; a deploy without smoke is not.
+        workspace.write_context(ws, "deploy_report.json", json.dumps({"sha": "abc", "smoke_ok": None, "deployed": False}))
+        assert require_artifact(stage, ws).pending
+        for bad in ({"sha": "abc", "smoke_ok": None, "deployed": True}, {"sha": "abc", "smoke_ok": False}):
+            workspace.write_context(ws, "deploy_report.json", json.dumps(bad))
+            with pytest.raises(StageArtifactMissing):
+                require_artifact(stage, ws)
+
 
 @pytest.mark.parametrize("stage", [Stage.RESEARCH, Stage.DOCS, Stage.LEARNING])
 def test_optional_stages_return_none(stage, tmp_path):

@@ -268,7 +268,7 @@ def test_resume_delivery_happy_path(tmp_path: Path, capsys: pytest.CaptureFixtur
         assert code == 0
 
     captured = capsys.readouterr()
-    assert "[SUCESSO] Ticket USR-116 entregue e validado com sucesso!" in captured.out
+    assert "[MERGE] Ticket USR-116 mergeado e validado; aguardando deploy" in captured.out  # USR-375 S4: smoke pendente
     assert "abcd1234ef5678" in captured.out
     mock_sweep.assert_called_once()
 
@@ -347,7 +347,7 @@ def test_resume_delivery_renumbers_duplicate_owner_action_before_gate(
 
     captured = capsys.readouterr()
     assert "OA renumerada apos sync com origin/main: OA-002 -> OA-003" in captured.out
-    assert "[SUCESSO] Ticket USR-255 entregue e validado com sucesso!" in captured.out
+    assert "[MERGE] Ticket USR-255 mergeado e validado; aguardando deploy" in captured.out  # USR-375 S4: smoke pendente
 
     document = json.loads(oa_path.read_text(encoding="utf-8"))
     assert [row["id"] for row in document["actions"]] == ["OA-001", "OA-002", "OA-003"]
