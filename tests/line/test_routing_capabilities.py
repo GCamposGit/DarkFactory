@@ -166,7 +166,9 @@ def test_read_can_still_elect_antigravity(tmp_path: Path) -> None:
     config = load_routing_config(default_config_path())
 
     assert _pick("grill", ["harness:antigravity"], config, tmp_path) == ("antigravity", None)
-    assert _pick("planning", ["harness:antigravity"], config, tmp_path) == ("antigravity", None)
+    # Planning is high-tier only (USR-375 S5): a cheap/default model means wait (None), never a fallback.
+    assert _pick("planning", ["harness:antigravity"], config, tmp_path) is None
+    assert _pick("planning", ["harness:antigravity", "harness:claude"], config, tmp_path) == ("claude", "opus")
     # An explicit read mode overrides the stage default, so the capability filter is about the mode.
     custom = _write_config(tmp_path, [["antigravity", None], ["claude", "sonnet"]])
     assert _pick("development", _ALL_CAPS, custom, tmp_path, mode="read") == ("antigravity", None)

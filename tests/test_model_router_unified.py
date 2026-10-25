@@ -134,8 +134,8 @@ def test_high_intelligence_prefers_opus_sol_when_healthy(tmp_path: Path):
     assert choice == ("claude", "opus")
 
 
-def test_high_intelligence_falls_back_to_highest_headroom_when_opus_sol_critical(tmp_path: Path):
-    """When Opus/Sol providers are critical (<= 15%), fallback to highest headroom."""
+def test_high_intelligence_waits_when_opus_sol_critical(tmp_path: Path):
+    """Planning is high-tier only (USR-375 S5): with Opus/Sol critical it waits, no cheap fallback."""
     cfg = load_routing_config(default_config_path())
 
     def critical_intel_lookup(provider_id: str) -> float | None:
@@ -154,8 +154,8 @@ def test_high_intelligence_falls_back_to_highest_headroom_when_opus_sol_critical
         cooldown_path=tmp_path / "cooldowns.json",
         complexity="high",
     )
-    # Antigravity is chosen because Claude and Codex are in critical state
-    assert choice == ("antigravity", None)
+    # Antigravity is healthy but not a high-tier model: the ticket waits
+    assert choice is None
 
 
 def test_autonomous_recommend_never_returns_fable_or_astra():

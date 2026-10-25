@@ -617,6 +617,31 @@ def _rank_eligible(
     return pool[0][0], pool[0][1]
 
 
+HIGH_TIER_ONLY_STAGES = frozenset({"planning"})
+_HIGH_TIERS = frozenset({"high", "frontier"})
+
+
+def is_high_tier_model(model: Optional[str]) -> bool:
+    """True when `model` is an explicit high-tier model (registry tier `high`/`frontier`).
+
+    A harness default (`None`) has no declared tier and is never high; unknown names fall back to
+    the historical opus/sol name hint.
+    """
+    if not model:
+        return False
+    try:
+        from core.models.registry import get_registry
+
+        low = model.strip().lower()
+        for entry in get_registry().models:
+            names = [entry.id, *entry.aliases, *entry.gateway_ids]
+            if low in (n.strip().lower() for n in names):
+                return entry.tier in _HIGH_TIERS
+    except Exception as exc:  # registry trouble must not open the cheap door
+        logger.debug("tier lookup failed for %s: %s", model, exc)
+    return any(m in model.lower() for m in ("opus", "sol"))
+
+
 def _policy_allows(project_id: str, harness: str) -> bool:
     from core.enterprise.enforcement import provider_allowed
 
@@ -700,6 +725,9 @@ def pick(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
         operating,
     ):
+        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model):
+            logger.info("pick: %s/%s skipped for stage %s (not a high-tier model)", harness, model, stage)
+            continue
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
         if project_id and not _policy_allows(project_id, harness):
@@ -769,6 +797,7 @@ def pick(
     all_exhausted = bool(evaluated) and all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
     if (
         required_mode == "read"
+        and stage not in HIGH_TIER_ONLY_STAGES  # the OpenRouter fallback model is a cheap one
         and (not project_id or _policy_allows(project_id, "openrouter"))
         and stage_cfg.openrouter_model
         and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
