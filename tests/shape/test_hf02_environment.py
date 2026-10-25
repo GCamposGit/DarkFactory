@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LOCK = ROOT / "spikes" / "runtime_choice" / "requirements.lock.txt"
 VERSIONS = ROOT / "spikes" / "runtime_choice" / "versions.json"
 ENVIRONMENT_DOC = ROOT / "docs" / "handoffs" / "HF-02-ENVIRONMENT.md"

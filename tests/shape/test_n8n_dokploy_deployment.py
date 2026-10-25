@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = PROJECT_ROOT / "deploy" / "dokploy" / "docker-compose.n8n.yml"
 ENV_TEMPLATE_PATH = PROJECT_ROOT / "deploy" / "dokploy" / "env.n8n.example"
 

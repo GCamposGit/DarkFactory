@@ -50,7 +50,7 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_baseline_catalog.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/test_roadmap.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/test_roadmap_history.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
-    "tests/test_worktree_protocol.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
+    "tests/shape/test_worktree_protocol.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/test_hub_hf13.py": "'HYBRID_WORKFLOW_PLAN_2026-09-08.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/test_cloud_artifacts.py": "'wf-2026-001' e id de workflow, nao uma data",
     "tests/test_quota_meter_contract.py": "'xai_2026-10-01.json' e nome de arquivo de fixture versionado em tests/fixtures/usage/, nao uma data lida do relogio",
