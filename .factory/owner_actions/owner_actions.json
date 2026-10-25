@@ -2796,6 +2796,46 @@
       "verify": "gh pr view slice/usr-343-s3-tap --repo GCamposGit/DarkFactory mostra MERGED; um PR que altera AGENTS.md gera mensagem com botoes no Telegram e, apos o toque, e mesclado sem --admin",
       "created_at": "2026-10-25T03:00:00Z",
       "created_by": "claude"
+    },
+    {
+      "id": "OA-070",
+      "kind": "action",
+      "title": "Mesclar #676 e #680 (harness do USR-377) com admin e aplicar o workflow do portao em camadas",
+      "priority": "high",
+      "status": "open",
+      "why": "O CI copia core/harness/* e harness.config.json da base por cima do candidato; PR que muda esses arquivos sempre falha com 'Candidate worktree is dirty'. Alem disso o workflow roda os testes em duas execucoes e uma delas marca os testes como 'skipped', que o GitHub conta como aprovado. O workflow e protegido.",
+      "blocks": [
+        "USR-377"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Mesclar os testes de tempo deterministicos",
+          "command": "gh pr merge 676 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Mesclar o perfil pr do portao",
+          "command": "gh pr merge 680 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Criar worktree limpa do main",
+          "command": "git -C C:\\dev\\DarkFac fetch origin; git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\owner-ci origin/main"
+        },
+        {
+          "text": "Abrir C:\\dev\\DarkFac\\.worktrees\\owner-ci\\docs\\manual\\portao.md, copiar o bloco diff da secao 'Mudanca pendente no workflow' para C:\\dev\\DarkFac\\.worktrees\\owner-ci\\ci.patch e aplicar",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\owner-ci apply ci.patch"
+        },
+        {
+          "text": "Publicar por push direto de admin (workflow protegido)",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\owner-ci add .github/workflows; git -C C:\\dev\\DarkFac\\.worktrees\\owner-ci commit -m \"ci: portao em camadas e checagem de politica em workflow proprio [USR-377]\"; git -C C:\\dev\\DarkFac\\.worktrees\\owner-ci push origin HEAD:main"
+        },
+        {
+          "text": "Avisar no chat; o agente confere que os PRs seguintes rodam o perfil pr e que nenhum teste aparece como 'skipped'"
+        }
+      ],
+      "verify": "gh pr view 676 e 680 mostram MERGED; no proximo PR, a aba Checks mostra 'DarkFac Trusted Policy' separado e pr-tests (ubuntu-latest) executado",
+      "created_at": "2026-10-25T04:00:00Z",
+      "created_by": "claude"
     }
   ]
 }
