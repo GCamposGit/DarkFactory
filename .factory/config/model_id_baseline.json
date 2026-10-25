@@ -66,7 +66,6 @@
     "core/usage/adapters.py": 1,
     "core/visual/cloud_engine.py": 2,
     "core/workflow/qualified_routes.py": 52,
-    "core/workflow/quality_handlers.py": 1,
     "docs/AI_USAGE_MONITOR.md": 4,
     "docs/ARCHITECTURE.md": 2,
     "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md": 1,

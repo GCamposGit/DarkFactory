@@ -69,7 +69,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_local_progress_visibility.py": "T0 so alimenta o campo 'at' de um LocalRunEvent escrito via conexao psycopg fake; nunca e lido de volta nem comparado",
     "tests/test_marketing_engine.py": "campo de conteudo 'date' de um post de marketing, apenas armazenado/comparado como string; sem leitura do relogio real",
     "tests/test_postgres_hybrid_persistence.py": "timestamps sao apenas colunas simuladas de linha de banco (conflito de sync por versao); o arquivo nao le o relogio real em nenhum ponto",
-    "tests/test_release_evidence_chain.py": "BASE_TIME e uma constante sem uso no arquivo; todo outro horario do arquivo e calculado relativo a datetime.now(UTC) no momento do teste",
     "tests/test_workflow_safe_export.py": "NOW passado explicitamente como observed_at para uma funcao pura de exportacao",
     # -- fixture/content data: stored and asserted back verbatim, never diffed against the real clock
     # in the file or in the production path the test exercises (confirmed by reading that path, not
@@ -82,7 +81,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_hub_factory_health.py": "campo de payload mock de webhook/API, armazenado e comparado verbatim",
     "tests/test_hub_service_legacy_cleanup.py": "linha de seed SQL para um teste de limpeza de servico legado; sem filtro por idade",
     "tests/test_infra11_unified_metrics.py": "campo 'boot_time' de um snapshot de metricas, armazenado e comparado verbatim",
-    "tests/test_learning_event_chain.py": "campo 'expires_at' de uma fixture de claim, armazenado e comparado verbatim (nao um TTL contra o relogio real)",
     "tests/test_learning_pack.py": "campo 'timestamp' de uma fixture de sessao de learning pack, armazenado e comparado verbatim",
     "tests/test_model_benchmark.py": "campo 'observed_at' de uma fixture de provenance, comparado so com o proprio valor esperado no teste",
     "tests/test_owner_actions_core.py": "'resolved_at' exercita apenas o caminho de validacao (ValueError); nao ha comparacao com o relogio real",
