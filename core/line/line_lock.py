@@ -40,7 +40,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from core.paths import state_root
 from core.workflow.control_contracts import (
@@ -308,7 +308,13 @@ class LineLock:
         lease_duration_sec: int = 45,
         max_fleet_slots: int = 3,
         require_reservation: bool = False,
+        clock: Callable[[], float] = time.time,
+        heartbeat_wait: Optional[Callable[[float], bool]] = None,
     ) -> None:
+        # Test seams (USR-377): ``clock`` stamps the sidecar heartbeat; ``heartbeat_wait(interval)`` blocks
+        # between beats and returns True to stop. Defaults keep the real clock and the stop-event wait.
+        self._clock = clock
+        self._heartbeat_wait = heartbeat_wait
         self._require_reservation = require_reservation
         self._ticket_id = ticket_id
         # Fleet mode (USR-366): one lock slot per gate host, so several hosts can run in parallel from
@@ -458,13 +464,14 @@ class LineLock:
 
     def _start_heartbeat(self, info: LineLockInfo) -> None:
         def beat() -> None:
-            while not self._stop_heartbeat.wait(HEARTBEAT_INTERVAL_SEC):
+            wait = self._heartbeat_wait or self._stop_heartbeat.wait
+            while not wait(HEARTBEAT_INTERVAL_SEC):
                 with contextlib.suppress(OSError):
                     _write_lock(
                         self._path,
                         LineLockInfo(
                             pid=info.pid, ticket_id=info.ticket_id, hostname=info.hostname,
-                            started_at=info.started_at, heartbeat_at=time.time(),
+                            started_at=info.started_at, heartbeat_at=self._clock(),
                         ),
                     )
                 if (
