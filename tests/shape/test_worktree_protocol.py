@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SKILL = Path("skills/04-autonomous-piv-loop/SKILL.md")
 REFERENCE = Path("skills/04-autonomous-piv-loop/references/worktree-parallelism.md")
 

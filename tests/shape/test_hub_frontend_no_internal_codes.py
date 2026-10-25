@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-FRONTEND = Path(__file__).resolve().parents[1] / "hub" / "frontend"
+FRONTEND = Path(__file__).resolve().parents[2] / "hub" / "frontend"
 FORBIDDEN = re.compile(r"\b(?:HF-\d+|DH-\d+|USR-\d+|Skill \d+|G\d)\b")
 ALLOWED_LINE = re.compile(r"startsWith\(|\.some\(|id=\"grill-modal-ticket-id\"")
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = PROJECT_ROOT / "deploy" / "dokploy" / "docker-compose.cloud.yml"
 DOCKERFILE_PATH = PROJECT_ROOT / "deploy" / "dokploy" / "Dockerfile.cloud"
 ENV_TEMPLATE_PATH = PROJECT_ROOT / "deploy" / "dokploy" / "env.cloud.example"
@@ -94,7 +94,7 @@ def test_worker_owner_action_sync_uses_existing_credentials_and_persistent_volum
     from pathlib import Path
     import yaml
 
-    manifest = yaml.safe_load((Path(__file__).resolve().parents[1] / "deploy/dokploy/docker-compose.cloud.yml").read_text(encoding="utf-8"))
+    manifest = yaml.safe_load((Path(__file__).resolve().parents[2] / "deploy/dokploy/docker-compose.cloud.yml").read_text(encoding="utf-8"))
     worker = manifest["services"]["darkfac-worker"]
     assert "DARKFAC_TELEMETRY_KEY=${DARKFAC_TELEMETRY_KEY:-}" in worker["environment"]
     assert "DARKHUB_CLOUD_URL=${DARKHUB_CLOUD_URL:-https://darkhub.ggcampos.com}" in worker["environment"]

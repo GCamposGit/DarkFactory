@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from lxml import html
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 EXPECTED = [(None, 'line-live-link', 'Esteira ao vivo: tickets da fábrica etapa por etapa', 'Esteira ao vivo'),
  ('openBenchmarksModal()',
   None,
