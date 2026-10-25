@@ -484,6 +484,24 @@ def _offline_ticket_stage_agents(request: pytest.FixtureRequest, monkeypatch: py
 
 
 @pytest.fixture(autouse=True)
+def _isolate_fleet_env() -> Iterator[None]:
+    """Fleet mode must not leak between tests (USR-369).
+
+    ``run_ticket.py --fleet`` writes DARKFAC_FLEET_MODE straight into ``os.environ``, so a test that
+    runs it in-process leaves fleet mode on for the next test in the same xdist worker, which then
+    takes a per-host lock slot and a control-store reservation it never asked for. Saved and restored
+    explicitly because ``monkeypatch.delenv`` does not undo a value set later outside monkeypatch.
+    """
+
+    names = ("DARKFAC_FLEET_MODE", "DARKFAC_HOST_ID")
+    saved = {name: os.environ.pop(name) for name in names if name in os.environ}
+    yield
+    for name in names:
+        os.environ.pop(name, None)
+    os.environ.update(saved)
+
+
+@pytest.fixture(autouse=True)
 def _reset_node_liveness_cache() -> None:
     """The short liveness cache must not leak a node status between tests (USR-217)."""
 

@@ -11324,7 +11324,7 @@
     "project_id": "darkfac",
     "title": "CI vermelho no main @c7fcb00: main-tests (windows-latest 2/4), main-tests (ubuntu-latest), main-validation",
     "origin": "user",
-    "status": "planned",
+    "status": "cancelled",
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
@@ -11332,7 +11332,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA c7fcb008d5c9abe0e125df10b70d12122a9d2b95) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 2/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40140714632. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA c7fcb008d5c9abe0e125df10b70d12122a9d2b95) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 2/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40140714632. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.\n\nCancelado em 25/10: superado. O main voltou ao verde em e329e171 (#703 corrigiu test_ci_policy, #706 corrigiu OA-071); run DarkFac CI 40192957401 success.",
     "core_journey": [
       "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA c7fcb008d5c9abe0e125df10b70d12122a9d2b95) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 2/4), main-tests (ubuntu-latest), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40140714632. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
     ],
@@ -11346,14 +11346,14 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-24T23:23:10.747706Z",
-    "updated_at": "2026-10-24T23:23:10.747706Z"
+    "updated_at": "2026-10-25T12:32:11.344903Z"
   },
   {
     "id": "USR-381",
     "project_id": "darkfac",
     "title": "CI vermelho no main @ba81ed5: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-tests (windows-latest...",
     "origin": "user",
-    "status": "planned",
+    "status": "cancelled",
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
@@ -11361,7 +11361,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA ba81ed5749fc0fdcac43fcb8542c5336a0f9d8d0) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-tests (windows-latest 2/4), main-tests (windows-latest 1/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40151434128. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA ba81ed5749fc0fdcac43fcb8542c5336a0f9d8d0) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-tests (windows-latest 2/4), main-tests (windows-latest 1/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40151434128. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.\n\nCancelado em 25/10: superado. O main voltou ao verde em e329e171 (#703 corrigiu test_ci_policy, #706 corrigiu OA-071); run DarkFac CI 40192957401 success.",
     "core_journey": [
       "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA ba81ed5749fc0fdcac43fcb8542c5336a0f9d8d0) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 4/4), main-tests (ubuntu-latest), main-tests (windows-latest 2/4), main-tests (windows-latest 1/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40151434128. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
     ],
@@ -11375,7 +11375,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T01:56:25.600840Z",
-    "updated_at": "2026-10-25T01:56:25.600840Z"
+    "updated_at": "2026-10-25T12:32:11.344903Z"
   },
   {
     "id": "USR-382",
@@ -11532,7 +11532,7 @@
     "project_id": "darkfac",
     "title": "CI vermelho no main @107e82f: main-tests (windows-latest 3/4), main-tests (ubuntu-latest), main-tests (windows-latest...",
     "origin": "user",
-    "status": "planned",
+    "status": "cancelled",
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
@@ -11540,7 +11540,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 107e82f977b919869f0f3641ae20e83cfa76cb32) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 3/4), main-tests (ubuntu-latest), main-tests (windows-latest 1/4), main-tests (windows-latest 2/4), main-tests (windows-latest 4/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40155412468. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 107e82f977b919869f0f3641ae20e83cfa76cb32) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 3/4), main-tests (ubuntu-latest), main-tests (windows-latest 1/4), main-tests (windows-latest 2/4), main-tests (windows-latest 4/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40155412468. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.\n\nCancelado em 25/10: superado. O main voltou ao verde em e329e171 (#703 corrigiu test_ci_policy, #706 corrigiu OA-071); run DarkFac CI 40192957401 success.",
     "core_journey": [
       "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 107e82f977b919869f0f3641ae20e83cfa76cb32) terminou em 'failure'. Jobs vermelhos: main-tests (windows-latest 3/4), main-tests (ubuntu-latest), main-tests (windows-latest 1/4), main-tests (windows-latest 2/4), main-tests (windows-latest 4/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/40155412468. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
     ],
@@ -11554,15 +11554,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T02:46:48.365365Z",
-    "updated_at": "2026-10-25T02:46:48.365365Z"
+    "updated_at": "2026-10-25T12:32:11.344903Z"
   },
   {
     "id": "USR-388",
     "project_id": "darkfac",
     "title": "Blue-green do Hub derruba o Hub: gate de overlap falha e o restore reaplica compose offline",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #701 mesclado em main (fix(deploy): blue-green verifica a cor nova e nunca deixa o Hub sem replica); redeploy pos-merge pela sessao de 25/10",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11584,6 +11584,32 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T03:00:50.663797Z",
-    "updated_at": "2026-10-25T03:00:50.663797Z"
+    "updated_at": "2026-10-25T13:24:32.815022Z"
+  },
+  {
+    "id": "USR-389",
+    "project_id": "darkfac",
+    "title": "Merge de PR com ledger-fast vermelho deixou o main vermelho (OA-071 com kind invalido)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "PR #699 (registro OA-071) foi mesclado com os checks ledger-fast e pr-validation em fail (gh pr checks 699). O item tinha kind 'approval', fora do schema (action|decision), e o main ficou vermelho em test_owner_actions_core::test_seeded_backlog_is_valid_and_complete (run 40192113384), corrigido no PR #706. Criterios de aceite: (1) ledger-fast e pr-validation sao checks obrigatorios no ruleset do main ou o caminho de merge autonomo (core.git.autonomy / scripts de envio) recusa mesclar com qualquer check em fail, com teste; (2) o registro de OA (core.owner_actions) valida kind/schema antes de gravar e recusa item invalido, com teste; (3) nenhum teste novo de forma.",
+    "core_journey": [
+      "PR #699 (registro OA-071) foi mesclado com os checks ledger-fast e pr-validation em fail (gh pr checks 699). O item tinha kind 'approval', fora do schema (action|decision), e o main ficou vermelho em test_owner_actions_core::test_seeded_backlog_is_valid_and_complete (run 40192113384), corrigido no PR #706. Criterios de aceite: (1) ledger-fast e pr-validation sao checks obrigatorios no ruleset do main ou o caminho de merge autonomo (core.git.autonomy / scripts de envio) recusa mesclar com qualquer check em fail, com teste; (2) o registro de OA (core.owner_actions) valida kind/schema antes de gravar e recusa item invalido, com teste; (3) nenhum teste novo de forma."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T12:26:49.553801Z",
+    "updated_at": "2026-10-25T12:26:49.553801Z"
   }
 ]

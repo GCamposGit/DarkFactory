@@ -25,7 +25,6 @@ from core.visual.prompt_synthesizer import VisualPromptSynthesizer
 from core.visual.procedural_engine import ProceduralVisualEngine
 from core.visual.cloud_engine import CloudVisualEngine
 from core.visual.studio import VisualStudio
-from core.router.model_router import recommend_model
 from hub.backend.main import app
 
 client = TestClient(app)
@@ -260,15 +259,6 @@ def test_strict_cloud_mode_rejects_silent_local_fallback(monkeypatch, tmp_path):
     fallback_spec = VisualPromptSpec(title="Fallback allowed")
     result = engine.generate(fallback_spec)
     assert result.provider == "local_procedural"
-
-
-def test_visual_router_scales_image_model_by_complexity():
-    low = recommend_model("visual", "low")
-    high = recommend_model("visual", "high")
-    assert low["model"] == "google/gemini-3.1-flash-lite-image"
-    assert high["model"] == "openai/gpt-image-2"
-    assert low["provider"] == high["provider"] == "openrouter"
-    assert "daily_efficiency_frontier" not in high
 
 
 # -------------------------------------------------------------

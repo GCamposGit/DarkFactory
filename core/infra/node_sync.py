@@ -206,6 +206,43 @@ KNOWN_EPHEMERAL_PATTERNS = (
 )
 
 
+# USR-343 S4b / USR-374: these ledgers are generated snapshots (scripts/snapshot_queue.py); a local edit is
+# never authoritative, so a node resets them (keeping a backup) instead of refusing to pull.
+GENERATED_LEDGER_FILES = (
+    ".factory/demands/demands.json",
+    ".factory/owner_actions/owner_actions.json",
+)
+
+
+def is_generated_ledger(path_str: str) -> bool:
+    return path_str.replace("\\", "/").strip().strip('"') in GENERATED_LEDGER_FILES
+
+
+def reset_generated_ledgers(root: Path, git: GitRunner = run_git, backup_dir: Path | None = None) -> list[str]:
+    """Back up and ``checkout`` locally modified generated ledgers so the next pull cannot abort. Never raises."""
+    import shutil
+
+    reset: list[str] = []
+    for rel in GENERATED_LEDGER_FILES:
+        try:
+            if not git(root, ["status", "--porcelain", "--", rel]):
+                continue
+            target = root / rel
+            if target.exists():
+                if backup_dir is None:
+                    from core.paths import state_root
+
+                    backup_dir = state_root() / "ledger_backups"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                shutil.copy2(target, backup_dir / f"{target.name}.{stamp}.bak")
+            git(root, ["checkout", "--", rel])
+            reset.append(rel)
+        except Exception:  # noqa: BLE001 - best effort; the pull reports whatever remains
+            continue
+    return reset
+
+
 def is_ephemeral_dirty_file(path_str: str) -> bool:
     norm = path_str.replace("\\", "/")
     return any(pattern in norm for pattern in KNOWN_EPHEMERAL_PATTERNS)
@@ -407,10 +444,11 @@ def remediate_dirty_checkout(
     notifier: Callable[[str], bool] | None = None,
 ) -> bool:
     """Safely remediate dirty worktrees if they only contain known ephemeral files (USR-119)."""
+    reset_generated_ledgers(root, git)
     non_ephemeral = []
     for category in ("tracked_modified", "untracked"):
         for f in dirty_files.get(category, []):
-            if not is_ephemeral_dirty_file(f):
+            if not is_ephemeral_dirty_file(f) and not is_generated_ledger(f):
                 non_ephemeral.append(f)
     if non_ephemeral:
         msg = f"Dirty worktree contains non-ephemeral files: {', '.join(non_ephemeral)}"
@@ -441,6 +479,8 @@ def remediate_dirty_checkout(
         return False
     for category in ("tracked_modified", "untracked"):
         for f in dirty_files.get(category, []):
+            if is_generated_ledger(f):
+                continue
             p = root / f
             if p.exists() and p.is_file():
                 try:

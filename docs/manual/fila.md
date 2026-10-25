@@ -24,10 +24,20 @@ de ID vale o control store, exceto quando o ledger já marca o ticket como `comp
 `cancelled`. Se o control store estiver inacessível, a leitura cai para o `demands.json`.
 Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
 
-## Ainda por vir (S4b)
+## Acoes do owner e status (S4b)
 
-Hub, escritores de `owner_actions`, `scripts/snapshot_queue.py` (snapshot diário no git) e
-`node_sync`.
+- Escritores de `owner_actions` (respostas do Hub via `answer_sync`, espelhos, alertas de CI, CLI)
+  gravam no control store (`OwnerActionStore` no ledger padrao). Nao existem mais PRs `chore/oa-*`
+  nem `ticket/queue-*`; a leitura mescla o control store sobre o `owner_actions.json`.
+- `DemandsStore.save_ticket` e `update_status` gravam tambem a linha em `tickets` do control store.
+- Snapshot diario: `python C:\dev\DarkFac\scripts\snapshot_queue.py` (a flag `--force` ignora o
+  marcador do dia) escreve `demands.json` e `owner_actions.json` a partir do control store em UM
+  commit, publicado em `main` com o token do GitHub App (`core/git/app_token.py`). E idempotente
+  (marcador no diretorio de estado; ledger igual nao gera commit) e roda uma vez por dia dentro do
+  laco de `scripts/sync_usage_to_cloud.py`.
+- `core/infra/node_sync.py` trata os dois ledgers como arquivos gerados: antes do pull do Desktop
+  (`/system/update`) e na remediacao do Notebook, edicoes locais sao copiadas para
+  `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
 
 # Fila de demandas (entrada)
 

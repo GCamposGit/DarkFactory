@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
@@ -59,6 +60,7 @@ RECENT_WINDOW = timedelta(days=7)
 STATE_DIRNAME = "executions"
 OUTBOX_NAME = "outbox.jsonl"
 OUTBOX_MAX_LINES = 1000
+ORPHAN_SENDING_MAX_AGE_SECONDS = 600.0
 WRITE_TIMEOUT_SECONDS = 3.0
 _MESSAGE_BUDGET = 380
 
@@ -506,11 +508,78 @@ class ExecutionRegistry:
         ]
         path.write_text("\n".join(kept[-OUTBOX_MAX_LINES:]) + "\n", encoding="utf-8")
 
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        """Best-effort liveness check; an uninspectable PID is assumed alive (fail safe)."""
+        if pid <= 0:
+            return False
+        try:
+            import psutil
+
+            try:
+                return bool(psutil.pid_exists(pid))
+            except Exception:  # noqa: BLE001
+                return True
+        except ImportError:
+            pass
+        if os.name == "nt":
+            import ctypes
+
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _adopt_orphans(self, path: Path) -> None:
+        """Requeue ``outbox.jsonl.<pid>.<hex>.sending`` files left by dead or stale flushers."""
+        try:
+            candidates = sorted(path.parent.glob(f"{OUTBOX_NAME}.*.sending"))
+        except OSError:
+            return
+        now = time.time()
+        for orphan in candidates:
+            parts = orphan.name.split(".")
+            try:
+                pid = int(parts[2])
+            except (IndexError, ValueError):
+                pid = -1
+            try:
+                stale = now - orphan.stat().st_mtime > ORPHAN_SENDING_MAX_AGE_SECONDS
+            except OSError:
+                continue
+            if not stale and self._pid_alive(pid):
+                continue
+            mine = orphan.with_name(f"{OUTBOX_NAME}.{os.getpid()}.{uuid.uuid4().hex[:6]}.sending")
+            try:
+                orphan.replace(mine)  # atomic: the loser of a race gets OSError and moves on
+            except OSError:
+                continue
+            try:
+                text = mine.read_text(encoding="utf-8")
+                if text.strip():
+                    with path.open("a", encoding="utf-8") as handle:
+                        handle.write(text if text.endswith("\n") else text + "\n")
+                    self._trim_outbox(path)
+                mine.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def _flush_outbox(self) -> bool:
         """Resend queued events oldest first. ``False`` when the store is still unreachable."""
         path = self.outbox_path
         if path is None or self.sink is None:
             return True
+        self._adopt_orphans(path)
         try:
             if not path.is_file():
                 return True

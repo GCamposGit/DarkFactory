@@ -30,7 +30,7 @@ Esta skill analisa o histórico operacional de longo prazo da fábrica autônoma
 ### Outputs Estruturados
 - **Relatório de Evolução**: Relatório arquivado em `.factory/reports/` com diagnósticos sistêmicos e propostas de ajuste.
 - **Rascunhos de Novas Skills**: Novos arquivos de especificação com frontmatter e contratos normativos.
-- **Calibração de Roteamento**: Recomendações de pesos e thresholds para o `model_router.py`.
+- **Calibração de Roteamento**: Recomendações de pesos e thresholds para o `core/line/routing.py` (`pick`).
 
 ### Portões, Política e Validação
 - **Disparo Orientado a Eventos e Marcos**: O evolver é acionado por eventos do scheduler, incidentes sistêmicos ou marcos consolidados de release, **sem depender de contagem de prompts humanos**.
