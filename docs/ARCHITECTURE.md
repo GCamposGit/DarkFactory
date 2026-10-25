@@ -46,7 +46,7 @@ A fábrica é composta por três camadas integradas:
    - Escada determinística em 5 níveis: Análise Estática -> Testes Unitários -> Integração -> E2E Headless -> Testes Holdout.
    - Contrato de marcadores: `[STEP_START]`, `[STEP_PASS]`, `[STEP_FAIL]`, `[TEST_COUNT]`, `[HARNESS_PASS]`.
 3. **Workflow Engine**:
-   - Máquina de estados determinística (`core/orchestrator/state.py`).
+   - Máquina de estados determinística (`core/line` (máquina de estados da esteira)).
    - Guardrail de caminhos protegidos (`core/orchestrator/guard.py`).
 4. **Deploy & Entrega Contínua**:
    - Pipeline automatizado de empacotamento e entrega acionado pós-merge.
