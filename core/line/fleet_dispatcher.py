@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import subprocess
 import sys
@@ -347,7 +348,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     args = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        log_dir / "fleet-dispatcher.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                        handlers=[handler, logging.StreamHandler()])
     from core.notifications.daily_digest import maybe_send_due
 
     d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due)

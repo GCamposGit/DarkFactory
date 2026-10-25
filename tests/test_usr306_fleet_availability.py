@@ -195,6 +195,29 @@ def test_expired_reservation_is_not_resurrected_by_renewal(store, monkeypatch):
     assert store.renew_open_run_reservations(now + timedelta(seconds=300)) == 0
 
 
+def test_dead_host_reservation_expires_and_pending_ticket_is_admitted_elsewhere(store, monkeypatch):
+    monkeypatch.delenv(FLEET_MANAGED_ENV, raising=False)
+    now = datetime.now(UTC)
+    receipt = _accept(store, now)
+    reservation = _reserve(store, receipt, now, host="grokbox")
+    recovered_at = now + timedelta(seconds=300)
+
+    expired = store.reconcile_fleet_reservations(recovered_at)
+    assert [item.reservation_id for item in expired] == [reservation.reservation_id]
+    assert store.get_reservation(reservation.reservation_id).status == "expired"
+
+    coordinator = CloudCoordinator(
+        store=store,
+        fleet_hosts=["notebook"],
+        host_health_prober=lambda host: host == "notebook",
+        capacity_probe=lambda: 2,
+    )
+    admitted = coordinator.admit_eligible_cycles(recovered_at)
+
+    assert [item.host_id for item in admitted] == ["notebook"]
+    assert admitted[0].run_id == receipt.run_id
+
+
 # --------------------------------------------------------------------------- worker heartbeat
 
 
