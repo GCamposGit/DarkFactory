@@ -4,24 +4,52 @@
       "name": "syntax_only",
       "cmd": "python -m compileall -q core hub run_hub.py",
       "quick": true,
-      "kind": "check"
+      "kind": "check",
+      "profiles": [
+        "pr",
+        "full"
+      ]
     },
     {
       "name": "static_types",
       "cmd": "python scripts/typecheck.py",
       "quick": true,
-      "kind": "check"
+      "kind": "check",
+      "profiles": [
+        "pr",
+        "full"
+      ]
+    },
+    {
+      "name": "affected_tests",
+      "cmd": "python -m core.harness.affected --base origin/main --run",
+      "quick": true,
+      "kind": "test",
+      "timeout_sec": 1800,
+      "profiles": [
+        "pr"
+      ]
+    },
+    {
+      "name": "smoke_tests",
+      "cmd": "python -m pytest tests -q -m smoke",
+      "quick": true,
+      "kind": "test",
+      "timeout_sec": 300,
+      "profiles": [
+        "pr"
+      ]
     },
     {
       "name": "unit_and_integration_tests_parallel",
-      "cmd": "python -m pytest tests -q -n auto --dist worksteal -m \"not serial\" --durations=25 --ignore=tests/test_canaletto.py",
+      "cmd": "python -m pytest tests -q -n auto --dist worksteal -m \"not serial\" --durations=25",
       "quick": true,
       "kind": "test",
       "timeout_sec": 3000
     },
     {
       "name": "unit_and_integration_tests_serial",
-      "cmd": "python -m pytest tests -q -m serial --ignore=tests/test_canaletto.py",
+      "cmd": "python -m pytest tests -q -m serial",
       "quick": true,
       "kind": "test",
       "timeout_sec": 300

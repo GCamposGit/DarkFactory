@@ -25,6 +25,8 @@ class HarnessStepConfig(BaseModel):
     holdout: bool = False
     timeout_sec: int = Field(default=120, ge=1, le=3600)
     kind: Literal["test", "check"] | None = None
+    #: Gate profiles this step belongs to (USR-377 S5). Default keeps steps in "full" only.
+    profiles: list[Literal["pr", "full"]] = Field(default_factory=lambda: ["full"], min_length=1)
 
 
 class HarnessConfig(BaseModel):

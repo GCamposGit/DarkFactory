@@ -487,6 +487,14 @@ def _ensure_clean_worktree() -> None:
         )
 
 
+def config_for_profile(config: HarnessConfig, profile: str) -> HarnessConfig:
+    """Return a config holding only the steps of ``profile`` ("pr" or "full")."""
+    steps = [step for step in config.steps if profile in step.profiles]
+    if not steps:
+        raise ValueError(f"Harness profile {profile!r} selects zero steps")
+    return config.model_copy(update={"steps": steps})
+
+
 def _selected_steps(
     config: HarnessConfig, *, quick: bool, include_holdout: bool
 ) -> list[HarnessStepConfig]:
@@ -1030,7 +1038,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="I/N",
         help="Run only shard I of N of the test files (1-based; forces --no-cache --local)",
     )
+    parser.add_argument(
+        "--profile",
+        choices=("pr", "full"),
+        default="full",
+        help=(
+            "Gate profile: 'full' (default, unchanged) or 'pr' (syntax, types, "
+            "affected tests vs origin/main and smoke; forces --no-cache --local)"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.profile == "pr":
+        args.no_cache = True
+        args.local = True
     if args.shard:
         try:
             test_shards.parse_shard(args.shard)
@@ -1047,6 +1067,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config_path = PROJECT_ROOT / config_path
     try:
         config, config_hash = load_config(config_path)
+        config = config_for_profile(config, args.profile)
         return 0 if run_with_cache(
             config,
             config_hash=config_hash,
