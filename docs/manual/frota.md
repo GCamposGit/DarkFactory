@@ -155,6 +155,6 @@ Recoloque os dois arquivos em `deploy/dokploy/`, recrie o compose no Dokploy e r
 
 ## Imagem do cloud no GHCR
 
-O job `cloud` de `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkfac-cloud:<sha>` (coordinator, worker, backup-cron, canary) junto com a imagem do Hub. O `DARKFAC_GIT_SHA` do compose `darkfac-cloud` e gravado pela propria fabrica: `scripts/dokploy_redeploy.py` (`pin_cloud_git_sha`) acrescenta `DARKFAC_GIT_SHA=<sha de origin/main>` ao env do compose no Dokploy antes de cada deploy, preservando as outras variaveis. Sem sha valido, o disparo falha fechado em vez de construir na VPS.
+O job `cloud` de `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkfac-cloud:<sha>` (coordinator, worker, backup-cron, canary) junto com a imagem do Hub. O `DARKFAC_GIT_SHA` do compose `darkfac-cloud` e gravado pela propria fabrica: `scripts/dokploy_redeploy.py` (`pin_cloud_git_sha`) acrescenta `DARKFAC_GIT_SHA=<sha de origin/main>` ao env do compose no Dokploy antes de cada deploy, preservando as outras variaveis. Antes disso o script espera a tag `ghcr.io/gcamposgit/darkfac-cloud:<sha>` existir no GHCR (mesmo mecanismo do Hub); se ela nao aparecer no prazo, nao grava o sha novo nem dispara o deploy, e o sha anterior continua rodando. Sem sha valido, o disparo falha fechado em vez de construir na VPS.
 
 Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) reconstroem a imagem do Hub (USR-397); o ledger (`.factory/demands`, `.factory/owner_actions`) continua somente dados.

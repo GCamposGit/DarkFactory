@@ -659,12 +659,13 @@ GhcrManifestProbe = Callable[[str, str], int]
 def wait_for_ghcr_tag(
     sha: str, *, probe: Optional[GhcrManifestProbe] = None, timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
     interval: float = GHCR_TAG_POLL_SECONDS, sleep_fn: Callable[[float], None] = time.sleep,
-    clock_fn: Callable[[], float] = time.monotonic,
+    clock_fn: Callable[[], float] = time.monotonic, repository: str = "gcamposgit/darkhub",
 ) -> None:
     """CLI compatibility wrapper around the shared GHCR waiter; never falls back to build."""
     try:
         _shared_wait_for_ghcr_image(
             sha, probe=probe, timeout=timeout, interval=interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
+            repository=repository,
         )
     except GhcrImageUnavailableError as exc:
         raise DokployUsageError(str(exc)) from None
@@ -689,6 +690,7 @@ def set_compose_git_sha(
 
 
 CLOUD_SHA_ENV = "DARKFAC_GIT_SHA"
+CLOUD_IMAGE_REPOSITORY = "gcamposgit/darkfac-cloud"
 
 
 def merge_env_var(env_text: str, name: str, value: str) -> str:
@@ -1296,7 +1298,13 @@ def _run_main(
                     continue
             else:
                 if svc.name.lower() == "darkfac-cloud":
-                    pin_cloud_git_sha(transport, svc, baseline_payload, expected_sha or get_origin_main_sha())
+                    cloud_sha = expected_sha or get_origin_main_sha()
+                    # USR-397: never move DARKFAC_GIT_SHA (nor deploy) before the image exists;
+                    # on timeout the previous sha keeps running.
+                    print(f"Waiting for ghcr.io/{CLOUD_IMAGE_REPOSITORY}:{cloud_sha} on GHCR...", file=out, flush=True)
+                    wait_for_ghcr_tag(cloud_sha or "", probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn,
+                                      repository=CLOUD_IMAGE_REPOSITORY)
+                    pin_cloud_git_sha(transport, svc, baseline_payload, cloud_sha)
                 trigger_deploy(transport, svc)
         except (DokployUsageError, BlueGreenError) as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)

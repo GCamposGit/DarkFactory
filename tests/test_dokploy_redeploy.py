@@ -29,6 +29,19 @@ from scripts import dokploy_redeploy as mod
 _REAL_DEFAULT_DISK_HYGIENE = mod.default_disk_hygiene_runner
 _REAL_DEFAULT_CHECK_MAIN_RUNNER = mod.default_check_main_runner
 
+@pytest.fixture(autouse=True)
+def _no_network_for_cloud_ghcr_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-397: the darkfac-cloud deploy waits on GHCR; tests that do not inject a probe skip the network."""
+    real = mod._shared_wait_for_ghcr_image
+
+    def fake(sha: str, **kwargs: Any) -> None:
+        if kwargs.get("probe") is None and kwargs.get("repository") == mod.CLOUD_IMAGE_REPOSITORY:
+            return None
+        return real(sha, **kwargs)
+
+    monkeypatch.setattr(mod, "_shared_wait_for_ghcr_image", fake)
+
+
 
 @pytest.fixture(autouse=True)
 def _no_ambient_registry_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -764,6 +777,7 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
         [],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
+        ghcr_probe=lambda repo, tag: 200,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
         clock_fn=clock.now,
@@ -833,6 +847,7 @@ def test_main_no_wait_triggers_and_exits_0_without_polling() -> None:
         ["--no-wait", "--only", "darkfac-cloud"],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
+        ghcr_probe=lambda repo, tag: 200,
         transport_factory=lambda url, key: transport,
         stdout=out,
         stderr=err,
@@ -858,6 +873,7 @@ def test_main_only_scopes_deploy_to_selected_services() -> None:
         ["--only", "darkfac-cloud"],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
+        ghcr_probe=lambda repo, tag: 200,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
         clock_fn=clock.now,
@@ -2085,3 +2101,31 @@ def test_check_main_red_ticket_creation_never_hangs_the_deploy() -> None:
     assert mod.run_check_main_bounded(lambda: (0, {"state": "green"})) == (0, {"state": "green"})
     assert not mod.hub_restore_is_secure("# darkfac-bluegreen: active=blue blue=" + "a" * 40 + " green=" + "a" * 40
                                          + "\n      replicas: 0\n      replicas: 0\n")
+
+
+def test_cloud_deploy_waits_for_ghcr_tag_and_does_nothing_when_absent() -> None:
+    transport = _make_transport_with_full_project()
+    transport.program_get("/api/compose.one?composeId=compose_cloud", [{"deployments": [], "env": "KEEP=secret-value\n"}])
+    out, err = io.StringIO(), io.StringIO()
+    clock = FakeClock()
+    seen: list = []
+
+    def probe(repo: str, tag: str) -> int:
+        seen.append(repo)
+        return 404
+
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        ghcr_probe=probe,
+        sleep_fn=clock.sleep,
+        clock_fn=clock.now,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code != mod.EXIT_OK
+    assert seen and set(seen) == {"gcamposgit/darkfac-cloud"}
+    assert transport.post_calls == []  # no compose.update (sha unchanged), no deploy
+    assert "darkfac-cloud:" in err.getvalue() and "not published" in err.getvalue()
