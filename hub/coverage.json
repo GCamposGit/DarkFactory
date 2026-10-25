@@ -374,6 +374,9 @@
     "GET /api/usage/models": {
       "surface": "ai-usage-section"
     },
+    "GET /api/usage/ticket-costs": {
+      "surface": "ticket-cost-list"
+    },
     "POST /api/usage/models/events": {
       "machine": "Ingestão de eventos de uso enviados por workers e harnesses (chave compartilhada)"
     },

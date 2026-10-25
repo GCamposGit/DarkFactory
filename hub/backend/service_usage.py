@@ -98,6 +98,34 @@ class UsageMixin:
         """Return project-wide model counters and recent attempts."""
         return self.model_usage_ledger.report(project_id=project_id)
 
+    def get_ticket_costs(self, limit: int = 50) -> list[Any]:
+        """Cost per ticket: API calls tagged with ticket_id + implicit subscription cost (USR-378)."""
+        from core.usage.ticket_cost import (
+            cost_by_ticket,
+            load_subscription_prices,
+            read_ticket_quota_history,
+        )
+
+        records: list[dict[str, Any]] = list(read_ticket_quota_history(self._ticket_reports_dir()))
+        for event in self.model_usage_ledger.report(recent_limit=500).recent_events:
+            if event.ticket_id:
+                records.append({
+                    "ticket_id": event.ticket_id,
+                    "kind": "api_call",
+                    "harness": event.harness,
+                    "model": event.model,
+                    "success": event.success,
+                    "api_cost_usd": event.cost_usd,
+                    "timestamp": event.timestamp,
+                })
+        return cost_by_ticket(records, load_subscription_prices())[:max(1, limit)]
+
+    @staticmethod
+    def _ticket_reports_dir() -> Any:
+        from core.paths import state_root
+
+        return state_root() / "reports"
+
     def record_model_usage(self, event: ModelCallEvent) -> Any:
         """Allow Codex, Grok, Gemini and other harnesses to report calls."""
         self.model_usage_ledger.record(event)

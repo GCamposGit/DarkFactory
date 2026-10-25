@@ -966,6 +966,15 @@ def get_model_usage_endpoint(
     return service.get_model_usage(project_id=project_id)
 
 
+@router.get("/usage/ticket-costs")
+def get_ticket_costs_endpoint(
+    limit: int = Query(default=50, ge=1, le=500),
+    service: HubService = Depends(get_hub_service),
+) -> List[dict]:
+    """Read-only cost per ticket (API + implicit subscription cost, failed attempts included)."""
+    return [row.model_dump() for row in service.get_ticket_costs(limit=limit)]
+
+
 @router.post("/usage/models/events", response_model=ModelUsageReport)
 def record_model_usage_endpoint(
     payload: ModelCallEvent,
