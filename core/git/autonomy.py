@@ -32,7 +32,7 @@ from core.demands.models import DemandOrigin, TAG_USER_DEMAND, UserTicket
 from core.demands.id_allocator import title_collisions
 from core.demands.merge import merge_demands_3way
 from core.demands.store import DemandsStore
-from core.git import main_ci_alert, queue_registration, secret_scan, ticket_workspace
+from core.git import app_token, main_ci_alert, queue_registration, secret_scan, ticket_workspace
 from core.git.safe_show import safe_show
 from core.git.state_guard import DEFAULT_PROTECTED_STATE_PATHS, check_staged_state_files
 from core.line import cancellation
@@ -146,6 +146,15 @@ def _refuse_if_cancelled(args: Sequence[str], publishing: frozenset[str]) -> Non
         cancellation.ensure_not_cancelled()
 
 
+def _app_env(args: Sequence[str], publishing: frozenset[str]) -> Optional[dict[str, str]]:
+    """Env with the GitHub App token as GH_TOKEN for publishing calls only; ``None`` keeps ambient auth (USR-343)."""
+    words = [a for a in args if not str(a).startswith("-")]
+    if not publishing.intersection(words[:2]):
+        return None
+    token = app_token.get_app_token()
+    return {**os.environ, "GH_TOKEN": token} if token else None
+
+
 def _run_gh(args: Sequence[str], cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess[str]:
     """Execute the GitHub CLI; never raises (missing gh yields returncode 127)."""
     _refuse_if_cancelled(args, _PUBLISHING_GH)
@@ -159,6 +168,7 @@ def _run_gh(args: Sequence[str], cwd: Path = PROJECT_ROOT) -> subprocess.Complet
             encoding="utf-8",
             errors="replace",
             timeout=120.0,
+            env=_app_env(args, _PUBLISHING_GH),
             **_win_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
@@ -205,6 +215,7 @@ def _run_git(
             errors="replace",
             timeout=timeout_s,
             check=check,
+            env=_app_env(args, frozenset({"push"})),
             **_win_kwargs(),
         )
         return proc

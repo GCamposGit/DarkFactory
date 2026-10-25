@@ -364,3 +364,38 @@ def test_sync_with_base_fails_closed_on_conflicting_ticket_mutation(test_remote_
     assert ok is False
     assert "USR-01" in msg
     assert "Conflict for ticket USR-01" in msg
+
+
+def test_github_app_token_cached_and_injected_only_for_publishing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-343 S2: App token goes to GH_TOKEN of push/pr-merge only; absent config keeps ambient env."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import httpx
+    from core.git import app_token, autonomy
+
+    pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    ).decode()
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(201, json={"token": "ghs_fake", "expires_at": "2030-01-01T00:00:00Z"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    env = {"GH_APP_ID": "1", "GH_APP_INSTALLATION_ID": "2", "GH_APP_PRIVATE_KEY": pem}
+    app_token.clear_cache()
+    assert app_token.get_app_token({}, client=client) is None
+    assert app_token.get_app_token(env, client=client, now=1_000.0) == "ghs_fake"
+    assert app_token.get_app_token(env, client=client, now=2_000.0) == "ghs_fake"
+    assert len(calls) == 1 and calls[0].url.path == "/app/installations/2/access_tokens"
+    assert b"pull_requests" in calls[0].content
+    assert app_token.get_app_token(env, client=client, now=1_893_456_000.0 - 100) == "ghs_fake"
+    assert len(calls) == 2  # inside the 5 min refresh margin
+    app_token.clear_cache()
+
+    monkeypatch.setattr(app_token, "get_app_token", lambda *a, **k: "ghs_fake")
+    assert autonomy._app_env(["pr", "merge", "1"], autonomy._PUBLISHING_GH)["GH_TOKEN"] == "ghs_fake"
+    assert autonomy._app_env(["pr", "view", "1"], autonomy._PUBLISHING_GH) is None
+    monkeypatch.setattr(app_token, "get_app_token", lambda *a, **k: None)
+    assert autonomy._app_env(["push", "origin"], frozenset({"push"})) is None
