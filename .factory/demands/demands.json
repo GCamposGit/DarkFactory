@@ -11436,5 +11436,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T02:32:45.942759Z",
     "updated_at": "2026-10-25T02:32:45.942759Z"
+  },
+  {
+    "id": "USR-384",
+    "project_id": "darkfac",
+    "title": "Despachante da frota como servico do sistema nos 3 hosts (fatia do USR-369)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Plano V0 Frente 4: o despachante (core/line/fleet_dispatcher.py) deve iniciar com a maquina, sem o owner logado. Hoje roda por script de sessao. Existe scripts/install_fleet_dispatcher.ps1. Entregar: Windows via Agendador de Tarefas com gatilho 'ao iniciar' e conta de servico do usuario (Notebook, Desktop) e Linux via systemd unit (grokbox), com reinicio automatico e log rotativo; queda da VM do grokbox tratada como evento normal (ticket volta para a fila e retoma em outro host).",
+    "core_journey": [
+      "Plano V0 Frente 4: o despachante (core/line/fleet_dispatcher.py) deve iniciar com a maquina, sem o owner logado. Hoje roda por script de sessao. Existe scripts/install_fleet_dispatcher.ps1. Entregar: Windows via Agendador de Tarefas com gatilho 'ao iniciar' e conta de servico do usuario (Notebook, Desktop) e Linux via systemd unit (grokbox), com reinicio automatico e log rotativo; queda da VM do grokbox tratada como evento normal (ticket volta para a fila e retoma em outro host)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "scripts/install_fleet_dispatcher.ps1 instala tarefa que inicia no boot e reinicia em falha; teste do gerador do XML da tarefa",
+      "unit systemd do grokbox gerada e documentada em docs/manual/frota.md",
+      "Teste: reserva de host morto expira e o ticket volta para planned"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T02:34:48.353495Z",
+    "updated_at": "2026-10-25T02:34:48.353495Z"
   }
 ]
