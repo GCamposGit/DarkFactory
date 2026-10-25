@@ -714,7 +714,7 @@ class TelegramGateway:
             return self._handle_alerts(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
         if not cmd_str.startswith("/"):
             return self._handle_demand0(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
-        return self._handle_command_fallback(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        return self._handle_command_fallback(result, msg, user_id, chat_id, cmd_str, arg_str, raw_text, is_voice_demand, voice_transcription)
 
     def _redirect_owner_command(
         self, update: TelegramUpdate, raw_text: str
@@ -1205,7 +1205,7 @@ class TelegramGateway:
             )
         return result
 
-    def _handle_command_fallback(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+    def _handle_command_fallback(self, result, msg, user_id, chat_id, cmd_str, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
         result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
         return result
 

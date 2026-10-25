@@ -1162,7 +1162,7 @@ class GitAutonomyManager:
         if push.returncode != 0:
             return DeliveryReport(
                 ok=False, action="error", branch=branch, message=f"push failed: {push.stderr.strip()}"
-            )
+            ), remote_branch, 0, ""
 
         # (e) PR (reuse existing)
         existing = (duplicate[:2] if duplicate else None) or self._find_open_pr(branch, cwd, runner)
@@ -1183,20 +1183,25 @@ class GitAutonomyManager:
             if pr.returncode != 0:
                 return DeliveryReport(
                     ok=False, action="error", branch=branch, message=f"gh pr create failed: {pr.stderr.strip()}"
-                )
+                ), remote_branch, 0, ""
             pr_url = pr.stdout.strip().splitlines()[-1] if pr.stdout.strip() else ""
             m = re.search(r"/pull/(\d+)", pr_url)
             if not m:
                 return DeliveryReport(
                     ok=False, action="error", branch=branch, pr_url=pr_url, message="cannot parse PR number"
-                )
+                ), remote_branch, 0, pr_url
             number = int(m.group(1))
 
         pr_title = _delivery_pr_title(kind, ticket_id, title)
         title_update = runner(["pr", "edit", str(number), "--title", pr_title], cwd)
         if title_update.returncode != 0:
-            return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
-                                  message=f"Could not set {kind} PR title: {title_update.stderr.strip()}")
+            return (
+                DeliveryReport(
+                    ok=False, action="error", pr_url=pr_url, branch=branch,
+                    message=f"Could not set {kind} PR title: {title_update.stderr.strip()}",
+                ),
+                remote_branch, number, pr_url,
+            )
         label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
         if label.returncode != 0:
             color = {"queue": "D4C5F9", "registry": "FBCA04"}.get(kind, "0E8A16")
@@ -1205,12 +1210,22 @@ class GitAutonomyManager:
             created = runner(["label", "create", kind, "--color", color,
                               "--description", description, "--force"], cwd)
             if created.returncode != 0:
-                return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
-                                      message=f"Could not create {kind} label: {created.stderr.strip()}")
+                return (
+                    DeliveryReport(
+                        ok=False, action="error", pr_url=pr_url, branch=branch,
+                        message=f"Could not create {kind} label: {created.stderr.strip()}",
+                    ),
+                    remote_branch, number, pr_url,
+                )
             label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
             if label.returncode != 0:
-                return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
-                                      message=f"Could not label {kind} PR: {label.stderr.strip()}")
+                return (
+                    DeliveryReport(
+                        ok=False, action="error", pr_url=pr_url, branch=branch,
+                        message=f"Could not label {kind} PR: {label.stderr.strip()}",
+                    ),
+                    remote_branch, number, pr_url,
+                )
 
         self._phase("pr", "succeeded", pr_url)
         if kind == "implementation":

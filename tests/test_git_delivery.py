@@ -12,6 +12,7 @@ import pytest
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.git.autonomy import DeliveryReport, GitAutonomyManager
+from core.git import autonomy as autonomy_module
 from core.roadmap.models import DeliveryStatus
 
 
@@ -179,6 +180,66 @@ def test_commercial_acceptance_opens_pr_without_merge(env: tuple[Path, Path, Fak
     assert rep.pr_url and not rep.cleaned
     assert not any(c[:2] == ["pr", "merge"] for c in gh.calls)
     assert _git(local, "branch", "--list", "ticket/usr-74")
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_message", "expected_number", "expected_url"),
+    [
+        ("push", "push failed: denied", 0, ""),
+        ("create", "gh pr create failed: denied", 0, ""),
+        ("parse", "cannot parse PR number", 0, "not-a-pr-url"),
+        ("title", "Could not set implementation PR title: denied", 1, "https://github.com/x/y/pull/1"),
+        ("create_label", "Could not create implementation label: denied", 1, "https://github.com/x/y/pull/1"),
+        ("add_label", "Could not label implementation PR: denied", 1, "https://github.com/x/y/pull/1"),
+    ],
+)
+def test_open_delivery_pr_errors_preserve_tuple_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    expected_message: str,
+    expected_number: int,
+    expected_url: str,
+) -> None:
+    git_returncode = 1 if failure == "push" else 0
+
+    def fake_git(args: list[str], *, cwd: Path, timeout_s: float = 60.0) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, git_returncode, "", "denied" if git_returncode else "")
+
+    monkeypatch.setattr(autonomy_module, "_run_git", fake_git)
+    calls: list[list[str]] = []
+
+    def fake_gh(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        call = list(args)
+        calls.append(call)
+        if call[:2] == ["pr", "list"]:
+            return subprocess.CompletedProcess(call, 0, "[]", "")
+        if call[:2] == ["pr", "create"]:
+            if failure == "create":
+                return subprocess.CompletedProcess(call, 1, "", "denied")
+            url = "not-a-pr-url" if failure == "parse" else "https://github.com/x/y/pull/1"
+            return subprocess.CompletedProcess(call, 0, url, "")
+        if call[:2] == ["pr", "edit"]:
+            if failure == "title" and "--title" in call:
+                return subprocess.CompletedProcess(call, 1, "", "denied")
+            if failure in {"create_label", "add_label"} and "--add-label" in call:
+                return subprocess.CompletedProcess(call, 1, "", "denied")
+            return subprocess.CompletedProcess(call, 0, "", "")
+        if call[:2] == ["label", "create"] and failure == "create_label":
+            return subprocess.CompletedProcess(call, 1, "", "denied")
+        return subprocess.CompletedProcess(call, 0, "", "")
+
+    manager = GitAutonomyManager(tmp_path)
+    opened, remote_branch, number, pr_url = manager._open_delivery_pr(
+        "USR-385", "Refactor", tmp_path, "main", "ticket/usr-385", fake_gh, "implementation"
+    )
+
+    assert isinstance(opened, DeliveryReport)
+    assert not opened.ok and opened.action == "error"
+    assert opened.message == expected_message
+    assert opened.branch == "ticket/usr-385"
+    assert opened.pr_url == (expected_url or None)
+    assert (remote_branch, number, pr_url) == ("ticket/usr-385", expected_number, expected_url)
 
 
 def test_cleanup_removes_secondary_worktree(env: tuple[Path, Path, FakeGh]) -> None:
