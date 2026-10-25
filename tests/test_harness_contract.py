@@ -12,6 +12,8 @@ from core.harness.markers import parse_harness_output
 from core.harness.models import HarnessConfig, HarnessResult, HarnessStepConfig
 from core.harness.runner import load_config, resolve_command, sanitize_child_output
 
+pytestmark = pytest.mark.smoke
+
 
 def _valid_result() -> HarnessResult:
     return HarnessResult(

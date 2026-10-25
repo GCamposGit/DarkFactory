@@ -279,6 +279,20 @@ def test_docs_only_change_is_none(tmp_path: Path) -> None:
     assert selection.mode == "none"
     assert selection.tests == []
     assert selection.escalations == []
+    # pr profile (USR-377 S5): docs-only runs no affected tests, only smoke.
+    assert affected.run_pytest(repo, selection, []) == 0
+
+    # ...but a change to harness.config.json escalates to the full suite.
+    _write(repo, "harness.config.json", "{}\n")
+    assert affected.select_affected(repo, "main").mode == "full"
+
+    from core.harness import runner
+
+    config, _ = runner.load_config(Path(__file__).resolve().parents[1] / "harness.config.json")
+    pr_names = [s.name for s in runner.config_for_profile(config, "pr").steps]
+    assert pr_names == ["syntax_only", "static_types", "affected_tests", "smoke_tests"]
+    full_names = [s.name for s in runner.config_for_profile(config, "full").steps]
+    assert "affected_tests" not in full_names and "smoke_tests" not in full_names
 
 
 # --- untracked files / deletions ---------------------------------------------
