@@ -232,7 +232,7 @@ def sync_with_refresh_requests(
 
 
 def sync_owner_answers(target_url: str, telemetry_key: str) -> None:
-    """USR-195: persist decisions answered in the Hub into the repo ledger (autonomous queue PR).
+    """USR-195: persist decisions answered in the Hub into the repo ledger (control store, no PR).
 
     Idempotent and never raises; it opens a worktree/PR only when an answered decision is missing
     from the repository's ``owner_actions.json`` / blocked-ticket tags.
@@ -248,6 +248,19 @@ def sync_owner_answers(target_url: str, telemetry_key: str) -> None:
         logger.warning("[OA_ANSWER_SYNC_DEFER] %s", _redact_secret(result.error, telemetry_key))
     elif result.pending:
         logger.info("[OA_ANSWER_SYNC] decisoes %s -> delivered=%s", ",".join(result.pending), result.delivered)
+
+
+def run_daily_queue_snapshot() -> None:
+    """USR-343 S4b: once a day (idempotent) write the control-store queue into the ledgers. Never raises."""
+    try:
+        from scripts.snapshot_queue import run_snapshot
+
+        result = run_snapshot(REPO_ROOT)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[QUEUE_SNAPSHOT_FAIL] %s", exc)
+        return
+    if result.action not in ("skipped", "no_changes"):
+        logger.info("[QUEUE_SNAPSHOT] %s: %s", result.action, result.message)
 
 
 def main() -> int:
@@ -370,6 +383,9 @@ def main() -> int:
         ):
             last_answer_sync = time.monotonic()
             sync_owner_answers(args.target_url, telemetry_key)
+
+        if args.loop and not args.dry_run:
+            run_daily_queue_snapshot()
 
         if not args.loop:
             break

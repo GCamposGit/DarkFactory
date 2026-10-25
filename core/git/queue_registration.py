@@ -15,15 +15,8 @@ This module makes that failure loud, through the existing owner-action backlog
 
 Everything is best effort and idempotent (one item per PR) and never raises into the delivery.
 
-Writing the alert (USR-246): both functions run from whatever checkout the caller's own delivery
-is using (the shared checkout, or a ticket's throwaway worktree) -- never a location it would be
-safe to write into directly, because nobody commits there on this module's behalf. Without an
-explicit ``store`` (the test-only direct-write path) the mutation instead happens inside its own
-disposable worktree off ``origin/main`` and is landed on main as a small autonomous ``queue`` PR
-(:func:`_commit_owner_action_changes`), exactly like a ticket's own registration PR. The caller's
-working tree is never touched, so raising or resolving an alert can never be the reason the next
-``run_ticket`` refuses with ``SharedCheckoutDirty``, and the change reaches main so the Hub (which
-reads the committed file) shows it too.
+Writing the alert (USR-343 S4b): the alert is written straight to the control store (see
+:func:`_commit_owner_action_changes`); no worktree and no PR are involved.
 """
 
 from __future__ import annotations
@@ -52,10 +45,6 @@ GhRunner = Callable[[Sequence[str], Path], "subprocess.CompletedProcess[str]"]
 ManagerFactory = Callable[[Path], "GitAutonomyManager"]
 
 T = TypeVar("T")
-
-# Repository-relative path of the owner-action backlog (kept in sync with
-# ``core.owner_actions.store.DEFAULT_PATH`` by ``tests/test_queue_registration.py``).
-_OWNER_ACTIONS_RELATIVE = ".factory/owner_actions/owner_actions.json"
 
 _PR_NUMBER = re.compile(r"/pull/(\d+)")
 _TICKET_IN_TITLE = re.compile(r"registrar\s+(\S+)\s+-", re.IGNORECASE)
@@ -121,49 +110,18 @@ def _commit_owner_action_changes(
     gh_runner: Optional[GhRunner] = None,
     manager_factory: Optional[ManagerFactory] = None,
 ) -> Optional[T]:
-    """Apply ``mutate`` to the owner-action ledger inside its own throwaway worktree (USR-246).
+    """Apply ``mutate`` to the owner-action backlog in the control store (USR-343 S4b).
 
-    ``cwd`` is only used to locate the repository (any worktree of it will do, via
-    :func:`core.git.ticket_workspace.create_workspace`'s own ``git worktree list`` lookup); it is
-    never written to. When ``mutate`` actually changed the ledger, the commit is landed on main as
-    its own small autonomous ``queue`` PR (reusing :meth:`core.git.autonomy.GitAutonomyManager.deliver_branch`,
-    the same path a ticket's own registration PR takes) and the disposable worktree is cleaned up by
-    that delivery; a no-op mutation (idempotent re-raise/re-resolve) just discards the worktree.
-    Returns ``mutate``'s result, or ``None`` if the worktree could not even be created. Never raises.
-
-    ``manager_factory`` builds the manager used for that landing delivery (default: a plain
-    ``GitAutonomyManager(root)``). The caller's own ``deliver_branch`` passes its ``_child_manager``
-    bound method so the nested delivery shares its CI timeout/poll and, critically, its injected
-    clock/sleep functions -- without that, a test driving the outer delivery with a fake clock would
-    have this inner one fall back to real ``time.sleep`` (USR-246).
+    Historically this opened a throwaway worktree and landed the change as a ``chore/oa-*`` PR; the
+    backlog now lives in the control store, so the mutation is a plain store write: no worktree, no
+    push, no PR. ``cwd``, ``label``, ``title``, ``gh_runner`` and ``manager_factory`` are kept only
+    so existing callers need no change. Returns ``mutate``'s result, or ``None`` on failure. Never raises.
     """
-    from core.git.autonomy import GitAutonomyManager
-    from core.git.ticket_workspace import WorkspaceError, cleanup, create_workspace
-
     try:
-        workspace = create_workspace(label, cwd=cwd, unique_branch=True)
-    except WorkspaceError as exc:
-        logger.warning("owner_actions: could not open an isolated worktree for %s: %s", label, exc)
-        return None
-    store = OwnerActionStore(workspace.path / _OWNER_ACTIONS_RELATIVE)
-    try:
-        result = mutate(store)
+        return mutate(OwnerActionStore(control=True))
     except Exception as exc:  # noqa: BLE001 - supervision must never break the delivery
         logger.warning("owner_actions: mutation failed for %s: %s", label, exc)
-        cleanup(workspace.path, workspace.main_root)
         return None
-    mgr = (manager_factory or GitAutonomyManager)(workspace.main_root)
-    if not mgr.is_dirty(cwd=workspace.path):
-        cleanup(workspace.path, workspace.main_root)
-        return result
-    # supervise_queue=False: this delivery IS the stuck-PR alert/resolution commit itself, so it
-    # must never re-trigger the watchdog that would recurse right back into this function.
-    report = mgr.deliver_branch(
-        label, title, cwd=workspace.path, gh_runner=gh_runner, kind="queue", supervise_queue=False
-    )
-    if not report.ok:
-        logger.warning("owner_actions: could not land %s on main (%s): %s", label, report.action, report.message)
-    return result
 
 
 def raise_alert(
