@@ -24,6 +24,7 @@ import os
 import re
 import time
 import urllib.parse
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
@@ -260,6 +261,19 @@ def run_bluegreen_deploy(
 DokployRequest = Callable[[str, str, Optional[dict]], Any]
 
 
+def _created_at_key(value: Any) -> float:
+    """Sortable epoch for an ISO 8601 ``createdAt``; missing/invalid sorts oldest."""
+    if not isinstance(value, str):
+        return float("-inf")
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return float("-inf")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 def run_bluegreen_via_dokploy(
     *,
     request: DokployRequest,
@@ -283,11 +297,13 @@ def run_bluegreen_via_dokploy(
         return data if isinstance(data, dict) else {}
 
     def newest(payload: dict) -> Optional[tuple]:
+        # Dokploy returns `deployments` out of order (USR-393): pick by createdAt.
         deployments = payload.get("deployments")
-        if isinstance(deployments, list) and deployments and isinstance(deployments[0], dict):
-            d = deployments[0]
-            return (d.get("deploymentId") or d.get("createdAt"), str(d.get("status") or ""))
-        return None
+        items = [d for d in deployments if isinstance(d, dict)] if isinstance(deployments, list) else []
+        if not items:
+            return None
+        d = max(items, key=lambda x: _created_at_key(x.get("createdAt")))
+        return (d.get("deploymentId") or d.get("createdAt"), str(d.get("status") or ""))
 
     def read_compose() -> Optional[str]:
         value = one().get("composeFile")
