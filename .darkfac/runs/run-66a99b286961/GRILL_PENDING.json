@@ -1,0 +1,61 @@
+{
+  "assumptions": [
+    "USR-375/USR-376 já entregaram: sequência canônica de estágios em run_ticket.py (todas as funções ≤150 linhas por varredura AST), artefatos Pydantic obrigatórios por estágio (core/line/stages.py require_artifact), G1 com checagem real de ambiguidade (core/demands/readiness.py), grill restrito às categorias do owner com cap de 3 perguntas e fallback em ADR (core/demands/grill.py), roteamento de planejamento fail-closed sem modelo barato de fallback (core/line/routing.py HIGH_TIER_ONLY_STAGES), e os fixes de USR-355 (budget_reset_at) e USR-371 (project_id propagado em pick()/deliver_branch()) — não será reimplementado nesta entrega.",
+    "fleet_dispatcher.py já delega integralmente a sequência canônica ao `run_ticket.py --fleet` (é só um filtro de tags + spawner de subprocesso); nenhuma mudança é necessária nele além do que a unificação do alimentador exigir.",
+    "'Correção pequena passa direto, sem grill' já está satisfeito pela regex de small-fix em core/demands/readiness.py; nenhum código novo é necessário para esse critério.",
+    "docs/manual/ será conferido e atualizado contra o comportamento atual dos estágios como parte normal da entrega, sem necessidade de pergunta ao owner.",
+    "Os testes E2E novos exigidos pelos critérios de aceite (três pontos de entrada bloqueados sem plano/veredito/relatório de deploy; ticket do Telegram sobrevivendo a um redeploy no meio) substituem/consolidam testes de forma existentes em vez de somar ao total, conforme o critério 'saldo de testes da suite nao aumenta'."
+  ],
+  "technical": [
+    {
+      "id": "q4",
+      "text": "Confirmando remoção de código morto e de uma regra que hoje contradiz o G1 já implementado: core/workflow/integration_handler.py e core/workflow/research_handler.py (zero referência fora dos próprios testes dedicados, já substituídos por core/line/stage_integration.py via core/line/bindings.py:464) e o trecho de .agents/rules/GEMINI.md:31-41 que proíbe o agente de assumir parâmetros técnicos antes da 'desambiguação formal' — hoje incompatível com o fluxo ADR técnico que core/demands/grill.py já usa. Remover ambos nesta entrega?",
+      "kind": "technical",
+      "options": [
+        "Remover os dois módulos órfãos + seus testes dedicados, e remover o trecho do GEMINI.md",
+        "Manter por ora e tratar só o que está estritamente no escopo mínimo"
+      ],
+      "recommended": "Remover os dois módulos órfãos + seus testes dedicados, e remover o trecho do GEMINI.md",
+      "why": "É exatamente o que a demanda já lista em 'Remover'; manter código morto e uma regra contraditória confunde agentes futuros sem nenhum benefício."
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "A investigação no repositório mostra que USR-375/USR-376 já entregaram boa parte do escopo desta demanda: sequência canônica INTAKE→GRILL→PLAN→RESEARCH→BUILD→VALIDATE→REVIEW→MERGE→DEPLOY_SMOKE→DOCS→LEARNING dentro de run_ticket.py (nenhuma função acima de 150 linhas), artefatos Pydantic obrigatórios por estágio (core/line/stages.py), G1 real (core/demands/readiness.py já rejeita 'Quero um painel que mostre minhas vendas do mes'), grill só com categorias do owner e cap de 3 perguntas (core/demands/grill.py), roteamento planning fail-closed sem fallback barato (core/line/routing.py), e os fixes de USR-355 (budget_reset_at) e USR-371 (project_id em pick/deliver_branch). Isso muda o escopo real desta entrega: ela deve ser tratada como auditoria/fechamento dos itens que FALTAM, ou como reimplementação/verificação completa dos 10 critérios originais mesmo onde já há código em main?",
+      "kind": "intent",
+      "options": [
+        "Reduzir o escopo aos gaps concretos restantes (unificar o alimentador duplicado do Telegram/Hub, remover handlers mortos em core/workflow/, remover o trecho contraditório do GEMINI.md, girar ou não a tag planning-only) e testes E2E que faltam, sem tocar no que já está provado em main",
+        "Tratar como varredura de fechamento: reverificar e testar todos os 10 critérios de aceite do zero, mesmo os já aparentemente satisfeitos"
+      ],
+      "recommended": "Reduzir o escopo aos gaps concretos restantes",
+      "why": "Reimplementar o que já foi mesclado (commits a41ebbe, a5950d6, 53a73fe, 5e0f991) seria retrabalho puro e infla o saldo de testes, violando o próprio critério de aceite 'saldo de testes da suite nao aumenta'."
+    },
+    {
+      "id": "q2",
+      "text": "O container do Hub (deploy/dokploy/Dockerfile.hub) grava tickets do Telegram (core/integrations/telegram.py:938) direto em um demands.json local, auto-curado a partir de um .factory_seed congelado na imagem — uma segunda fila, divergente da canônica (core/line/backlog_feeder.py + feeder_cycle.py) que a linha lê do checkout do repositório. Unificar isso exige que o Hub passe a falar com a fila canônica (via core/demands/queue_store.register_ticket ou uma API) em vez de escrever em disco local. O Hub já tem hoje acesso de rede/credencial (conexão Postgres ou token de API) até o armazenamento canônico em produção, ou isso precisa ser provisionado antes de qualquer mudança de código?",
+      "kind": "secret",
+      "options": [
+        "Hub já tem acesso configurado — só repontar telegram.py para core.demands.queue_store.register_ticket",
+        "Não há acesso ainda — uma nova credencial/connection string precisa ser provisionada antes"
+      ],
+      "recommended": "Hub já tem acesso configurado — só repontar telegram.py para core.demands.queue_store.register_ticket",
+      "why": "Não é possível confirmar pela leitura do código se o container do Hub alcança o Postgres/API canônico em produção; assumir errado quebra em produção mesmo passando localmente."
+    },
+    {
+      "id": "q3",
+      "text": "docs/plans/PLANO_V0_2026-10-24.md:191-195 define que, ao entrar em produção, USR-375 remove a tag 'planning-only' dos blocos restantes do plano, liberando o despachante para executá-los com planejamento e fatiamento automáticos. Esta entrega deve girar essa tag imediatamente no próprio deploy autônomo, ou isso fica como ticket separado aprovado pelo owner antes de liberar o próximo lote de trabalho autônomo?",
+      "kind": "business",
+      "options": [
+        "Girar a tag já no deploy desta entrega, conforme o PLANO_V0",
+        "Manter a remoção da tag como ticket separado, com aprovação explícita do owner antes de liberar os blocos"
+      ],
+      "recommended": "Manter a remoção da tag como ticket separado, com aprovação explícita do owner antes de liberar os blocos",
+      "why": "Girar a tag libera de uma vez um volume desconhecido de trabalho autônomo no backlog; é uma decisão de risco/blast-radius que cabe ao owner, não uma recomendação técnica segura de assumir sozinho."
+    }
+  ],
+  "deadline": "2026-10-26T10:25:32.109498Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
