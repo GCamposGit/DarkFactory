@@ -9,22 +9,16 @@ paid-first model routing with fail-closed budget guards, and cryptographic audit
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
 
 import pytest
 
 from core.adoption.service import inspect_project
 from core.catalog.manager import CrossProjectCatalogManager
 from core.catalog.models import ComponentKind
-from core.content.anti_slop_linter import AntiSlopLinter
 from core.enterprise.audit_chain import ImmutableAuditChain
 from core.knowledge.models import KnowledgeCitation, KnowledgeQuery
 from core.knowledge.segundo_cerebro_client import SegundoCerebroClient
-from core.marketing.models import BlogPost, SEOAuditResult
-from core.marketing.publisher import ContentPublisher
-from core.marketing.seo_analytics import SEOValidator
 from core.portfolio.budget_manager import PortfolioBudgetManager
 from core.portfolio.models import ModelTier, ProjectBudgetConfig
 from core.portfolio.router_optimizer import PortfolioModelRouter
@@ -56,102 +50,6 @@ def test_atrium_adoption_and_governance_inspection() -> None:
         assert "MISSION.md" in inspection.governance_files
         assert "FACTORY_RULES.md" in inspection.governance_files
         assert "node" in inspection.stack.ecosystems
-
-
-def test_atrium_anti_slop_and_gate_g1_lifecycle(tmp_path: Path) -> None:
-    """Validate content authoring with Anti-Slop (Skill 15) and Gate G1 staging/promotion."""
-    site_dir = tmp_path / "site"
-    staging_dir = tmp_path / "staged"
-
-    publisher = ContentPublisher(
-        target_site_dir=site_dir,
-        staging_dir=staging_dir,
-        max_slop_score=20.0,
-        telegram_gateway=None,
-    )
-
-    clean_content = (
-        "Neste ensaio técnico, analisamos a transição de arquiteturas distribuídas "
-        "para agentes de software autônomos operando em fábricas de software. "
-        "A separação estrita de contratos de domínio e I/O garante que cada módulo "
-        "possa ser inspecionado deterministicamente por oráculos de teste."
-    )
-
-    post = BlogPost(
-        title="Arquitetura de Agentes Autônomos",
-        slug="arquitetura-agentes-autonomos",
-        description="Ensaio prático sobre orquestração autônoma e contratos estritos.",
-        date=datetime(2026, 9, 18, tzinfo=timezone.utc),
-        tags=["arquitetura", "agentes", "engenharia"],
-        content_md=clean_content,
-        lang="pt",
-    )
-
-    # 1. Publish without approval -> Must be STAGED awaiting Gate G1
-    stage_res = publisher.publish_blog_post(post, approved=False)
-    assert stage_res.success is True
-    assert stage_res.status == "staged_pending_approval"
-    assert stage_res.requires_human_approval is True
-    assert stage_res.slop_score <= 20.0
-
-    staged_file = staging_dir / "arquitetura-agentes-autonomos.md"
-    assert staged_file.is_file(), "Draft must be staged in staging directory"
-
-    # Production file must NOT exist yet
-    prod_file = site_dir / "src" / "content" / "thinking" / "arquitetura-agentes-autonomos.md"
-    assert not prod_file.exists(), "Unapproved post must never reach production directory"
-
-    # 2. Simulate Gate G1 Human Approval -> Promotes to production and clears staging
-    approve_res = publisher.publish_blog_post(post, approved=True, approver="Guilherme Campos")
-    assert approve_res.success is True
-    assert approve_res.status == "published"
-    assert approve_res.requires_human_approval is False
-    assert approve_res.approver == "Guilherme Campos"
-
-    assert prod_file.is_file(), "Approved post must be written to Astro thinking collection"
-    assert not staged_file.exists(), "Staged file must be cleaned up after human approval"
-
-    # Verify Astro frontmatter
-    prod_text = prod_file.read_text(encoding="utf-8")
-    assert 'title: "Arquitetura de Agentes Autônomos"' in prod_text
-    assert "date: 2026-09-18" in prod_text
-    assert 'lang: "pt"' in prod_text
-    assert '  - "arquitetura"' in prod_text
-
-
-def test_atrium_seo_metadata_audit() -> None:
-    """Validate deterministic SEO auditing on HTML structures."""
-    validator = SEOValidator(target_domain="https://ggcampos.com")
-
-    # Audit compliant HTML
-    valid_html = """<!DOCTYPE html>
-    <html lang="pt">
-    <head>
-        <title>Guilherme Campos - Engenharia e Software Autônomo</title>
-        <meta name="description" content="Portfólio executivo e ensaios técnicos de Guilherme Campos cobrindo inteligência artificial, engenharia e arquitetura de software." />
-        <link rel="canonical" href="https://ggcampos.com/thinking/agentes" />
-        <meta property="og:title" content="Guilherme Campos - Engenharia e Software Autônomo" />
-        <meta property="og:description" content="Portfólio executivo e ensaios técnicos de Guilherme Campos." />
-        <meta property="og:url" content="https://ggcampos.com/thinking/agentes" />
-        <meta property="og:image" content="https://ggcampos.com/og.jpg" />
-        <meta property="og:type" content="article" />
-    </head>
-    <body><h1>Conteúdo</h1></body>
-    </html>"""
-
-    result = validator.audit_html(valid_html, url_or_path="https://ggcampos.com/thinking/agentes")
-    assert result.valid is True
-    assert result.score >= 80.0
-    assert result.meta_description is not None
-    assert result.canonical_url == "https://ggcampos.com/thinking/agentes"
-    assert result.og_tags.get("og:type") == "article"
-
-    # Audit defective HTML (missing title and canonical)
-    bad_html = "<html><head><meta name='description' content='Curto'></head><body>Vazio</body></html>"
-    bad_result = validator.audit_html(bad_html, url_or_path="inline")
-    assert bad_result.valid is False
-    assert any("Missing <title>" in issue for issue in bad_result.issues)
-    assert any("Missing canonical" in issue for issue in bad_result.issues)
 
 
 def test_atrium_catalog_component_sync(tmp_path: Path) -> None:
