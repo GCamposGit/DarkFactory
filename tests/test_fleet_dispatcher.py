@@ -93,3 +93,20 @@ def test_deploy_deduplicated_per_batch(tmp_path: Path):
     e.d.run_cycle()
     e.d.run_cycle()
     assert e.deploys == 1
+
+
+def test_line_lock_refusal_is_busy_not_infra(tmp_path: Path):
+    log = tmp_path / "run.log"
+    log.write_text("[TRAVA DE LINHA] Já existe um run_ticket em andamento nesta máquina", encoding="utf-8")
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.config.lock_requeue_cooldown_sec = 10
+    e.d.run_cycle()
+    e.d.in_flight["grokbox"].log_path = log
+    e.handles["USR-01"].rc = 2
+    cyc = e.d.run_cycle()
+    assert cyc["idle_reasons"]["grokbox"].startswith("host_ocupado_trava")
+    text = log.read_text(encoding="utf-8")
+    assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
+    e.now += 15  # cooldown curto (10 s), bem abaixo do de infra (50 s)
+    e.d.run_cycle()
+    assert e.launched[-1] == ("USR-01", "grokbox")
