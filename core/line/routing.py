@@ -3,7 +3,8 @@
 Implements the unified "subscription first, OpenRouter only with verified balance,
 and fail-closed under critical pressure" policy.
 `pick()` walks a stage cascade, filtering out ineligible accounts (not in host_caps,
-in cooldown, forbidden models, unknown/stale quota, or remaining <= critical threshold 15%),
+in cooldown, forbidden models, unknown/stale quota, or remaining <= critical threshold 15%,
+except that low-complexity development can use unknown quota in degraded mode),
 and prioritizes eligible harnesses via Dynamic Headroom (highest remaining quota first)
 or specialized intelligence tiers.
 
@@ -679,7 +680,8 @@ def pick(
     Enforces:
     0. Filter out harnesses that do not declare `mode` (before any headroom ranking).
     1. Filter out accounts in cooldown, missing from host_caps, forbidden models,
-       and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed).
+       and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed except unknown quota
+       for low-complexity development tickets).
     1b. Operating-harness preference (`development` only): when the operating harness survived every
        filter above with known quota above the critical floor and no cooldown, it is elected before any
        headroom or complexity ranking. A harness outside the stage cascade takes part as an extra
@@ -690,7 +692,9 @@ def pick(
          falling back to highest headroom.
        - Low complexity: prefers GPT Luna xhigh / Gemini Flash if eligible.
        - Medium complexity / default: sorts strictly by remaining headroom descending.
-    2b. Bootstrap (`DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`, or `unknown_quota_last_resort_ok=True`):
+    2b. Low-complexity development can use unknown quota in degraded mode. Other stages retain the
+       optional bootstrap (`DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`, or
+       `unknown_quota_last_resort_ok=True`):
        when no candidate has known healthy quota, a subscription harness whose quota is UNKNOWN (never
        one known critical, nor one in cooldown) is elected, in cascade order, before OpenRouter.
        Default off: unknown quota stays fail-closed.
@@ -775,7 +779,13 @@ def pick(
     elif eligible:
         winner = _rank_eligible(stage, complexity, eligible)
 
-    allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
+    # USR-382: unknown subscription quota is a degraded route for small development tickets only.
+    # Keep the explicit last-resort bootstrap for non-development/read stages, but never let it
+    # authorize medium/high development work whose quota cannot be measured.
+    if stage == "development":
+        allow_unknown = (complexity or "").lower().strip() == "low"
+    else:
+        allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
     if winner is None and allow_unknown and unknown_quota:
         winner = unknown_quota[0]
         logger.warning(
