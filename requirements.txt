@@ -14,5 +14,6 @@ lxml>=5,<7
 cryptography>=42.0,<51
 PyYAML>=6.0,<7
 psutil>=6.0,<8
+import-linter>=2.0,<3
 
 # HF-02 laboratory dependencies are intentionally isolated; see spikes/runtime_choice/requirements.lock.txt.

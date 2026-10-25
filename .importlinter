@@ -1,0 +1,26 @@
+[importlinter]
+root_packages =
+    core
+    hub
+include_external_packages = True
+
+[importlinter:contract:core-not-hub]
+name = core nao importa hub (USR-377)
+type = forbidden
+source_modules =
+    core
+forbidden_modules =
+    hub
+
+[importlinter:contract:core-not-http]
+name = dominio (core) nao importa HTTP (USR-377)
+type = forbidden
+source_modules =
+    core
+forbidden_modules =
+    fastapi
+    starlette
+# TODO(USR-377): mover a camada HTTP destes dois modulos para fora de core.
+ignore_imports =
+    core.harness.remote_worker -> fastapi
+    core.orchestrator.cloud_coordinator -> fastapi
