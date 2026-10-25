@@ -16,6 +16,13 @@ def _validate_hex(value: str, *, minimum: int, maximum: int, label: str) -> str:
     return normalized
 
 
+GateProfile = Literal["pr", "full"]
+
+
+def _default_profiles() -> list[GateProfile]:
+    return ["full"]
+
+
 class HarnessStepConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -26,7 +33,7 @@ class HarnessStepConfig(BaseModel):
     timeout_sec: int = Field(default=120, ge=1, le=3600)
     kind: Literal["test", "check"] | None = None
     #: Gate profiles this step belongs to (USR-377 S5). Default keeps steps in "full" only.
-    profiles: list[Literal["pr", "full"]] = Field(default_factory=lambda: ["full"], min_length=1)
+    profiles: list[GateProfile] = Field(default_factory=_default_profiles, min_length=1)
 
 
 class HarnessConfig(BaseModel):
