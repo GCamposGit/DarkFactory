@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Iterable
 
-REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/")
+REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/", ".factory/config/")
+# USR-397: .factory/config/ is read at runtime (prices, routing, model registry); the ledger
+# (.factory/demands, .factory/owner_actions) stays data-only.
 # Keep this aligned with COPY sources in deploy/dokploy/Dockerfile.hub. In particular,
 # run_hub.py is not copied into the image and therefore cannot require a Hub rebuild.
 REBUILD_FILES: frozenset[str] = frozenset({"requirements.txt", "harness.config.json"})

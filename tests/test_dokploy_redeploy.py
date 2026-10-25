@@ -356,8 +356,10 @@ def test_main_allows_default_project_explicitly() -> None:
 
 def test_select_services_no_filter_returns_all() -> None:
     services = mod.normalize_project_services(_new_shape_projects(), "darkfac-core", "production")
-    assert mod.select_services(services, None) == services
-    assert mod.select_services(services, []) == services
+    # USR-369: leftover n8n composes are excluded from the default (all services) selection.
+    expected = [s for s in services if s.name.lower() not in mod.EXCLUDED_FROM_DEFAULT]
+    assert mod.select_services(services, None) == expected
+    assert mod.select_services(services, []) == expected
 
 
 def test_select_services_only_case_insensitive() -> None:
@@ -701,7 +703,7 @@ def test_main_list_prints_services_and_exits_0() -> None:
     listing = out.getvalue()
     assert "darkfac-cloud" in listing
     assert "darkfac-canary" in listing
-    assert "darkfac-n8n" in listing  # the real darkfac-core compose service
+    assert "darkfac-n8n" not in listing  # USR-369: n8n removed from the default selection
     assert "compose_other_n8n" not in listing  # never the other project's decoy "n8n"
     assert "My First Project" not in listing
     assert not transport.post_calls  # --list never triggers a deploy
@@ -769,7 +771,8 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    # 4 deploys plus the DarkHub pinned compose update.
+    # 3 deploys (n8n excluded, USR-369) plus the DarkHub pinned compose update and the
+    # darkfac-cloud DARKFAC_GIT_SHA env pin (USR-397).
     assert len(transport.post_calls) == 5
     assert {c[1] for c in transport.post_calls} == {"/api/compose.update", "/api/compose.deploy", "/api/application.deploy"}
     report = out.getvalue()
@@ -835,7 +838,7 @@ def test_main_no_wait_triggers_and_exits_0_without_polling() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    assert len(transport.post_calls) == 1
+    assert len(transport.post_calls) == 2  # cloud env pin + deploy
     assert "Not waiting" in out.getvalue()
 
 
@@ -862,7 +865,8 @@ def test_main_only_scopes_deploy_to_selected_services() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    assert transport.post_calls == [("POST", "/api/compose.deploy", {"composeId": "compose_cloud"})]
+    assert [c[1] for c in transport.post_calls] == ["/api/compose.update", "/api/compose.deploy"]
+    assert transport.post_calls[0][2]["env"].startswith("KEEP=secret-value\nDARKFAC_GIT_SHA=")
 
 
 # ---------------------------------------------------------------------------

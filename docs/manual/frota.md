@@ -120,3 +120,41 @@ Se grokbox ou a VM ficar indisponível, não apague nem altere manualmente a res
 heartbeats cessam, o TTL expira, o reconciliador libera o slot e o ticket `planned` volta
 a ser elegível em outro host. `Restart=always` cobre falhas do processo local; a
 recuperação de host morto vem do lease e da admissão normal da frota.
+
+## Frota e VPS enxuta (USR-369)
+
+Regras da VPS (Hetzner CX23, 2 vCPU, 4 GB):
+
+- Todas as imagens sao construidas no CI e publicadas no GHCR. Nenhum `build:` nos compose de `deploy/dokploy/`.
+- Soma dos limites de memoria <= 3,2 GB (teste: `tests/shape/test_vps_lean_usr369.py`).
+- Concorrencia de build = 1 (`MAX_CONCURRENT_BUILDS` em `scripts/dokploy_redeploy.py`; os disparos sao sequenciais).
+- n8n removido da pilha implantada.
+
+## Orcamento de memoria (limites)
+
+| Servico | Compose | Limite |
+|---|---|---|
+| darkfac-coordinator | cloud | 512M |
+| darkfac-worker | cloud | 1536M |
+| darkfac-backup-cron | cloud | 256M |
+| darkfac-canary | cloud | 192M |
+| darkfac-pg-tailnet | cloud | 64M |
+| darkhub | hub | 512M |
+| Total | | 3072M (teto 3200M) |
+
+## Como restaurar o n8n
+
+Os arquivos foram removidos do repositorio (historico preservado). Para restaurar:
+
+```powershell
+git -C C:\dev\DarkFac show a0e0f8d3:deploy/dokploy/docker-compose.n8n.yml
+git -C C:\dev\DarkFac show a0e0f8d3:deploy/dokploy/env.n8n.example
+```
+
+Recoloque os dois arquivos em `deploy/dokploy/`, recrie o compose no Dokploy e reajuste os limites: o n8n pede 1024M + 256M, o que estoura o teto de 3,2 GB; reduza outros servicos antes e ajuste o teste. Enquanto existir um compose `n8n` ou `darkfac-n8n` no Dokploy, `dokploy_redeploy.py` sem `--only` o ignora; `--only darkfac-n8n` ainda o alcanca.
+
+## Imagem do cloud no GHCR
+
+O job `cloud` de `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkfac-cloud:<sha>` (coordinator, worker, backup-cron, canary) junto com a imagem do Hub. O `DARKFAC_GIT_SHA` do compose `darkfac-cloud` e gravado pela propria fabrica: `scripts/dokploy_redeploy.py` (`pin_cloud_git_sha`) acrescenta `DARKFAC_GIT_SHA=<sha de origin/main>` ao env do compose no Dokploy antes de cada deploy, preservando as outras variaveis. Sem sha valido, o disparo falha fechado em vez de construir na VPS.
+
+Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) reconstroem a imagem do Hub (USR-397); o ledger (`.factory/demands`, `.factory/owner_actions`) continua somente dados.

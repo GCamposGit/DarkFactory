@@ -39,8 +39,8 @@ def test_cloud_compose_manifest_structure() -> None:
     # Verify coordinator resource bounds (must protect 4GB VPS)
     coord_res = coord.get("deploy", {}).get("resources", {})
     assert "limits" in coord_res
-    assert coord_res["limits"]["memory"] == "1536M"
-    assert coord_res["reservations"]["memory"] == "512M"
+    assert coord_res["limits"]["memory"] == "512M"
+    assert coord_res["reservations"]["memory"] == "256M"
 
     # Verify worker configuration
     worker = services["darkfac-worker"]
@@ -49,7 +49,7 @@ def test_cloud_compose_manifest_structure() -> None:
     worker_res = worker.get("deploy", {}).get("resources", {})
     # HF-27-09: worker memory raised to 2 GB (2048M) for the agent-CLI
     # toolchain, leaving headroom on the CX23's 4 GB next to the coordinator.
-    assert worker_res["limits"]["memory"] == "2048M"
+    assert worker_res["limits"]["memory"] == "1536M"
     assert worker_res["reservations"]["memory"] == "256M"
 
     # Verify shared volumes and external network
