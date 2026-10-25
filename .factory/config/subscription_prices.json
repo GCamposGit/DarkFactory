@@ -1,10 +1,10 @@
 {
-  "_note": "Mensalidades em USD usadas no custo implicito por ticket (USR-378). Valores A CONFIRMAR PELO OWNER: sem fonte no repo, preenchidos com precos publicos de lista. Chaves = nome do harness.",
-  "status": "a_confirmar_pelo_owner",
+  "_note": "Mensalidades em USD usadas no custo implicito por ticket (USR-378). Confirmadas pelo owner em 25/10/2026 (OA-073): Grok anual equivale a ~20/mes; Gemini e pacote promocional usado tambem fora de IA, considerado 20. Chaves = nome do harness.",
+  "status": "confirmado_pelo_owner",
   "plans": {
     "claude": {"plan": "Claude Pro", "monthly_usd": 20.0},
     "codex": {"plan": "ChatGPT Plus (Codex)", "monthly_usd": 20.0},
-    "grok": {"plan": "SuperGrok", "monthly_usd": 30.0},
-    "antigravity": {"plan": "Gemini Pro (Google AI Pro)", "monthly_usd": 19.99}
+    "grok": {"plan": "SuperGrok (anual, equivalente mensal)", "monthly_usd": 20.0},
+    "antigravity": {"plan": "Gemini Pro (pacote promocional, uso misto)", "monthly_usd": 20.0}
   }
 }

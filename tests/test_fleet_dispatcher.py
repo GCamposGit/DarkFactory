@@ -110,3 +110,24 @@ def test_line_lock_refusal_is_busy_not_infra(tmp_path: Path):
     e.now += 15  # cooldown curto (10 s), bem abaixo do de infra (50 s)
     e.d.run_cycle()
     assert e.launched[-1] == ("USR-01", "grokbox")
+
+
+def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
+    """USR-343 S4a moved new tickets to the control store; the ledger alone left the fleet idle."""
+    from core.line.fleet_dispatcher import merge_control_queue
+
+    ledger = [
+        {"id": "USR-1", "status": "planned", "tags": []},
+        {"id": "USR-2", "status": "completed", "tags": []},
+    ]
+    queue = [
+        {"id": "USR-2", "status": "planned", "tags": []},  # closed in the ledger: stays closed
+        {"id": "USR-3", "status": "planned", "tags": []},  # only in the control store
+    ]
+    merged = {r["id"]: r["status"] for r in merge_control_queue(ledger, lambda: queue)}
+    assert merged == {"USR-1": "planned", "USR-2": "completed", "USR-3": "planned"}
+
+    def unreachable() -> list:
+        raise ConnectionError("store down")
+
+    assert merge_control_queue(ledger, unreachable) == ledger

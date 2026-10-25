@@ -147,7 +147,35 @@ def default_demands_loader() -> list[dict[str, Any]]:
                          capture_output=True, text=True, encoding="utf-8", check=True,
                          creationflags=CREATE_NO_WINDOW, timeout=60).stdout
     data = json.loads(out)
-    return data if isinstance(data, list) else list(data.get("demands", []))
+    rows = data if isinstance(data, list) else list(data.get("demands", []))
+    return merge_control_queue(rows)
+
+
+_TERMINAL_STATUSES = frozenset({"completed", "cancelled", "canceled"})
+
+
+def merge_control_queue(
+    rows: list[dict[str, Any]], queue_loader: Optional[Callable[[], list[Any]]] = None
+) -> list[dict[str, Any]]:
+    """Ledger rows plus the control-store queue (USR-343 S4a), where `--create --queue-only` and the
+    Telegram intake register new tickets. A terminal status in the ledger wins; an unreachable store
+    leaves the ledger as is."""
+    try:
+        if queue_loader is None:
+            from core.demands import queue_store
+
+            queue_loader = queue_store.list_queue_tickets
+        control = [t.model_dump(mode="json") if hasattr(t, "model_dump") else dict(t) for t in queue_loader()]
+    except Exception as exc:  # noqa: BLE001 - the ledger alone still drives the fleet
+        logger.warning("fila do control store indisponivel (%s); usando so demands.json", exc)
+        return rows
+    by_id = {str(r.get("id")): r for r in rows}
+    for row in control:
+        current = by_id.get(str(row.get("id")))
+        if current is not None and str(current.get("status")) in _TERMINAL_STATUSES:
+            continue
+        by_id[str(row.get("id"))] = row
+    return list(by_id.values())
 
 
 # --- probes e lancamento --------------------------------------------------------------------------
