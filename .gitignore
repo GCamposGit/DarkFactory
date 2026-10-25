@@ -43,6 +43,7 @@ models/.locks/
 # Generated DarkFac state/assets (source ledgers remain versionable)
 .factory/visuals/
 .factory/learning_packs/
+.factory/research/_artifacts/
 .factory/content/
 .factory/benchmarks/history/
 .factory/benchmarks/latest.json

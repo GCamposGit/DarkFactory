@@ -1,4 +1,4 @@
-<!-- covers: core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/route_wait.py -->
+<!-- covers: core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
 # Motor da esteira
 
 ## Sequencia canonica de estagios (USR-375 S2)
@@ -17,7 +17,8 @@ Cada estagio deixa um artefato em `.darkfac/runs/<run_id>/`, validado por `requi
 | REVIEW | `review_verdict.json` | `ReviewVerdict` (`approve`, sem bloqueios) |
 | MERGE | `merge.json` | `MergeReceipt` |
 | DEPLOY_SMOKE | `deploy_report.json` | `DeployReport` (`smoke_ok` true) |
-| RESEARCH, DOCS, LEARNING | opcionais | retornam `None` (USR-376) |
+| RESEARCH | `research.json` | `ResearchArtifact` (`research_skipped` com motivo, `research_done` ou `research_reused` com fontes) |
+| DOCS, LEARNING | opcionais | retornam `None`: nunca bloqueiam uma entrega ja mesclada |
 
 Artefato ausente, vazio ou invalido levanta `StageArtifactMissing` (com `stage` e `reason`). O contrato esta ligado ao `run_ticket`, ao `fleet_dispatcher` e a linha (slice S4, abaixo).
 
@@ -30,9 +31,14 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    Correcao pequena (`estimate_ticket_size == small`) pula SOMENTE o GRILL.
 2. **PLAN** chama `stage_planning.run_planning` (modelo de nivel alto) e grava `SPEC.md` + `tickets.json`;
    correcao pequena grava um plano minimo (um sub-ticket igual a demanda), sem agente.
-3. **BUILD** roda o agente de desenvolvimento uma vez por sub-ticket do plano, em sequencia, na mesma
+3. **RESEARCH** (USR-376, entre PLAN e BUILD) chama `research.policy.run_research_stage` com o ledger
+   `.factory/research/` do checkout principal e grava `research.json`. Sem busca web deterministica neste
+   processo o estagio registra `research_skipped` com o motivo "busca web indisponivel neste host"; nunca
+   inventa fontes. A politica (R1..R7) dispensa correcoes, docs e mudancas pequenas. Sem `research.json`
+   valido o ticket nao chega ao BUILD nem a entrega (`_require_plan_and_build` exige PLAN, RESEARCH e BUILD).
+4. **BUILD** roda o agente de desenvolvimento uma vez por sub-ticket do plano, em sequencia, na mesma
    worktree, e grava `progress.json` (`harness` = familia do implementador).
-4. Na entrega (`--resume-delivery`, processo novo): exige PLAN e BUILD; **VALIDATE** grava `validation.json`
+5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD; **VALIDATE** grava `validation.json`
    depois do portao; **REVIEW** roda `stage_review.ReviewStage` com familia diferente do implementador e grava
    `review_verdict.json` so na aprovacao (`changes_required` reinvoca o agente, comita e repete o portao);
    **MERGE** grava `merge.json` (PR e SHA); **DEPLOY_SMOKE** grava `deploy_report.json`. Na DarkFac o deploy
@@ -41,7 +47,16 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    reportado como `merged_awaiting_deploy` (`[MERGE] ... aguardando deploy`), nunca como entregue. Um
    `smoke_ok=null` com `deployed=true` e invalido. Sem plano ou veredito nao ha merge; sem relatorio de deploy
    a execucao falha.
-5. **Sem rota elegivel** (nenhum modelo de nivel alto para PLAN, nenhum revisor de outra familia para REVIEW):
+   **DOCS** (`_stage_docs_sync`, so projetos internos) roda `core/harness/docs_sync.py` sobre o diff
+   `origin/main...HEAD` depois do portao e antes do REVIEW: se uma pagina do manual ficou desatualizada, o
+   agente de desenvolvimento e reinvocado uma vez com a mensagem (mesmo padrao da autocorrecao do portao);
+   persistindo a violacao, a entrega e recusada (`stage_docs_refused`). Falha de infraestrutura do
+   controle de versao apenas registra aviso. **LEARNING**: o learning pack
+   (`learning_pack.delivery.build_for_delivery`) e calculado antes do merge e, depois do merge
+   bem-sucedido, gravado em `learning_pack.json` e no `LearningPackStore` (`.factory/learning_packs/`,
+   `packs_index.json`), de onde o Hub (`/api/learning-packs/<id>/html`) e o resumo diario o leem; falha na
+   geracao ou na gravacao so e registrada e nao derruba a entrega.
+6. **Sem rota elegivel** (nenhum modelo de nivel alto para PLAN, nenhum revisor de outra familia para REVIEW):
    o resultado do `RouteWaiter` (`no_route_available not_before=...`) vira espera, nao falha. O `run_ticket`
    sai com o codigo 75 (`EXIT_ROUTE_WAIT`, de `fleet_dispatcher.INFRA_EXIT_CODES`), com o marcador
    `harness_infra_error: route_wait`; o despachante reenfileira com cooldown e o ticket continua `planned`

@@ -5,8 +5,9 @@ Every stage of the line leaves one artifact under `.darkfac/runs/<run_id>/`
 a later stage (or the runner, from slice S4) can refuse to proceed without proof
 that the previous one really finished. Not wired into `run_ticket` yet.
 
-RESEARCH, DOCS and LEARNING are optional placeholders (USR-376): they return None
-instead of raising until their artifacts are defined.
+RESEARCH is mandatory since USR-376 (`research.json`: a `ResearchArtifact`, which may be a
+`research_skipped` with its reason). DOCS and LEARNING stay optional (None): docs-sync and the
+learning pack never block a delivery that is already merged.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from core.line import workspace
 from core.line.stage_planning import PlanningPlan, PlanningSpec, PlanningTicket
 from core.line.stage_release import DEPLOY_REPORT_FILE, DeployReport
 from core.line.stage_review import ReviewVerdict
+from core.research.policy import ResearchArtifact
 
 
 class Stage(str, Enum):
@@ -39,8 +41,9 @@ class Stage(str, Enum):
 
 
 STAGE_SEQUENCE: tuple[Stage, ...] = tuple(Stage)
-OPTIONAL_STAGES: frozenset[Stage] = frozenset({Stage.RESEARCH, Stage.DOCS, Stage.LEARNING})
+OPTIONAL_STAGES: frozenset[Stage] = frozenset({Stage.DOCS, Stage.LEARNING})
 
+RESEARCH_FILE = "research.json"
 BUILD_FILE = "progress.json"
 VALIDATION_FILE = "validation.json"
 VERDICT_FILE = "review_verdict.json"
@@ -140,6 +143,7 @@ _LOADERS: dict[Stage, Callable[[Stage, Path], BaseModel]] = {
     Stage.INTAKE: _text("DEMAND.md"),
     Stage.GRILL: _text("GRILL.md"),
     Stage.PLAN: _plan,
+    Stage.RESEARCH: lambda s, d: _json(s, d, RESEARCH_FILE, ResearchArtifact),
     Stage.BUILD: lambda s, d: _json(s, d, BUILD_FILE, BuildReport),
     Stage.VALIDATE: _validated,
     Stage.REVIEW: _reviewed,
@@ -151,7 +155,7 @@ _LOADERS: dict[Stage, Callable[[Stage, Path], BaseModel]] = {
 def require_artifact(stage: Stage, ws: workspace.RunWorkspace) -> Optional[BaseModel]:
     """Load and validate the artifact of `stage`; raise `StageArtifactMissing` if absent/invalid.
 
-    Optional stages (RESEARCH, DOCS, LEARNING) are skipped (None) until USR-376.
+    Optional stages (DOCS, LEARNING) are skipped (None).
     """
     stage = Stage(stage)
     if stage in OPTIONAL_STAGES:
