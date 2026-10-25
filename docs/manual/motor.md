@@ -1,3 +1,4 @@
+<!-- covers: core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/route_wait.py -->
 # Motor da esteira
 
 ## Sequencia canonica de estagios (USR-375 S2)

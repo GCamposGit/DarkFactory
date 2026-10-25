@@ -1,3 +1,4 @@
+<!-- covers: core/workflow/*.py -->
 # Arquitetura do modulo workflow
 
 Apos USR-375 S1, `core/workflow/` nao contem mais os handlers por estagio
