@@ -34,8 +34,10 @@ def control_store():  # noqa: ANN201
     return _store(os.environ.get("DARKFAC_HF02_DATABASE_URL", ""), str(state_root() / "control.db"))
 
 
-def register_ticket(ticket: UserTicket) -> UserTicket:
-    """Upsert ``ticket`` in the control store. Raises when the store is unavailable."""
+def register_ticket(ticket: UserTicket, *, source: str | None = None) -> UserTicket:
+    """Upsert ``ticket`` in the control store (``source`` = intake channel, informational). Raises when the store is unavailable."""
+    if source:
+        logger.debug("Registering %s in the control store (source=%s)", ticket.id, source)
     payload = ticket.model_dump(mode="json")
     control_store().upsert_ticket(
         ticket.project_id, ticket.id, str(payload.get("status") or "planned"), payload, datetime.now(UTC)

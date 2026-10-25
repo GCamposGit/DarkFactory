@@ -616,7 +616,11 @@ def _register_in_canonical_queue(ticket: UserTicket, source: str) -> bool:
         from core.demands.queue_store import register_ticket  # type: ignore[import-not-found]
     except ImportError:
         return False
-    register_ticket(ticket, source=source)
+    try:
+        register_ticket(ticket, source=source)
+    except Exception:  # noqa: BLE001 - control store down or ticket not serializable: DemandsStore stays canonical
+        logger.warning("Control-store registration of the owner demand failed; DemandsStore remains canonical", exc_info=True)
+        return False
     return True
 
 

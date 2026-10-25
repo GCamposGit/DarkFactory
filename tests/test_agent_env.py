@@ -4,7 +4,8 @@ from core.line import agent_cli
 from core.line.agent_env import build_agent_env, load_policy
 
 SECRETS = {"DOKPLOY_TOKEN": "a", "BACKUP_S3_KEY": "b", "DATABASE_URL": "c", "GH_TOKEN": "d",
-           "GH_ADMIN_TOKEN": "e", "POSTGRES_PASSWORD": "f", "TELEGRAM_BOT_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "h"}
+           "GH_ADMIN_TOKEN": "e", "POSTGRES_PASSWORD": "f", "TELEGRAM_BOT_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "h",
+           "GITHUB_TOKEN": "i", "GH_APP_PRIVATE_KEY": "j", "FOO_SECRET": "k", "BAR": "l"}
 
 
 def test_denies_other_roles_and_keeps_harness_auth():
@@ -31,3 +32,7 @@ def test_probe_subprocess_cannot_see_secrets(monkeypatch):
     assert res.stdout.strip() == "[]"
     res2 = agent_cli._run_bounded([sys.executable, "-c", code], timeout_s=30, scrub_env=False)
     assert "DOKPLOY_TOKEN" in res2.stdout
+    code_ok = "import os;print('PATH' in os.environ, os.environ.get('ANTHROPIC_API_KEY'))"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-keep")
+    res3 = agent_cli._run_bounded([sys.executable, "-c", code_ok], timeout_s=30)
+    assert res3.stdout.strip() == "True sk-keep"
