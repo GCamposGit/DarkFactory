@@ -89,7 +89,7 @@ def line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     def planning(project: Any, run_id: str, *, ws: Any, **_kw: Any) -> StageResult:
         state.calls.append("PLAN")
         if state.missing == "plan_route":  # no high-tier model: RouteWaiter outcome
-            return StageResult(outcome="retry", cause_code="no_route_available not_before=2026-10-24T12:00:00+00:00")
+            return StageResult(outcome="retry", cause_code="no_route_available not_before=2030-10-24T12:00:00+00:00")
         if state.missing != "plan":
             line_workspace.write_context(ws, "SPEC.md", "# SPEC\n\nobjetivo\n")
             line_workspace.write_context(ws, "tickets.json", json.dumps([{"id": "T1", "title": "Sub um"}]))
@@ -98,7 +98,7 @@ def line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     def review(self: Any, project: Any, run_id: str, *, ws: Any, **_kw: Any) -> StageResult:
         state.calls.append("REVIEW")
         if state.missing == "review_route":  # no other-family reviewer right now
-            return StageResult(outcome="retry", cause_code="no_route_available not_before=2026-10-24T12:00:00+00:00")
+            return StageResult(outcome="retry", cause_code="no_route_available not_before=2030-10-24T12:00:00+00:00")
         if state.missing != "verdict":
             line_workspace.write_context(ws, VERDICT_FILE, ReviewVerdict(verdict="approve").model_dump_json())
         return StageResult(outcome="success", output_refs=["test"])
