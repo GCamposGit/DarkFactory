@@ -2838,6 +2838,30 @@
       "created_at": "2026-10-25T04:00:00Z",
       "created_by": "claude",
       "resolved_at": "2026-10-25T06:00:00Z"
+    },
+    {
+      "id": "OA-071",
+      "kind": "approval",
+      "title": "Aprovar o PR #696 (CI para de copiar o harness da base e corrige o mypy do main)",
+      "priority": "critical",
+      "status": "open",
+      "why": "O main esta vermelho: o perfil pr (#680) deixou um erro de tipo em core/harness/models.py, e o CI copia o harness da base por cima de todo PR, entao nenhum PR consegue trazer a correcao. O #696 muda o workflow (protegido) e corrige o tipo; e preciso do toque do owner. Bloqueia todos os merges da fila.",
+      "blocks": [
+        "USR-343",
+        "USR-375",
+        "USR-377",
+        "USR-369"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Tocar em Aprovar na mensagem do bot sobre o PR #696; se a mensagem nao chegou (Hub fora do ar), rodar:",
+          "command": "gh pr merge 696 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        }
+      ],
+      "verify": "gh pr view 696 --repo GCamposGit/DarkFactory mostra MERGED e o proximo run de CI do main fica verde",
+      "created_at": "2026-10-25T05:00:00Z",
+      "created_by": "claude"
     }
   ]
 }
