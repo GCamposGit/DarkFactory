@@ -816,8 +816,24 @@ def _finalize_remote_result(
 
     raw_result = payload.get("result_json")
     if not raw_result:
-        _emit_local_fail(f"remote worker {base_url} finished without structured HARNESS_RESULT evidence")
-        return False, None
+        # A terminal job without structured evidence has no test verdict. Treat it as
+        # worker infrastructure failure so the caller can try another worker or run
+        # the suite locally, instead of turning missing evidence into HARNESS_FAIL.
+        details = {
+            "error_code": "worker_internal_error",
+            "job_id": job_id or payload.get("job_id"),
+            "worker_url": base_url,
+            "message": "remote job finished without structured HARNESS_RESULT evidence",
+            "last_status": status,
+            "returncode": payload.get("returncode"),
+            "worker_instance_id": payload.get("worker_instance_id"),
+            "health": _health_subset(health),
+        }
+        _record_lost_job(details, str(payload.get("_log_tail") or ""))
+        raise RemoteJobLost(
+            f"job {details['job_id']} on {base_url} ended without structured HARNESS_RESULT evidence",
+            details,
+        )
 
     try:
         remote_result = HarnessResult.model_validate(raw_result)
