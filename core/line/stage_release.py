@@ -114,6 +114,18 @@ _MAX_CONSECUTIVE_SMOKE_FAILURES = 2
 _TICKET_SMOKE_COMMENT_RE = re.compile(r"<!--\s*darkfac:ticket_smoke:(?P<json>.*?)-->", re.DOTALL)
 
 
+DEPLOY_REPORT_FILE = "deploy_report.json"
+
+
+class DeployReport(BaseModel):
+    """`deploy_report.json` - outcome of DEPLOY_SMOKE, the artifact the stage contract validates."""
+
+    sha: str = Field(min_length=1)
+    smoke_ok: bool
+    deployed: bool = True
+    detail: str = ""
+
+
 class ReleaseError(RuntimeError):
     """Raised for unrecoverable plumbing errors inside this stage."""
 
