@@ -75,6 +75,7 @@ Gerado de `.factory/config/model_registry.json` por `python scripts/generate_mod
 | `development.grok` | `grok-4.7` | active |
 | `distill.openrouter` | `deepseek/deepseek-v4.1-flash` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
+| `planning.codex` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |

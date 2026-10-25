@@ -497,10 +497,10 @@ def codex_sandbox_mode() -> str:
 
 
 def _codex_cli_slug(model: str) -> str:
-    """Codex CLI slug for a registry model: a slash-free gateway id (``gpt-5.6-sol``) when declared.
+    """Codex CLI slug for a registry model: a slash-free gateway id when declared.
 
-    The registry id of the planning model (``gpt-sol``) is not a slug the Codex CLI knows; models
-    without such a gateway id (e.g. ``gpt-6-luna``) are passed through unchanged.
+    The registry id of the planning model (role ``planning.codex``) is not a slug the Codex CLI knows; models
+    without such a gateway id are passed through unchanged.
     """
     try:
         from core.models.registry import get_registry

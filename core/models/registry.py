@@ -210,6 +210,7 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         "development.codex": "gpt-6-luna",
         "development.grok": "grok-4.7",
         "planning.claude": "claude-opus-5-5",
+        "planning.codex": "gpt-sol",
         "review.codex": "gpt-6-luna",
         "review.grok": "grok-4.6",
         "distill.openrouter": "deepseek/deepseek-v4.1-flash",
