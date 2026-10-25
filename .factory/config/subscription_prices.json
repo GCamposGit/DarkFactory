@@ -1,0 +1,10 @@
+{
+  "_note": "Mensalidades em USD usadas no custo implicito por ticket (USR-378). Valores A CONFIRMAR PELO OWNER: sem fonte no repo, preenchidos com precos publicos de lista. Chaves = nome do harness.",
+  "status": "a_confirmar_pelo_owner",
+  "plans": {
+    "claude": {"plan": "Claude Pro", "monthly_usd": 20.0},
+    "codex": {"plan": "ChatGPT Plus (Codex)", "monthly_usd": 20.0},
+    "grok": {"plan": "SuperGrok", "monthly_usd": 30.0},
+    "antigravity": {"plan": "Gemini Pro (Google AI Pro)", "monthly_usd": 19.99}
+  }
+}

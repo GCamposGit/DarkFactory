@@ -1,3 +1,4 @@
+<!-- covers: core/line/stage_grill.py, core/demands/grill.py -->
 # Grill: o que a fabrica pergunta a voce
 
 O grill so faz perguntas que apenas voce (owner) pode responder. Decisoes tecnicas a fabrica toma sozinha e registra como ADR curto no workspace da execucao (`GRILL.md`, secao Premissas).

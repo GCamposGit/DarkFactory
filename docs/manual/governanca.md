@@ -1,3 +1,4 @@
+<!-- covers: core/governance/authorization.py, core/orchestrator/guard.py -->
 # Governança: guard enxuto e autorização assinada (USR-343 S1)
 
 ## O que o guard protege

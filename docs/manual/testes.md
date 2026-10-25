@@ -1,3 +1,4 @@
+<!-- covers: core/harness/remote_dispatch.py, core/harness/suite_lock.py, scripts/complexity_ratchet.py -->
 # Testes
 
 ## Testes de forma

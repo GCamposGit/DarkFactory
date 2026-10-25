@@ -532,6 +532,11 @@ def _offline_ticket_stage_agents(request: pytest.FixtureRequest, monkeypatch: py
 
     monkeypatch.setattr(run_ticket, "_plan_with_agent", plan)
     monkeypatch.setattr(run_ticket, "_review_candidate", review)
+    # RESEARCH never searches the web (no adapter) but would write the ledger of the main checkout (USR-376).
+    from core.line import ticket_extras
+
+    ledger = request.getfixturevalue("tmp_path_factory").mktemp("research_ledger")
+    monkeypatch.setattr(ticket_extras, "research_ledger_root", lambda _main_root: ledger)
 
 
 @pytest.fixture(autouse=True)

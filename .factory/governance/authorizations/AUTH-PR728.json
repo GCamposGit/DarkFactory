@@ -1,0 +1,12 @@
+{
+  "id": "AUTH-PR728",
+  "ticket_id": "USR-377",
+  "approver": "owner",
+  "paths": [
+    ".github/workflows/ci.yml"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "fa7db004c6bed220f97c4ee31d91818157de4293",
+  "expires_at": "2026-10-26T18:36:27Z",
+  "signature": "aVfwNNYx00sWiu0cSUNVICv0h3bJiO9WALiXPnSfDFeRHC/4H+396a6i4Oe83H2McPFKHYeZuGmWFANWbsEiDA=="
+}

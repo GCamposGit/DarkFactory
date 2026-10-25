@@ -14,6 +14,8 @@ _VALID = {
     Stage.INTAKE: {"DEMAND.md": "demanda"},
     Stage.GRILL: {"GRILL.md": "grill"},
     Stage.PLAN: {"SPEC.md": "# spec", "tickets.json": json.dumps(_TICKET)},
+    Stage.RESEARCH: {"research.json": json.dumps(
+        {"kind": "research_skipped", "ticket_id": "T1", "reason": "busca web indisponivel neste host"})},
     Stage.BUILD: {"progress.json": json.dumps({"tickets_done": ["T1"]})},
     Stage.VALIDATE: {"validation.json": json.dumps({"passed": True})},
     Stage.REVIEW: {"review_verdict.json": json.dumps({"verdict": "approve"})},
@@ -61,6 +63,6 @@ def test_require_artifact_absent_malformed_valid(stage, tmp_path):
                 require_artifact(stage, ws)
 
 
-@pytest.mark.parametrize("stage", [Stage.RESEARCH, Stage.DOCS, Stage.LEARNING])
+@pytest.mark.parametrize("stage", [Stage.DOCS, Stage.LEARNING])
 def test_optional_stages_return_none(stage, tmp_path):
     assert require_artifact(stage, _ws(tmp_path)) is None

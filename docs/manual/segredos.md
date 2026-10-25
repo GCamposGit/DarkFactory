@@ -1,3 +1,4 @@
+<!-- covers: scripts/bootstrap_secrets.py -->
 # Segredos: cofre SOPS + age (passo a passo, Windows)
 
 1. Instale as ferramentas no PowerShell: `winget install FiloSottile.age` e `winget install Mozilla.SOPS`. Feche e reabra o PowerShell.

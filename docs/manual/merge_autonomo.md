@@ -1,3 +1,4 @@
+<!-- covers: core/git/app_token.py, core/git/autonomy.py -->
 # Merge autonomo com GitHub App (USR-343)
 
 A fabrica faz push e merge com um token de curta duracao de uma GitHub App, sem a conta admin do owner.

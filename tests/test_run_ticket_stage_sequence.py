@@ -238,3 +238,73 @@ def _assert_small_fix_goes_through_without_grill(line: SimpleNamespace, capsys: 
     line.merged.assert_called_once()
     out = capsys.readouterr().out
     assert "[MERGE]" in out and "aguardando deploy" in out and "[SUCESSO]" not in out
+
+
+def _context(line: SimpleNamespace) -> Path:
+    return line_workspace.context_dir(run_ticket.ticket_engine.run_workspace(line.ticket))
+
+
+def test_feature_without_research_artifact_never_reaches_merge(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-376: RESEARCH is mandatory between PLAN and BUILD; a skip WITH its reason is an artifact."""
+    monkeypatch.setattr(run_ticket.ticket_extras, "run_research", lambda *a, **k: SimpleNamespace(kind="none"))
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) != 0
+    assert "RESEARCH" in capsys.readouterr().err
+    assert line.calls == ["PLAN"]  # BUILD never started
+    line.merged.assert_not_called()
+
+
+def test_research_without_web_search_is_skipped_with_reason_and_never_invents_sources(
+    line: SimpleNamespace,
+) -> None:
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
+    research = json.loads((_context(line) / "research.json").read_text(encoding="utf-8"))
+    assert research["kind"] == "research_skipped" and research["sources"] == []
+    assert research["reason"] == "busca web indisponivel neste host"
+    line.ticket = _ticket("small")
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
+    research = json.loads((_context(line) / "research.json").read_text(encoding="utf-8"))
+    assert research["kind"] == "research_skipped" and research["reason"].startswith("R3")  # policy skip
+
+
+def test_learning_pack_is_recorded_and_indexed_after_the_merge(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from core.learning_pack.delivery import LearningPackArtifact
+
+    seen: list[str] = []
+
+    def build(_repo: Path, ticket_id: str, base: str, head: str = "HEAD") -> LearningPackArtifact:
+        seen.append("merged" if line.merged.called else "before-merge")
+        return LearningPackArtifact(
+            ticket=ticket_id, base_ref=base, head_ref=head, layman="Troca simples.", dev="Mudou feature.py."
+        )
+
+    monkeypatch.setattr(run_ticket.ticket_extras, "build_learning", build)
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
+
+    store = tmp_path / "state" / "learning_packs"
+    index = json.loads((store / "packs_index.json").read_text(encoding="utf-8"))
+    assert [entry["pack_id"] for entry in index] == ["lp-usr-990"]  # what the Hub and the daily digest read
+    assert (store / index[0]["file_html"]).is_file() and (_context(line) / "learning_pack.json").is_file()
+    assert seen == ["before-merge"]
+    # a pack that cannot be generated never undoes a merged delivery
+    monkeypatch.setattr(run_ticket.ticket_extras, "build_learning", lambda *a, **k: None)
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
+
+
+def test_docs_sync_failure_goes_back_to_build_and_blocks_delivery_if_unfixed(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixes: list[str] = []
+    monkeypatch.setattr(run_ticket.ticket_extras, "docs_sync_feedback", lambda *_a, **_k: "docs-sync: falta motor.md")
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda wt, t, label, feedback: fixes.append(feedback))
+    monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
+
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) != 0
+
+    assert fixes == ["docs-sync: falta motor.md"]  # the agent got the message once
+    assert "DOCS" in capsys.readouterr().err
+    assert "REVIEW" not in line.calls
+    line.merged.assert_not_called()

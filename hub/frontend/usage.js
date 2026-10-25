@@ -30,6 +30,7 @@ function toggleUsageExpansion() {
 document.addEventListener("DOMContentLoaded", () => {
   mountAIUsageMonitor();
   loadAIUsage(false);
+  loadTicketCosts();
   window.setInterval(() => {
     if (document.visibilityState === "visible") loadAIUsage(false);
   }, 60000);
@@ -86,11 +87,31 @@ function mountAIUsageMonitor() {
       <div id="model-usage-list" class="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/55">
         <div class="p-4 text-center text-[11px] text-slate-500">Carregando telemetria…</div>
       </div>
+    </div>
+    <div class="border-t border-slate-800/80 pt-4">
+      <h3 class="text-xs font-semibold text-slate-200">Custo por ticket</h3>
+      <p class="text-[10px] text-slate-500">API + custo implicito da assinatura; tentativas falhas incluidas.</p>
+      <div id="ticket-cost-list" class="mt-2 text-[11px] font-mono text-slate-400">carregando…</div>
     </div>`;
   quickDock.insertAdjacentElement("afterend", section);
   document.getElementById("refresh-ai-usage")?.addEventListener("click", () => loadAIUsage(true));
   document.getElementById("toggle-usage-expand-header")?.addEventListener("click", toggleUsageExpansion);
   document.getElementById("toggle-usage-expand-footer")?.addEventListener("click", toggleUsageExpansion);
+}
+
+async function loadTicketCosts() {
+  const target = document.getElementById("ticket-cost-list");
+  if (!target) return;
+  try {
+    const response = await hubNetFetch("/api/usage/ticket-costs?limit=10");
+    if (!response.ok) throw new Error("status " + response.status);
+    const rows = await response.json();
+    target.textContent = rows.length
+      ? rows.map((r) => `${r.ticket_id}: US$ ${r.total_cost_usd.toFixed(2)} (${r.attempts} tent., ${r.failed_attempts} falhas)`).join(" | ")
+      : "sem custos registrados";
+  } catch (error) {
+    target.textContent = "custo por ticket indisponivel";
+  }
 }
 
 function usageSkeleton(count) {
