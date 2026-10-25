@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from core.governance import authorization as auth
 
 PROTECTED = "core/orchestrator/guard.py"
+
+
+_KEY = Ed25519PrivateKey.generate()
+
+
+def _sign(record: dict[str, object]) -> dict[str, object]:
+    record = {k: v for k, v in record.items() if k != "signature"}
+    record["signature"] = base64.b64encode(_KEY.sign(auth.canonical_payload(record))).decode("ascii")
+    return record
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -24,6 +36,10 @@ def repo(tmp_path: Path) -> Path:
     _git(tmp_path, "config", "user.name", "T")
     _git(tmp_path, "config", "user.email", "t@example.invalid")
     (tmp_path / "seed.txt").write_text("seed\n", encoding="utf-8")
+    raw = _KEY.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    pub = tmp_path / auth.OWNER_PUBKEY_PATH
+    pub.parent.mkdir(parents=True)
+    pub.write_text(base64.b64encode(raw).decode("ascii"), encoding="utf-8")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "--quiet", "-m", "seed")
     _git(tmp_path, "checkout", "--quiet", "-b", "cand")
@@ -50,7 +66,7 @@ def _publish(repo: Path, **overrides: object) -> None:
     _git(repo, "checkout", "--quiet", "main")
     path = repo / auth.AUTHORIZATIONS_DIR / "AUTH-1.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record), encoding="utf-8")
+    path.write_text(json.dumps(_sign(record)), encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "record")
     _git(repo, "checkout", "--quiet", "cand")

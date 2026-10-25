@@ -671,7 +671,7 @@ def test_a_cancelled_protected_edit_stops_the_stage_and_registers_an_owner_actio
     result = stage.run(project, "run-protected")
 
     assert len(calls) == 1
-    assert "docs/proposals" in calls[0].prompt and "core/harness/*" in calls[0].prompt
+    assert "docs/proposals" in calls[0].prompt and "core/governance/*" in calls[0].prompt
     assert result.outcome == "waiting_human" and result.cause_code == "protected_path"
     assert "protected_path:core/harness/remote_worker.py" in result.evidence_refs
     assert any(ref.startswith("owner_action:OA-") for ref in result.evidence_refs)
