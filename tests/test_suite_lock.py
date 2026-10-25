@@ -107,10 +107,19 @@ def test_second_slot_is_acquired_when_first_is_held(tmp_path: Path) -> None:
         first.release()
 
 
-def test_timeout_raises_when_no_slot_frees_up(tmp_path: Path) -> None:
+def test_timeout_raises_when_no_slot_frees_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     holder = suite_lock.SuiteLock(timeout_sec=5)
     holder.acquire()
     try:
+        # Simulated time (USR-377): the waiter's backoff advances a fake monotonic clock instead of sleeping.
+        import time as _real_time
+        from types import SimpleNamespace
+
+        fake = [0.0]
+        proxy = SimpleNamespace(**{n: getattr(_real_time, n) for n in dir(_real_time) if not n.startswith("_")})
+        proxy.monotonic = lambda: fake[0]
+        monkeypatch.setattr(suite_lock, "time", proxy)
+        monkeypatch.setattr(suite_lock, "_sleep", lambda seconds: fake.__setitem__(0, fake[0] + seconds))
         waiter = suite_lock.SuiteLock(timeout_sec=0.5)
         with pytest.raises(suite_lock.SuiteLockTimeout):
             waiter.acquire()
