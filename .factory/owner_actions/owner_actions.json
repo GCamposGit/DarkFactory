@@ -2758,7 +2758,7 @@
       "kind": "action",
       "title": "Ativar aprovacao por toque no Telegram: publicar USR-343 S3, criar GitHub App e configurar o Hub",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "S3 toca core/governance/* (protegido) e nao pode aprovar a propria entrada; o agente nao publica mudanca de governanca. Depois disso, protegidos passam a ser aprovados por toque assinado e o merge sai pela GitHub App, sem --admin.",
       "blocks": [
         "USR-343"
@@ -2795,14 +2795,15 @@
       ],
       "verify": "gh pr view slice/usr-343-s3-tap --repo GCamposGit/DarkFactory mostra MERGED; um PR que altera AGENTS.md gera mensagem com botoes no Telegram e, apos o toque, e mesclado sem --admin",
       "created_at": "2026-10-25T03:00:00Z",
-      "created_by": "claude"
+      "created_by": "claude",
+      "resolved_at": "2026-10-25T06:00:00Z"
     },
     {
       "id": "OA-070",
       "kind": "action",
       "title": "Mesclar #676 e #680 (harness do USR-377) com admin e aplicar o workflow do portao em camadas",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O CI copia core/harness/* e harness.config.json da base por cima do candidato; PR que muda esses arquivos sempre falha com 'Candidate worktree is dirty'. Alem disso o workflow roda os testes em duas execucoes e uma delas marca os testes como 'skipped', que o GitHub conta como aprovado. O workflow e protegido.",
       "blocks": [
         "USR-377"
@@ -2835,7 +2836,8 @@
       ],
       "verify": "gh pr view 676 e 680 mostram MERGED; no proximo PR, a aba Checks mostra 'DarkFac Trusted Policy' separado e pr-tests (ubuntu-latest) executado",
       "created_at": "2026-10-25T04:00:00Z",
-      "created_by": "claude"
+      "created_by": "claude",
+      "resolved_at": "2026-10-25T06:00:00Z"
     }
   ]
 }
