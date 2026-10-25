@@ -36,13 +36,12 @@ O orquestrador (`core/orchestrator/state.py next`) despacha a tarefa respeitando
 
 Para cada tarefa:
 1. **Branch Limpa**: `git checkout -b feature/<task-id>`
-2. **Implementação**: O modelo selecionado pelo `core/router/model_router.py` escreve o código e o teste associado.
+2. **Implementação**: O modelo selecionado pelo `core/line/routing.py` (`pick`) escreve o código e o teste associado.
 3. **Validação Rápida**: `python core/harness/runner.py --quick`
 4. **Validação Completa**: `python core/harness/runner.py | python core/harness/markers.py`
-5. **Auditoria Local Nível 1**: `python core/router/model_router.py call-local --model gpt-review:latest --prompt "[DIFF]"`
-6. **Auditoria Cruzada Nível 2**: Modelo independente avalia conformidade de segurança.
-7. **Portão de Proteção**: `python core/orchestrator/guard.py HEAD`
-8. **Auto-Merge**: Se todos os passos retornarem código 0 (`PASS`), o PR é mesclado automaticamente na branch principal (`main`).
+5. **Auditoria Cruzada Nível 2**: Modelo independente avalia conformidade de segurança.
+6. **Portão de Proteção**: `python core/orchestrator/guard.py HEAD`
+7. **Auto-Merge**: Se todos os passos retornarem código 0 (`PASS`), o PR é mesclado automaticamente na branch principal (`main`).
 
 ---
 
