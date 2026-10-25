@@ -44,6 +44,11 @@ _MARKER_RE = re.compile(
 _SERVICE_RE = re.compile(r"^  darkhub:\n(?P<body>(?:(?:    .*)?\n)+?)(?=^\S)", re.M)
 _HEALTH_RETRIES = 3
 LEGACY_CONTAINER = "darkhub-cloud-247"
+# USR-388: each colour also gets its own Traefik router at ``/__bg/<colour>`` (prefix stripped), so the
+# gate probes the NEW colour directly instead of the public /health that round-robins to the old one.
+COLOR_PREFIX = "/__bg/"
+_SHARED_SERVICE_LABEL = '      - "traefik.http.services.darkhub.loadbalancer.server.port=8000"\n'
+_REPLICAS_RE = re.compile(r"^      replicas: (\d+)\s*$", re.M)
 MODE_ENV = "DARKHUB_DEPLOY_MODE"
 
 
@@ -88,7 +93,29 @@ def _service_block(rendered: str, color: str, sha: str, replicas: int) -> str:
         raise ComposeRenderError("Darkhub compose service lacks a deploy block")
     body = body.replace("    deploy:\n", f"    deploy:\n      replicas: {replicas}\n", 1)
     body = body.replace("    restart: unless-stopped\n", f"    restart: unless-stopped\n    # colour={color} sha={sha[:12]}\n", 1)
+    if _SHARED_SERVICE_LABEL in body:
+        r = f"darkhub-{color}"
+        labels = (
+            "traefik.http.routers.darkhub.service=darkhub",
+            f"traefik.http.routers.{r}.rule=Host(`darkhub.ggcampos.com`) && PathPrefix(`{COLOR_PREFIX}{color}`)",
+            f"traefik.http.routers.{r}.entrypoints=websecure",
+            f"traefik.http.routers.{r}.tls.certresolver=letsencrypt",
+            f"traefik.http.routers.{r}.priority=100",
+            f"traefik.http.routers.{r}.service={r}",
+            f"traefik.http.routers.{r}.middlewares={r}-strip",
+            f"traefik.http.middlewares.{r}-strip.stripprefix.prefixes={COLOR_PREFIX}{color}",
+            f"traefik.http.services.{r}.loadbalancer.server.port=8000",
+        )
+        extra = "".join(f'      - "{label}"\n' for label in labels)
+        body = body.replace(_SHARED_SERVICE_LABEL, _SHARED_SERVICE_LABEL + extra, 1)
     return f"  darkhub-{color}:\n{body}"
+
+
+def has_serving_replica(compose_file: Optional[str]) -> bool:
+    """False for a blue-green compose where every colour has ``replicas: 0`` (Hub offline, USR-388)."""
+    if parse_state(compose_file) is None:
+        return bool(compose_file)
+    return any(int(n) > 0 for n in _REPLICAS_RE.findall(compose_file or ""))
 
 
 def render_bluegreen_compose(source: str, state: BlueGreenState, running: tuple[str, ...]) -> str:
@@ -102,6 +129,8 @@ def render_bluegreen_compose(source: str, state: BlueGreenState, running: tuple[
     match = _SERVICE_RE.search(base)
     if not match:
         raise ComposeRenderError("Darkhub compose has no 'darkhub' service block to split")
+    if not running:
+        raise ComposeRenderError("refusing to render a blue-green compose with zero serving replicas (USR-388)")
     blocks = []
     for color in COLORS:
         rendered = render_darkhub_compose(source, state.sha_of(color), IMAGE_SOURCE_GHCR)
@@ -137,12 +166,19 @@ def run_bluegreen_deploy(
     interval: float = 5.0,
     remove_legacy: Optional[Callable[[], bool]] = None,
     restore_allowed: Optional[Callable[[str], bool]] = None,
+    color_is_serving: Optional[Callable[[str, str], bool]] = None,
+    public_attempts: int = 12,
 ) -> BlueGreenState:
     """Run overlap -> health gate -> cutover. Returns the final state.
 
-    On failure the previous compose is restored only if ``restore_allowed(previous)`` accepts it;
-    otherwise both colours are scaled to zero (the Hub goes offline instead of reviving a version
-    the caller refuses, e.g. one older than a security fix).
+    USR-388: the gate probes the NEW colour directly with ``color_is_serving(colour, sha)`` (its own
+    Traefik route); only then the cutover is applied, and afterwards the public ``sha_is_serving``
+    must confirm the new sha. Without ``color_is_serving`` the public probe is the gate (legacy).
+
+    On failure the previous compose is restored only if it still has a serving replica and
+    ``restore_allowed(previous)`` accepts it. A refused restore never writes anything: the compose
+    in place (overlap: old colour still up) keeps serving and :class:`BlueGreenError` is raised.
+    A compose with zero serving replicas is never applied nor restored.
 
     ``apply_compose`` installs the compose in Dokploy and waits for ``compose up`` to finish.
     ``sha_is_serving(sha)`` is True only after ``_HEALTH_RETRIES`` consecutive probes of the public
@@ -163,11 +199,13 @@ def run_bluegreen_deploy(
         running: tuple[str, ...] = (target,)
     else:
         overlap_state = planned
-        running = COLORS
+        # USR-388: an offline previous compose must not revive its old colour during the overlap.
+        running = COLORS if has_serving_replica(previous_compose) else (target,)
     try:
         apply_compose(render_bluegreen_compose(source, overlap_state, running))
+        gate = (lambda sha: color_is_serving(target, sha)) if color_is_serving is not None else sha_is_serving
         for _ in range(health_attempts):
-            if sha_is_serving(new_sha):
+            if gate(new_sha):
                 break
             sleep_fn(interval)
         else:
@@ -186,13 +224,16 @@ def run_bluegreen_deploy(
         apply_compose(render_bluegreen_compose(source, final, (target,)))
     except Exception as exc:  # noqa: BLE001 - any failure after the first apply restores the previous compose
         logger.error("blue-green: deploy of %s failed (%s); restoring previous compose", new_sha[:12], exc)
+        if previous_compose and not has_serving_replica(previous_compose):
+            raise BlueGreenError(
+                f"{exc}; previous compose has zero serving replicas and is never restored; "
+                "current compose left in place (old colour kept serving)"
+            ) from exc
         if previous_compose and restore_allowed is not None and not restore_allowed(previous_compose):
-            try:
-                apply_compose(render_bluegreen_compose(source, planned, ()))
-                restore_note = "previous compose refused; both colours scaled to zero (Hub offline)"
-            except Exception as offline_exc:  # noqa: BLE001
-                restore_note = f"previous compose refused; OFFLINE FAILED ({offline_exc})"
-            raise BlueGreenError(f"{exc}; {restore_note}") from exc
+            raise BlueGreenError(
+                f"{exc}; previous compose refused for security; nothing written, the compose in place "
+                "keeps the serving colour running (Hub NOT taken offline)"
+            ) from exc
         if previous_compose:
             try:
                 apply_compose(previous_compose)
@@ -203,6 +244,16 @@ def run_bluegreen_deploy(
         else:
             restore_note = "no previous compose to restore"
         raise BlueGreenError(f"{exc}; {restore_note}") from exc
+    if color_is_serving is not None:
+        for _ in range(public_attempts):
+            if sha_is_serving(new_sha):
+                break
+            sleep_fn(interval)
+        else:
+            raise BlueGreenError(
+                f"cutover to {target} applied (new colour healthy) but public /health never showed "
+                f"{new_sha[:12]}; compose left on the new colour"
+            )
     return final
 
 
@@ -222,6 +273,7 @@ def run_bluegreen_via_dokploy(
     sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
     restore_allowed: Optional[Callable[[str], bool]] = None,
+    color_is_serving: Optional[Callable[[str, str], bool]] = None,
 ) -> BlueGreenState:
     """Blue-green over the Dokploy API (``request(method, path, json_body) -> parsed JSON``)."""
     query = urllib.parse.urlencode({"composeId": compose_id})
@@ -242,6 +294,8 @@ def run_bluegreen_via_dokploy(
         return value if isinstance(value, str) else None
 
     def apply_compose(compose_file: str) -> None:
+        if not has_serving_replica(compose_file):
+            raise BlueGreenError("refusing to save a compose with zero serving replicas (USR-388)")
         baseline = newest(one())
         request("POST", "/api/compose.update", {
             "composeId": compose_id, "sourceType": "raw",
@@ -270,12 +324,14 @@ def run_bluegreen_via_dokploy(
     return run_bluegreen_deploy(
         source=source, new_sha=new_sha, read_compose=read_compose, apply_compose=apply_compose,
         sha_is_serving=sha_is_serving, wait_ghcr=wait_ghcr, sleep_fn=sleep_fn,
-        remove_legacy=remove_legacy, restore_allowed=restore_allowed,
+        remove_legacy=remove_legacy, restore_allowed=restore_allowed, color_is_serving=color_is_serving,
         health_attempts=60,  # ~5 min: a cold Hub pulls the image and refreshes benchmarks before healthy
     )
 
 
 __all__ = [
+    "COLOR_PREFIX",
+    "has_serving_replica",
     "is_bluegreen",
     "run_bluegreen_via_dokploy",
     "LEGACY_CONTAINER",
