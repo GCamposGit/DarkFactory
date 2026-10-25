@@ -22,11 +22,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from core.demands.grill import DemandGrillEngine, ProjectDocScout
+from core.demands.grill import (
+    OWNER_CATEGORIES,
+    DemandGrillEngine,
+    ProjectDocScout,
+    filter_owner_questions,
+    render_adr,
+)
 from core.demands.models import (
     DemandInput,
     GrillAnswersPayload,
     GrillQuestion,
+    GrillQuestionOption,
     GrillRefinementResult,
     GrillSession,
     UserTicket,
@@ -73,28 +80,45 @@ def test_doc_scout_extracts_project_context(temp_grill_env):
     assert any("Missão" in ins or "Arquitetura" in ins for ins in insights)
 
 
-def test_grill_engine_heuristic_generates_essential_questions(temp_grill_env):
-    """Verify DemandGrillEngine generates 2 to 4 surgical questions with recommended options."""
+@pytest.mark.parametrize(
+    "title,problem,criteria,expected_min,expected_max,injected_technical",
+    [
+        ("Painel de vendas", "Quero um painel que mostre minhas vendas do mes", [], 1, 3, False),
+        ("Painel de vendas", "Quero um painel que mostre minhas vendas do mes", [], 1, 3, True),
+        ("Relatorio", "Preciso de um relatorio de clientes ativos", [], 1, 3, False),
+        ("App", "Quero um aplicativo para organizar minhas tarefas", [], 1, 3, False),
+        ("Alertas", "Quero ser avisado quando o estoque ficar baixo", [], 1, 3, False),
+        ("Curto", "Fazer", [], 1, 3, False),
+        ("Typo no menu", "Corrigir o erro de digitacao no titulo do menu principal", [], 0, 0, False),
+        ("Ajuste", "Ajustar o espacamento do botao salvar na tela de cadastro", [], 0, 0, False),
+        ("Bug login", "Corrigir bug em que o login falha com e-mail em maiusculas", [], 0, 0, True),
+        ("Painel ok", "Quero um painel que mostre minhas vendas do mes", ["Painel exibe a soma das vendas do mes corrente"], 1, 3, False),
+    ],
+)
+def test_grill_engine_asks_only_owner_questions(
+    temp_grill_env, title, problem, criteria, expected_min, expected_max, injected_technical
+):
+    """G1 semantico: so perguntas do owner, em categorias fechadas, com recomendada; tecnicas viram ADR."""
     engine: DemandGrillEngine = temp_grill_env["engine"]
-    ticket = UserTicket(
-        id="ZZTEST-99",
-        project_id="darkfac",
-        title="Adicionar suporte a exportação de métricas",
-        problem_statement="Necessidade de exportar relatórios para análise externa",
-    )
-
+    ticket = UserTicket(id="ZZTEST-99", project_id="darkfac", title=title, problem_statement=problem,
+                        acceptance_criteria=criteria)
     session = engine.start_grill(ticket, force_heuristic=True)
-    assert session.ticket_id == "ZZTEST-99"
-    assert session.status == "pending"
-    assert 2 <= len(session.questions) <= 4
-
-    for q in session.questions:
-        assert isinstance(q, GrillQuestion)
-        assert len(q.question) > 10
-        assert len(q.options) >= 2
-        # Must have at least one recommended option
+    questions = list(session.questions)
+    if injected_technical:
+        tech = GrillQuestion(
+            id="q_tech", question="Usar Redis ou Postgres para o cache?", category="architecture",
+            options=[GrillQuestionOption(id="o1", label="Redis", is_recommended=True)],
+        )
+        questions, dropped = filter_owner_questions(questions + [tech])
+        assert [q.id for q in dropped] == ["q_tech"]
+        assert "Redis" in render_adr(dropped)
+    assert expected_min <= len(questions) <= expected_max
+    for q in questions:
+        assert q.category in OWNER_CATEGORIES
+        assert q.id != "q_tech"
         assert any(opt.is_recommended for opt in q.options)
-        assert q.allow_custom_input is True
+    if expected_max == 0:
+        assert engine.classify_readiness(ticket).is_clear is True
 
 
 def test_ticket_refiner_enriches_ticket_and_preserves_id(temp_grill_env):
@@ -120,7 +144,7 @@ def test_ticket_refiner_enriches_ticket_and_preserves_id(temp_grill_env):
     assert TAG_USER_DEMAND in result.refined_ticket.tags
 
     # Non-goal was added
-    assert any("dados sensíveis" in ng for ng in result.refined_ticket.non_goals)
+    assert "dados sensíveis" in result.refined_ticket.problem_statement
     # Original non-goal was preserved
     assert "Não suportar formato XML" in result.refined_ticket.non_goals
     # Problem statement enriched
@@ -149,12 +173,12 @@ def test_demands_service_grill_flow(temp_grill_env):
     result = service.submit_grill_answers("ZZTEST-88", answers, session=session)
 
     assert result.ticket_id == "ZZTEST-88"
-    assert any("LDAP" in ng for ng in result.refined_ticket.non_goals)
+    assert "LDAP" in result.refined_ticket.problem_statement
 
     # 3. Verify store holds the refined version
     reloaded = service.get_ticket("ZZTEST-88")
     assert reloaded is not None
-    assert any("LDAP" in ng for ng in reloaded.non_goals)
+    assert "LDAP" in reloaded.problem_statement
 
 
 def test_grill_api_endpoints_isolated(temp_grill_env):
@@ -180,7 +204,7 @@ def test_grill_api_endpoints_isolated(temp_grill_env):
         assert res_grill.status_code == 200
         session_data = res_grill.json()
         assert session_data["ticket_id"] == "ZZTEST-77"
-        assert len(session_data["questions"]) >= 2
+        assert 1 <= len(session_data["questions"]) <= 3
 
         # 2. Submit grill answers
         q_id = session_data["questions"][0]["id"]
@@ -192,7 +216,7 @@ def test_grill_api_endpoints_isolated(temp_grill_env):
         assert res_submit.status_code == 200
         ref_data = res_submit.json()
         assert ref_data["ticket_id"] == "ZZTEST-77"
-        assert any("RabbitMQ" in ng for ng in ref_data["refined_ticket"]["non_goals"])
+        assert "RabbitMQ" in ref_data["refined_ticket"]["problem_statement"]
     finally:
         app.dependency_overrides.clear()
 

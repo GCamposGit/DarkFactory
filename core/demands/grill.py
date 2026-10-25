@@ -36,11 +36,61 @@ from core.demands.models import (
     GrillSession,
     UserTicket,
 )
-from core.demands.readiness import ReadinessReport, evaluate_readiness
+from core.demands.readiness import (
+    MSG_PROBLEM_PLACEHOLDER,
+    MSG_PROBLEM_SHORT,
+    MSG_SUCCESS,
+    ReadinessReport,
+    evaluate_readiness,
+    is_small_fix,
+)
 from core.demands.specifier import DemandSpecifier, _extract_json_object
 from core.roadmap.models import utc_now
 
 logger = logging.getLogger(__name__)
+
+# Closed set of questions the owner may be asked (USR-375 S6). Anything else is technical:
+# it is decided by the factory and recorded as an ADR in the run workspace.
+OWNER_CATEGORIES: frozenset[str] = frozenset({"objective", "success", "business", "new_secret", "acceptance"})
+MAX_OWNER_QUESTIONS = 3
+
+
+def _owner_question(qid: str, category: str, text: str, reason: str, labels: list[str]) -> GrillQuestion:
+    return GrillQuestion(
+        id=qid,
+        question=text,
+        context_reason=reason,
+        category=category,
+        options=[
+            GrillQuestionOption(id=f"{qid}_{i + 1}", label=lab, is_recommended=(i == 0))
+            for i, lab in enumerate(labels)
+        ],
+        allow_custom_input=True,
+    )
+
+
+def filter_owner_questions(questions: list[GrillQuestion]) -> tuple[list[GrillQuestion], list[GrillQuestion]]:
+    """Split into (owner questions, dropped technical). Owner ones: allowed category, a
+    recommended option (defaulting to the first), at most MAX_OWNER_QUESTIONS."""
+    kept: list[GrillQuestion] = []
+    dropped: list[GrillQuestion] = []
+    for q in questions:
+        if q.category not in OWNER_CATEGORIES or not q.options or len(kept) >= MAX_OWNER_QUESTIONS:
+            dropped.append(q)
+            continue
+        if not any(o.is_recommended for o in q.options):
+            q.options[0].is_recommended = True
+        kept.append(q)
+    return kept, dropped
+
+
+def render_adr(dropped: list[GrillQuestion]) -> str:
+    """Short ADR text for technical questions the factory decided on its own."""
+    lines = ["# ADR (decisoes tecnicas da fabrica)"]
+    for q in dropped:
+        rec = next((o.label for o in q.options if o.is_recommended), q.options[0].label if q.options else "padrao")
+        lines.append(f"- {q.question} -> {rec}")
+    return "\n".join(lines)
 
 
 class ProjectDocScout:
@@ -134,110 +184,40 @@ class DemandGrillEngine:
         return self._generate_heuristic(ticket, doc_insights)
 
     def _generate_heuristic(self, ticket: UserTicket, doc_insights: list[str]) -> GrillSession:
-        """Deterministic, zero-token question synthesizer adhering to Skill 02 PRD standards."""
+        """Deterministic owner-only questions (max 3), driven by what readiness finds missing."""
+        report = evaluate_readiness(ticket.problem_statement, ticket.non_goals, ticket.acceptance_criteria)
         questions: list[GrillQuestion] = []
-
-        # Question 1: Scope & Non-Goals (always critical to avoid scope creep)
-        title_lower = ticket.title.lower()
-        has_nongoals = bool(ticket.non_goals and len(ticket.non_goals) > 1)
-        questions.append(
-            GrillQuestion(
-                id="q_scope_boundaries",
-                question=f"Quais limites explícitos de escopo (Non-Goals) devem ser fixados para '{ticket.title}'?",
-                context_reason="Sem non-goals explícitos, o agente autônomo pode inflar o escopo ou modificar módulos não relacionados.",
-                category="non_goals",
-                options=[
-                    GrillQuestionOption(
-                        id="opt_scope_1",
-                        label="Não criar novos frameworks ou acoplamentos visuais; focar na lógica de negócios headless e testes.",
-                        is_recommended=True,
-                        description="Mantém a entrega cirúrgica e 100% testável via terminal e API.",
-                    ),
-                    GrillQuestionOption(
-                        id="opt_scope_2",
-                        label="Limitar a entrega exclusivamente à camada de backend/serviço, postergando ajustes de UI para outro ciclo.",
-                        is_recommended=False,
-                        description="Prioriza a estabilização das regras de domínio antes de qualquer tela.",
-                    ),
-                    GrillQuestionOption(
-                        id="opt_scope_3",
-                        label="Entregar fluxo completo ponta a ponta (backend + painel web do DarkHub) no mesmo ciclo.",
-                        is_recommended=False,
-                        description="Escopo mais amplo cobrindo tanto serviço quanto interface de usuário.",
-                    ),
-                ],
-                allow_custom_input=True,
-            )
-        )
-
-        # Question 2: Driver de Teste e Reachability
-        questions.append(
-            GrillQuestion(
-                id="q_reachability_driver",
-                question="Qual deve ser a estratégia primária de validação e driver de teste desta funcionalidade?",
-                context_reason="Garante que a funcionalidade possa ser executada por scripts automatizados de forma headless.",
-                category="validation",
-                options=[
-                    GrillQuestionOption(
-                        id="opt_reach_1",
-                        label="Teste de integração e reachability headless via pytest exercendo CLI e endpoints HTTP.",
-                        is_recommended=True,
-                        description="Padrão Staff+ da Dark Factory com assertivas determinísticas rápidas.",
-                    ),
-                    GrillQuestionOption(
-                        id="opt_reach_2",
-                        label="Validação focada estritamente em chamadas diretas de biblioteca (Domain Service puro).",
-                        is_recommended=False,
-                        description="Isola a lógica de negócio de qualquer protocolo de transporte.",
-                    ),
-                    GrillQuestionOption(
-                        id="opt_reach_3",
-                        label="Validação combinada com suite de fixtures mockadas e prova de idempotência.",
-                        is_recommended=False,
-                        description="Recomendado quando há dependências de filesystem ou persistência de estado.",
-                    ),
-                ],
-                allow_custom_input=True,
-            )
-        )
-
-        # Question 3: Resiliência e Fallback de Falha
-        questions.append(
-            GrillQuestion(
-                id="q_failure_resilience",
-                question="Qual o comportamento esperado caso dependências externas ou modelos locais estejam offline?",
-                context_reason="Define o modo de tolerância a falhas para garantir disponibilidade contínua.",
-                category="architecture",
-                options=[
-                    GrillQuestionOption(
-                        id="opt_fail_1",
-                        label="Degradar graciosamente para script determinístico local a custo zero ($0.00).",
-                        is_recommended=True,
-                        description="Garante que nenhuma operação falhe por indisponibilidade de IA ou créditos.",
-                    ),
-                    GrillQuestionOption(
-                        id="opt_fail_2",
-                        label="Falhar de forma segura (fail-closed) com erro estruturado e diagnóstico claro.",
-                        is_recommended=False,
-                        description="Previne execuções parciais se houver risco de inconsistência.",
-                    ),
-                    GrillQuestionOption(
-                        id="opt_fail_3",
-                        label="Emitir aviso no structured log e adotar defaults pré-configurados silenciosamente.",
-                        is_recommended=False,
-                        description="Prioriza continuidade máxima sem interromper o operador.",
-                    ),
-                ],
-                allow_custom_input=True,
-            )
-        )
-
+        if not report.is_clear and not is_small_fix(ticket.problem_statement):
+            reasons = report.human_decision_reasons
+            if any(r in (MSG_PROBLEM_SHORT, MSG_PROBLEM_PLACEHOLDER) for r in reasons):
+                questions.append(_owner_question(
+                    "q_objective", "objective",
+                    f"Qual e o objetivo de '{ticket.title}' em uma frase, do ponto de vista de quem usa?",
+                    "Sem objetivo claro a entrega pode resolver o problema errado.",
+                    ["Entregar exatamente o descrito no titulo, no menor escopo util",
+                     "Descrever o objetivo com minhas palavras"],
+                ))
+            if MSG_SUCCESS in reasons:
+                questions.append(_owner_question(
+                    "q_success", "success",
+                    "Como saberemos que deu certo? Qual resultado concreto voce vai conferir?",
+                    "O criterio de sucesso vira o teste de aceite da entrega.",
+                    ["Eu abro o resultado e vejo os dados corretos na tela, sem erro",
+                     "Um relatorio ou numero de referencia que eu informo bate com o resultado"],
+                ))
+            questions.append(_owner_question(
+                "q_acceptance", "acceptance",
+                "Quem aprova a entrega final?",
+                "Define se a fabrica conclui sozinha ao passar nos testes ou espera voce.",
+                ["auto: a fabrica conclui quando os testes de aceite passarem",
+                 "owner: eu confirmo o resultado antes de concluir"],
+            ))
         return GrillSession(
             ticket_id=ticket.id,
             project_id=ticket.project_id,
             status="pending",
             doc_insights=doc_insights,
-            questions=questions,
+            questions=questions[:MAX_OWNER_QUESTIONS],
             engine_used="heuristic_script",
             created_at=utc_now(),
         )
@@ -256,7 +236,7 @@ class DemandGrillEngine:
         system_prompt = (
             "Você é o Arquiteto Líder da Dark Factory conduzindo uma sessão de Q&A rápida (Grill) "
             "com o originador da demanda para estressar escopo, non-goals e reachability. "
-            "Formule de 2 a 3 perguntas cirúrgicas. Cada pergunta DEVE conter de 2 a 3 opções "
+            "Formule no maximo 3 perguntas, SOMENTE ao dono do produto (objetivo, sucesso, negocio, segredo novo, aceite); nunca perguntas tecnicas. Cada pergunta DEVE conter de 2 a 3 opções "
             "prováveis (a melhor marcada com 'is_recommended': true). "
             "Responda APENAS em JSON estrito no formato:\n"
             "{\n"
@@ -265,7 +245,7 @@ class DemandGrillEngine:
             '      "id": "q_1",\n'
             '      "question": "...",\n'
             '      "context_reason": "...",\n'
-            '      "category": "scope|non_goals|validation|architecture",\n'
+            '      "category": "objective|success|business|new_secret|acceptance",\n'
             '      "options": [\n'
             '        {"id": "opt_1", "label": "...", "is_recommended": true, "description": "..."},\n'
             '        {"id": "opt_2", "label": "...", "is_recommended": false, "description": "..."}\n'
@@ -323,12 +303,15 @@ class DemandGrillEngine:
                             id=item.get("id", f"q_{len(questions)+1}"),
                             question=item.get("question", ""),
                             context_reason=item.get("context_reason", ""),
-                            category=item.get("category", "scope"),
+                            category=item.get("category", "technical"),
                             options=options,
                             allow_custom_input=True,
                         )
                     )
 
+            questions, dropped = filter_owner_questions(questions)
+            if dropped:
+                logger.info("grill: %d technical question(s) dropped\n%s", len(dropped), render_adr(dropped))
             if not questions:
                 return self._generate_heuristic(ticket, doc_insights)
 
@@ -369,7 +352,12 @@ class DemandGrillEngine:
                 continue
             applied_answers[q_id] = ans_clean
 
-            if "scope" in q_id.lower() or "non_goal" in q_id.lower():
+            if "success" in q_id.lower() or "acceptance" in q_id.lower():
+                crit = f"Sucesso/aceite acordado no Grill: {ans_clean}"
+                if crit not in ticket.acceptance_criteria:
+                    ticket.acceptance_criteria.append(crit)
+                    changes.append(f"Criterio de sucesso refinado: {ans_clean}")
+            elif "scope" in q_id.lower() or "non_goal" in q_id.lower():
                 if ans_clean not in non_goals:
                     non_goals.append(ans_clean)
                     changes.append(f"Adicionado non-goal: {ans_clean}")

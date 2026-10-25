@@ -58,7 +58,7 @@ def test_missing_non_goals_is_documentary_gap_and_still_blocks() -> None:
     assert report.is_clear is False
     assert report.classification == READINESS_DOCUMENTARY_GAP
     assert evaluate_readiness(GOOD, ["  "], ["Teste verde"]).is_clear is False
-    assert evaluate_readiness(GOOD, ["a"], ["b"]).classification == READINESS_READY
+    assert evaluate_readiness(GOOD, ["a"], ["Teste verde passa"]).classification == READINESS_READY
 
 
 def test_run_ticket_non_goal_flag_preserved(tmp_path: Path) -> None:
@@ -78,11 +78,11 @@ def test_run_ticket_non_goal_flag_preserved(tmp_path: Path) -> None:
 def test_queue_projection_matches_canonical_readiness() -> None:
     rows = [
         {"id": "USR-1", "status": "planned", "problem_statement": GOOD,
-         "non_goals": ["n"], "acceptance_criteria": ["a"]},
+         "non_goals": ["n"], "acceptance_criteria": ["Teste verde passa"]},
         {"id": "USR-2", "status": "planned", "problem_statement": GOOD,
-         "acceptance_criteria": ["a"]},
+         "acceptance_criteria": ["Teste verde passa"]},
         {"id": "USR-3", "status": "planned", "problem_statement": "TODO escrever depois isto aqui",
-         "non_goals": ["n"], "acceptance_criteria": ["a"]},
+         "non_goals": ["n"], "acceptance_criteria": ["Teste verde passa"]},
     ]
     queue = _build_executable_queue(rows, [])
     engine = DemandGrillEngine()
