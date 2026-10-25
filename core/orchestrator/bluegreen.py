@@ -271,6 +271,7 @@ def run_bluegreen_via_dokploy(
         source=source, new_sha=new_sha, read_compose=read_compose, apply_compose=apply_compose,
         sha_is_serving=sha_is_serving, wait_ghcr=wait_ghcr, sleep_fn=sleep_fn,
         remove_legacy=remove_legacy, restore_allowed=restore_allowed,
+        health_attempts=60,  # ~5 min: a cold Hub pulls the image and refreshes benchmarks before healthy
     )
 
 

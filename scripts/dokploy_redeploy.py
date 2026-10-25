@@ -992,21 +992,30 @@ def hub_restore_is_secure(previous_compose: str, *, repo_root: Optional[Path] = 
     return result.returncode == 0
 
 
-def _bluegreen_serving(health_client: Optional[Callable[[], Dict[str, Any]]]) -> Callable[[str], bool]:
+def _bluegreen_serving(
+    health_client: Optional[Callable[[], Dict[str, Any]]],
+    log: Optional[Callable[[str], None]] = None,
+) -> Callable[[str], bool]:
     probe = health_client or fetch_darkhub_health
 
     def serving(expected: str) -> bool:
         # During the overlap both colours are healthy and Traefik round-robins between them, so the
         # new sha alternates with the old one: require it in 2 of 6 probes, never 3 in a row.
         seen = 0
+        observed: List[str] = []
         for _ in range(6):
             try:
-                if str(probe().get("git_sha", "")).lower() == expected:
-                    seen += 1
-            except Exception:
+                sha = str(probe().get("git_sha", "")).lower()
+            except Exception as exc:  # noqa: BLE001 - recorded for the operator, never fatal
+                observed.append(type(exc).__name__)
                 continue
+            observed.append(sha[:12] or "<empty>")
+            if sha == expected:
+                seen += 1
             if seen >= 2:
                 return True
+        if log is not None:
+            log(f"[Darkhub] health probes (want {expected[:12]}): {', '.join(observed)}")
         return False
 
     return serving
@@ -1141,7 +1150,8 @@ def _run_main(
             print(f"[{svc.name}] blue-green deploy (USR-339)", file=out, flush=True)
             (bluegreen_runner or run_bluegreen_via_dokploy)(
                 request=transport, compose_id=svc.service_id, source=darkhub_compose,
-                new_sha=expected_sha, sha_is_serving=_bluegreen_serving(health_client),
+                new_sha=expected_sha,
+                sha_is_serving=_bluegreen_serving(health_client, log=lambda m: print(m, file=err, flush=True)),
                 restore_allowed=hub_restore_is_secure,
                 deploy_timeout=args.timeout, poll_interval=args.poll_interval,
                 sleep_fn=sleep_fn, clock_fn=clock_fn,
