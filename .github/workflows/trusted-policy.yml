@@ -1,0 +1,28 @@
+name: DarkFac Trusted Policy
+
+# Runs only on pull_request_target so the workflow code itself is base-owned
+# (a PR cannot edit the workflow that enforces the guard). Never executes candidate code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  trusted-pr-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout candidate merge without executing it
+        uses: actions/checkout@v4
