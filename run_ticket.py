@@ -48,7 +48,9 @@ from core.line.agent_cli import (
     run_agent,
     supports,
 )
-from core.line import gate_ram, grokbox_wake, stage_planning, stage_review, ticket_engine, ticket_stages
+from core.line import (
+    gate_ram, grokbox_wake, stage_planning, stage_review, ticket_engine, ticket_extras, ticket_stages,
+)
 from core.line.stages import Stage, StageArtifactMissing, require_artifact
 from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
@@ -2040,6 +2042,13 @@ def _deliver_worktree(
         f"{len(attempts_log)} autocorrecao(oes)",
     )
 
+    docs_outcome = _stage_docs_sync(
+        ticket, target_worktree, current_branch, resume_cmd, as_json, return_result, progress, external_project
+    )
+    if docs_outcome is not None:
+        return docs_outcome
+    learning = None if external_project else ticket_extras.build_learning(target_worktree, ticket.id, "origin/main")
+
     # REVIEW by another model family than the implementer; a change request goes back to the agent.
     if _cancelled():
         return cancelled_payload()
@@ -2090,6 +2099,7 @@ def _deliver_worktree(
             require_artifact(Stage.MERGE, rws)
             _stage_deploy_smoke(rws, ticket, project, merge_sha, external_project, progress)
             awaiting_deploy = bool(getattr(require_artifact(Stage.DEPLOY_SMOKE, rws), "pending", False))
+            ticket_extras.publish_learning(rws, learning)
         except (StageArtifactMissing, ValueError) as exc:
             stage = exc.stage if isinstance(exc, StageArtifactMissing) else Stage.MERGE
             return refused(stage, getattr(exc, "reason", str(exc)))
@@ -2106,6 +2116,45 @@ def _deliver_worktree(
     )
 
 
+def _stage_docs_sync(
+    ticket: UserTicket,
+    target_worktree: Path,
+    current_branch: str,
+    resume_cmd: str,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    external_project: bool,
+) -> Any:
+    """DOCS stage (USR-376): None when the manual is in sync with the diff, else a refusal payload.
+
+    A violation sends the development agent back once to update the manual (same pattern as the gate's
+    self-correction); if the manual is still out of sync the delivery is refused. A failure of the
+    version-control query is infra, not a violation: it is logged and the stage passes.
+    """
+    if external_project:
+        return None
+    feedback: Optional[str] = None
+    for attempt in range(2):
+        try:
+            feedback = ticket_extras.docs_sync_feedback(target_worktree)
+        except RuntimeError as exc:
+            logger.warning("docs-sync de %s nao verificado: %s", ticket.id, exc)
+            return None
+        if feedback is None:
+            return None
+        if attempt == 0:
+            _invoke_fix_agent(target_worktree, ticket, "docs-sync", feedback)
+            _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "docs-sync")
+            if commit_error:
+                feedback = f"{feedback}\nfix_commit_failed: {commit_error}"
+                break
+    return _delivery_stage_refused(
+        ticket, Stage.DOCS, feedback or "docs_sync", target_worktree, current_branch, resume_cmd,
+        progress, as_json, return_result,
+    )
+
+
 def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> None:
     """Delivery never starts without PLAN and BUILD artifacts (raises `StageArtifactMissing`).
 
@@ -2117,8 +2166,10 @@ def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> N
         logger.warning("resume-delivery de %s sem artefatos de estagio: plano/build minimos registrados", ticket.id)
         ticket_engine.write_demand(rws, ticket)
         ticket_engine.write_minimal_plan(rws, ticket)
+        ticket_engine.write_research(rws, ticket_extras.legacy_research(ticket.id))
         ticket_engine.write_build(rws, None, [ticket.id])
     require_artifact(Stage.PLAN, rws)
+    require_artifact(Stage.RESEARCH, rws)
     require_artifact(Stage.BUILD, rws)
 
 
@@ -2985,6 +3036,10 @@ def _stage_plan(
             if cause is not None:
                 return _stage_refused(args, ticket, workspace, progress, Stage.PLAN, cause)
         planned = ticket_engine.plan_tickets(rws)
+        stage = Stage.RESEARCH
+        research = ticket_extras.run_research(ticket, rws, workspace.main_root)
+        require_artifact(Stage.RESEARCH, rws)
+        logger.info("estagio RESEARCH: %s", research.kind)
     except StageArtifactMissing as exc:
         return _stage_refused(args, ticket, workspace, progress, exc.stage, exc.reason)
     except (OSError, ValueError) as exc:

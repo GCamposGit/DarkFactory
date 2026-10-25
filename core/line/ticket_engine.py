@@ -22,6 +22,7 @@ from core.line.stage_release import DEPLOY_REPORT_FILE, DeployReport
 from core.line.stages import (
     BUILD_FILE,
     MERGE_FILE,
+    RESEARCH_FILE,
     VALIDATION_FILE,
     VERDICT_FILE,
     BuildReport,
@@ -123,6 +124,10 @@ def sub_ticket_prompt(item: PlanningTicket, index: int, total: int) -> str:
     return "\n".join(lines) + "\n"
 
 
+def write_research(ws: workspace.RunWorkspace, artifact: Any) -> None:
+    workspace.write_context(ws, RESEARCH_FILE, artifact.model_dump_json(indent=2))
+
+
 def write_build(ws: workspace.RunWorkspace, harness: Optional[str], tickets_done: Iterable[str]) -> None:
     report = BuildReport(harness=harness, tickets_done=list(tickets_done))
     workspace.write_context(ws, BUILD_FILE, report.model_dump_json(indent=2))
@@ -158,6 +163,6 @@ def merge_receipt_from(report: Any, branch: str, fallback_sha: str) -> tuple[str
 __all__ = [
     "DEMAND_FILE", "GRILL_FILE", "SPEC_FILE", "TICKETS_FILE", "VERDICT_FILE", "DELIVERY_FILES",
     "artifacts_root", "run_workspace", "reset", "clear_delivery", "has_any", "write_demand", "write_grill",
-    "write_minimal_plan", "plan_tickets", "sub_ticket_prompt", "write_build", "write_validation",
+    "write_minimal_plan", "write_research", "plan_tickets", "sub_ticket_prompt", "write_build", "write_validation",
     "write_merge", "write_deploy", "merge_receipt_from",
 ]

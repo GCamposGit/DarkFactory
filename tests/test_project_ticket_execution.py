@@ -168,12 +168,13 @@ def test_external_delivery_opens_pr_from_project_worktree_against_registered_bas
     ticket = UserTicket(id="USR-259", project_id="fake-client", title="client change")
 
     # Delivery starts only from the PLAN and BUILD artifacts the launcher leaves (USR-375 S4).
-    from core.line import ticket_engine
+    from core.line import ticket_engine, ticket_extras
 
     monkeypatch.setattr(ticket_engine, "artifacts_root", lambda: tmp_path / "artifacts")
     rws = ticket_engine.run_workspace(ticket, "ticket/usr-259")
     ticket_engine.write_demand(rws, ticket)
     ticket_engine.write_minimal_plan(rws, ticket)
+    ticket_engine.write_research(rws, ticket_extras.legacy_research(ticket.id))
     ticket_engine.write_build(rws, "codex", [ticket.id])
 
     result = run_ticket._deliver_worktree(
