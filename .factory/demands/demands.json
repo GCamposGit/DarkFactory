@@ -11555,5 +11555,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T02:46:48.365365Z",
     "updated_at": "2026-10-25T02:46:48.365365Z"
+  },
+  {
+    "id": "USR-388",
+    "project_id": "darkfac",
+    "title": "Blue-green do Hub derruba o Hub: gate de overlap falha e o restore reaplica compose offline",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Incidente 24-25/10: deploys de 53a73fe, 8f9109d1 e 60fe467 falharam no gate (o colour novo subiu healthy mas /health publico so mostrou o sha antigo 32d59baa); o restore_allowed recusou o anterior (32d59baa e anterior a MIN_SECURE_HUB_SHA) e escalou ambos colours para replicas 0, gravando esse compose offline em Dokploy. Deploys seguintes tratam esse compose offline como 'previous' e o restauram, deixando Traefik com 404. Recuperado manualmente aplicando compose blue=60fe467 replicas 1.",
+    "core_journey": [
+      "Incidente 24-25/10: deploys de 53a73fe, 8f9109d1 e 60fe467 falharam no gate (o colour novo subiu healthy mas /health publico so mostrou o sha antigo 32d59baa); o restore_allowed recusou o anterior (32d59baa e anterior a MIN_SECURE_HUB_SHA) e escalou ambos colours para replicas 0, gravando esse compose offline em Dokploy. Deploys seguintes tratam esse compose offline como 'previous' e o restauram, deixando Traefik com 404. Recuperado manualmente aplicando compose blue=60fe467 replicas 1."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Overlap observa o sha novo quando o container novo esta healthy (ou o gate investiga por container).",
+      "Estado com ambos colours em replicas 0 nunca e restaurado como 'previous'; deploy a partir dele sobe o sha novo direto.",
+      "dokploy_redeploy nao fica pendurado sem saida quando check-main cria ticket de CI vermelho."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T03:00:50.663797Z",
+    "updated_at": "2026-10-25T03:00:50.663797Z"
   }
 ]
