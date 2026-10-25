@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from core.line.fleet_dispatcher import DispatcherConfig, FleetDispatcher
 from core.notifications import daily_digest as dd
 
-NOW = datetime(2026, 10, 25, 11, 30, tzinfo=timezone.utc)  # 08:30 em Sao Paulo
+NOW = datetime(2030, 10, 25, 11, 30, tzinfo=timezone.utc)  # 08:30 em Sao Paulo
 
 
 def _sources() -> dd.DigestSources:
@@ -59,5 +59,5 @@ def test_dispatcher_hook_sends_once_per_day(tmp_path) -> None:
     d.run_digest_hook()
     d.run_digest_hook()
     assert sent == ["morning"]
-    evening = datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc)  # 21:30 em Sao Paulo
+    evening = datetime(2030, 10, 26, 0, 30, tzinfo=timezone.utc)  # 21:30 em Sao Paulo
     assert hook(evening) == "evening" and hook(evening) is None

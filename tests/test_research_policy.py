@@ -45,4 +45,4 @@ def test_same_topic_reuses_ledger_without_web_search(tmp_path):
 
 def test_source_without_url_is_rejected():
     with pytest.raises(ValidationError):
-        ResearchSourceRecord(title="x", url="", accessed_at="2026-10-25", insight="i", influence="o")
+        ResearchSourceRecord(title="x", url="", accessed_at="2000-01-01", insight="i", influence="o")
