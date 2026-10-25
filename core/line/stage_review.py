@@ -105,6 +105,8 @@ class ReviewRound(BaseModel):
 
 
 MAX_REVIEW_AGENT_RETRIES: int = 5
+# Same name as `core.line.stages.VERDICT_FILE` (stages imports this module, so no import back).
+VERDICT_FILE = "review_verdict.json"
 
 
 class ReviewState(BaseModel):
@@ -280,13 +282,24 @@ class ReviewStage:
         self.agent_timeout_s = agent_timeout_s
         self.route_waiter = route_waiter or RouteWaiter()
 
-    def run(self, project: ProjectDescriptor, run_id: str) -> StageResult:
-        ws = workspace.checkout(project, run_id)
+    def run(
+        self,
+        project: ProjectDescriptor,
+        run_id: str,
+        *,
+        ws: Optional[RunWorkspace] = None,
+        repo_dir: Optional[Path] = None,
+        publish: bool = True,
+    ) -> StageResult:
+        """Review `run_id`. `run_ticket` (USR-375 S4) passes its artifact `ws`, the ticket worktree as
+        `repo_dir` (diff and agent cwd) and `publish=False` (no commit/push of the review files)."""
+        ws = ws or workspace.checkout(project, run_id)
+        git_ws = ws if repo_dir is None else ws.model_copy(update={"path": Path(repo_dir)})
         state = _load_review_state(ws)
         max_rounds = self.routing_config.run_caps.review_rounds
 
         default_branch = project.default_branch or "main"
-        cur_candidate = _candidate_digest(ws, default_branch)
+        cur_candidate = _candidate_digest(git_ws, default_branch)
         cur_policy = _policy_digest(self.routing_config)
 
         # A failed diff command is not an empty candidate. Without a digest we
@@ -315,7 +328,9 @@ class ReviewStage:
 
         if state.rounds and state.rounds[-1].verdict == "approve":
             last = state.rounds[-1]
-            last_sha = last.sha or workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}")
+            last_sha = last.sha or (
+                workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}") if publish else None
+            )
             if last.forced:
                 return StageResult(
                     outcome="failed", cause_code="review_forced_approval_legacy",
@@ -325,7 +340,9 @@ class ReviewStage:
 
         if state.rounds and state.rounds[-1].verdict != "invalidated" and len(state.rounds) > max_rounds:
             last = state.rounds[-1]
-            last_sha = last.sha or workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}")
+            last_sha = last.sha or (
+                workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}") if publish else None
+            )
             return StageResult(
                 outcome="failed",
                 cause_code=f"review_exhausted_changes_required:round={last.round}",
@@ -351,7 +368,7 @@ class ReviewStage:
             )
         harness, model = route
 
-        diff_text = _get_diff(ws, default_branch)
+        diff_text = _get_diff(git_ws, default_branch)
         template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
         prompt = fill_template(
             template,
@@ -363,7 +380,7 @@ class ReviewStage:
         agent_result = self.run_agent_func(
             AgentRequest(
                 prompt=prompt,
-                cwd=ws.path,
+                cwd=git_ws.path,
                 mode="read",
                 harness=harness,
                 model=model,
@@ -431,14 +448,20 @@ class ReviewStage:
         )
         state.agent_error_streak = 0
         _write_review_state(ws, state)
+        if approved:
+            # USR-375 S4: the stage contract artifact `stages.require_artifact(REVIEW)` validates.
+            workspace.write_context(ws, VERDICT_FILE, verdict.model_dump_json(indent=2))
 
         job_key = f"{run_id}:review:{round_num}"
-        sha = workspace.commit(
-            ws,
-            f"docs: review round {round_num}" + (" (changes requested)" if not approved else ""),
-            job_key=job_key,
-        )
-        workspace.push(ws)
+        if publish:
+            sha = workspace.commit(
+                ws,
+                f"docs: review round {round_num}" + (" (changes requested)" if not approved else ""),
+                job_key=job_key,
+            )
+            workspace.push(ws)
+        else:
+            sha = f"review:{run_id}:{round_num}"
 
         if approved:
             return StageResult(outcome="success", output_refs=[sha])

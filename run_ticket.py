@@ -48,7 +48,8 @@ from core.line.agent_cli import (
     run_agent,
     supports,
 )
-from core.line import gate_ram, grokbox_wake, ticket_stages
+from core.line import gate_ram, grokbox_wake, stage_planning, stage_review, ticket_engine, ticket_stages
+from core.line.stages import Stage, StageArtifactMissing, require_artifact
 from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.workflow import execution_registry
@@ -111,6 +112,14 @@ _DEV_HOST_CAPS: tuple[str, ...] = ("harness:claude", "harness:codex", "harness:g
 # Upper bound of one in-place fix-agent reinvocation (USR-245's `_invoke_fix_agent`); reported alongside
 # every reinvocation in `attempts_log` (USR-249) the same way `GATE_TIMEOUT_S`/`FOCAL_TEST_TIMEOUT_S` are.
 FIX_AGENT_TIMEOUT_S = 1800.0
+# USR-375 S4: PLAN/REVIEW without an eligible route WAIT (route_wait semantics): the run ends with the
+# fleet's requeue code (fleet_dispatcher.INFRA_EXIT_CODES), the ticket stays `planned` and is retried
+# after the cooldown; never a hard failure.
+EXIT_ROUTE_WAIT = 75
+ROUTE_WAIT_MARKER = "harness_infra_error: route_wait"
+# USR-375 S4: in-process attempts of PLAN and REVIEW for a transient `retry` outcome (agent hiccup).
+PLAN_ATTEMPTS = 2
+REVIEW_ATTEMPTS = 4
 
 
 def estimate_ticket_size(ticket: UserTicket) -> tuple[str, list[str]]:
@@ -1796,6 +1805,9 @@ def _resume_delivery_scoped(
 
         warn_if_unanswered(session_probe_path, logger)
 
+    # A resume typed by an operator (no launcher in this process, no parent launcher): the only case in
+    # which a worktree cut before USR-375 S4 (no stage artifacts at all) gets its plan/build backfilled.
+    standalone = not holder and not os.environ.get(local_cancel.ENV_PARENT)
     if holder:
         progress = holder[0]
     else:
@@ -1851,6 +1863,7 @@ def _resume_delivery_scoped(
         return _deliver_worktree(
             git_mgr, ticket, target_worktree, current_branch, resume_cmd,
             skip_validation, no_commit, no_push, as_json, return_result, progress, cancelled_payload,
+            standalone=standalone,
         )
     except cancellation.RunCancelledError:
         return cancelled_payload()
@@ -1971,8 +1984,26 @@ def _deliver_worktree(
     return_result: bool,
     progress: ProgressPublisher,
     cancelled_payload: Any,
+    standalone: bool = False,
 ) -> Any:
-    """Rebase, gate and delivery of one worktree, checking the cancel request before every step."""
+    """VALIDATE, REVIEW, MERGE and DEPLOY_SMOKE of one worktree (USR-375 S4).
+
+    Each stage writes its artifact and `require_artifact` validates it before the next stage; the
+    cancel request is checked before every step.
+    """
+    rws = ticket_engine.run_workspace(ticket, current_branch)
+
+    def refused(stage: Stage, reason: str) -> Any:
+        return _delivery_stage_refused(
+            ticket, stage, reason, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
+        )
+
+    try:
+        _require_plan_and_build(ticket, rws, standalone)
+    except StageArtifactMissing as exc:
+        return refused(exc.stage, exc.reason)
+    ticket_engine.clear_delivery(rws)
+
     # 1. Commit uncommitted changes in worktree if any (required before rebase)
     if _cancelled():
         return cancelled_payload()
@@ -2003,6 +2034,25 @@ def _deliver_worktree(
         return gate_outcome
     if attempts_log and not as_json:
         print(_render_self_correction_log(attempts_log))
+    ticket_engine.write_validation(
+        rws, True, "skip_validation" if skip_validation else "core/harness/runner.py --quick",
+        f"{len(attempts_log)} autocorrecao(oes)",
+    )
+
+    # REVIEW by another model family than the implementer; a change request goes back to the agent.
+    if _cancelled():
+        return cancelled_payload()
+    review_outcome = _stage_review(
+        ticket, target_worktree, current_branch, current_sha, resume_cmd, skip_validation, as_json,
+        return_result, progress, cancelled_payload, rws,
+    )
+    if review_outcome is not None:
+        return review_outcome
+    try:
+        require_artifact(Stage.VALIDATE, rws)
+        require_artifact(Stage.REVIEW, rws)
+    except StageArtifactMissing as exc:
+        return refused(exc.stage, exc.reason)
 
     # 4. Autonomous Git Lifecycle Completion (PR, merge, cleanup)
     if _cancelled():
@@ -2031,10 +2081,19 @@ def _deliver_worktree(
             resume_cmd, progress, as_json, return_result,
         )
 
-    if not external_project:
-        progress.phase(
-            "deploy", "skipped", "deploy pos-merge nao faz parte do run_ticket (scripts/dokploy_redeploy.py)"
-        )
+    awaiting_deploy = False
+    if completion_report is not None and not no_push:
+        pr_url, merge_sha = ticket_engine.merge_receipt_from(completion_report, current_branch, current_sha)
+        try:
+            ticket_engine.write_merge(rws, pr_url, merge_sha)
+            require_artifact(Stage.MERGE, rws)
+            _stage_deploy_smoke(rws, ticket, project, merge_sha, external_project, progress)
+            awaiting_deploy = bool(getattr(require_artifact(Stage.DEPLOY_SMOKE, rws), "pending", False))
+        except (StageArtifactMissing, ValueError) as exc:
+            stage = exc.stage if isinstance(exc, StageArtifactMissing) else Stage.MERGE
+            return refused(stage, getattr(exc, "reason", str(exc)))
+    else:
+        progress.phase("deploy", "skipped", "merge e deploy desligados por --no-commit/--no-push")
     try:
         git_mgr.sweep_stale(cwd=git_mgr.root)
     except Exception as exc:
@@ -2042,7 +2101,168 @@ def _deliver_worktree(
 
     return ticket_stages.delivery_success_result(
         ticket, completion_report, target_worktree, current_branch, current_sha, attempts_log,
-        as_json, return_result,
+        as_json, return_result, awaiting_deploy=awaiting_deploy,
+    )
+
+
+def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> None:
+    """Delivery never starts without PLAN and BUILD artifacts (raises `StageArtifactMissing`).
+
+    Exception: an operator's standalone `--resume-delivery` of a worktree cut before USR-375 S4 (no
+    artifact at all) records a minimal plan/build so the old worktree can still go through VALIDATE,
+    REVIEW and MERGE; the launcher and the fleet always produce both stages themselves.
+    """
+    if standalone and not ticket_engine.has_any(rws):
+        logger.warning("resume-delivery de %s sem artefatos de estagio: plano/build minimos registrados", ticket.id)
+        ticket_engine.write_demand(rws, ticket)
+        ticket_engine.write_minimal_plan(rws, ticket)
+        ticket_engine.write_build(rws, None, [ticket.id])
+    require_artifact(Stage.PLAN, rws)
+    require_artifact(Stage.BUILD, rws)
+
+
+def _delivery_stage_refused(
+    ticket: UserTicket,
+    stage: Stage,
+    reason: str,
+    target_worktree: Path,
+    current_branch: str,
+    resume_cmd: str,
+    progress: ProgressPublisher,
+    as_json: bool,
+    return_result: bool,
+) -> Any:
+    """A delivery stage without its artifact: nothing further runs and the ticket is not delivered."""
+    cause = f"stage_artifact_missing:{stage.value}"
+    message = f"estagio {stage.value} sem artefato valido: {reason}"
+    progress.phase("merge" if stage.value in ("MERGE", "DEPLOY_SMOKE") else "gate", "failed", message, cause=cause)
+    progress.set_outcome(message, cause)
+    print(f"[ERRO] Ticket {ticket.id}: {message}. Entrega interrompida.", file=sys.stderr)
+    print(f"[i] Worktree preservada: {target_worktree}\n[i] Para retomar: {resume_cmd}", file=sys.stderr)
+    payload = {
+        "exit_code": 1, "ok": False, "cause": cause, "error": reason, "ticket_id": ticket.id,
+        "branch": current_branch, "worktree": str(target_worktree), "resume_command": resume_cmd,
+    }
+    if as_json and not return_result:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return payload if return_result else 1
+
+
+def _delivery_route_wait(
+    ticket: UserTicket,
+    cause: str,
+    target_worktree: Path,
+    current_branch: str,
+    resume_cmd: str,
+    progress: ProgressPublisher,
+    as_json: bool,
+    return_result: bool,
+) -> Any:
+    """No other-family reviewer now: keep the worktree, requeue (fleet requeue code), no failure."""
+    message = f"estagio REVIEW aguardando revisor de outra familia: {cause}"
+    progress.phase("gate", "skipped", message, cause="route_wait")
+    progress.set_outcome(message, "route_wait")
+    print(f"[AGUARDANDO] Ticket {ticket.id}: {message} ({ROUTE_WAIT_MARKER}).", file=sys.stderr)
+    print(f"[i] Worktree preservada: {target_worktree}\n[i] Para retomar: {resume_cmd}", file=sys.stderr)
+    payload = {
+        "exit_code": EXIT_ROUTE_WAIT, "ok": False, "cause": "route_wait", "error": cause, "ticket_id": ticket.id,
+        "branch": current_branch, "worktree": str(target_worktree), "resume_command": resume_cmd,
+    }
+    if as_json and not return_result:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return payload if return_result else EXIT_ROUTE_WAIT
+
+
+def _review_candidate(ticket: UserTicket, target_worktree: Path, rws: Any) -> Any:
+    """One `stage_review.ReviewStage` round over the ticket diff; writes `review_verdict.json` on approve."""
+    return stage_review.ReviewStage().run(
+        _resolve_project(ticket), ticket.id, ws=rws, repo_dir=target_worktree, publish=False
+    )
+
+
+def _latest_review_feedback(rws: Any) -> str:
+    from core.line import workspace as line_workspace
+
+    reviews = sorted(line_workspace.context_dir(rws).glob("review-*.md"))
+    return reviews[-1].read_text(encoding="utf-8", errors="replace") if reviews else ""
+
+
+def _stage_review(
+    ticket: UserTicket,
+    target_worktree: Path,
+    current_branch: str,
+    current_sha: str,
+    resume_cmd: str,
+    skip_validation: bool,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    cancelled_payload: Any,
+    rws: Any,
+) -> Any:
+    """REVIEW stage: None once the verdict is `approve`; otherwise the refusal/failure payload.
+
+    `changes_required` reinvokes the development agent with the review, commits its fix and re-runs
+    the gate before the next round (rounds are capped by `run_caps.review_rounds` in the stage).
+    """
+    cause = "review_not_attempted"
+    for _attempt in range(REVIEW_ATTEMPTS):
+        if _cancelled():
+            return cancelled_payload()
+        logger.info("estagio REVIEW: revisao por outra familia de modelo")
+        if not as_json:
+            print("--> Estagio REVIEW: revisao independente por outra familia de modelo...")
+        try:
+            result = _review_candidate(ticket, target_worktree, rws)
+        except Exception as exc:  # noqa: BLE001 - a crashed review is a refused stage, never an approval
+            logger.warning("Review of %s crashed: %s", ticket.id, exc)
+            cause = f"review_error:{type(exc).__name__}: {exc}"
+            break
+        if result.outcome == "success":
+            logger.info("revisao independente aprovada")
+            return None
+        cause = f"review_{result.outcome}:{result.cause_code or ''}"
+        if _is_route_wait(result):
+            return _delivery_route_wait(
+                ticket, cause, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
+            )
+        if result.outcome != "retry" or "not_before" in (result.cause_code or ""):
+            break
+        if (result.cause_code or "").startswith("retry:development"):
+            feedback = _latest_review_feedback(rws)
+            _invoke_fix_agent(target_worktree, ticket, "revisao independente", feedback)
+            _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "revisao")
+            if commit_error:
+                cause = f"fix_commit_failed: {commit_error}"
+                break
+            gate_outcome = _run_gate_with_self_correction(
+                target_worktree, current_branch, current_sha, ticket, resume_cmd,
+                skip_validation, as_json, return_result, progress, cancelled_payload, [],
+            )
+            if gate_outcome is not None:
+                return gate_outcome
+    return _delivery_stage_refused(
+        ticket, Stage.REVIEW, cause, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
+    )
+
+
+def _stage_deploy_smoke(
+    rws: Any, ticket: UserTicket, project: Any, merge_sha: str, external_project: bool, progress: ProgressPublisher
+) -> None:
+    """DEPLOY_SMOKE artifact. An external project's deploy/smoke already ran in the delivery (a failure
+    never reaches here); the factory's own deploy is the fleet's single post-merge redeploy."""
+    if external_project and project is not None:
+        deployed = project.deploy is not None
+        detail = "deploy e smoke do projeto aprovados" if deployed else "sem deploy declarado; smoke HTTP aprovado"
+        ticket_engine.write_deploy(rws, merge_sha, True, deployed, detail)
+        return
+    # Not run here: smoke_ok None = deploy pending (merged-awaiting-deploy), never a claimed smoke.
+    ticket_engine.write_deploy(
+        rws, merge_sha, None, False,
+        "deploy pos-merge pendente: unico pelo fleet_dispatcher/scripts/dokploy_redeploy.py (fora do run_ticket)",
+    )
+    progress.phase(
+        "deploy", "skipped", "deploy pos-merge nao faz parte do run_ticket (scripts/dokploy_redeploy.py)"
     )
 
 
@@ -2352,9 +2572,12 @@ def _run_dev_agent(
     selected_harness: Optional[str],
     selected_model: Optional[str],
     progress: ProgressPublisher,
+    extra_prompt: str = "",
 ) -> Any:
-    """Runs the development agent with the line's retry policy; returns the retry report."""
-    dev_prompt = ticket_stages.build_dev_prompt(ticket, workspace)
+    """Runs the development agent with the line's retry policy; returns the retry report.
+
+    `extra_prompt` scopes the run to one sub-ticket of a multi-ticket plan (USR-375 S4)."""
+    dev_prompt = ticket_stages.build_dev_prompt(ticket, workspace) + extra_prompt
 
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
         continuation = ticket_stages.continuation_prompt(workspace, LEDGER_RELATIVE)
@@ -2644,6 +2867,130 @@ def _stage_preflight(
     }
 
 
+def _resolve_project(ticket: UserTicket) -> Any:
+    from core.projects.registry import get_project_registry
+
+    project = get_project_registry().get_project(ticket.project_id)
+    if project is None:
+        raise RuntimeError(f"projeto {ticket.project_id} nao registrado")
+    return project
+
+
+def _plan_with_agent(ticket: UserTicket, workspace: TicketWorkspace, rws: Any) -> Optional[str]:
+    """PLAN through `stage_planning.run_planning` (high-tier model only); None on success, else the cause."""
+    cause = "plan_not_attempted"
+    for _attempt in range(PLAN_ATTEMPTS):
+        try:
+            result = stage_planning.run_planning(
+                _resolve_project(ticket), ticket.id, ws=rws, repo_dir=workspace.path, publish=False,
+                host_caps=_DEV_HOST_CAPS, demand_text=ticket.problem_statement,
+            )
+        except Exception as exc:  # noqa: BLE001 - a crashed planner is a refused stage, not a traceback
+            return f"plan_error:{type(exc).__name__}: {exc}"
+        if result.outcome == "success":
+            return None
+        cause = f"plan_{result.outcome}:{result.cause_code or ''}"
+        if _is_route_wait(result):
+            return cause
+        if result.outcome != "retry" or "not_before" in (result.cause_code or ""):
+            break
+    return cause
+
+
+def _is_route_wait(result: Any) -> bool:
+    """`RouteWaiter.no_route_result` outcome (retry with not_before, or parked) for "no eligible model"."""
+    from core.line.route_wait import NO_ROUTE_CAUSE
+
+    return NO_ROUTE_CAUSE in str(getattr(result, "cause_code", "") or "")
+
+
+def _stage_wait(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: Optional[TicketWorkspace],
+    progress: ProgressPublisher,
+    stage: Stage,
+    cause: str,
+) -> int:
+    """No route for a stage right now: requeue later (ticket stays planned), never a failure."""
+    message = f"estagio {stage.value} aguardando rota elegivel: {cause}"
+    progress.phase("agent", "skipped", message, cause="route_wait")
+    progress.set_outcome(message, "route_wait")
+    print(f"[AGUARDANDO] {message}. Ticket segue planned e volta a fila depois ({ROUTE_WAIT_MARKER}).",
+          file=sys.stderr)
+    if workspace is not None:
+        _report_workspace_fate(workspace, args.json)
+    if args.json:
+        print(json.dumps({
+            "ok": False, "cause": "route_wait", "stage": stage.value, "error": cause, "ticket_id": ticket.id,
+        }, indent=2, ensure_ascii=False))
+    return EXIT_ROUTE_WAIT
+
+
+def _stage_refused(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    progress: ProgressPublisher,
+    stage: Stage,
+    cause: str,
+) -> int:
+    """A launcher stage that did not leave its artifact stops the ticket before the next stage."""
+    message = f"estagio {stage.value} nao produziu o artefato: {cause}"
+    progress.phase("agent", "failed", message, cause=f"stage_{stage.value.lower()}_refused")
+    progress.set_outcome(message, f"stage_{stage.value.lower()}_refused")
+    print(f"[ERRO] {message}. O ticket NAO segue para o desenvolvimento nem para o merge.", file=sys.stderr)
+    _report_workspace_fate(workspace, args.json)
+    if args.json:
+        print(json.dumps({
+            "ok": False, "cause": f"stage_artifact_missing:{stage.value}", "error": cause,
+            "ticket_id": ticket.id, "workspace": str(workspace.path),
+        }, indent=2, ensure_ascii=False))
+    return 1
+
+
+def _stage_plan(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    route: dict[str, Any],
+    progress: ProgressPublisher,
+) -> Optional[int]:
+    """INTAKE, GRILL (skipped for a small fix) and PLAN, each validated before the next; None to proceed."""
+    rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
+    ticket_engine.reset(rws)
+    stage = Stage.INTAKE
+    try:
+        ticket_engine.write_demand(rws, ticket)
+        require_artifact(Stage.INTAKE, rws)
+        stage = Stage.PLAN
+        if route.get("ticket_size") == "small":
+            # A small fix skips only GRILL; it still leaves a (minimal) plan artifact.
+            logger.info("estagio PLAN: plano minimo de correcao pequena (sem grill)")
+            ticket_engine.write_minimal_plan(rws, ticket)
+        else:
+            stage = Stage.GRILL
+            ticket_engine.write_grill(rws, ticket)
+            require_artifact(Stage.GRILL, rws)
+            stage = Stage.PLAN
+            logger.info("estagio PLAN: planejamento por modelo de nivel alto")
+            if not args.json:
+                print("\n--> Estagio PLAN: planejamento (SPEC.md + tickets.json)...")
+            cause = _plan_with_agent(ticket, workspace, rws)
+            if cause is not None and "no_route" in cause:
+                return _stage_wait(args, ticket, workspace, progress, Stage.PLAN, cause)
+            if cause is not None:
+                return _stage_refused(args, ticket, workspace, progress, Stage.PLAN, cause)
+        planned = ticket_engine.plan_tickets(rws)
+    except StageArtifactMissing as exc:
+        return _stage_refused(args, ticket, workspace, progress, exc.stage, exc.reason)
+    except (OSError, ValueError) as exc:
+        return _stage_refused(args, ticket, workspace, progress, stage, f"{type(exc).__name__}: {exc}")
+    if not args.json:
+        print(f"[+] Plano validado: {len(planned)} sub-ticket(s).")
+    return None
+
+
 def _stage_build(
     args: argparse.Namespace,
     ticket: UserTicket,
@@ -2664,12 +3011,32 @@ def _stage_build(
         print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
 
     before_headroom = quotas.get(selected_harness, {}).get("headroom")
-    report = _run_dev_agent(args, ticket, workspace, quotas, selected_harness, selected_model, progress)
-    early = _stage_agent_early_exit(
-        args, ticket, workspace, report, selected_harness, before_headroom, ticket_size, progress
-    )
-    if early is not None:
-        return early
+    rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
+    plan_items = ticket_engine.plan_tickets(rws)
+    # A multi-ticket plan runs its sub-tickets sequentially inside this same ticket (USR-375 S4).
+    sequential = len(plan_items) > 1
+    tickets_done: list[str] = []
+    total_duration = 0.0
+    implementer = selected_harness
+    for index, item in enumerate(plan_items, start=1):
+        if sequential:
+            if not args.json:
+                print(f"--> Sub-ticket {index}/{len(plan_items)} do plano: {item.id} {item.title}")
+            extra = ticket_engine.sub_ticket_prompt(item, index, len(plan_items))
+            report = _run_dev_agent(
+                args, ticket, workspace, quotas, selected_harness, selected_model, progress, extra_prompt=extra
+            )
+        else:
+            report = _run_dev_agent(args, ticket, workspace, quotas, selected_harness, selected_model, progress)
+        early = _stage_agent_early_exit(
+            args, ticket, workspace, report, selected_harness, before_headroom, ticket_size, progress
+        )
+        if early is not None:
+            return early
+        total_duration += float(report.total_duration_s or 0.0)
+        tickets_done.append(item.id)
+        if report.route is not None:
+            implementer = report.route[0]
 
     agent_result = report.result
     if report.route is not None:
@@ -2684,7 +3051,7 @@ def _stage_build(
         harness=selected_harness,
         before_headroom=before_headroom,
         after_headroom=after_headroom,
-        duration_s=report.total_duration_s,
+        duration_s=total_duration if sequential else report.total_duration_s,
     )
     if not args.json:
         print(f"\n{format_ticket_quota_summary(cost_record)}")
@@ -2703,6 +3070,9 @@ def _stage_build(
             args, ticket, workspace, agent_result, selected_harness, ticket_size, cost_record, progress
         )
 
+    # BUILD artifact: the implementer family REVIEW must differ from (stage_review reads `harness`).
+    ticket_engine.write_build(rws, implementer, tickets_done)
+    require_artifact(Stage.BUILD, rws)
     agent_summary = redacted_head(agent_result.text, 800)
     progress.phase(
         "agent", "succeeded", f"{len(implementation_paths)} arquivo(s) alterado(s)", harness=selected_harness
@@ -2799,6 +3169,13 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if _cancelled():
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
+    # INTAKE -> GRILL -> PLAN (USR-375 S4): BUILD never starts without a validated plan artifact.
+    plan_refused = _stage_plan(args, ticket, workspace, route, progress)
+    if plan_refused is not None:
+        return plan_refused
+    if _cancelled():
+        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
+
     built = _stage_build(args, ticket, workspace, quotas, route, progress)
     if isinstance(built, int):
         return built
@@ -2814,7 +3191,11 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
     delivered = exit_code == 0 and completion_info.get("ok", False)
-    if not delivered:
+    if delivered and completion_info.get("status") == "merged_awaiting_deploy":
+        progress.set_outcome("mergeado, aguardando deploy pos-merge", "merged_awaiting_deploy")
+    if exit_code == EXIT_ROUTE_WAIT:
+        pass  # requeue: the outcome was already recorded by the waiting stage
+    elif not delivered:
         failure_text = completion_info.get("error") or completion_info.get("cause") or f"codigo {exit_code}"
         progress.set_outcome(f"entrega falhou: {failure_text}", str(completion_info.get("cause") or "delivery_failed"))
 

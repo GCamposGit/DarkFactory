@@ -68,7 +68,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from core.line import workspace as ws_mod
 from core.line.recovery_context import restore_context
@@ -121,9 +121,21 @@ class DeployReport(BaseModel):
     """`deploy_report.json` - outcome of DEPLOY_SMOKE, the artifact the stage contract validates."""
 
     sha: str = Field(min_length=1)
-    smoke_ok: bool
+    # None = smoke not run: only valid with `deployed=False` ("deploy pending", USR-375 S4).
+    smoke_ok: Optional[bool]
     deployed: bool = True
     detail: str = ""
+
+    @model_validator(mode="after")
+    def _smoke_required_once_deployed(self) -> "DeployReport":
+        if self.smoke_ok is None and self.deployed:
+            raise ValueError("a deployed sha needs a smoke result (smoke_ok true/false)")
+        return self
+
+    @property
+    def pending(self) -> bool:
+        """Merged, deploy (and smoke) not run yet: merged-awaiting-deploy, never 'delivered'."""
+        return self.smoke_ok is None and not self.deployed
 
 
 class ReleaseError(RuntimeError):

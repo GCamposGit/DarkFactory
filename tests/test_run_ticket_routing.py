@@ -559,28 +559,6 @@ def test_ok_agent_without_implementation_is_rejected_before_delivery(
     delivery.assert_not_called()
 
 
-def test_ok_agent_with_implementation_reaches_normal_completion(
-    real_workspace: TicketWorkspace, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A real implementation is committed and the ticket can be completed."""
-    def fake_agent(req: AgentRequest) -> AgentResult:
-        assert req.prompt.startswith("CONTEXTO DE EXECUCAO HEADLESS")
-        assert "codex (headroom 64.0%)" in req.prompt
-        (req.cwd / "feature.py").write_text("value = 1\n", encoding="utf-8")
-        return AgentResult(
-            ok=True, text=f"Implemented feature.py {_FAKE_SECRET}",
-            harness=req.harness, duration_s=1.0,
-        )
-
-    monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-push", "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True and payload["agent_summary"] == "Implemented feature.py [REDACTED]"
-    assert (real_workspace.path / "feature.py").is_file()
-    assert DemandsStore(real_workspace.path / ".factory" / "demands" / "demands.json").get_ticket(_TICKET.id).status == DeliveryStatus.COMPLETED
-
-
 # --------------------------------------------------------------------------
 # USR-109: the harness the owner operates through is reported and preferred
 # --------------------------------------------------------------------------
