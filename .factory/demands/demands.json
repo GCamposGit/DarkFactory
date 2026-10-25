@@ -11442,8 +11442,8 @@
     "project_id": "darkfac",
     "title": "Despachante da frota como servico do sistema nos 3 hosts (fatia do USR-369)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "77dcf688e3b94507709a8ef67836db21a6d35bf1",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11465,7 +11465,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T02:34:48.353495Z",
-    "updated_at": "2026-10-25T02:34:48.353495Z"
+    "updated_at": "2026-10-25T14:28:07.002258Z"
   },
   {
     "id": "USR-385",
