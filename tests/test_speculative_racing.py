@@ -29,7 +29,6 @@ from core.benchmarks.racing import (
     EmpiricalBenchmarkLedger,
     SpeculativeRacingEngine,
 )
-from core.router.model_router import recommend_model
 from hub.backend.main import app
 
 
@@ -291,7 +290,6 @@ def test_speculative_race_escalation_on_failure():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-
 def test_empirical_tournament_and_elo():
     """Validates running an empirical tournament, Elo updating, and JSON serialization."""
     temp_dir = Path(tempfile.mkdtemp(prefix="speculative_test_"))
@@ -424,17 +422,6 @@ def test_legacy_empirical_metrics_are_quarantined_from_live_stats(tmp_path):
     assert persisted["metrics_scope"] == "live_model_inference_only"
     assert persisted["models"] == {}
     assert persisted["legacy_models"]["legacy-model"]["total_tasks_run"] == 9
-
-
-def test_model_router_speculative_fields():
-    """Validates model_router includes speculative_top3 candidate models."""
-    rec = recommend_model("coding", complexity="high", offline=False)
-    assert "daily_efficiency_frontier" in rec
-    frontier = rec["daily_efficiency_frontier"]
-    assert "speculative_top3" in frontier
-    top3 = frontier["speculative_top3"]
-    assert len(top3) == 3
-    assert all("role" in c for c in top3)
 
 
 def test_rest_api_speculative_and_proximity_endpoints():

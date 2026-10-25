@@ -95,9 +95,9 @@ python core/research/cli.py scout "faster-whisper voice activity detection" --la
 python core/research/cli.py list
 ```
 
-### 2. Consultar Recomendação de Modelo
+### 2. Consultar Roteamento (core.line.routing.pick)
 ```bash
-python core/router/model_router.py recommend --task-type code_scout
+python -c "from core.line.routing import pick; print(pick('development', ['harness:claude', 'harness:codex', 'harness:grok']))"
 ```
 
 ### 3. Rodar Validação Determinística

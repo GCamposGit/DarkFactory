@@ -17,15 +17,12 @@ Esta skill governa o despacho eficiente e custo-efetivo de modelos de linguagem 
 - **Telemetria de Cotas**: Headroom disponível nas contas e status do ledger diário de benchmarks (`.factory/benchmarks/latest.json`).
 
 ### Ações e Procedimento Executável
-1. **Consulta à Fronteira de Pareto**:
-   - Determine a recomendação ótima via CLI headless:
+1. **Consulta ao roteador único (`core.line.routing.pick`)**:
+   - O único roteador em produção é `core.line.routing.pick`; os roteadores legados `model_router` e `harness_router` foram removidos (USR-378).
      ```bash
-     python core/router/model_router.py recommend --task-type coding --complexity high
+     python -c "from core.line.routing import pick; print(pick('development', ['harness:claude', 'harness:codex', 'harness:grok']))"
      ```
-   - Para execução local $0 custo (Ollama):
-     ```bash
-     python core/router/model_router.py recommend --task-type review --offline
-     ```
+   - Para execução local $0 custo (Ollama), use as cascatas de `.factory/config/line_routing.json`.
 2. **Avaliação de Pressão de Tokens e Estresse de Cota**:
    - Calcule a projeção de consumo (`expected-steps`, `remaining-hourly-percent`).
    - Sob pressão (>80% de cota consumida), aplique failover para contas alternativas, priorize executores locais (`qwen-fast`, `qwen-deep`) ou acione gateway de API paga com teto delimitado.

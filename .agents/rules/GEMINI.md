@@ -7,7 +7,7 @@ Seu motor primário de orquestração e contexto é o **Gemini 3.8 Flash**.
 
 1. **Contexto Limpo & Especialização**:
    - Para tarefas complexas ou de pesquisa extensiva, use subagentes com contexto fresco (`invoke_subagent` com `flash_lite`, `flash` ou `pro`) para evitar poluição do contexto principal.
-   - Utilize o script `core/router/model_router.py` para consultar a matriz ótima de modelos para cada caso de uso.
+   - Utilize `core/line/routing.pick` (roteador único) para consultar o modelo/harness elegível para cada caso de uso.
 
 2. **Hierarquia de Execução Híbrida (Local-First -> Nuvem)**:
    - **Local Primeiro (Ollama `localhost:11434`)**: Para microtarefas, geração de massas de teste, mocks, fixtures e verificações sintáticas, utilize `qwen-fast` ou `qwen-deep`. Custo: $0.

@@ -37,7 +37,7 @@ Esta skill governa o monitoramento diário do ecossistema global de modelos de i
 
 ### Outputs Estruturados
 - **Ledger Diário de Benchmarks**: `.factory/benchmarks/latest.json` contendo catálogo consolidado, preços atualizados por 1M tokens e status da fronteira.
-- **Insumos para o Model Router**: Dados consumidos diretamente por `core/router/model_router.py` para seleção de planejadores (`PlannerTier.HIGH`) e implementadores econômicos.
+- **Insumos para o Model Router**: Dados consumidos diretamente por `core/line/routing.py` (`pick`) para seleção de planejadores (`PlannerTier.HIGH`) e implementadores econômicos.
 
 ### Portões, Política e Validação
 - **Comportamento Idempotente Obrigatório**: Proibida sobrecarga de requisições de rede se a execução do dia já foi concluída.
