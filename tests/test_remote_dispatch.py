@@ -559,21 +559,17 @@ def test_worker_vanishing_mid_run_falls_back(monkeypatch: pytest.MonkeyPatch) ->
 # =============================================================================
 
 
-def test_job_manager_submit_reports_missing_prerequisites_for_a_thin_bundle(tmp_path: Path) -> None:
-    client_repo = tmp_path / "client"
-    _init_repo(client_repo)
-    _write(client_repo, "a.txt", "one\n")
-    _commit_all(client_repo, "base")
-    base_sha = _git(client_repo, "rev-parse", "HEAD").strip()
-    _write(client_repo, "a.txt", "two\n")
-    _commit_all(client_repo, "second")
+def test_job_manager_submit_reports_missing_prerequisites_for_a_thin_bundle(
+    tmp_path: Path, copy_git_repo,
+) -> None:
+    client_repo = copy_git_repo("populated", tmp_path / "client")
+    base_sha = _git(client_repo, "rev-parse", "HEAD~1").strip()
     head_sha = _git(client_repo, "rev-parse", "HEAD").strip()
 
     thin_bundle = tmp_path / "thin.bundle"
     _git(client_repo, "bundle", "create", str(thin_bundle), "HEAD", "--not", base_sha)
 
-    worker_repo = tmp_path / "worker"
-    _init_repo(worker_repo)  # empty: knows nothing about base_sha or head_sha
+    worker_repo = copy_git_repo("empty", tmp_path / "worker")  # knows nothing about either client commit
 
     manager = JobManager(worker_repo, state_dir=tmp_path / "worker_state")
     status_code, body = manager.submit(thin_bundle.read_bytes(), {"candidate_sha": head_sha})
@@ -798,18 +794,13 @@ def test_worker_keeps_real_console_streams(tmp_path):
     assert not (tmp_path / "daemon.log").exists()
 
 
-def test_bundle_when_worker_already_has_head(tmp_path):
+def test_bundle_when_worker_already_has_head(tmp_path, copy_git_repo):
     """The worker usually has the exact commit being validated (its own
     origin/main); `HEAD --not HEAD` is empty and git refuses it, which made
     the client silently skip the Desktop and run locally."""
     from core.harness import remote_dispatch
 
-    repo = tmp_path / "repo"
-    _init_repo(repo)
-    _write(repo, "a.txt", "one\n")
-    _commit_all(repo, "first")
-    _write(repo, "a.txt", "two\n")
-    _commit_all(repo, "second")
+    repo = copy_git_repo("populated", tmp_path / "repo")
     head = _git(repo, "rev-parse", "HEAD").strip()
     parent = _git(repo, "rev-parse", "HEAD~1").strip()
 
@@ -829,18 +820,13 @@ def test_bundle_when_worker_already_has_head(tmp_path):
         bundle.unlink()
 
 
-def test_bundle_ignores_worker_commits_unknown_locally(tmp_path):
+def test_bundle_ignores_worker_commits_unknown_locally(tmp_path, copy_git_repo):
     """A worker can advertise a commit this checkout never saw (e.g. an
     unpushed commit on the Desktop); passing it to `--not` made git abort
     with 'bad object' and the client silently ran the suite locally."""
     from core.harness import remote_dispatch
 
-    repo = tmp_path / "repo"
-    _init_repo(repo)
-    _write(repo, "a.txt", "one\n")
-    _commit_all(repo, "first")
-    _write(repo, "a.txt", "two\n")
-    _commit_all(repo, "second")
+    repo = copy_git_repo("populated", tmp_path / "repo")
     head = _git(repo, "rev-parse", "HEAD").strip()
     parent = _git(repo, "rev-parse", "HEAD~1").strip()
     unknown = "9113b674e3e3c069cf639f5a6470e37ab71b35b5"

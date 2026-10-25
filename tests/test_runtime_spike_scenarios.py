@@ -65,26 +65,9 @@ def test_cli_run_verify_and_summarize_native_core(tmp_path: Path) -> None:
     """Run core suite on native_sqlite, verify manifest, and produce summary."""
     run_out = tmp_path / "exp_core"
     run_res = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "spikes.runtime_choice.cli",
-            "run",
-            "--runtime",
-            "native_sqlite",
-            "--suite",
-            "core",
-            "--out",
-            str(run_out),
-            "--lease-seconds",
-            "10.0",
-        ],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-        timeout=60,
+        [sys.executable, "-m", "spikes.runtime_choice.cli", "run", "--runtime", "native_sqlite",
+         "--suite", "core", "--out", str(run_out), "--lease-seconds", "1.0"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
     )
     details = ""
     if run_res.returncode != 0:
@@ -103,38 +86,16 @@ def test_cli_run_verify_and_summarize_native_core(tmp_path: Path) -> None:
 
     # Verify manifest
     verify_res = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "spikes.runtime_choice.cli",
-            "verify",
-            "--manifest",
-            str(manifest_file),
-        ],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
+        [sys.executable, "-m", "spikes.runtime_choice.cli", "verify", "--manifest", str(manifest_file)],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     assert verify_res.returncode == 0, f"verify failed: {verify_res.stderr}\n{verify_res.stdout}"
     assert "[PASS] Manifest verified successfully." in verify_res.stdout
 
     # Summarize manifest
     summarize_res = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "spikes.runtime_choice.cli",
-            "summarize",
-            "--manifest",
-            str(manifest_file),
-        ],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
+        [sys.executable, "-m", "spikes.runtime_choice.cli", "summarize", "--manifest", str(manifest_file)],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
     )
     assert summarize_res.returncode == 0
     assert "# HF-02 Runtime Spike Comparison Report" in summarize_res.stdout

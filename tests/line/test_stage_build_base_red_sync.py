@@ -26,6 +26,7 @@ from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import load_routing_config
 from core.line.stage_build import DevelopmentStage
 from core.projects.models import ProjectCommands, ProjectDescriptor
+from tests.line.conftest import copy_bare_origin
 
 BASE_TEST = "tests/test_base.py::test_red_on_main"
 NOW = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
@@ -58,11 +59,12 @@ class _Origin:
     """A bare origin plus a seed clone used to land commits on `main` like another developer would."""
 
     def __init__(self, tmp_path: Path) -> None:
-        self.bare = tmp_path / "origin.git"
-        _git(["init", "--bare", str(self.bare)], cwd=tmp_path)
+        self.bare = copy_bare_origin(tmp_path / "origin.git")
         self.seed = tmp_path / "_seed"
         _git(["clone", str(self.bare), str(self.seed)], cwd=tmp_path)
-        _git(["checkout", "-B", "main"], cwd=self.seed)
+        # The copied bare template's HEAD can still point at its original
+        # default branch (usually `master`), so make the seed checkout explicit.
+        _git(["checkout", "-B", "main", "origin/main"], cwd=self.seed)
         _git(["config", "user.email", "seed@example.com"], cwd=self.seed)
         _git(["config", "user.name", "Seed"], cwd=self.seed)
         self.land({
