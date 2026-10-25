@@ -496,7 +496,7 @@ class PostgresControlStore:
                             res_id, h_id, st, exp_at = res_row
                             res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
                             res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                            if res_expires < now_utc:
+                            if res_expires <= now_utc:
                                 continue  # Expired cycle reservation
                             res_host = str(h_id).lower()
                             worker_lower = worker.lower()
@@ -613,7 +613,7 @@ class PostgresControlStore:
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
                     exp_at = row[1] if hasattr(row[1], "astimezone") else datetime.fromisoformat(str(row[1])).astimezone(UTC)
-                    if exp_at < now_utc:
+                    if exp_at <= now_utc:
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' expired at {exp_at}.")
 
                     cur.execute(
@@ -635,7 +635,7 @@ class PostgresControlStore:
                             st, exp_at = res_row[0], res_row[1]
                             res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
                             res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                            if st not in ("active", "draining") or res_expires < now_utc:
+                            if st not in ("active", "draining") or res_expires <= now_utc:
                                 raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}).")
 
                     cur.execute(
@@ -663,6 +663,47 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL heartbeat failed: {exc}") from exc
 
+    @staticmethod
+    def _raise_if_cycle_reservation_inactive(cur: Any, claim: Claim) -> None:
+        """Reconciliation can deactivate a claim when its reservation expires; report the cycle fence cause."""
+        if not (claim.reservation_id and claim.reservation_id.startswith("fres-")):
+            return
+        cur.execute(
+            "SELECT status FROM fleet_reservations WHERE reservation_id = %s",
+            (claim.reservation_id,),
+        )
+        reservation_row = cur.fetchone()
+        if reservation_row and reservation_row[0] not in ("active", "draining"):
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_row[0]}). Old owner cannot publish."
+            )
+
+    @staticmethod
+    def _check_finish_reservation_fence(cur: Any, claim: Claim, now_utc: datetime) -> None:
+        """Fleet cycle claims may only publish while their reservation is active and unexpired (USR-281)."""
+        if not (claim.reservation_id and claim.reservation_id.startswith("fres-")):
+            return
+        cur.execute(
+            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
+            (claim.reservation_id,),
+        )
+        reservation_row = cur.fetchone()
+        if not reservation_row:
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is missing. Old owner cannot publish."
+            )
+        reservation_status, reservation_expiry = reservation_row
+        res_expires = (
+            reservation_expiry
+            if hasattr(reservation_expiry, "astimezone")
+            else datetime.fromisoformat(str(reservation_expiry))
+        )
+        res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+        if reservation_status not in ("active", "draining") or res_expires <= now_utc:
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_status}). Old owner cannot publish."
+            )
+
     def finish(self, claim: Claim, result: StageResult, now: datetime) -> None:
         if self.mock_mode:
             return self._backend.finish(claim, result, now)
@@ -685,10 +726,11 @@ class PostgresControlStore:
                     )
                     claim_row = cur.fetchone()
                     if not claim_row or claim_row[0] != "active":
+                        self._raise_if_cycle_reservation_inactive(cur, claim)
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
                     exp_at = claim_row[1] if hasattr(claim_row[1], "astimezone") else datetime.fromisoformat(str(claim_row[1])).astimezone(UTC)
-                    if exp_at < now_utc:
+                    if exp_at <= now_utc:
                         raise StaleLeaseError("Lease has expired.")
 
                     cur.execute(
@@ -699,19 +741,7 @@ class PostgresControlStore:
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Fencing token mismatch on finish.")
 
-                    # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
-                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
-                        cur.execute(
-                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
-                            (claim.reservation_id,),
-                        )
-                        res_row = cur.fetchone()
-                        if res_row:
-                            st, exp_at = res_row[0], res_row[1]
-                            res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
-                            res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                            if st not in ("active", "draining") or res_expires < now_utc:
-                                raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}). Old owner cannot publish.")
+                    self._check_finish_reservation_fence(cur, claim, now_utc)
 
                     if result.outcome == "success":
                         cur.execute(
@@ -852,7 +882,7 @@ class PostgresControlStore:
                         """
                         SELECT lease_id, run_id, ticket_id, plan_version, stage, iteration, fencing_token
                         FROM claims
-                        WHERE status = 'active' AND expires_at < %s
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
                         LIMIT %s
                         FOR UPDATE SKIP LOCKED
                         """,
@@ -1928,6 +1958,24 @@ class PostgresControlStore:
             metadata=meta if isinstance(meta, dict) else {},
         )
 
+    @staticmethod
+    def _requeue_expired_fleet_run(cur: Any, run_id: str, now_utc: datetime) -> None:
+        """Return in-flight jobs to pending when their owning fleet host loses its lease."""
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = 'pending', cause_code = 'FLEET_RESERVATION_EXPIRED',
+                fencing_token = fencing_token + 1, current_lease_id = NULL,
+                started_at = NULL, updated_at = %s
+            WHERE run_id = %s AND status = 'running'
+            """,
+            (now_utc, run_id),
+        )
+        cur.execute(
+            "UPDATE claims SET status = 'released' WHERE run_id = %s AND status = 'active'",
+            (run_id,),
+        )
+
     def reserve_cycle(
         self,
         project_id: str,
@@ -1960,15 +2008,25 @@ class PostgresControlStore:
                     # Advisory transaction lock serializes concurrent ceiling checks
                     cur.execute("SELECT pg_advisory_xact_lock(hashtext('darkfac_fleet_reservation_lock'))")
 
-                    # 1. Sweep expired active reservations to release slots
+                    # 1. Sweep expired reservations and return their in-flight jobs to pending.
+                    cur.execute(
+                        """
+                        SELECT run_id FROM fleet_reservations
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
+                        """,
+                        (now_utc,),
+                    )
+                    expiring_runs = [row[0] for row in cur.fetchall()]
                     cur.execute(
                         """
                         UPDATE fleet_reservations
                         SET status = 'expired'
-                        WHERE status = 'active' AND expires_at < %s
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
                         """,
                         (now_utc,),
                     )
+                    for expiring_run_id in expiring_runs:
+                        self._requeue_expired_fleet_run(cur, expiring_run_id, now_utc)
 
                     # 2. Check active ticket uniqueness
                     cur.execute(
@@ -2106,8 +2164,9 @@ class PostgresControlStore:
                         )
                     res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
                     res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                    if res_expires < now_utc:
+                    if res_expires <= now_utc:
                         cur.execute("UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = %s", (reservation_id,))
+                        self._requeue_expired_fleet_run(cur, row[3], now_utc)
                         conn.commit()
                         raise StaleLeaseError(f"Reservation '{reservation_id}' expired at {res_expires.isoformat()}.")
 
@@ -2384,7 +2443,7 @@ class PostgresControlStore:
                         """
                         UPDATE fleet_reservations
                         SET status = 'expired'
-                        WHERE status IN ('active', 'draining') AND expires_at < %s
+                        WHERE status IN ('active', 'draining') AND expires_at <= %s
                         RETURNING reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
                                   acquired_at, heartbeat_at, expires_at, metadata
                         """,
@@ -2395,6 +2454,7 @@ class PostgresControlStore:
                     for row in rows:
                         res = self._row_to_reservation(row)
                         expired.append(res)
+                        self._requeue_expired_fleet_run(cur, res.run_id, now_utc)
                         cur.execute(
                             """
                             INSERT INTO reconciliation_ledger (

@@ -1,0 +1,22 @@
+[Unit]
+Description=DarkFac fleet dispatcher
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=darkfac
+Group=darkfac
+WorkingDirectory=/opt/darkfac
+EnvironmentFile=-/etc/darkfac/fleet-dispatcher.env
+ExecStart=/opt/darkfac/.venv/bin/python -m core.line.fleet_dispatcher --loop
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+LogsDirectory=darkfac
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

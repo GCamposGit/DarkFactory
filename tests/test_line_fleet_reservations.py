@@ -250,6 +250,29 @@ def test_stage_claim_blocked_on_expired_reservation(store: ControlStore):
     assert claim is None
 
 
+def test_reserve_cycle_keeps_requested_run_id_after_expiration_sweep(store: ControlStore):
+    expired = store.reserve_cycle(
+        project_id="darkfac",
+        ticket_id="USR-281",
+        run_id="expired-run",
+        host_id="notebook",
+        now=NOW,
+        lease_duration_sec=10,
+    )
+
+    replacement = store.reserve_cycle(
+        project_id="darkfac",
+        ticket_id="USR-281",
+        run_id="replacement-run",
+        host_id="notebook",
+        now=NOW + timedelta(seconds=10),
+    )
+
+    assert replacement.run_id == "replacement-run"
+    expired_after_sweep = store.get_reservation(expired.reservation_id)
+    assert expired_after_sweep is not None and expired_after_sweep.status == "expired"
+
+
 # ------------------------------------------------------------------------------
 # 6. Heartbeat, drain, expiration, and fencing
 # ------------------------------------------------------------------------------

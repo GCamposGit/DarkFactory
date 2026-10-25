@@ -453,18 +453,29 @@ def test_finalize_remote_result_config_hash_mismatch_is_a_definitive_fail(
     assert "config_hash" in out.lower()
 
 
-def test_finalize_remote_result_missing_result_json_fails(capsys: pytest.CaptureFixture[str]) -> None:
-    payload = {"status": "failed", "result_json": None}
-    success, result = remote_dispatch._finalize_remote_result(
-        payload,
-        candidate_sha="a" * 40,
-        config_hash="b" * 64,
-        base_url="http://worker",
-        health={},
-    )
-    assert success is False
-    assert result is None
-    assert markers.MARKER_HARNESS_FAIL in capsys.readouterr().out
+@pytest.mark.parametrize("status", ["done", "failed"])
+def test_finalize_remote_result_missing_result_json_is_worker_loss(
+    status: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload = {"status": status, "result_json": None, "returncode": 0, "_log_tail": "worker output"}
+    lost: list[tuple[dict, str]] = []
+    monkeypatch.setattr(remote_dispatch, "_record_lost_job", lambda details, log: lost.append((details, log)))
+
+    with pytest.raises(remote_dispatch.RemoteJobLost, match="without structured HARNESS_RESULT"):
+        remote_dispatch._finalize_remote_result(
+            payload,
+            candidate_sha="a" * 40,
+            config_hash="b" * 64,
+            base_url="http://worker",
+            health={"hostname": "worker-host"},
+            job_id="job-1",
+        )
+
+    assert lost[0][0]["error_code"] == "worker_internal_error"
+    assert lost[0][0]["job_id"] == "job-1"
+    assert lost[0][1] == "worker output"
+    out = capsys.readouterr().out
+    assert markers.MARKER_HARNESS_FAIL not in out
 
 
 def test_finalize_remote_result_success_sets_executed_on(capsys: pytest.CaptureFixture[str]) -> None:

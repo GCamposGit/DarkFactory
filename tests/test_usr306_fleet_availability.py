@@ -14,10 +14,12 @@ from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_coordinator import CloudCoordinator
 from core.orchestrator.cloud_worker import CloudWorker
 from core.workflow.control_contracts import (
+    Claim,
     FLEET_MANAGED_ENV,
     IntakeCommand,
     JobKey,
     RuntimeOwner,
+    StaleLeaseError,
     StageResult,
 )
 from core.workflow.control_store import SQLiteControlStore
@@ -112,7 +114,7 @@ def test_managed_mode_requires_verified_health(store, monkeypatch):
 
     # capacity_probe pinned: on a machine named *notebook* the real RAM probe decides the slot (flaky).
     admitted = CloudCoordinator(
-        store=store, host_health_prober=lambda h: h == "notebook", capacity_probe=lambda: 2
+        store=store, host_health_prober=lambda h: h == "notebook", capacity_probe=lambda: 1
     ).admit_eligible_cycles(now)
     assert [r.host_id for r in admitted] == ["notebook"]
 
@@ -121,7 +123,7 @@ def test_unmanaged_legacy_mode_keeps_presuming_hosts_available(store, monkeypatc
     monkeypatch.delenv(FLEET_MANAGED_ENV, raising=False)
     now = datetime.now(UTC)
     _accept(store, now)
-    admitted = CloudCoordinator(store=store).admit_eligible_cycles(now)
+    admitted = CloudCoordinator(store=store, capacity_probe=lambda: 1).admit_eligible_cycles(now)
     assert [r.host_id for r in admitted] == ["grokbox"]
 
 
@@ -194,6 +196,159 @@ def test_expired_reservation_is_not_resurrected_by_renewal(store, monkeypatch):
     receipt = _accept(store, now)
     _reserve(store, receipt, now)
     assert store.renew_open_run_reservations(now + timedelta(seconds=300)) == 0
+
+
+def test_dead_host_reservation_expires_and_pending_ticket_is_admitted_elsewhere(store, monkeypatch):
+    monkeypatch.delenv(FLEET_MANAGED_ENV, raising=False)
+    now = datetime.now(UTC)
+    receipt = _accept(store, now)
+    reservation = _reserve(store, receipt, now, host="grokbox")
+    recovered_at = now + timedelta(seconds=300)
+
+    expired = store.reconcile_fleet_reservations(recovered_at)
+    assert [item.reservation_id for item in expired] == [reservation.reservation_id]
+    assert store.get_reservation(reservation.reservation_id).status == "expired"
+    assert store.get_active_reservation_for_host("grokbox") is None
+
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        run_status = conn.execute("SELECT status FROM runs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+        job_status = conn.execute("SELECT status FROM jobs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+    assert run_status == "active"
+    assert job_status == "pending"
+
+    coordinator = CloudCoordinator(
+        store=store,
+        fleet_hosts=["notebook"],
+        host_health_prober=lambda host: host == "notebook",
+        capacity_probe=lambda: 2,
+    )
+    admitted = coordinator.admit_eligible_cycles(recovered_at)
+
+    assert [item.host_id for item in admitted] == ["notebook"]
+    assert admitted[0].run_id == receipt.run_id
+
+
+def test_expired_host_owner_cannot_finish_cycle_after_re_admission(store, monkeypatch):
+    monkeypatch.setenv(FLEET_MANAGED_ENV, "1")
+    now = datetime.now(UTC)
+    receipt = _accept(store, now)
+    reservation = _reserve(store, receipt, now, host="grokbox")
+    claim = store.claim(worker="grokbox-worker", capabilities=CAPS, now=now + timedelta(seconds=1))
+    assert claim is not None and claim.reservation_id == reservation.reservation_id
+
+    recovered_at = now + timedelta(seconds=300)
+    store.reconcile_fleet_reservations(recovered_at)
+    coordinator = CloudCoordinator(
+        store=store,
+        fleet_hosts=["notebook"],
+        host_health_prober=lambda host: host == "notebook",
+        capacity_probe=lambda: 2,
+    )
+    admitted = coordinator.admit_eligible_cycles(recovered_at)
+    assert [item.run_id for item in admitted] == [receipt.run_id]
+
+    with pytest.raises(StaleLeaseError):
+        store.finish(
+            claim,
+            StageResult(outcome="success", output_refs=["stale-output"]),
+            recovered_at + timedelta(seconds=1),
+        )
+
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        run_status = conn.execute("SELECT status FROM runs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+        job_status = conn.execute("SELECT status FROM jobs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+    assert run_status == "active"
+    assert job_status == "pending"
+
+
+def test_finish_rejects_active_claim_after_reservation_ttl_without_reconcile(store, monkeypatch):
+    monkeypatch.setenv(FLEET_MANAGED_ENV, "1")
+    now = datetime.now(UTC)
+    receipt = _accept(store, now)
+    reservation = _reserve(store, receipt, now, host="grokbox")
+    claim = store.claim(worker="grokbox-worker", capabilities=CAPS, now=now + timedelta(seconds=1))
+    assert claim is not None and claim.reservation_id == reservation.reservation_id
+
+    # Keep the claim lease alive while allowing the independent reservation TTL to expire.
+    claim = store.heartbeat(claim, now + timedelta(seconds=20))
+    with pytest.raises(StaleLeaseError, match="no longer active"):
+        store.finish(
+            claim,
+            StageResult(outcome="success", output_refs=["stale-output"]),
+            now + timedelta(seconds=31),
+        )
+
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        job_status = conn.execute("SELECT status FROM jobs WHERE run_id = ?", (receipt.run_id,)).fetchone()[0]
+    assert job_status != "succeeded"
+
+
+def test_postgres_production_finish_checks_reservation_ttl():
+    now = datetime.now(UTC)
+    claim = Claim(
+        job_key=JobKey(run_id="run-pg", ticket_id="USR-306", plan_version="v1", stage="development", iteration=0),
+        lease_id="lease-pg",
+        owner="grokbox-worker",
+        fencing_token=4,
+        expires_at=(now + timedelta(seconds=60)).isoformat(),
+        reservation_id="fres-pg",
+    )
+
+    class FakeCursor:
+        def __init__(self):
+            self.row = None
+            self.statements = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, _params=None):
+            self.statements.append(sql)
+            if "FROM claims WHERE lease_id" in sql:
+                self.row = ("active", now + timedelta(seconds=60))
+            elif "FROM jobs WHERE run_id" in sql:
+                self.row = (claim.fencing_token, claim.lease_id, 0, 3)
+            elif "FROM fleet_reservations WHERE reservation_id" in sql:
+                self.row = ("active", now - timedelta(seconds=1))
+            else:
+                self.row = None
+
+        def fetchone(self):
+            return self.row
+
+    class FakeConnection:
+        def __init__(self):
+            self.cursor_instance = FakeCursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            raise AssertionError("stale finish must not commit")
+
+    connection = FakeConnection()
+    store = PostgresControlStore(mock_mode=True)
+    store.mock_mode = False
+    store.raw_url = "postgresql://test"
+    store._psycopg = SimpleNamespace(connect=lambda _url: connection)
+
+    with pytest.raises(StaleLeaseError, match="no longer active"):
+        store.finish(claim, StageResult(outcome="success", output_refs=["stale-output"]), now)
+
+    assert any("FROM fleet_reservations" in statement for statement in connection.cursor_instance.statements)
+    assert not any("UPDATE jobs" in statement for statement in connection.cursor_instance.statements)
 
 
 # --------------------------------------------------------------------------- worker heartbeat

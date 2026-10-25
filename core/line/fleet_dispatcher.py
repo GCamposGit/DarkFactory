@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import subprocess
 import sys
@@ -40,6 +41,27 @@ MIN_NOTEBOOK_WORKERS = 2
 INFRA_EXIT_CODES = frozenset({75})
 LOCK_MARKERS = ("[TRAVA DE LINHA]",)
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+
+def configure_logging(log_dir: Path, *, stream: Any = None) -> RotatingFileHandler:
+    """Configure UTF-8 file rotation and retain a console/journal copy."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        log_dir / "fleet-dispatcher.log",
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    handlers: list[logging.Handler] = [file_handler, logging.StreamHandler(stream)]
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+    return file_handler
 
 
 @dataclass
@@ -375,7 +397,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     args = ap.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
+    configure_logging(log_dir)
     from core.notifications.daily_digest import maybe_send_due
 
     d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due)

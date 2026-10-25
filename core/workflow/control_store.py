@@ -718,7 +718,7 @@ class SQLiteControlStore:
                         now_comp = now.replace(tzinfo=res_expires.tzinfo)
                     else:
                         now_comp = now
-                    if res_expires < now_comp:
+                    if res_expires <= now_comp:
                         continue  # Expired cycle reservation
                     res_host = str(res_row["host_id"]).lower()
                     worker_lower = worker.lower()
@@ -856,7 +856,13 @@ class SQLiteControlStore:
                 conn.rollback()
                 raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active in store.")
 
-            if datetime.fromisoformat(claim_row["expires_at"]) < now:
+            claim_expires = datetime.fromisoformat(claim_row["expires_at"])
+            compare_now = now
+            if claim_expires.tzinfo is None and compare_now.tzinfo is not None:
+                claim_expires = claim_expires.replace(tzinfo=compare_now.tzinfo)
+            elif claim_expires.tzinfo is not None and compare_now.tzinfo is None:
+                compare_now = compare_now.replace(tzinfo=claim_expires.tzinfo)
+            if claim_expires <= compare_now:
                 conn.rollback()
                 raise StaleLeaseError(f"Lease '{claim.lease_id}' expired at {claim_row['expires_at']}.")
 
@@ -898,7 +904,7 @@ class SQLiteControlStore:
                         now_comp = now.replace(tzinfo=res_expires.tzinfo)
                     else:
                         now_comp = now
-                    if res_row["status"] not in ("active", "draining") or res_expires < now_comp:
+                    if res_row["status"] not in ("active", "draining") or res_expires <= now_comp:
                         conn.rollback()
                         raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}).")
 
@@ -932,6 +938,53 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _expired_at(expires_iso: str, now: datetime) -> bool:
+        """True when the ISO expiry is at or before now (naive/aware tolerant)."""
+        expires = datetime.fromisoformat(str(expires_iso))
+        if expires.tzinfo is None and now.tzinfo is not None:
+            expires = expires.replace(tzinfo=now.tzinfo)
+        elif expires.tzinfo is not None and now.tzinfo is None:
+            now = now.replace(tzinfo=expires.tzinfo)
+        return expires <= now
+
+    @staticmethod
+    def _raise_if_cycle_reservation_inactive(conn: sqlite3.Connection, cur: sqlite3.Cursor, claim: Claim) -> None:
+        """Reconciliation can deactivate a claim when its fleet reservation expires; report the cycle fence cause."""
+        if not (claim.reservation_id and claim.reservation_id.startswith("fres-")):
+            return
+        cur.execute(
+            "SELECT status FROM fleet_reservations WHERE reservation_id = ?",
+            (claim.reservation_id,),
+        )
+        res_row = cur.fetchone()
+        if res_row and res_row["status"] not in ("active", "draining"):
+            conn.rollback()
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot publish."
+            )
+
+    @staticmethod
+    def _check_finish_reservation_fence(conn: sqlite3.Connection, cur: sqlite3.Cursor, claim: Claim, now: datetime) -> None:
+        """Fleet cycle claims may only publish while their reservation is active and unexpired (USR-281)."""
+        if not (claim.reservation_id and claim.reservation_id.startswith("fres-")):
+            return
+        cur.execute(
+            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = ?",
+            (claim.reservation_id,),
+        )
+        res_row = cur.fetchone()
+        if not res_row:
+            conn.rollback()
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is missing. Old owner cannot publish."
+            )
+        if res_row["status"] not in ("active", "draining") or SQLiteControlStore._expired_at(res_row["expires_at"], now):
+            conn.rollback()
+            raise StaleLeaseError(
+                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot publish."
+            )
+
     def finish(self, claim: Claim, result: StageResult, now: datetime) -> None:
         """Conclude active job execution in a single atomic transaction."""
         now_iso = now.isoformat()
@@ -955,12 +1008,15 @@ class SQLiteControlStore:
             )
             claim_row = cur.fetchone()
             if not claim_row or claim_row["status"] != "active":
+                self._raise_if_cycle_reservation_inactive(conn, cur, claim)
                 conn.rollback()
                 raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
-            if datetime.fromisoformat(claim_row["expires_at"]) < now:
+            if self._expired_at(claim_row["expires_at"], now):
                 conn.rollback()
                 raise StaleLeaseError(f"Lease '{claim.lease_id}' has expired at {claim_row['expires_at']}.")
+
+            self._check_finish_reservation_fence(conn, cur, claim, now)
 
             # Verify job fencing
             cur.execute(
@@ -984,27 +1040,6 @@ class SQLiteControlStore:
                 raise StaleLeaseError(
                     f"Fencing token mismatch on finish: job={job_row['fencing_token']}, claim={claim.fencing_token}"
                 )
-
-            # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
-            if claim.reservation_id and claim.reservation_id.startswith("fres-"):
-                cur.execute(
-                    "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = ?",
-                    (claim.reservation_id,),
-                )
-                res_row = cur.fetchone()
-                if res_row:
-                    res_expires = datetime.fromisoformat(str(res_row["expires_at"]))
-                    if res_expires.tzinfo is None and now.tzinfo is not None:
-                        res_expires = res_expires.replace(tzinfo=now.tzinfo)
-                    elif res_expires.tzinfo is not None and now.tzinfo is None:
-                        now_comp = now.replace(tzinfo=res_expires.tzinfo)
-                    else:
-                        now_comp = now
-                    if res_row["status"] not in ("active", "draining") or res_expires < now_comp:
-                        conn.rollback()
-                        raise StaleLeaseError(
-                            f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot publish."
-                        )
 
             # Apply state update
             if result.outcome == "success":
@@ -1215,12 +1250,12 @@ class SQLiteControlStore:
             conn.execute("BEGIN IMMEDIATE")
             cur = conn.cursor()
 
-            # Find active claims with expires_at < now
+            # Match Postgres: expired active or draining claims are swept at the TTL boundary.
             cur.execute(
                 """
                 SELECT lease_id, run_id, ticket_id, plan_version, stage, iteration, fencing_token
                 FROM claims
-                WHERE status = 'active' AND expires_at < ?
+                WHERE status IN ('active', 'draining') AND expires_at <= ?
                 LIMIT ?
                 """,
                 (now_iso, limit),
@@ -2174,6 +2209,24 @@ class SQLiteControlStore:
             metadata=meta,
         )
 
+    @staticmethod
+    def _requeue_expired_fleet_run(cur: sqlite3.Cursor, run_id: str, now_iso: str) -> None:
+        """Return in-flight jobs to pending when their owning fleet host loses its lease."""
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = 'pending', cause_code = 'FLEET_RESERVATION_EXPIRED',
+                fencing_token = fencing_token + 1, current_lease_id = NULL,
+                started_at = NULL, updated_at = ?
+            WHERE run_id = ? AND status = 'running'
+            """,
+            (now_iso, run_id),
+        )
+        cur.execute(
+            "UPDATE claims SET status = 'released' WHERE run_id = ? AND status = 'active'",
+            (run_id,),
+        )
+
     def reserve_cycle(
         self,
         project_id: str,
@@ -2199,12 +2252,22 @@ class SQLiteControlStore:
                 # 1. Sweep expired active reservations to release slots
                 cur.execute(
                     """
-                    UPDATE fleet_reservations
-                    SET status = 'expired'
-                    WHERE status = 'active' AND expires_at < ?
+                    SELECT run_id FROM fleet_reservations
+                    WHERE status IN ('active', 'draining') AND expires_at <= ?
                     """,
                     (now_iso,),
                 )
+                expiring_runs = [str(row["run_id"]) for row in cur.fetchall()]
+                cur.execute(
+                    """
+                    UPDATE fleet_reservations
+                    SET status = 'expired'
+                    WHERE status IN ('active', 'draining') AND expires_at <= ?
+                    """,
+                    (now_iso,),
+                )
+                for expiring_run_id in expiring_runs:
+                    self._requeue_expired_fleet_run(cur, expiring_run_id, now_iso)
 
                 # 2. Check active ticket uniqueness
                 cur.execute(
@@ -2358,8 +2421,9 @@ class SQLiteControlStore:
                 now_comp = now.replace(tzinfo=res_expires.tzinfo)
             else:
                 now_comp = now
-            if res_expires < now_comp:
+            if res_expires <= now_comp:
                 cur.execute("UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = ?", (reservation_id,))
+                self._requeue_expired_fleet_run(cur, row["run_id"], now_iso)
                 conn.commit()
                 raise StaleLeaseError(f"Reservation '{reservation_id}' expired at {row['expires_at']}.")
 
@@ -2631,7 +2695,7 @@ class SQLiteControlStore:
                 SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
                        acquired_at, heartbeat_at, expires_at, metadata
                 FROM fleet_reservations
-                WHERE status IN ('active', 'draining') AND expires_at < ?
+                WHERE status IN ('active', 'draining') AND expires_at <= ?
                 """,
                 (now_iso,),
             )
@@ -2644,6 +2708,7 @@ class SQLiteControlStore:
                     "UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = ?",
                     (r["reservation_id"],),
                 )
+                self._requeue_expired_fleet_run(cur, res.run_id, now_iso)
                 cur.execute(
                     """
                     INSERT INTO reconciliation_ledger (
