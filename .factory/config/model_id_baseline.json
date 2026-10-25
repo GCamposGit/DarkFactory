@@ -52,7 +52,6 @@
     "core/content/engine.py": 2,
     "core/demands/specifier.py": 1,
     "core/execution/resilience.py": 5,
-    "core/game/cli.py": 2,
     "core/infra/inventory.py": 1,
     "core/line/agent_cli.py": 1,
     "core/line/auth_bootstrap.py": 1,

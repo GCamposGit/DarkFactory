@@ -516,16 +516,3 @@ def test_get_model_provider_factory_resilient() -> None:
     assert prov.provider_id == "resilient"
 
 
-def test_cli_circuit_status_and_execute_headless(capsys: pytest.CaptureFixture[str]) -> None:
-    """CLI commands work with --json flag outputting structured data."""
-    from core.execution.cli import main
-
-    # circuit-status
-    ret = main(["circuit-status", "--json"])
-    assert ret == 0
-    captured = capsys.readouterr().out
-    data = json.loads(captured)
-    assert "providers" in data
-    assert "ollama" in data["providers"]
-    assert "cloud" in data["providers"]
-    assert data["providers"]["ollama"]["state"] == "closed"

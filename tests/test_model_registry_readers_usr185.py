@@ -130,7 +130,6 @@ def test_qualified_routes_ids_unchanged() -> None:
 def test_gateway_readers_ids_unchanged() -> None:
     from core.acceptance import engine as acceptance
     from core.execution import resilience
-    from core.game import cli as game_cli
 
     assert resilience.DEFAULT_PARETO_FALLBACK_MODELS == {
         "low": "qwen/qwen3-8-flash-next",
@@ -138,9 +137,6 @@ def test_gateway_readers_ids_unchanged() -> None:
         "high": "deepseek/deepseek-v4-pro",
         "critical": "anthropic/claude-3.7-sonnet",
     }
-    assert game_cli.FRONTIER_MODEL == "openai/gpt-6-astra"
-    assert game_cli.FAST_IMAGE_MODEL == "google/gemini-3.1-flash-lite-image"
-    assert game_cli.FRONTIER_IMAGE_MODEL == "openai/gpt-image-2"
     assert acceptance._PARETO_FLASH == "deepseek-v4.1-flash"
 
 

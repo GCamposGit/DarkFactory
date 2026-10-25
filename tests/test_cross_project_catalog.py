@@ -133,18 +133,6 @@ def test_catalog_export_from_project(tmp_path: Path) -> None:
         cat_mod.get_project_registry = orig_get_reg
 
 
-def test_catalog_cli_list_and_inspect(capsys: pytest.CaptureFixture[str]) -> None:
-    from core.catalog.cli import main
-
-    code = main(["list"])
-    assert code == 0
-    captured = capsys.readouterr()
-    assert "atrium-seo-validator" in captured.out
-
-    code_inspect = main(["inspect", "--id", "atrium-seo-validator"])
-    assert code_inspect == 0
-    captured_inspect = capsys.readouterr()
-    assert "SEO and Sitemap Validator" in captured_inspect.out
 
 
 def test_catalog_sync_fails_when_target_missing_without_create_flag(tmp_path: Path) -> None:

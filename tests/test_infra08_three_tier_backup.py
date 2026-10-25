@@ -21,7 +21,6 @@ from core.infra.backup_service import (
     BackupStorageTarget,
     CloudBackupService,
 )
-from core.infra.cli import main as cli_main
 from core.infra.crypto import (
     CorruptedArchiveError,
     DecryptionError,
@@ -357,49 +356,6 @@ def test_asymmetric_retention_policy(backup_env: tuple[CloudBackupService, Path,
 # ==============================================================================
 
 
-def test_cli_backup_commands_integration(tmp_path: Path) -> None:
-    """Verifies that CLI commands backup-run, backup-list, backup-restore, and backup-retention succeed."""
-    source_dir = tmp_path / "cli_src"
-    source_dir.mkdir()
-    (source_dir / "app.py").write_text("print('cli')", encoding="utf-8")
-    restore_dest = tmp_path / "cli_restore"
-
-    # 1. backup-run
-    ret_run = cli_main([
-        "backup-run",
-        "--project-id", "proj-cli",
-        "--source-dir", str(source_dir),
-    ])
-    assert ret_run == 0
-
-    # 2. backup-list
-    ret_list = cli_main(["backup-list", "--project-id", "proj-cli"])
-    assert ret_list == 0
-
-    # 3. get snapshot ID
-    service = CloudBackupService()
-    snaps = service.list_snapshots("proj-cli")
-    assert len(snaps) >= 1
-    snap_id = snaps[0].snapshot_id
-
-    # 4. backup-restore
-    ret_res = cli_main([
-        "backup-restore",
-        "--snapshot-id", snap_id,
-        "--destination", str(restore_dest),
-        "--from-tier", "local",
-    ])
-    assert ret_res == 0
-    assert (restore_dest / "app.py").read_text(encoding="utf-8") == "print('cli')"
-
-    # 5. backup-retention
-    ret_ret = cli_main([
-        "backup-retention",
-        "--project-id", "proj-cli",
-        "--r2-days", "7",
-        "--onprem-days", "120",
-    ])
-    assert ret_ret == 0
 
 
 # ==============================================================================

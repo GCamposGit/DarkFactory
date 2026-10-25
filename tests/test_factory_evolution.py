@@ -150,9 +150,3 @@ def test_engine_proposals_persistence_and_report(tmp_path: Path) -> None:
     assert report.proposals[0].proposal_id == "prop_persisted_01"
 
 
-def test_evolution_cli_status(capsys: pytest.CaptureFixture[str]) -> None:
-    from core.evolution.cli import main
-    code = main(["status"])
-    assert code == 0
-    captured = capsys.readouterr()
-    assert "Factory Evolution Subsystem" in captured.out
