@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import sys
 import time
 import urllib.error
@@ -56,7 +57,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.git.safe_show import safe_show
-from core.orchestrator.bluegreen import BlueGreenError, is_bluegreen, run_bluegreen_via_dokploy
+from core.orchestrator.bluegreen import COLOR_PREFIX, BlueGreenError, has_serving_replica, is_bluegreen, run_bluegreen_via_dokploy
 from core.orchestrator.bluegreen import parse_state as parse_bluegreen_state
 from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
@@ -980,8 +981,8 @@ MIN_SECURE_HUB_SHA = "b653a305fe602c7afb6b82c2016d7197ebaf2a8f"
 def hub_restore_is_secure(previous_compose: str, *, repo_root: Optional[Path] = None) -> bool:
     """True only if the colour active in ``previous_compose`` already contains MIN_SECURE_HUB_SHA."""
     state = parse_bluegreen_state(previous_compose)
-    if state is None:
-        return False
+    if state is None or not has_serving_replica(previous_compose):
+        return False  # USR-388: an offline (zero-replica) compose is never a "previous" to restore
     try:
         result = subprocess.run(
             ["git", "merge-base", "--is-ancestor", MIN_SECURE_HUB_SHA, state.sha_of(state.active)],
@@ -1021,6 +1022,63 @@ def _bluegreen_serving(
     return serving
 
 
+DARKHUB_PUBLIC_ORIGIN = DARKHUB_HEALTH_URL.rsplit("/health", 1)[0]
+
+
+def _bluegreen_color_serving(
+    color_health: Optional[Callable[[str], Dict[str, Any]]] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> Callable[[str, str], bool]:
+    """USR-388: probe the NEW colour on its own Traefik route (``/__bg/<colour>/health``); 3 in a row."""
+    probe = color_health or (lambda color: fetch_darkhub_health(f"{DARKHUB_PUBLIC_ORIGIN}{COLOR_PREFIX}{color}/health"))
+
+    def serving(color: str, expected: str) -> bool:
+        observed: List[str] = []
+        for _ in range(3):
+            try:
+                sha = str(probe(color).get("git_sha", "")).lower()
+            except Exception as exc:  # noqa: BLE001 - recorded for the operator, never fatal
+                observed.append(type(exc).__name__)
+                break
+            observed.append(sha[:12] or "<empty>")
+            if sha != expected:
+                break
+        else:
+            return True
+        if log is not None:
+            log(f"[Darkhub] colour {color} probes (want {expected[:12]}): {', '.join(observed)}")
+        return False
+
+    return serving
+
+
+CHECK_MAIN_TIMEOUT_SECONDS = 120.0
+
+
+def run_check_main_bounded(
+    runner: Callable[[], Tuple[int, Dict[str, Any]]], timeout: float = CHECK_MAIN_TIMEOUT_SECONDS,
+) -> Tuple[int, Dict[str, Any]]:
+    """USR-388: check-main (which may spawn ``run_ticket.py --create``) must never hang the deploy."""
+    box: Dict[str, Any] = {}
+
+    def target() -> None:
+        try:
+            box["result"] = runner()
+        except Exception as exc:  # noqa: BLE001
+            box["result"] = (2, {"state": "unknown", "error": str(exc)})
+
+    worker = threading.Thread(target=target, name="check-main", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        return 2, {
+            "state": "timeout",
+            "error": f"check-main exceeded {timeout:.0f}s (red-CI ticket creation left in background); "
+                     "deploy continues -- register the main-CI ticket via run_ticket.py --create --queue-only",
+        }
+    return box["result"]
+
+
 def _run_main(
     *,
     argv: Optional[Sequence[str]],
@@ -1038,6 +1096,7 @@ def _run_main(
     ops_notifier: Optional[Callable[[str], bool]] = None,
     ghcr_probe: Optional[GhcrManifestProbe] = None,
     bluegreen_runner: Optional[Callable[..., Any]] = None,
+    color_health_client: Optional[Callable[[str], Dict[str, Any]]] = None,
 ) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -1152,6 +1211,7 @@ def _run_main(
                 request=transport, compose_id=svc.service_id, source=darkhub_compose,
                 new_sha=expected_sha,
                 sha_is_serving=_bluegreen_serving(health_client, log=lambda m: print(m, file=err, flush=True)),
+                color_is_serving=_bluegreen_color_serving(color_health_client, log=lambda m: print(m, file=err, flush=True)),
                 restore_allowed=hub_restore_is_secure,
                 deploy_timeout=args.timeout, poll_interval=args.poll_interval,
                 sleep_fn=sleep_fn, clock_fn=clock_fn,
@@ -1378,14 +1438,14 @@ def _run_main(
         print("[CHECK-MAIN] skipped (--skip-check-main)", file=out, flush=True)
     elif check_main_runner is not None:
         try:
-            cm_code, cm_payload = check_main_runner()
+            cm_code, cm_payload = run_check_main_bounded(check_main_runner)
             cm_state = cm_payload.get("state", "unknown") if isinstance(cm_payload, dict) else "unknown"
             print(f"[CHECK-MAIN] state={cm_state} code={cm_code} payload={json.dumps(cm_payload)}", file=out, flush=True)
         except Exception as exc:
             print(f"[CHECK-MAIN] failed: {exc}", file=err, flush=True)
     elif not getattr(args, "skip_node_sync", False) and not args.list and not args.dry_run:
         try:
-            cm_code, cm_payload = default_check_main_runner()
+            cm_code, cm_payload = run_check_main_bounded(default_check_main_runner)
             cm_state = cm_payload.get("state", "unknown") if isinstance(cm_payload, dict) else "unknown"
             print(f"[CHECK-MAIN] state={cm_state} code={cm_code} payload={json.dumps(cm_payload)}", file=out, flush=True)
         except Exception as exc:

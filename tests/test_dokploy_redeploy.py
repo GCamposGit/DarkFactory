@@ -2068,3 +2068,16 @@ def test_hub_restore_requires_the_security_fix_in_the_active_colour(monkeypatch:
     monkeypatch.setattr(mod.subprocess, "run", fake_run)
     assert not mod.hub_restore_is_secure(previous)
     assert calls[-1][-2:] == [mod.MIN_SECURE_HUB_SHA, old]  # checks the ACTIVE colour
+
+
+def test_check_main_red_ticket_creation_never_hangs_the_deploy() -> None:
+    """USR-388: a hung run_ticket --create inside check-main times out instead of blocking."""
+    import threading
+
+    release = threading.Event()
+    code, payload = mod.run_check_main_bounded(lambda: (release.wait(30), (1, {}))[1], timeout=0.2)
+    release.set()
+    assert code == 2 and payload["state"] == "timeout" and "--queue-only" in payload["error"]
+    assert mod.run_check_main_bounded(lambda: (0, {"state": "green"})) == (0, {"state": "green"})
+    assert not mod.hub_restore_is_secure("# darkfac-bluegreen: active=blue blue=" + "a" * 40 + " green=" + "a" * 40
+                                         + "\n      replicas: 0\n      replicas: 0\n")
