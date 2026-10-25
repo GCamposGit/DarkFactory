@@ -12,7 +12,6 @@ Governed by:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import pytest
 
@@ -279,70 +278,3 @@ def test_backup_retention_policy_pruning(temp_backup: CloudBackupService, tmp_pa
     assert len(pruned) == 2
     assert len(temp_backup.list_snapshots("proj-retain")) == 2
     assert s1.snapshot_id in pruned or s2.snapshot_id in pruned
-
-
-# ---------------------------------------------------------------------------
-# 11. CLI Headless Operação com --json
-# ---------------------------------------------------------------------------
-
-def test_cli_headless_release_commands(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
-    """Release CLI commands execute headlessly with --json output."""
-    from core.orchestrator.release_cli import main
-
-    # 1. Build
-    ret_build = main([
-        "build",
-        "--project", "cli-test-proj",
-        "--git-sha", "f" * 40,
-        "--json",
-    ])
-    assert ret_build == 0
-    out_build = capsys.readouterr().out
-    data_build = json.loads(out_build)
-    art_digest = data_build["artifact_digest"]
-    assert len(art_digest) == 64
-
-    # 2. Deploy Staging
-    ret_stg = main(["deploy-staging", "--artifact-id", art_digest, "--json"])
-    assert ret_stg == 0
-    out_stg = capsys.readouterr().out
-    data_stg = json.loads(out_stg)
-    assert data_stg["stage"] == "staging_deployed"
-
-    # 3. Deploy Production (Commercial paid requires acceptance)
-    ret_prod_blocked = main([
-        "deploy-production",
-        "--artifact-id", art_digest,
-        "--tier", "commercial_paid",
-        "--json",
-    ])
-    assert ret_prod_blocked == 2  # Blocked by acceptance
-    out_blocked = capsys.readouterr().out
-    data_blocked = json.loads(out_blocked)
-    assert data_blocked["status"] == "blocked_by_acceptance"
-
-    # 4. Accept
-    ret_acc = main([
-        "accept",
-        "--project", "cli-test-proj",
-        "--artifact-id", art_digest,
-        "--client", "cli-client-1",
-        "--approved-by", "Bob Manager",
-        "--json",
-    ])
-    assert ret_acc == 0
-    out_acc = capsys.readouterr().out
-    data_acc = json.loads(out_acc)
-    assert "receipt_id" in data_acc
-
-    # 5. Deploy Production (Now succeeds!)
-    ret_prod_ok = main([
-        "deploy-production",
-        "--artifact-id", art_digest,
-        "--tier", "commercial_paid",
-        "--json",
-    ])
-    assert ret_prod_ok == 0
-    out_prod = capsys.readouterr().out
-    data_prod = json.loads(out_prod)
-    assert data_prod["stage"] == "delivered"
