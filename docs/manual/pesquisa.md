@@ -15,3 +15,5 @@ O estagio de pesquisa (`core/research/policy.py`) so roda quando vale a pena.
 3. Todo artefato fica em `.factory/research/_artifacts/<ticket>.json`. Fonte sem URL e rejeitada.
 
 Teste: `python -m pytest C:\dev\DarkFac\tests\test_research_policy.py -q`
+
+Ledger antigo com formato que nao abre mais (enums ou campos de versoes anteriores) e ignorado com aviso no log: nunca derruba o estagio RESEARCH.

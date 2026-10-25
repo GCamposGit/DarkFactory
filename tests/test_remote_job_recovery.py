@@ -469,6 +469,8 @@ def test_plain_404_without_job_not_found_marker_is_still_treated_as_silence(monk
     monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.05)
     monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "60")
     monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **k: None)
+    gaps: list[float] = []
+    monkeypatch.setattr(remote_dispatch, "_sleep", gaps.append)  # simulated time: the dead-probe gaps never really wait
 
     def _proxy_404(*_a: object, **_k: object):
         raise urllib.error.HTTPError("http://w", 404, "Not Found", {}, io.BytesIO(b"<html>nginx</html>"))  # type: ignore[arg-type]
@@ -477,6 +479,7 @@ def test_plain_404_without_job_not_found_marker_is_still_treated_as_silence(monk
     with pytest.raises(remote_dispatch._WorkerUnavailable, match="/health is unreachable") as excinfo:
         remote_dispatch._stream_job("http://w", "j1", deadline=time.monotonic() + 5)
     assert excinfo.value.details["error_code"] == "worker_unreachable"  # type: ignore[attr-defined]
+    assert gaps and set(gaps) == {remote_dispatch.DEAD_PROBE_GAP_SEC}
 
 
 def test_rejected_credentials_fail_fast_with_a_structured_error(monkeypatch: pytest.MonkeyPatch) -> None:

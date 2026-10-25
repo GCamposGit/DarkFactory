@@ -20,6 +20,7 @@ class LicenseType(str, Enum):
     PERMISSIVE = "permissive"      # MIT, Apache-2.0, BSD-2/3, ISC (Safe for direct reuse)
     COPYLEFT = "copyleft"          # GPL-2.0/3.0, AGPL (Needs strict isolation or architectural reference only)
     PROPRIETARY = "proprietary"    # Closed or restrictive
+    DOCUMENTATION = "documentation"  # Official docs/specs: reference only, no code reuse
     UNKNOWN = "unknown"
 
 

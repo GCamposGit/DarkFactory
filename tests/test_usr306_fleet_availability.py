@@ -112,6 +112,7 @@ def test_managed_mode_requires_verified_health(store, monkeypatch):
 
     assert CloudCoordinator(store=store, host_health_prober=boom).admit_eligible_cycles(now) == []
 
+    # capacity_probe pinned: on a machine named *notebook* the real RAM probe decides the slot (flaky).
     admitted = CloudCoordinator(
         store=store, host_health_prober=lambda h: h == "notebook", capacity_probe=lambda: 1
     ).admit_eligible_cycles(now)

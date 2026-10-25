@@ -61,7 +61,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_control_store_failure_evidence.py": "_T0 passado explicitamente em todo accept/claim/finish; SQLiteControlStore só lê o relógio real quando now é omitido, nunca é o caso aqui",
     "tests/test_infra08_three_tier_backup.py": "dt fixo so verifica se o assinador SigV4 formata UM datetime DADO corretamente; nunca comparado ao relogio real",
     "tests/test_line_dogfood.py": "created_at so usado como chave de ordenacao relativa; o fallback de relogio real de submit_dogfood_item nao e exercitado com esse valor",
-    "tests/test_line_lock.py": "started_at e um epoch fixo so formatado para texto ('2026-10-12' no aviso); nunca comparado ao relogio real",
     "tests/test_line_owner_intake.py": "jobs semeados via SQL bruto nunca tem cause_code='no_route_available', unico caso em que run_state cairia no fallback de relogio real",
     "tests/test_local_progress_visibility.py": "T0 so alimenta o campo 'at' de um LocalRunEvent escrito via conexao psycopg fake; nunca e lido de volta nem comparado",
     "tests/test_postgres_hybrid_persistence.py": "timestamps sao apenas colunas simuladas de linha de banco (conflito de sync por versao); o arquivo nao le o relogio real em nenhum ponto",
