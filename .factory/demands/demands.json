@@ -11406,5 +11406,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T02:30:26.902308Z",
     "updated_at": "2026-10-25T02:30:26.902308Z"
+  },
+  {
+    "id": "USR-383",
+    "project_id": "darkfac",
+    "title": "Testes lentos por git e sockets: fixtures mais leves (fatia S4b do USR-377)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Depois do USR-377 S4 ainda levam mais de 2 s sob carga: tests/test_usr328_review_timeout.py::test_review_timeout_is_structured_failure_with_next_route (~38 chamadas git), test_dead_worker_is_abandoned_without_waiting_for_the_ceiling, test_job_manager_submit_reports_missing_prerequisites_for_a_thin_bundle, test_bundle_when_worker_already_has_head, test_bundle_ignores_worker_commits_unknown_locally, tests/line/test_stage_grill.py::test_adoption_never_raises_when_git_cannot_read_the_previous_grill, tests/line/test_stage_integration.py (3), tests/line/test_stage_build_base_red_sync.py (2), tests/test_run_ticket_routing.py::test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_neighbours, tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core. Usar repositorio git template compartilhado por sessao (copiar em vez de recriar), stubs de socket e relogio injetado. Mudar apenas testes e fixtures (conftest).",
+    "core_journey": [
+      "Depois do USR-377 S4 ainda levam mais de 2 s sob carga: tests/test_usr328_review_timeout.py::test_review_timeout_is_structured_failure_with_next_route (~38 chamadas git), test_dead_worker_is_abandoned_without_waiting_for_the_ceiling, test_job_manager_submit_reports_missing_prerequisites_for_a_thin_bundle, test_bundle_when_worker_already_has_head, test_bundle_ignores_worker_commits_unknown_locally, tests/line/test_stage_grill.py::test_adoption_never_raises_when_git_cannot_read_the_previous_grill, tests/line/test_stage_integration.py (3), tests/line/test_stage_build_base_red_sync.py (2), tests/test_run_ticket_routing.py::test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_neighbours, tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core. Usar repositorio git template compartilhado por sessao (copiar em vez de recriar), stubs de socket e relogio injetado. Mudar apenas testes e fixtures (conftest)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Cada teste listado roda em menos de 2 s em `pytest --durations=20 -n 4`",
+      "Contagem de testes nao aumenta",
+      "Nenhuma mudanca de comportamento em codigo de producao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T02:32:45.942759Z",
+    "updated_at": "2026-10-25T02:32:45.942759Z"
   }
 ]
