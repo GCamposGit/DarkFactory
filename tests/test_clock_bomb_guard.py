@@ -64,7 +64,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_line_owner_intake.py": "jobs semeados via SQL bruto nunca tem cause_code='no_route_available', unico caso em que run_state cairia no fallback de relogio real",
     "tests/test_local_progress_visibility.py": "T0 so alimenta o campo 'at' de um LocalRunEvent escrito via conexao psycopg fake; nunca e lido de volta nem comparado",
     "tests/test_postgres_hybrid_persistence.py": "timestamps sao apenas colunas simuladas de linha de banco (conflito de sync por versao); o arquivo nao le o relogio real em nenhum ponto",
-    "tests/test_workflow_safe_export.py": "NOW passado explicitamente como observed_at para uma funcao pura de exportacao",
     # -- fixture/content data: stored and asserted back verbatim, never diffed against the real clock
     # in the file or in the production path the test exercises (confirmed by reading that path, not
     # just grepping for datetime.now()).

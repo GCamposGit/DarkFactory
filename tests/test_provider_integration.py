@@ -35,13 +35,6 @@ from core.execution.providers import (
     get_model_provider,
     get_openrouter_api_key,
 )
-from core.game.cli import (
-    BALANCED_MODEL,
-    FRONTIER_MODEL,
-    LOCAL_MODEL,
-    build_live,
-)
-from core.game.models import GameManifest
 from core.usage.ledger import ModelUsageLedger
 
 
@@ -279,66 +272,3 @@ def test_get_model_provider_factory() -> None:
         get_model_provider("invalid-provider")
 
 
-def test_echo_garden_build_live_with_mock_provider_and_budget(tmp_path: Path) -> None:
-    """Execute complete Echo Garden build_live using MockModelProvider and ExecutionBudgetManager."""
-    mock_provider = MockModelProvider(
-        provider_id="mock",
-        responses_by_model={
-            LOCAL_MODEL: (
-                '{"tagline":"Balance the garden before the echo returns.",'
-                '"move_labels":{"weave":"Weave","echo":"Reflect","ground":"Ground"}}'
-            ),
-            BALANCED_MODEL: (
-                '{"moves":["weave","ground","weave"],'
-                '"rationale":"The third direct pulse and rotated ground echo cancel the spread."}'
-            ),
-            FRONTIER_MODEL: (
-                '{"verdict":"APPROVE",'
-                '"risks_checked":["energy bounds","turn budget","echo ordering"],'
-                '"summary":"The trace reaches exact resonance on turn three without leaving bounds."}'
-            ),
-        },
-    )
-
-    budget_db = tmp_path / "test_budget.db"
-    budget_mgr = ExecutionBudgetManager(database_path=budget_db)
-
-    game_output = tmp_path / "game_output"
-    result = build_live(
-        output_dir=game_output,
-        seed=0,
-        provider=mock_provider,
-        budget_manager=budget_mgr,
-        offline_assets=True,
-    )
-
-    # 1. Output verification
-    assert result["status"] == "passed"
-    assert Path(result["manifest_path"]).exists()
-    assert Path(result["html_path"]).exists()
-
-    # 2. Manifest verification
-    manifest_data = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
-    manifest = GameManifest(**manifest_data)
-    assert len(manifest.model_evidence) == 3
-    for ev in manifest.model_evidence:
-        assert ev.provider == "mock"
-        assert ev.validation == "passed"
-        assert ev.duration_ms > 0
-        assert ev.tokens_used is not None and ev.tokens_used > 0
-
-    # 3. Budget & attempts verification
-    budget_id = result["budget_id"]
-    attempts = budget_mgr.list_attempts(budget_id)
-    assert len(attempts) == 3
-    for attempt in attempts:
-        assert attempt.outcome == AttemptOutcome.SUCCEEDED
-        assert attempt.tokens > 0
-        assert attempt.estimated_cost >= 0.0
-
-    budget = budget_mgr.get_budget(budget_id)
-    assert budget is not None
-    assert budget.spent > 0.0
-    assert budget.reserved == 0.0  # all reservations committed
-
-    budget_mgr.close()

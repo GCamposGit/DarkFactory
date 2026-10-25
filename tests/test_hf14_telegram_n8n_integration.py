@@ -33,7 +33,6 @@ from core.integrations.telegram import (
     TelegramGateway,
     redact_secrets,
 )
-from core.integrations.telegram_n8n_cli import main as cli_main
 from hub.backend.main import app
 
 
@@ -376,28 +375,3 @@ def test_hub_endpoints_telegram_and_n8n() -> None:
     assert hook_resp.json()["authorized"] is False  # unknown user
 
 
-def test_cli_headless_telegram_and_n8n_commands(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    """CLI subcommands execute headlessly with --json output."""
-    # 1. telegram-status
-    capsys.readouterr()
-    exit_code = cli_main(["telegram-status", "--json"])
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    status = json.loads(captured.out)
-    assert "last_offset" in status
-
-    # 2. n8n-preflight generic
-    capsys.readouterr()
-    exit_code = cli_main(["n8n-preflight", "--url", "https://n8n.io", "--json"])
-    assert exit_code == 2  # generic placeholder
-    captured = capsys.readouterr()
-    report = json.loads(captured.out)
-    assert report["is_generic_placeholder"] is True
-
-    # 3. n8n-generate-compose
-    capsys.readouterr()
-    compose_path = tmp_path / "test-compose.yml"
-    exit_code = cli_main(["n8n-generate-compose", "--output", str(compose_path), "--json"])
-    assert exit_code == 0
-    assert compose_path.exists()
-    assert "postgres:16-alpine" in compose_path.read_text(encoding="utf-8")

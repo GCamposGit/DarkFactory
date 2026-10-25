@@ -451,9 +451,6 @@
     "execution": {
       "surface": "playground-drawer"
     },
-    "game": {
-      "surface": "portfolio-drawer"
-    },
     "git": {
       "internal": "Autonomia de Git, commits atômicos de tickets e sincronização multi-ambiente da fábrica (USR-57)."
     },

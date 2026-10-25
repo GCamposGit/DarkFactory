@@ -16,7 +16,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.integrations.telegram import TelegramConfig, TelegramService, TelegramUpdate
-from core.notifications.cli import main as cli_main
 from core.notifications.models import (
     AlertCategory,
     AlertSeverity,
@@ -418,21 +417,3 @@ def test_darkhub_notifications_api_endpoints(tmp_path: Path) -> None:
         assert store.get_notification("notif_api_01").acknowledged is True
 
 
-def test_notifications_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Tests CLI invocation for notifications."""
-    store_file = tmp_path / "cli_store.jsonl"
-    with patch.dict("os.environ", {"DARKFAC_NOTIFICATIONS_PATH": str(store_file)}):
-        # 1. Test alert dispatch
-        ret = cli_main(["test-alert", "--json"])
-        assert ret == 0
-        captured = capsys.readouterr()
-        data = json.loads(captured.out)
-        assert data["title"] == "Alerta de Teste Operacional"
-
-        # 2. List notifications
-        ret_list = cli_main(["list", "--json"])
-        assert ret_list == 0
-        captured_list = capsys.readouterr()
-        list_data = json.loads(captured_list.out)
-        assert len(list_data) == 1
-        assert list_data[0]["title"] == "Alerta de Teste Operacional"

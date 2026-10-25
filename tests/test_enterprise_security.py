@@ -170,19 +170,3 @@ def test_enterprise_policy_guard_scenario_g8(tmp_path: Path) -> None:
     assert len(dec2.rejection_reasons) == 0
 
 
-def test_enterprise_cli_status_and_configure(capsys: pytest.CaptureFixture[str]) -> None:
-    from core.enterprise.cli import main
-
-    # Status of unconfigured project
-    code_status = main(["status", "--project", "darkfac"])
-    assert code_status == 0
-    captured = capsys.readouterr()
-    assert "Enterprise Profile: darkfac" in captured.out
-
-    # Configure enterprise
-    code_cfg = main(["configure", "--project", "test-prj", "--enable", "--residency", "local_only", "--rpo", "60", "--rto", "30"])
-    assert code_cfg == 0
-
-    # Verify audit
-    code_audit = main(["verify-audit", "--project", "test-prj"])
-    assert code_audit == 0

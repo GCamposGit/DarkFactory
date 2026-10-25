@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from core.infra.cli import main as infra_cli_main
 from core.infra.inventory import DEFAULT_INVENTORY_PATH, InventoryManager, build_default_inventory
 from core.infra.models import (
     ArchitectureDecisionRecord,
@@ -138,49 +137,3 @@ def test_inventory_manager_crud_in_temp_dir(tmp_path: Path) -> None:
     assert "ADR-001" in summary_md
 
 
-def test_infra_cli_commands(tmp_path: Path) -> None:
-    """Test CLI commands: list, status, inspect, and export-markdown."""
-    test_file = tmp_path / "inventory_cli.json"
-    inv_arg = ["--inventory-path", str(test_file)]
-
-    # 1. list
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        ret = infra_cli_main(inv_arg + ["list"])
-    assert ret == 0
-    output = buf.getvalue()
-    assert "predator-neo-16" in output
-    assert "onprem-z97-server" in output
-
-    # 2. status
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        ret = infra_cli_main(inv_arg + ["status"])
-    assert ret == 0
-    output = buf.getvalue()
-    assert "Total de nos:" in output
-    assert "Decisoes arquiteturais registradas:" in output
-
-    # 3. inspect
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        ret = infra_cli_main(inv_arg + ["inspect", "onprem-z97-server"])
-    assert ret == 0
-    output = buf.getvalue()
-    assert "Intel Core i7-4790K" in output
-    assert "Corsair AX1200" in output
-
-    # inspect non-existent
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        ret = infra_cli_main(inv_arg + ["inspect", "fake-node-id"])
-    assert ret == 1
-
-    # 4. export-markdown to file
-    out_md = tmp_path / "exported.md"
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        ret = infra_cli_main(inv_arg + ["export-markdown", "-o", str(out_md)])
-    assert ret == 0
-    assert out_md.exists()
-    assert "ADR-001" in out_md.read_text(encoding="utf-8")

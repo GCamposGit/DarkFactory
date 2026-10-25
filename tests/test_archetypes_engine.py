@@ -14,7 +14,6 @@ from core.archetypes.models import (
 )
 from core.archetypes.registry import ArchetypeRegistry, get_registry
 from core.archetypes.scaffolder import ArchetypeScaffolder
-from core.archetypes.cli import main as cli_main
 
 
 def test_registry_builtins():
@@ -169,44 +168,3 @@ def test_scaffolder_second_brain(tmp_path: Path):
     assert (target_dir / "harness.config.json").is_file()
 
 
-def test_cli_commands(tmp_path: Path, capsys):
-    """Test CLI commands: list, inspect, and init."""
-    # 1. list
-    rc = cli_main(["list"])
-    assert rc == 0
-    captured = capsys.readouterr()
-    assert "personal_presence" in captured.out
-    assert "internal_tool" in captured.out
-
-    # 2. list --json
-    rc = cli_main(["list", "--json"])
-    assert rc == 0
-    captured = capsys.readouterr()
-    data = json.loads(captured.out)
-    assert isinstance(data, list)
-    assert len(data) >= 3
-
-    # 3. inspect
-    rc = cli_main(["inspect", "personal_presence"])
-    assert rc == 0
-    captured = capsys.readouterr()
-    arch_data = json.loads(captured.out)
-    assert arch_data["id"] == "personal_presence"
-    assert arch_data["stack"]["framework"] == "Astro 5"
-
-    # 4. init
-    target = tmp_path / "cli_scaffolded_site"
-    rc = cli_main([
-        "init",
-        "personal_presence",
-        str(target),
-        "--name", "CLI Site",
-        "--author", "Test Author",
-        "--title", "Test Title",
-        "--domain", "testsitedomain.com",
-    ])
-    assert rc == 0
-    captured = capsys.readouterr()
-    assert "[OK] Successfully scaffolded" in captured.out
-    assert (target / "package.json").is_file()
-    assert (target / "PROJECT_BIBLE.md").is_file()

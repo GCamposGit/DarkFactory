@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from core.catalog import delivery
 from core.catalog.manager import CrossProjectCatalogManager
 from core.evolution.engine import FactoryEvolutionEngine
-from scripts import backfill_catalog
 from tests.test_git_autonomy_ci_gate import (  # noqa: F401 - fixtures + helpers
     FakeClock,
     FakeRepoGh,
@@ -111,17 +110,6 @@ def test_explicit_tag_groups_changed_files() -> None:
     assert sorted(f.path for f in comps[0].files) == ["core/a.py", "docs/x.md"]
 
 
-def test_backfill_dry_run_writes_nothing(repo, capsys: pytest.CaptureFixture[str]) -> None:
-    local, _ = repo
-    (local / "scripts").mkdir()
-    (local / "scripts" / "tool.py").write_text("def main():\n    return 0\n", encoding="utf-8")
-    _git(local, "add", "-A")
-    _git(local, "commit", "-q", "-m", "feat(core): Tool [USR-77] (#12)")
-    rc = backfill_catalog.main(["--dry-run", "--root", str(local), "--branch", "main"])
-    out = capsys.readouterr().out
-    assert rc == 0 and "script-tool" in out and "DRY-RUN" in out
-    assert not (Path(CrossProjectCatalogManager().catalog_file).exists() and
-                any(c.id == "script-tool" for c in CrossProjectCatalogManager().list_components()))
 
 
 def test_api_empty_state_only_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:

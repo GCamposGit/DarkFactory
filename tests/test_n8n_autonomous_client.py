@@ -27,7 +27,6 @@ from core.integrations.n8n import (
     N8nConfig,
     N8nWorkflowManager,
 )
-from core.integrations.telegram_n8n_cli import build_parser
 from hub.backend.api import get_hub_service
 from hub.backend.main import app
 from hub.backend.service import HubService
@@ -207,25 +206,6 @@ def test_n8n_api_client_sync_workflows(temp_project_dir: Path) -> None:
     assert server_store["data"][0]["name"] == "Test Autonomous Workflow"
 
 
-def test_cli_headless_n8n_commands(temp_project_dir: Path) -> None:
-    parser = build_parser()
-
-    # Test n8n-workflows parser
-    args_wfs = parser.parse_args(["--json", "n8n-workflows", "--url", "https://n8n.ggcampos.com", "--limit", "5"])
-    assert args_wfs.subcommand == "n8n-workflows"
-    assert args_wfs.url == "https://n8n.ggcampos.com"
-    assert args_wfs.limit == 5
-
-    # Test n8n-sync parser
-    wf_file = str(temp_project_dir / ".factory" / "n8n" / "workflows" / "sample_wf.json")
-    args_sync = parser.parse_args(["--json", "n8n-sync", "--path", wf_file])
-    assert args_sync.subcommand == "n8n-sync"
-    assert args_sync.path == wf_file
-
-    # Test n8n-trigger parser
-    args_trig = parser.parse_args(["--json", "n8n-trigger", "--path", "webhook/alert", "--payload", '{"test": 1}'])
-    assert args_trig.subcommand == "n8n-trigger"
-    assert args_trig.path == "webhook/alert"
 
 
 def test_hub_backend_n8n_endpoints(temp_project_dir: Path) -> None:

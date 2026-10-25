@@ -18,7 +18,6 @@ import pytest
 
 from core.integrations.telegram import TelegramConfig, TelegramGateway
 from core.portfolio.budget_manager import PortfolioBudgetManager
-from core.portfolio.cli import main as cli_main
 from core.portfolio.models import (
     BudgetStatus,
     JobSlotKind,
@@ -227,26 +226,3 @@ def test_model_router_local_zero_fallback_on_budget_exhaustion(tmp_path: Path) -
 # ==============================================================================
 
 
-def test_portfolio_cli_commands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    budget_file = tmp_path / "cli_budgets.json"
-    scheduler_file = tmp_path / "cli_scheduler.json"
-    monkeypatch.setattr("core.portfolio.budget_manager.DEFAULT_BUDGET_FILE", budget_file)
-    monkeypatch.setattr("core.portfolio.scheduler.DEFAULT_SCHEDULER_FILE", scheduler_file)
-
-    # 1. Status command
-    assert cli_main(["status"]) == 0
-
-    # 2. Set-budget command
-    assert cli_main(["set-budget", "--project", "atrium", "--limit", "80"]) == 0
-
-    # 3. Record-spend command
-    assert cli_main(["record-spend", "--project", "atrium", "--amount", "15"]) == 0
-
-    # 4. Route-task command
-    assert cli_main(["route-task", "--task-type", "research", "--project", "atrium"]) == 0
-
-    # 5. Enqueue-job command
-    assert cli_main(["enqueue-job", "--job-id", "test-job-1", "--project", "atrium", "--kind", "light"]) == 0
-
-    # 6. Dequeue-job command
-    assert cli_main(["dequeue-job"]) == 0

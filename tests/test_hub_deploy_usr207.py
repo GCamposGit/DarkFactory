@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import pytest
 
-from core.infra import availability_probe as probe_mod
 from core.infra import deploy_classifier as dc
 from scripts import dokploy_redeploy as mod
 
@@ -268,59 +267,10 @@ def test_inflight_autodeploy_is_joined_not_retriggered(monkeypatch: pytest.Monke
 # --------------------------------------------------------------------------- watchdog
 
 
-def test_watchdog_alerts_once_after_two_minutes_and_reports_recovery() -> None:
-    clock = [1000.0]
-    healthy = [False]
-    sent: List[str] = []
-    state = probe_mod.ProbeState()
-
-    def step(dt: float) -> None:
-        clock[0] += dt
-        probe_mod.tick(state, probe=lambda: healthy[0], send=lambda m: sent.append(m) or True, now=lambda: clock[0])
-
-    step(0)
-    step(60)
-    step(59)
-    assert sent == []  # 119 s down
-    step(2)
-    assert len(sent) == 1 and "indisponivel" in sent[0]
-    step(60)
-    assert len(sent) == 1  # no spam
-    healthy[0] = True
-    step(30)
-    assert len(sent) == 2 and "voltou" in sent[1]
-    assert state.first_failure_ts is None and not state.alerted
 
 
-def test_watchdog_retries_when_sender_fails_and_short_blip_is_silent() -> None:
-    sent: List[str] = []
-    calls = {"n": 0}
-
-    def send(m: str) -> bool:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("telegram down")
-        sent.append(m)
-        return True
-
-    state = probe_mod.ProbeState()
-    for t in (0.0, 130.0, 140.0):
-        probe_mod.tick(state, probe=lambda: False, send=send, now=lambda t=t: t)
-    assert len(sent) == 1
-
-    quiet: List[str] = []
-    s2 = probe_mod.ProbeState()
-    for t, up in ((0.0, False), (60.0, False), (90.0, True)):
-        probe_mod.tick(s2, probe=lambda up=up: up, send=lambda m: quiet.append(m) or True, now=lambda t=t: t)
-    assert quiet == []
 
 
-def test_probe_state_roundtrip_and_corrupt_file(tmp_path: Path) -> None:
-    path = tmp_path / "s.json"
-    probe_mod.save_state(path, probe_mod.ProbeState(first_failure_ts=5.0, alerted=True))
-    assert probe_mod.load_state(path) == probe_mod.ProbeState(5.0, True)
-    path.write_text("{garbage", encoding="utf-8")
-    assert probe_mod.load_state(path) == probe_mod.ProbeState()
 
 
 # --------------------------------------------------------------------------- frontend (static)

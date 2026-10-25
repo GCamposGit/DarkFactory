@@ -13,7 +13,7 @@ Layout atual:
 - Jobs e catalogo: `catalog_jobs.py`, `planning_jobs.py`, `job_board.py`, `execution_registry.py`.
 - Estagios ainda ativos: `integration_handler.py`, `research_handler.py`.
 - Politica e rotas: `capacity_policy.py`, `effective_policy.py`, `policy_binding.py`, `qualified_routes.py`.
-- Apoio: `readiness.py`, `reconciliation.py`, `verification.py`, `manual_resolution.py`, `line_live.py`, `safe_export.py`, `cli.py`.
+- Apoio: `readiness.py`, `reconciliation.py`, `verification.py`, `manual_resolution.py`, `line_live.py`. `safe_export.py` e `cli.py` foram removidos em USR-377 S2.
 
 Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
 `SQLiteControlStore` (implementacao); nao e duplicata.
@@ -25,7 +25,21 @@ Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
 Sem uso em producao (nenhum import fora de testes), removidos em 2026-10-24:
 `core/planning/`, `core/pilots/`, `core/security/`, `core/marketing/` e
 `scripts/run_practical_activations.py`, junto com seus testes dedicados.
-`core/knowledge`, `core/game` e `core/workflow` permanecem (em uso).
+`core/knowledge` (CLI documentada na skill 18 e ligacao com o Segundo Cerebro) e `core/workflow` permanecem.
+
+## Modulos removidos (USR-377 S2)
+
+Sem chamador em producao (apenas testes ou documentos historicos), removidos junto com seus testes dedicados:
+
+- `spikes/` inteiro (laboratorio HF-02 `runtime_choice` e `check_local_usage.py`).
+- `core/game/` (motor do Echo Garden; nenhum importador fora de testes).
+- `core/models/` do autopilot de modelos: `autopilot`, `discovery`, `discovery_sources`, `grill_policy`,
+  `lifecycle`, `openrouter_qualifier`, `pending`, `pr`, `qualification`, `telemetry`; e os scripts
+  `discover_models.py`, `model_lifecycle.py`, `qualify_model.py`, `test_openrouter.py`.
+- CLIs sem uso: `core/{archetypes,catalog,evolution,infra,notifications,projects,telemetry,workflow,execution,enterprise,portfolio}/cli.py`,
+  `core/integrations/telegram_n8n_cli.py`, `core/harness/live_preflight.py`, `core/git/worktree_gc.py`,
+  `core/infra/availability_probe.py`, `core/workflow/safe_export.py`.
+- Scripts: `backfill_catalog.py`, `download_artworks.py`, `download_expanded_artworks.py`, `probe_production.py`.
 
 ## Orquestrador
 
@@ -42,12 +56,14 @@ Módulos que permanecem, todos com chamador em produção:
 | `release_pipeline.py` | Pipeline de release (build, staging, produção, backup) | `core/workflow/release_handlers.py`, `hub/backend/service.py` |
 | `cloud_coordinator.py`, `cloud_worker.py`, `cloud_db.py`, `cloud_artifacts.py`, `artifact_retention.py`, `adapters/control_postgres.py` | Coordenação de workers na nuvem e banco de controle | `scripts/start_fleet_worker.py`, `core/line/*` |
 | `context.py` | Contexto de aprendizado | `core/learning/service.py` |
-| `runtime.py`, `store.py` | Runtime SQLite do experimento HF-02, hoje só usado por `spikes/runtime_choice` | spike (candidato a remoção junto com `spikes/`) |
 
 Removidos em USR-377 (S3), por não terem nenhum importador em produção, apenas testes:
 `cli.py` (CLI vertical DF-15), `release_cli.py`, `state.py` e `models.py` (máquina de estados DF-01,
 substituída pelo estado da esteira em `core/line`), `target_journey.py` (a etapa foi fundida em
 `build_deploy`) e o arquivo `factory_vertical.config.json`.
+
+Removidos em USR-377 (S2): `runtime.py` e `store.py` (runtime SQLite do experimento HF-02, só usado por
+`spikes/runtime_choice`), junto com todo o diretório `spikes/`.
 
 Regra para novos módulos: todo módulo em `core/orchestrator` precisa ter um chamador fora de
 `tests/`; uma varredura de código morto semanal abre ticket de limpeza quando isso deixa de valer.
