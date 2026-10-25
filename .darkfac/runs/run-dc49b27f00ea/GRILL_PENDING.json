@@ -74,6 +74,6 @@
   ],
   "deadline": "2026-10-26T10:16:41.012492Z",
   "answers": {},
-  "notified": false,
+  "notified": true,
   "auto_resolved": []
 }
