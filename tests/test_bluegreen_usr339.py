@@ -16,6 +16,7 @@ from core.orchestrator.bluegreen import (
     plan_next,
     render_bluegreen_compose,
     run_bluegreen_deploy,
+    run_bluegreen_via_dokploy,
 )
 
 SRC = (Path(__file__).resolve().parent.parent / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")
@@ -225,3 +226,40 @@ def test_zero_replica_previous_is_never_restored_nor_revived() -> None:
         )
     assert offline not in applied and len(applied) == 1
     assert applied[0].count("replicas: 1") == 1  # the old insecure colour is not revived in the overlap
+
+
+def test_dokploy_newest_deployment_is_picked_by_created_at_not_list_order() -> None:
+    """USR-393: compose.one returns deployments out of order; the newest by createdAt must win."""
+    initial = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
+    st = {"compose": initial, "n": 0, "t": 0.0, "sha": A, "updates": 0}
+    deployments = [
+        {"deploymentId": "d0", "status": "done", "createdAt": "2030-01-01T14:05:07.000Z"},
+        {"deploymentId": "d1", "status": "done", "createdAt": "2030-01-01T02:15:39.000Z"},
+        {"deploymentId": "d2", "status": "done", "createdAt": "bogus"},
+    ]
+
+    def request(method: str, path: str, body: Optional[dict]):
+        if path.startswith("/api/compose.one"):
+            return {"composeFile": st["compose"], "deployments": list(deployments)}
+        if path == "/api/compose.update":
+            st["compose"] = body["composeFile"]
+            st["updates"] += 1
+            if st["updates"] == 2:
+                st["sha"] = C
+        elif path == "/api/compose.deploy":
+            st["n"] += 1
+            # newest deployment lands at index 1, not 0 (the real API ordering bug)
+            deployments.insert(1, {"deploymentId": f"new{st['n']}", "status": "done",
+                                   "createdAt": f"2031-01-01T00:00:0{st['n']}.000Z"})
+        return {}
+
+    def sleep(seconds: float) -> None:
+        st["t"] += seconds
+
+    final = run_bluegreen_via_dokploy(
+        request=request, compose_id="cid", source=SRC, new_sha=C,
+        sha_is_serving=lambda s: st["sha"] == s, deploy_timeout=100.0, poll_interval=5.0,
+        sleep_fn=sleep, clock_fn=lambda: st["t"],
+        color_is_serving=lambda color, s: s == C,
+    )
+    assert final.active == "green" and st["n"] == 2 and st["t"] < 100.0
