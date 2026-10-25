@@ -134,7 +134,22 @@ def test_last_resort_elects_unknown_codex_when_nothing_is_known_healthy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
-    assert _pick("development", {"anthropic": 5.0, "openai": None}, tmp_path) == ("codex", None)
+    assert _pick("development", {"anthropic": 5.0, "openai": None}, tmp_path, complexity="low") == ("codex", None)
+
+
+@pytest.mark.parametrize("complexity", ["medium", "high"])
+def test_development_unknown_quota_blocks_medium_and_high(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complexity: str
+) -> None:
+    monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
+    assert _pick("development", {"anthropic": None, "openai": None, "xai": None},
+                 tmp_path, complexity=complexity) is None
+
+
+def test_development_low_allows_unknown_quota_without_bootstrap_setting(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", raising=False)
+    assert _pick("development", {"anthropic": None, "openai": None}, tmp_path,
+                 complexity="low") == ("claude", "sonnet")
 
 
 def test_last_resort_prefers_known_healthy_over_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +168,7 @@ def test_last_resort_skips_a_harness_in_cooldown(tmp_path: Path, monkeypatch: py
         json.dumps({"codex": {"until": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}}),
         encoding="utf-8",
     )
-    assert _pick("development", {"anthropic": None, "openai": None}, tmp_path) == ("claude", "sonnet")
+    assert _pick("development", {"anthropic": None, "openai": None}, tmp_path, complexity="low") == ("claude", "sonnet")
 
 
 def test_last_resort_beats_openrouter_for_a_read_stage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

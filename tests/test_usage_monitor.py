@@ -344,7 +344,6 @@ def test_claude_adapter_detects_cli_auth(tmp_path: Path, monkeypatch) -> None:
         message="Sessão Claude Code validada no terminal.",
         dashboard_url=spec.dashboard_url,
     )
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: "mock_claude.exe")
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: dummy_usage)
     result = adapter.inspect()
@@ -356,58 +355,44 @@ def test_claude_adapter_detects_cli_auth(tmp_path: Path, monkeypatch) -> None:
     assert len(result.windows) == 2
 
 
-def test_claude_adapter_parses_live_unified_ratelimits(tmp_path: Path, monkeypatch) -> None:
+def test_claude_adapter_reads_rate_limits_from_cli(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
     spec = ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/billing")
     adapter = ClaudeCodeAccountAdapter(spec, tmp_path)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: "claude")
+    calls = []
 
-    dummy_usage = ProviderAccountUsage(
-        provider_id="anthropic",
-        provider_name="Anthropic / Claude",
-        family=ProviderFamily.FRONTIER,
-        status=AccountConnectionStatus.CONNECTED,
-        adapter="claude_code_api",
-        plan="Claude Pro",
-        account_label="test@example.com",
-        quota_supported=True,
-        windows=[
-            QuotaWindow(
-                quota_id="claude:weekly",
-                label="Limite Semanal (1 semana)",
-                used_percent=94.0,
-                remaining_percent=6.0,
-                window_duration_minutes=10080,
-                resets_at="2026-09-27T01:00:00+00:00",
-                metric="subscription",
-            ),
-            QuotaWindow(
-                quota_id="claude:5h",
-                label="Janela Móvel (5h)",
-                used_percent=45.0,
-                remaining_percent=55.0,
-                window_duration_minutes=300,
-                resets_at="2026-09-25T19:30:00+00:00",
-                metric="subscription",
-            ),
-        ],
-        message="Quotas lidas em tempo real da API unificada do Claude Code.",
-        dashboard_url=spec.dashboard_url,
-    )
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: dummy_usage)
+    class Result:
+        returncode = 0
+        stdout = json.dumps({
+            "loggedIn": True,
+            "email": "test@example.com",
+            "plan": "Claude Pro",
+            "rate_limits": {
+                "seven_day": {"used_percentage": 94, "resets_at": "2026-09-27T01:00:00Z"},
+                "five_hour": {"used_percentage": 45, "resets_at": "2026-09-25T19:30:00Z"},
+            },
+        })
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return Result()
+
+    monkeypatch.setattr("core.usage.adapters.subprocess.run", fake_run)
     result = adapter.inspect()
 
     assert result.status == AccountConnectionStatus.CONNECTED
-    assert result.adapter == "claude_code_api"
+    assert result.adapter == "claude_code_cli"
     assert len(result.windows) == 2
     assert result.windows[0].window_duration_minutes == 10080
     assert result.windows[0].used_percent == 94.0
     assert result.windows[1].window_duration_minutes == 300
     assert result.windows[1].used_percent == 45.0
+    assert calls == [["claude", "auth", "status", "--json"]]
 
 
 def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -427,7 +412,6 @@ def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None
 
 def test_claude_adapter_disconnected_when_no_auth(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

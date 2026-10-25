@@ -122,16 +122,20 @@ def test_real_fixtures_payload_semantics_fails_if_inverted(
             ProviderSpec("anthropic", "Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/usage"),
             tmp_path / "providers",
         )
-        monkeypatch.setattr(
-            ClaudeCodeAccountAdapter,
-            "_extract_claude_oauth_info",
-            lambda self: ("fixture-token", None, "Pro"),
-        )
-        monkeypatch.setattr(
-            "core.usage.adapters.urllib.request.urlopen",
-            lambda *a, **k: HeaderResponse(payload["headers"]),
-        )
-        usage = adapter._probe_claude_unified_ratelimits()
+        headers = payload["headers"]
+        cli_payload = {"loggedIn": True, "plan": "Pro", "rate_limits": {
+            "five_hour": {"used_percentage": float(headers["anthropic-ratelimit-unified-5h-utilization"]) * 100,
+                           "resets_at": headers["anthropic-ratelimit-unified-5h-reset"]},
+            "seven_day": {"used_percentage": float(headers["anthropic-ratelimit-unified-7d-utilization"]) * 100,
+                           "resets_at": headers["anthropic-ratelimit-unified-7d-reset"]},
+        }}
+
+        class CliResult:
+            returncode = 0
+            stdout = json.dumps(cli_payload)
+
+        monkeypatch.setattr("core.usage.adapters.subprocess.run", lambda *a, **k: CliResult())
+        usage = adapter._probe_claude_cli("claude")
 
     elif provider_id == "openai":
         adapter = CodexAccountAdapter(
@@ -279,6 +283,19 @@ def test_audit_expect_all_providers_detects_mismatch(
         return Response({})
 
     monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", mock_urlopen)
+    # USR-382: Claude quota comes from the CLI's rate_limits (same readings as the captured headers).
+    ant_h = ant_p["headers"]
+    ant_cli = {"loggedIn": True, "rate_limits": {
+        "seven_day": {"used_percentage": float(ant_h["anthropic-ratelimit-unified-7d-utilization"]) * 100,
+                      "resets_at": int(ant_h["anthropic-ratelimit-unified-7d-reset"])},
+        "five_hour": {"used_percentage": float(ant_h["anthropic-ratelimit-unified-5h-utilization"]) * 100,
+                      "resets_at": int(ant_h["anthropic-ratelimit-unified-5h-reset"])},
+    }}
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "fake-claude"))
+    monkeypatch.setattr(
+        "core.usage.adapters.subprocess.run",
+        lambda *a, **k: type("R", (), {"returncode": 0, "stdout": json.dumps(ant_cli), "stderr": ""})(),
+    )
 
     assert command.audit(provider_id, {provider_id: expected_val}, tmp_path / "providers") == 0
     assert command.audit(provider_id, {provider_id: divergent_val}, tmp_path / "providers") == 1
@@ -456,27 +473,11 @@ def test_disconnected_snapshot_cannot_supply_headroom():
     assert _quota_headroom(usage) is None
 
 
-def test_anthropic_partial_headers_are_degraded(tmp_path, monkeypatch, caplog):
-    from core.usage.adapters import ClaudeCodeAccountAdapter
-    adapter = ClaudeCodeAccountAdapter(ProviderSpec("anthropic", "Claude", ProviderFamily.FRONTIER,
-        "https://claude.ai/settings/usage"), tmp_path)
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_extract_claude_oauth_info",
-                        lambda self: ("fixture-token", None, "Pro"))
-
-    class HeaderResponse:
-        headers = {"anthropic-ratelimit-unified-7d-utilization": "0.82"}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return None
-
-    monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", lambda *a, **k: HeaderResponse())
-    usage = adapter._probe_claude_unified_ratelimits()
-    assert usage.status == AccountConnectionStatus.DEGRADED
-    assert _quota_headroom(usage) is None
-    assert "received fields" in caplog.text
+def test_anthropic_invalid_cli_rate_limits_are_not_treated_as_a_reading(tmp_path):
+    assert ClaudeCodeAccountAdapter._claude_cli_rate_limit_windows({
+        "seven_day": {"used_percentage": "unknown"},
+        "five_hour": {"used_percentage": None},
+    }) == []
 
 
 @pytest.mark.parametrize("bucket", [
