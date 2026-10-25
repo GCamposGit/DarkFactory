@@ -685,6 +685,19 @@ class PostgresControlStore:
                     )
                     claim_row = cur.fetchone()
                     if not claim_row or claim_row[0] != "active":
+                        # Reconciliation can deactivate a claim when its
+                        # reservation expires; report the cycle fence cause.
+                        if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                            cur.execute(
+                                "SELECT status FROM fleet_reservations WHERE reservation_id = %s",
+                                (claim.reservation_id,),
+                            )
+                            reservation_row = cur.fetchone()
+                            if reservation_row and reservation_row[0] not in ("active", "draining"):
+                                st = reservation_row[0]
+                                raise StaleLeaseError(
+                                    f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}). Old owner cannot publish."
+                                )
                         raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
                     exp_at = claim_row[1] if hasattr(claim_row[1], "astimezone") else datetime.fromisoformat(str(claim_row[1])).astimezone(UTC)
@@ -698,20 +711,6 @@ class PostgresControlStore:
                     job_row = cur.fetchone()
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Fencing token mismatch on finish.")
-
-                    # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
-                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
-                        cur.execute(
-                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
-                            (claim.reservation_id,),
-                        )
-                        res_row = cur.fetchone()
-                        if res_row:
-                            st, exp_at = res_row[0], res_row[1]
-                            res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
-                            res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                            if st not in ("active", "draining") or res_expires < now_utc:
-                                raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}). Old owner cannot publish.")
 
                     if result.outcome == "success":
                         cur.execute(

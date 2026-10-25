@@ -955,6 +955,19 @@ class SQLiteControlStore:
             )
             claim_row = cur.fetchone()
             if not claim_row or claim_row["status"] != "active":
+                # Reconciliation can deactivate the claim when its fleet
+                # reservation expires. Preserve the cycle fence as the cause.
+                if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                    cur.execute(
+                        "SELECT status FROM fleet_reservations WHERE reservation_id = ?",
+                        (claim.reservation_id,),
+                    )
+                    res_row = cur.fetchone()
+                    if res_row and res_row["status"] not in ("active", "draining"):
+                        conn.rollback()
+                        raise StaleLeaseError(
+                            f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot publish."
+                        )
                 conn.rollback()
                 raise StaleLeaseError(f"Lease '{claim.lease_id}' is not active.")
 
@@ -984,27 +997,6 @@ class SQLiteControlStore:
                 raise StaleLeaseError(
                     f"Fencing token mismatch on finish: job={job_row['fencing_token']}, claim={claim.fencing_token}"
                 )
-
-            # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
-            if claim.reservation_id and claim.reservation_id.startswith("fres-"):
-                cur.execute(
-                    "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = ?",
-                    (claim.reservation_id,),
-                )
-                res_row = cur.fetchone()
-                if res_row:
-                    res_expires = datetime.fromisoformat(str(res_row["expires_at"]))
-                    if res_expires.tzinfo is None and now.tzinfo is not None:
-                        res_expires = res_expires.replace(tzinfo=now.tzinfo)
-                    elif res_expires.tzinfo is not None and now.tzinfo is None:
-                        now_comp = now.replace(tzinfo=res_expires.tzinfo)
-                    else:
-                        now_comp = now
-                    if res_row["status"] not in ("active", "draining") or res_expires < now_comp:
-                        conn.rollback()
-                        raise StaleLeaseError(
-                            f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot publish."
-                        )
 
             # Apply state update
             if result.outcome == "success":
