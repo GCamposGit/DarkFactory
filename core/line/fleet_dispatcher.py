@@ -208,6 +208,7 @@ class FleetDispatcher:
         clock: Callable[[], float] = time.time,
         busy_ids_loader: Callable[[], set[str]] = lambda: set(),
         dry_run: bool = False,
+        digest_hook: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -217,6 +218,7 @@ class FleetDispatcher:
         self.clock = clock
         self.busy_ids_loader = busy_ids_loader  # tickets com run/worktree de entrega fora deste processo
         self.dry_run = dry_run
+        self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
         self.in_flight: dict[str, InFlight] = {}  # trava por host: no maximo um ticket por host
         self.cooldown: dict[str, float] = {}
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
@@ -320,12 +322,21 @@ class FleetDispatcher:
         except OSError:
             logger.exception("falha ao gravar estado do despachante")
 
+    def run_digest_hook(self) -> None:
+        if self.digest_hook is None or self.dry_run:
+            return
+        try:
+            self.digest_hook()
+        except Exception:  # noqa: BLE001 - notificacao nunca derruba o ciclo
+            logger.exception("gancho do resumo diario falhou")
+
     def run_forever(self, stop: Callable[[], bool] = lambda: False) -> None:
         while not stop():
             try:
                 self.run_cycle()
             except Exception:  # noqa: BLE001 - o daemon nunca morre por um ciclo ruim
                 logger.exception("ciclo do despachante falhou")
+            self.run_digest_hook()
             time.sleep(self.config.cycle_sec)
 
 
@@ -337,7 +348,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run)
+    from core.notifications.daily_digest import maybe_send_due
+
+    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due)
     if args.loop and not args.once:
         d.run_forever()
         return 0
