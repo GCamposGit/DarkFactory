@@ -2209,7 +2209,7 @@ def _stage_review(
     for _attempt in range(REVIEW_ATTEMPTS):
         if _cancelled():
             return cancelled_payload()
-        progress.phase("gate", "running", "estagio REVIEW: revisao por outra familia de modelo")
+        logger.info("estagio REVIEW: revisao por outra familia de modelo")
         if not as_json:
             print("--> Estagio REVIEW: revisao independente por outra familia de modelo...")
         try:
@@ -2219,7 +2219,7 @@ def _stage_review(
             cause = f"review_error:{type(exc).__name__}: {exc}"
             break
         if result.outcome == "success":
-            progress.phase("gate", "succeeded", "revisao independente aprovada")
+            logger.info("revisao independente aprovada")
             return None
         cause = f"review_{result.outcome}:{result.cause_code or ''}"
         if _is_route_wait(result):
@@ -2966,14 +2966,14 @@ def _stage_plan(
         stage = Stage.PLAN
         if route.get("ticket_size") == "small":
             # A small fix skips only GRILL; it still leaves a (minimal) plan artifact.
-            progress.phase("agent", "running", "estagio PLAN: plano minimo de correcao pequena (sem grill)")
+            logger.info("estagio PLAN: plano minimo de correcao pequena (sem grill)")
             ticket_engine.write_minimal_plan(rws, ticket)
         else:
             stage = Stage.GRILL
             ticket_engine.write_grill(rws, ticket)
             require_artifact(Stage.GRILL, rws)
             stage = Stage.PLAN
-            progress.phase("agent", "running", "estagio PLAN: planejamento por modelo de nivel alto")
+            logger.info("estagio PLAN: planejamento por modelo de nivel alto")
             if not args.json:
                 print("\n--> Estagio PLAN: planejamento (SPEC.md + tickets.json)...")
             cause = _plan_with_agent(ticket, workspace, rws)

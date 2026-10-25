@@ -50,7 +50,7 @@ def run_workspace(ticket: Any, branch: str = "", base_sha: str = "") -> workspac
     return workspace.RunWorkspace(
         project_id=getattr(ticket, "project_id", None) or "darkfac",
         run_id=ticket.id,
-        branch=branch or f"ticket/{ticket.id.lower()}",
+        branch=branch if isinstance(branch, str) and branch else f"ticket/{ticket.id.lower()}",
         path=artifacts_root() / ticket.id,
         base_sha=base_sha or "0" * 40,
     )
