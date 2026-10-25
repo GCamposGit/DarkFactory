@@ -1386,28 +1386,18 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if snapshot and not force and self._is_snapshot_fresh(snapshot):
             return self._from_snapshot(snapshot)
 
-        # 1. Try real live Anthropic unified rate-limits probe
-        # A single transient network error must not leave a days-old snapshot as the only evidence
-        # (USR-347): when the caller forced a probe, try once more before falling back.
-        for attempt in range(2 if force else 1):
-            try:
-                live_usage = self._probe_claude_unified_ratelimits()
-                if live_usage:
-                    return live_usage
-            except Exception as exc:
-                logger.warning("Claude live quota probe failed (attempt %d): %s", attempt + 1, type(exc).__name__)
-        if snapshot and not self._is_snapshot_fresh(snapshot):
-            logger.warning("Claude live quota probe returned no reading; only a stale snapshot is available")
-
-        if snapshot:
-            return self._from_snapshot(snapshot)
-
-        # 2. Try Claude Code CLI execution
+        # The CLI is the supported source for subscription rate limits. Do not impersonate the
+        # Claude Code client with a hand-built API request: that can fail while leaving old data.
         executable = self._find_claude()
         if executable:
             cli_usage = self._probe_claude_cli(executable)
             if cli_usage:
                 return cli_usage
+
+        if snapshot and not self._is_snapshot_fresh(snapshot):
+            logger.warning("Claude CLI quota probe returned no reading; only a stale snapshot is available")
+        if snapshot:
+            return self._from_snapshot(snapshot)
 
         # 3. Try Claude credentials file
         cred_usage = self._probe_claude_credentials()
@@ -1488,162 +1478,6 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             logger.debug("Failed to refresh Claude token via CLI: %s", exc)
             return False
 
-    def _probe_claude_unified_ratelimits(self) -> Optional[ProviderAccountUsage]:
-        token, email, plan = self._extract_claude_oauth_info()
-        if not token:
-            # Attempt CLI refresh if no token exists yet
-            if self._refresh_claude_token_via_cli():
-                token, email, plan = self._extract_claude_oauth_info()
-            if not token:
-                return None
-
-        body = json.dumps({
-            "model": "claude-haiku-4-5-20251001",  # census: wire-id (protocol/telemetry identifier, not a model choice)
-            "max_tokens": 1,
-            "messages": [{"role": "user", "content": "ping"}],
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=body,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-version": "2023-06-01",
-                "anthropic-beta": "claude-code-20250219",  # census: wire-id (protocol/telemetry identifier, not a model choice)
-                "Content-Type": "application/json",
-                "User-Agent": "claude-code/0.2.29",  # census: wire-id (protocol/telemetry identifier, not a model choice)
-            },
-            method="POST",
-        )
-
-        headers: Dict[str, str] = {}
-        try:
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
-                headers = {k.lower(): str(v) for k, v in resp.headers.items()}
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                # Token expired; attempt automatic refresh via CLI
-                if self._refresh_claude_token_via_cli():
-                    token, email, plan = self._extract_claude_oauth_info()
-                    if token:
-                        retry_req = urllib.request.Request(
-                            "https://api.anthropic.com/v1/messages",
-                            data=body,
-                            headers={
-                                "Authorization": f"Bearer {token}",
-                                "anthropic-version": "2023-06-01",
-                                "anthropic-beta": "claude-code-20250219",  # census: wire-id (protocol/telemetry identifier, not a model choice)
-                                "Content-Type": "application/json",
-                                "User-Agent": "claude-code/0.2.29",  # census: wire-id (protocol/telemetry identifier, not a model choice)
-                            },
-                            method="POST",
-                        )
-                        try:
-                            with urllib.request.urlopen(retry_req, timeout=4.0) as resp:
-                                headers = {k.lower(): str(v) for k, v in resp.headers.items()}
-                        except Exception as retry_exc:
-                            headers = {k.lower(): str(v) for k, v in getattr(retry_exc, "headers", {}).items()}
-            if not headers:
-                headers = {k.lower(): str(v) for k, v in exc.headers.items()}
-        except Exception as exc:
-            logger.debug("Claude unified rate limit probe failed: %s", exc)
-            return None
-
-        utilization_keys = ("anthropic-ratelimit-unified-5h-utilization", "anthropic-ratelimit-unified-7d-utilization")
-        reset_keys = ("anthropic-ratelimit-unified-5h-reset", "anthropic-ratelimit-unified-7d-reset")
-        if not any(key in headers for key in utilization_keys):
-            logger.warning("Anthropic quota headers unavailable; received fields: %s", list(headers))
-            return self.degraded("Sem medidor: headers Anthropic ausentes.", "claude_code_api")
-        try:
-            if any(key not in headers for key in utilization_keys + reset_keys):
-                raise ValueError("missing fields")
-            if any(not 0 <= float(headers[key]) <= 1 for key in utilization_keys):
-                raise ValueError("utilization outside 0..1")
-            for key in reset_keys:
-                value = headers[key]
-                try:
-                    if int(value) <= 0:
-                        raise ValueError("invalid reset")
-                except ValueError:
-                    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-                    if parsed.tzinfo is None:
-                        raise ValueError("reset without timezone")
-        except (TypeError, ValueError):
-            logger.warning("Invalid Anthropic quota payload; received fields: %s", list(headers))
-            return self.degraded("Sem medidor: campos Anthropic ausentes ou inválidos.", "claude_code_api")
-
-        windows: List[QuotaWindow] = []
-
-        # Weekly limit (7 days)
-        raw_7d_util = headers.get("anthropic-ratelimit-unified-7d-utilization")
-        if raw_7d_util is not None:
-            try:
-                used_7d = _clamp_percent(float(raw_7d_util) * 100.0)
-            except (ValueError, TypeError):
-                used_7d = None
-            rem_7d = round(100.0 - used_7d, 2) if used_7d is not None else None
-            reset_7d_raw = headers.get("anthropic-ratelimit-unified-7d-reset")
-            try:
-                reset_7d = _timestamp_to_iso(int(reset_7d_raw)) if reset_7d_raw else None
-            except (ValueError, TypeError):
-                reset_7d = _timestamp_to_iso(reset_7d_raw)
-            windows.append(
-                QuotaWindow(
-                    quota_id="claude:weekly",
-                    label="Limite Semanal (1 semana)",
-                    used_percent=used_7d,
-                    remaining_percent=rem_7d,
-                    window_duration_minutes=10080,
-                    resets_at=reset_7d,
-                    metric="subscription",
-                )
-            )
-
-        # 5-hour window
-        raw_5h_util = headers.get("anthropic-ratelimit-unified-5h-utilization")
-        if raw_5h_util is not None:
-            try:
-                used_5h = _clamp_percent(float(raw_5h_util) * 100.0)
-            except (ValueError, TypeError):
-                used_5h = None
-            rem_5h = round(100.0 - used_5h, 2) if used_5h is not None else None
-            reset_5h_raw = headers.get("anthropic-ratelimit-unified-5h-reset")
-            try:
-                reset_5h = _timestamp_to_iso(int(reset_5h_raw)) if reset_5h_raw else None
-            except (ValueError, TypeError):
-                reset_5h = _timestamp_to_iso(reset_5h_raw)
-            windows.append(
-                QuotaWindow(
-                    quota_id="claude:5h",
-                    label="Janela Móvel (5h)",
-                    used_percent=used_5h,
-                    remaining_percent=rem_5h,
-                    window_duration_minutes=300,
-                    resets_at=reset_5h,
-                    metric="subscription",
-                )
-            )
-
-        windows.sort(key=lambda w: (w.window_duration_minutes or 0), reverse=True)
-        limited = any(w.used_percent is not None and w.used_percent >= 100.0 for w in windows)
-
-        usage = ProviderAccountUsage(
-            provider_id=self.spec.provider_id,
-            provider_name=self.spec.provider_name,
-            family=self.spec.family,
-            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
-            adapter="claude_code_api",
-            plan=plan,
-            account_label=email,
-            quota_supported=bool(windows),
-            windows=windows,
-            message="Quotas lidas em tempo real da API unificada do Claude Code.",
-            dashboard_url=self.spec.dashboard_url,
-            raw_fields=sanitize_raw("anthropic", headers),
-        )
-        usage = record_probe(usage, self.snapshot_dir)
-        self._save_snapshot(usage)
-        return usage
-
     @staticmethod
     def _find_claude() -> Optional[str]:
         direct = shutil.which("claude") or shutil.which("claude.cmd")
@@ -1677,42 +1511,81 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 if isinstance(data, dict) and (data.get("loggedIn") or data.get("email")):
                     email = data.get("email") or data.get("account")
                     plan = str(data.get("plan") or data.get("subscriptionTier") or "Claude Pro")
-                    windows = [
-                        QuotaWindow(
-                            quota_id="claude:weekly",
-                            label="Limite Semanal (1 semana)",
-                            used_percent=None,
-                            remaining_percent=None,
-                            window_duration_minutes=10080,
-                            resets_at=None,
-                            metric="subscription",
-                        ),
-                        QuotaWindow(
-                            quota_id="claude:5h",
-                            label="Janela Móvel (5h)",
-                            used_percent=None,
-                            remaining_percent=None,
-                            window_duration_minutes=300,
-                            resets_at=None,
-                            metric="subscription",
-                        ),
-                    ]
+                    rate_limits = data.get("rate_limits") or data.get("rateLimits")
+                    windows = self._claude_cli_rate_limit_windows(rate_limits)
+                    if windows:
+                        limited = any(w.used_percent is not None and w.used_percent >= 100 for w in windows)
+                        usage = ProviderAccountUsage(
+                            provider_id=self.spec.provider_id,
+                            provider_name=self.spec.provider_name,
+                            family=self.spec.family,
+                            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
+                            adapter="claude_code_cli",
+                            plan=plan,
+                            account_label=email,
+                            quota_supported=True,
+                            windows=windows,
+                            message="Limites de uso lidos da CLI autenticada do Claude.",
+                            dashboard_url=self.spec.dashboard_url,
+                            raw_fields=sanitize_raw("anthropic", {"rate_limits": rate_limits}),
+                        )
+                        usage = record_probe(usage, self.snapshot_dir)
+                        self._save_snapshot(usage)
+                        return usage
+
+                    # Auth status alone confirms identity, not remaining quota. Do not manufacture
+                    # empty windows that downstream consumers could mistake for a measured reading.
                     return ProviderAccountUsage(
                         provider_id=self.spec.provider_id,
                         provider_name=self.spec.provider_name,
                         family=self.spec.family,
                         status=AccountConnectionStatus.CONNECTED,
-                        adapter="claude_code",
+                        adapter="claude_code_cli",
                         plan=plan,
                         account_label=email,
-                        quota_supported=True,
-                        windows=windows,
-                        message="Sessão Claude Code validada no terminal.",
+                        quota_supported=False,
+                        windows=[],
+                        message="Sessão Claude Code validada; a CLI não retornou rate_limits.",
                         dashboard_url=self.spec.dashboard_url,
                     )
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
             logger.debug("Claude CLI auth probe failed: %s", exc)
         return None
+
+    @staticmethod
+    def _claude_cli_rate_limit_windows(rate_limits: Any) -> List[QuotaWindow]:
+        """Convert the CLI's rate_limits object to the provider's quota window contract."""
+        if not isinstance(rate_limits, dict):
+            return []
+        windows: List[QuotaWindow] = []
+        for keys, quota_id, label, duration in (
+            (("seven_day", "7d", "weekly", "secondary"), "claude:weekly", "Limite Semanal (1 semana)", 10080),
+            (("five_hour", "5h", "primary"), "claude:5h", "Janela Móvel (5h)", 300),
+        ):
+            raw = next((rate_limits.get(key) for key in keys if isinstance(rate_limits.get(key), dict)), None)
+            if raw is None:
+                continue
+            used_value = raw.get("used_percentage", raw.get("used_percent", raw.get("utilization")))
+            used = _clamp_percent(used_value)
+            if used is None:
+                continue
+            reset = raw.get("resets_at", raw.get("reset_at"))
+            try:
+                if isinstance(reset, str) and reset.isdigit():
+                    reset = int(reset)
+                reset = _timestamp_to_iso(reset)
+            except (ValueError, TypeError, OverflowError, OSError):
+                reset = None
+            windows.append(QuotaWindow(
+                quota_id=quota_id,
+                label=label,
+                used_percent=used,
+                remaining_percent=round(100.0 - used, 2),
+                window_duration_minutes=duration,
+                resets_at=reset,
+                metric="subscription",
+            ))
+        return windows
 
     def _probe_claude_credentials(self) -> Optional[ProviderAccountUsage]:
         user_home = Path.home()
