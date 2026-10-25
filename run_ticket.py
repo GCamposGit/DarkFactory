@@ -1642,6 +1642,7 @@ def _finish_protected_path(
         before_headroom=before_headroom,
         after_headroom=inspect_quotas().get(harness, {}).get("headroom"),
         duration_s=report.total_duration_s,
+        success=False,
     )
     if not as_json:
         print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
@@ -2654,6 +2655,7 @@ def _stage_agent_failure(
         before_headroom=before_headroom,
         after_headroom=after_headroom,
         duration_s=report.total_duration_s,
+        success=False,
     )
     if not args.json:
         print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
@@ -2691,6 +2693,7 @@ def _stage_agent_early_exit(
             before_headroom=before_headroom,
             after_headroom=inspect_quotas().get(selected_harness, {}).get("headroom"),
             duration_s=report.total_duration_s,
+            success=False,
         )
         if not args.json:
             print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
@@ -3052,6 +3055,7 @@ def _stage_build(
         before_headroom=before_headroom,
         after_headroom=after_headroom,
         duration_s=total_duration if sequential else report.total_duration_s,
+        success=True,
     )
     if not args.json:
         print(f"\n{format_ticket_quota_summary(cost_record)}")
