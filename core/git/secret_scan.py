@@ -391,11 +391,6 @@ ALLOWLIST: tuple[AllowlistEntry, ...] = (
         reason="URLs 'mock_url'/'superuser_url' do teste de persistencia hibrida; senhas fake, host .internal",
     ),
     AllowlistEntry(
-        path="tests/test_reusable_pilots.py",
-        patterns=(_OPENAI,),
-        reason="sentinela de chave para provar que os pilotos reutilizaveis nao a persistem",
-    ),
-    AllowlistEntry(
         path="tests/test_workflow_verification.py",
         patterns=(_POSTGRES,),
         reason="rota 'postgres://user:...@host/db' de fixture; usuario e host genericos",

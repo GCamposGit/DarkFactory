@@ -475,9 +475,6 @@
     "line": {
       "surface": "portfolio-drawer"
     },
-    "marketing": {
-      "surface": "content-studio-section"
-    },
     "models": {
       "internal": "Registro unico de modelos (USR-185); leitor sem estado proprio, consumido pelo roteamento"
     },
@@ -492,12 +489,6 @@
     },
     "paths": {
       "internal": "Resolução de caminhos do repositório; utilitário sem estado próprio"
-    },
-    "pilots": {
-      "surface": "portfolio-drawer"
-    },
-    "planning": {
-      "surface": "tasks-dashboard-section"
     },
     "portfolio": {
       "surface": "portfolio-drawer"
@@ -528,9 +519,6 @@
     },
     "workflow": {
       "surface": "tasks-dashboard-section"
-    },
-    "security": {
-      "internal": "Contratos Pydantic e helper puro de permissao sem estado, I/O, HTTP ou operacao exposta ao owner (USR-226/SQ-02). Nao integra executores reais. Manual: docs/manuals/security_profiles.md."
     },
     "governance": {
       "internal": "Verificador puro de autorizacao de evolucao de governanca (USR-228): le o registro na base confiavel; sem I/O exposto nem superficie no Hub."

@@ -16,3 +16,12 @@ Layout atual:
 
 Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
 `SQLiteControlStore` (implementacao); nao e duplicata.
+
+# Arquitetura
+
+## Modulos removidos (USR-377 S1)
+
+Sem uso em producao (nenhum import fora de testes), removidos em 2026-10-24:
+`core/planning/`, `core/pilots/`, `core/security/`, `core/marketing/` e
+`scripts/run_practical_activations.py`, junto com seus testes dedicados.
+`core/knowledge`, `core/game` e `core/workflow` permanecem (em uso).

@@ -47,7 +47,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     # -- identifiers that are shaped like a date but are not one.
     "tests/line/test_stage_build.py": "'gpt-6-luna-2026-10-01' e nome de modelo, nao uma data",
     "tests/test_run_ticket_routing.py": "'gpt-6-luna-2026-10-01' e nome de modelo, nao uma data",
-    "tests/test_baseline_catalog.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/test_roadmap.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/test_roadmap_history.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
     "tests/shape/test_worktree_protocol.py": "'DEVELOPMENT_PLAN_2026-09-05.md' e nome de arquivo versionado, nao uma data lida do relogio",
@@ -58,8 +57,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_hub_cloud_seed.py": "'applied_revision' e um marcador de revisao do catalogo comparado so com o proprio conteudo versionado, nunca com o relogio real",
     # -- fixed value threaded explicitly into the production call (DI the scanner's keyword check
     # does not recognize by name) or inert, confirmed by reading the exercised production path.
-    "tests/test_atrium_jarvis_activation.py": "campo de conteudo 'date' de um post de marketing, apenas armazenado/comparado como string; sem leitura do relogio real",
-    "tests/test_baseline_reconcile.py": "NOW so alimenta observed_at/SourceObservation; core/planning/baseline_reconcile.py nao le o relogio real em nenhum ponto",
     "tests/test_continuous_planning.py": "NOW usado para construir um expires_at sempre no passado (lease ja expirada); seguro para sempre porque o relogio real so avanca",
     "tests/test_control_store_failure_evidence.py": "_T0 passado explicitamente em todo accept/claim/finish; SQLiteControlStore só lê o relógio real quando now é omitido, nunca é o caso aqui",
     "tests/test_infra08_three_tier_backup.py": "dt fixo so verifica se o assinador SigV4 formata UM datetime DADO corretamente; nunca comparado ao relogio real",
@@ -67,13 +64,11 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_line_lock.py": "started_at e um epoch fixo so formatado para texto ('2026-10-12' no aviso); nunca comparado ao relogio real",
     "tests/test_line_owner_intake.py": "jobs semeados via SQL bruto nunca tem cause_code='no_route_available', unico caso em que run_state cairia no fallback de relogio real",
     "tests/test_local_progress_visibility.py": "T0 so alimenta o campo 'at' de um LocalRunEvent escrito via conexao psycopg fake; nunca e lido de volta nem comparado",
-    "tests/test_marketing_engine.py": "campo de conteudo 'date' de um post de marketing, apenas armazenado/comparado como string; sem leitura do relogio real",
     "tests/test_postgres_hybrid_persistence.py": "timestamps sao apenas colunas simuladas de linha de banco (conflito de sync por versao); o arquivo nao le o relogio real em nenhum ponto",
     "tests/test_workflow_safe_export.py": "NOW passado explicitamente como observed_at para uma funcao pura de exportacao",
     # -- fixture/content data: stored and asserted back verbatim, never diffed against the real clock
     # in the file or in the production path the test exercises (confirmed by reading that path, not
     # just grepping for datetime.now()).
-    "tests/test_baseline_sources.py": "observed_at de uma SourceObservation de fixture; comparado so com outros valores fixos no mesmo teste",
     "tests/test_control_job_board.py": "linhas de seed SQL para core/workflow/job_board.py, que nao le o relogio real nem filtra por idade",
     "tests/test_delivery_policy.py": "campo 'updated_at' de um payload mock da API do GitHub; comparado so com outro campo do mesmo mock",
     "tests/test_harness_cache.py": "timestamp de uma linha de cache, armazenada/lida de volta verbatim",

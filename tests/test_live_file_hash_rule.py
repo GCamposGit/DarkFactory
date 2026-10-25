@@ -143,35 +143,3 @@ def test_manifest_mutation_preserves_invariants_and_does_not_break_compiler(tmp_
     assert len(item_ids) == len(snapshot.items)  # Invariant: unique IDs
     assert snapshot.stats.total_items >= 58  # Invariant: non-decreasing count floor
     assert not any("RM-99-TEST" in issue.item_ids for issue in snapshot.issues)
-
-
-def test_claims_validation_accepts_live_manifest_mutation(tmp_path: Path) -> None:
-    """The baseline claim for rm07-manifest-planned must not fail if the manifest content changes."""
-    from tests.test_baseline_catalog import (
-        ALLOWED_ASSERTIONS,
-        ALLOWED_DIMENSIONS,
-        ALLOWED_EVIDENCE_KINDS,
-        CATALOG_PATH,
-        CLAIMS_PATH,
-        CLAIM_KEYS,
-        _assert_safe_relative_path,
-        _path_from_locator,
-        _read_json,
-        _sha256,
-    )
-
-    catalog = _read_json(CATALOG_PATH)
-    catalog_by_id = {entry["source_id"]: entry for entry in catalog}
-    document = _read_json(CLAIMS_PATH)
-    claims = document["claims"]
-
-    # Verify that rm07-manifest-planned claim passes without requiring source_hash equality to live darkfac.json
-    rm07_claim = next(c for c in claims if c["claim_id"] == "rm07-manifest-planned")
-    assert rm07_claim["source_id"] == "approved-roadmap"
-    assert rm07_claim["locator"] == ".factory/roadmap/darkfac.json#RM-07"
-
-    # Even if we change the file content (or recompute hash), the presence check succeeds
-    real_manifest_path = REPO_ROOT / ".factory" / "roadmap" / "darkfac.json"
-    manifest_content = _read_json(real_manifest_path)
-    item_ids = {item["id"] for item in manifest_content.get("items", [])}
-    assert "RM-07" in item_ids
