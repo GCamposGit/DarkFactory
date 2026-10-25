@@ -61,16 +61,12 @@ def test_cli_preflight_output_and_exit_code() -> None:
     assert data["runtimes"]["native_sqlite"]["status"] == "ready"
 
 
-def test_cli_run_verify_and_summarize_native_core(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+def test_cli_run_verify_and_summarize_native_core(tmp_path: Path) -> None:
     """Run core suite on native_sqlite, verify manifest, and produce summary."""
-    from spikes.runtime_choice import cli
-
-    # Keep the CLI process boundary under test while using the minimum valid lease.
-    # This avoids waiting through the default recovery lease in the R02 scenario.
     run_out = tmp_path / "exp_core"
     run_res = subprocess.run(
         [sys.executable, "-m", "spikes.runtime_choice.cli", "run", "--runtime", "native_sqlite",
-         "--suite", "core", "--out", str(run_out), "--lease-seconds", "0.01"],
+         "--suite", "core", "--out", str(run_out), "--lease-seconds", "1.0"],
         cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
     )
     details = ""

@@ -62,6 +62,9 @@ class _Origin:
         self.bare = copy_bare_origin(tmp_path / "origin.git")
         self.seed = tmp_path / "_seed"
         _git(["clone", str(self.bare), str(self.seed)], cwd=tmp_path)
+        # The copied bare template's HEAD can still point at its original
+        # default branch (usually `master`), so make the seed checkout explicit.
+        _git(["checkout", "-B", "main", "origin/main"], cwd=self.seed)
         _git(["config", "user.email", "seed@example.com"], cwd=self.seed)
         _git(["config", "user.name", "Seed"], cwd=self.seed)
         self.land({
