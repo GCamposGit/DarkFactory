@@ -78,6 +78,7 @@ def _pick(
     config: Optional[RoutingConfig] = None,
     **kwargs,
 ):
+    kwargs.setdefault("complexity", "high")  # USR-378: the operating harness is preferred for high tickets only
     return pick(
         stage,
         _ALL_CAPS if caps is None else caps,
@@ -288,7 +289,7 @@ def test_a_harness_listed_twice_keeps_the_ranking_among_its_own_entries(tmp_path
     config = _config([("claude", "sonnet"), ("claude", "opus"), ("codex", None)])
     lookup = _lookup(claude=40.0, codex=95.0)
 
-    assert _pick(tmp_path, lookup, config=config, operating_harness="claude") == ("claude", "sonnet")
+    assert _pick(tmp_path, lookup, config=config, operating_harness="claude", complexity="medium") == ("codex", None)
     assert _pick(tmp_path, lookup, config=config, operating_harness="claude", complexity="high") == (
         "claude",
         "opus",
@@ -326,24 +327,23 @@ def test_the_operating_harness_beats_the_high_complexity_opus_preference(
     assert _pick(tmp_path, lookup, config=config, complexity="high") == ("claude", "opus")  # control
     assert _pick(tmp_path, lookup, config=config, complexity="high", operating_harness="codex") == ("codex", None)
     assert _pick(tmp_path, lookup, config=config, complexity="high", operating_harness="grok") == ("grok", None)
+    # USR-378: "critical" is not "high", so the chat preference does not apply
     assert _pick(tmp_path, lookup, config=config, complexity="critical", operating_harness="antigravity") == (
-        "antigravity",
-        None,
+        "claude",
+        "opus",
     )
 
 
-def test_the_operating_harness_beats_the_low_complexity_luna_preference(
+def test_the_operating_harness_does_not_beat_the_low_complexity_luna_preference(
     tmp_path: Path, grok_and_antigravity_write: None
 ) -> None:
     config = _config([("claude", "sonnet"), ("codex", "luna")])
     lookup = _lookup(claude=30.0, codex=90.0, grok=25.0)
 
     assert _pick(tmp_path, lookup, config=config, complexity="low") == ("codex", "luna")  # control
-    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="claude") == (
-        "claude",
-        "sonnet",
-    )
-    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="grok") == ("grok", None)
+    # USR-378: the chat preference is for high-complexity tickets only
+    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="claude") == ("codex", "luna")
+    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="grok") == ("codex", "luna")
 
 
 # --------------------------------------------------------------------------
@@ -580,10 +580,10 @@ def test_without_any_signal_grok_and_antigravity_are_never_development_candidate
     assert _pick(tmp_path, lookup) == ("claude", "sonnet")
 
 
-def test_the_real_development_cascade_keeps_grok_out_so_the_pump_never_picks_it_by_headroom() -> None:
-    """Design decision: Grok develops only as the operating harness, never as a cascade member."""
+def test_the_real_development_cascade_includes_grok_in_both_configs() -> None:
+    """USR-378: Grok is a cascade member, ranked by weekly slack like Claude and Codex."""
     for config in (load_routing_config(default_config_path()), _default_routing_config()):
-        assert [harness for harness, _model in config.stages["development"].cascade] == ["claude", "codex"]
+        assert [harness for harness, _model in config.stages["development"].cascade] == ["claude", "codex", "grok"]
 
 
 def test_pick_keeps_every_existing_parameter_and_a_keyword_only_operating_harness() -> None:

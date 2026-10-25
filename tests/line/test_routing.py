@@ -620,3 +620,47 @@ def test_quota_reservation_manager_reserve_and_release(tmp_path):
     assert mgr.release(res_id2) is True
     assert mgr.get_active_reserved_percent("google") == 0.0
 
+
+_DEV_CAPS = ["harness:claude", "harness:codex", "harness:grok"]
+_NO_COOLDOWN = Path("does-not-exist.json")
+
+
+def _dev_pick(table: dict[str, float], **kwargs):
+    return pick(
+        "development", _DEV_CAPS, config=load_routing_config(default_config_path()),
+        quota_lookup=table.get, cooldown_path=_NO_COOLDOWN, **kwargs,
+    )
+
+
+def test_grok_is_electable_in_development_when_it_has_the_most_headroom():
+    table = {"anthropic": 40.0, "openai": 30.0, "xai": 90.0}
+    assert _dev_pick(table, complexity="medium")[0] == "grok"
+    assert _dev_pick({"anthropic": 5.0, "openai": 5.0, "xai": 50.0}, complexity="medium")[0] == "grok"
+
+
+def test_operating_harness_preference_applies_only_to_high_complexity():
+    table = {"anthropic": 30.0, "openai": 90.0, "xai": 60.0}
+    assert _dev_pick(table, complexity="high", operating_harness="claude")[0] == "claude"
+    assert _dev_pick(table, complexity="medium", operating_harness="claude")[0] == "codex"
+    assert _dev_pick(table, complexity="low", operating_harness="claude")[0] == "codex"
+
+
+def test_development_ranks_by_weekly_slack_and_falls_back_to_headroom():
+    table = {"anthropic": 80.0, "openai": 60.0, "xai": 50.0}
+    slack = {"anthropic": 0.2, "openai": 0.9, "xai": 0.5}
+    assert _dev_pick(table, complexity="medium", slack_lookup=slack.get)[0] == "codex"
+    # one candidate without a reset: slack is ignored and plain headroom decides
+    partial = {"anthropic": 0.2, "openai": 0.9}
+    assert _dev_pick(table, complexity="medium", slack_lookup=partial.get)[0] == "claude"
+
+
+def test_single_critical_floor_is_the_registry_floor():
+    from core.models.registry import QUOTA_FLOOR_MIN
+    from core.router.token_budget import TokenPressure, _pressure_for
+
+    assert load_routing_config(default_config_path()).pressure_thresholds["critical"] == QUOTA_FLOOR_MIN
+    assert _pressure_for(QUOTA_FLOOR_MIN) == TokenPressure.CRITICAL
+    assert _pressure_for(QUOTA_FLOOR_MIN + 0.1) != TokenPressure.CRITICAL
+    floor = {"anthropic": QUOTA_FLOOR_MIN, "openai": QUOTA_FLOOR_MIN, "xai": QUOTA_FLOOR_MIN}
+    assert _dev_pick(floor) is None
+

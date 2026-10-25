@@ -150,7 +150,8 @@ def test_the_real_router_no_longer_elects_antigravity_for_development(
     assert main(["USR-99", "--dry-run", "--json"]) == 0
 
     payload = json.loads(capsys.readouterr().out)
-    assert (payload["selected_harness"], payload["selected_model"]) == ("claude", "sonnet")
+    # Antigravity cannot write; Grok (80%) is now a cascade member and wins on headroom (USR-378).
+    assert payload["selected_harness"] == "grok"
 
 
 def test_the_recommendation_for_a_blocked_critical_harness_is_also_write_capable(
@@ -578,8 +579,9 @@ def test_dry_run_json_reports_the_operating_harness_and_why_it_was_elected(
     assert main(["USR-99", "--dry-run", "--json"]) == 0
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload["selected_harness"] == "codex"  # claude has more headroom, codex is the one in use
-    assert payload["operating_harness"] == "codex" and payload["route_reason"] == "operating_harness_preferred"
+    # USR-378: the chat preference only applies to high-complexity tickets; run_ticket passes none here.
+    assert payload["selected_harness"] == "claude"
+    assert payload["operating_harness"] == "codex" and payload["route_reason"] == "headroom"
 
 
 def test_dry_run_without_any_signal_reports_no_operating_harness_and_the_headroom_reason(
@@ -604,7 +606,7 @@ def test_dry_run_shows_the_detected_harness_and_the_preference_in_the_selection_
 
     out = capsys.readouterr().out
     assert "[+] Harness de operacao detectado: codex" in out
-    assert "CODEX (Modelo: default, modo: write) (preferencia: harness de operacao)" in out
+    assert "CLAUDE (Modelo: sonnet, modo: write)" in out and "preferencia" not in out  # USR-378: high only
 
 
 def test_a_critical_operating_harness_is_reported_but_not_preferred(
