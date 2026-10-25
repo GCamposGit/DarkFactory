@@ -283,6 +283,19 @@ def test_audit_expect_all_providers_detects_mismatch(
         return Response({})
 
     monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", mock_urlopen)
+    # USR-382: Claude quota comes from the CLI's rate_limits (same readings as the captured headers).
+    ant_h = ant_p["headers"]
+    ant_cli = {"loggedIn": True, "rate_limits": {
+        "seven_day": {"used_percentage": float(ant_h["anthropic-ratelimit-unified-7d-utilization"]) * 100,
+                      "resets_at": int(ant_h["anthropic-ratelimit-unified-7d-reset"])},
+        "five_hour": {"used_percentage": float(ant_h["anthropic-ratelimit-unified-5h-utilization"]) * 100,
+                      "resets_at": int(ant_h["anthropic-ratelimit-unified-5h-reset"])},
+    }}
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "fake-claude"))
+    monkeypatch.setattr(
+        "core.usage.adapters.subprocess.run",
+        lambda *a, **k: type("R", (), {"returncode": 0, "stdout": json.dumps(ant_cli), "stderr": ""})(),
+    )
 
     assert command.audit(provider_id, {provider_id: expected_val}, tmp_path / "providers") == 0
     assert command.audit(provider_id, {provider_id: divergent_val}, tmp_path / "providers") == 1
