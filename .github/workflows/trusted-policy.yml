@@ -26,3 +26,11 @@ jobs:
           persist-credentials: false
       - name: Checkout candidate merge without executing it
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce base-owned governance policy
+        working-directory: candidate
+        run: python ../trusted/core/orchestrator/guard.py ${{ github.event.pull_request.base.sha }}
