@@ -66,9 +66,13 @@ logger = logging.getLogger(__name__)
 
 STAGE = "grill"
 GRILL_DEADLINE_HOURS = 12
-MAX_QUESTIONS = 5
+MAX_QUESTIONS = 3
 _NO_DEFAULT_KINDS = frozenset({"secret", "account"})
-_BLOCKING_KINDS = frozenset({"business", "intent", "secret", "account"})
+# Owner questions live in a closed coded set (USR-375 S6); legacy kinds map onto it and
+# anything else is technical: decided by the factory and recorded as an ADR in GRILL.md.
+_KIND_TO_CATEGORY = {"intent": "objective", "secret": "new_secret", "account": "new_secret"}
+_OWNER_CATEGORIES = frozenset({"objective", "success", "business", "new_secret", "acceptance"})
+_BLOCKING_KINDS = frozenset({"business", "intent", "secret", "account", "objective", "success", "new_secret", "acceptance"})
 # Canary demands must never wait for a human: their intent/business questions are resolved
 # immediately with the recommended answer (tag `auto_canary`). A run is a canary run when its
 # payload says `grill_policy: "auto"` (set by core.line.canary) or when it belongs to one of these
@@ -100,7 +104,7 @@ class GrillQuestion(BaseModel):
 
     id: str = Field(min_length=1)
     text: str = Field(min_length=1)
-    kind: Literal["business", "intent", "secret", "account", "technical"]
+    kind: str = "technical"
     options: list[str] = Field(default_factory=list)
     recommended: Optional[str] = None
     why: Optional[str] = None
@@ -670,9 +674,17 @@ def run_grill(
     except (ValueError, json.JSONDecodeError, ValidationError):
         return invalid_json_outcome(ws, run_id, STAGE, result, "grill_invalid_json", now=current_time)
 
-    questions = plan.questions[:MAX_QUESTIONS]
-    technical = [_PendingQuestion(**q.model_dump()) for q in questions if q.kind == "technical"]
-    blocking = [_PendingQuestion(**q.model_dump()) for q in questions if q.kind in _BLOCKING_KINDS]
+    technical: list[_PendingQuestion] = []
+    blocking: list[_PendingQuestion] = []
+    for q in plan.questions:
+        pq = _PendingQuestion(**q.model_dump())
+        category = _KIND_TO_CATEGORY.get(q.kind, q.kind)
+        if category in _OWNER_CATEGORIES and len(blocking) < MAX_QUESTIONS:
+            if not pq.recommended and pq.options:
+                pq.recommended = pq.options[0]
+            blocking.append(pq)
+        else:
+            technical.append(pq)
 
     auto_resolved: list[dict[str, Any]] = []
     if auto_policy and blocking:
