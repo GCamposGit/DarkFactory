@@ -742,17 +742,6 @@ class PostgresControlStore:
                         raise StaleLeaseError("Fencing token mismatch on finish.")
 
                     self._check_finish_reservation_fence(cur, claim, now_utc)
-                        reservation_status, reservation_expiry = reservation_row
-                        res_expires = (
-                            reservation_expiry
-                            if hasattr(reservation_expiry, "astimezone")
-                            else datetime.fromisoformat(str(reservation_expiry))
-                        )
-                        res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
-                        if reservation_status not in ("active", "draining") or res_expires <= now_utc:
-                            raise StaleLeaseError(
-                                f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_status}). Old owner cannot publish."
-                            )
 
                     if result.outcome == "success":
                         cur.execute(
