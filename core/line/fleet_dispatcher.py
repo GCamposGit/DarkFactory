@@ -38,6 +38,7 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
 MIN_NOTEBOOK_WORKERS = 2
 INFRA_EXIT_CODES = frozenset({75})
+LOCK_MARKERS = ("[TRAVA DE LINHA]",)
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 
 
@@ -66,6 +67,7 @@ class DispatcherConfig:
     cycle_sec: float = 30.0
     stable_probes: int = 3
     requeue_cooldown_sec: float = 600.0
+    lock_requeue_cooldown_sec: float = 30.0  # host ocupado/trava: reenfileira quase de imediato
     deploy_window_sec: float = 180.0
     state_path: Path = STATE_PATH
 
@@ -174,6 +176,10 @@ def default_deploy() -> int:
                           cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW).returncode
 
 
+def is_lock_refusal(log_tail: str) -> bool:
+    return any(m in log_tail for m in LOCK_MARKERS)
+
+
 def is_infra_failure(rc: int, log_tail: str) -> bool:
     return rc in INFRA_EXIT_CODES or any(m in log_tail for m in INFRA_MARKERS)
 
@@ -202,6 +208,7 @@ class FleetDispatcher:
         clock: Callable[[], float] = time.time,
         busy_ids_loader: Callable[[], set[str]] = lambda: set(),
         dry_run: bool = False,
+        digest_hook: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -211,8 +218,10 @@ class FleetDispatcher:
         self.clock = clock
         self.busy_ids_loader = busy_ids_loader  # tickets com run/worktree de entrega fora deste processo
         self.dry_run = dry_run
+        self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
         self.in_flight: dict[str, InFlight] = {}  # trava por host: no maximo um ticket por host
         self.cooldown: dict[str, float] = {}
+        self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
         self.last_merge_at: Optional[float] = None
         self.pending_deploy = False
         self.deploys = 0
@@ -227,6 +236,10 @@ class FleetDispatcher:
             if rc == 0:
                 self.last_merge_at = self.clock()
                 self.pending_deploy = True
+            elif rc != 0 and is_lock_refusal(_tail(job.log_path)):
+                self.cooldown[job.ticket_id] = self.clock() + self.config.lock_requeue_cooldown_sec
+                self.lock_busy[host_id] = f"host_ocupado_trava:{job.ticket_id}"
+                logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
             elif is_infra_failure(rc, _tail(job.log_path)):
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec
                 logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
@@ -261,6 +274,7 @@ class FleetDispatcher:
         queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
+        lock_busy, self.lock_busy = self.lock_busy, {}
         for host in sorted(self.config.hosts, key=lambda h: h.priority):
             if host.id in self.in_flight:
                 continue
@@ -281,6 +295,7 @@ class FleetDispatcher:
             except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
                 idle[host.id] = f"lancamento_falhou:{exc}"
                 self.cooldown[tid] = now + self.config.requeue_cooldown_sec
+        idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
         self.last_cycle = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -307,12 +322,21 @@ class FleetDispatcher:
         except OSError:
             logger.exception("falha ao gravar estado do despachante")
 
+    def run_digest_hook(self) -> None:
+        if self.digest_hook is None or self.dry_run:
+            return
+        try:
+            self.digest_hook()
+        except Exception:  # noqa: BLE001 - notificacao nunca derruba o ciclo
+            logger.exception("gancho do resumo diario falhou")
+
     def run_forever(self, stop: Callable[[], bool] = lambda: False) -> None:
         while not stop():
             try:
                 self.run_cycle()
             except Exception:  # noqa: BLE001 - o daemon nunca morre por um ciclo ruim
                 logger.exception("ciclo do despachante falhou")
+            self.run_digest_hook()
             time.sleep(self.config.cycle_sec)
 
 
@@ -324,7 +348,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run)
+    from core.notifications.daily_digest import maybe_send_due
+
+    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due)
     if args.loop and not args.once:
         d.run_forever()
         return 0

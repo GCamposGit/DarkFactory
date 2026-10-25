@@ -13,7 +13,6 @@ from typing import Dict, List, Set, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = REPO_ROOT / "hub" / "frontend"
-STATIC_DIR = FRONTEND_DIR / "static"
 
 # Standard Tailwind Color Palette (RGB tuples for opacity support)
 PALETTES: Dict[str, Dict[str, str]] = {
@@ -1398,14 +1397,10 @@ def main() -> None:
     css_content = build_stylesheet()
     out_file1 = FRONTEND_DIR / "styles.css"
     out_file1.write_text(css_content, encoding="utf-8", newline="\n")
-    
-    STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    out_file2 = STATIC_DIR / "styles.css"
-    out_file2.write_text(css_content, encoding="utf-8", newline="\n")
 
     size_kb = len(css_content.encode("utf-8")) / 1024
     print(f"Generated styles.css: {size_kb:.2f} KB ({len(css_content.encode('utf-8'))} bytes)")
-    print(f"Written to {out_file1} and {out_file2}")
+    print(f"Written to {out_file1}")
 
 if __name__ == "__main__":
     main()

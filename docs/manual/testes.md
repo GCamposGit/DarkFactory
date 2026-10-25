@@ -27,3 +27,20 @@ Testes nao devem esperar relogio real. Regras:
   primeiro sinal (`observe_sec`), nunca um intervalo fixo. Caso negativo usa prazo curto explicito.
 - Subprocessos reais com prazo (`_run_bounded`) usam o menor prazo viavel (1 s).
 - Os padroes de producao nao mudam: `_sleep` so e trocado dentro de testes.
+
+## Contratos de camada e ratchet de complexidade (USR-377)
+
+- `.importlinter` define dois contratos: `core` nao importa `hub`, e `core` nao importa `fastapi`/`starlette`. Rode `lint-imports` (dependencia `import-linter` em `requirements.txt`).
+- Excecoes reais ficam explicitas em `ignore_imports` (hoje `core.harness.remote_worker` e `core.orchestrator.cloud_coordinator` importam `fastapi`; TODO: mover a camada HTTP para fora de `core`). Nao adicione excecoes novas sem ticket.
+- `python C:\dev\DarkFac\scripts\complexity_ratchet.py` mede o tamanho de cada funcao em `core/` e `hub/backend/` e compara com `.factory/config/complexity_baseline.json`: falha para funcao nova acima de 150 linhas ou funcao ja grande que cresce.
+- Apos reduzir uma funcao grande, rode com `--update` para o baseline encolher (nunca cresce).
+- Passos de CI pendentes (`.github/workflows/ci.yml` e protegido pelo guard; owner publica). Inserir no job `pr-tests` depois de "Install dependencies" (e, se desejado, no `ledger-fast`):
+
+```yaml
+      - name: Layer contracts (import-linter)
+        working-directory: candidate
+        run: lint-imports
+      - name: Complexity ratchet
+        working-directory: candidate
+        run: python scripts/complexity_ratchet.py
+```

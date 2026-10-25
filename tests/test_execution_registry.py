@@ -433,3 +433,43 @@ console.log(JSON.stringify([hidden.active.length, hidden.execGroups[0].execution
     out = subprocess.run([node, "-e", script, str(path)], capture_output=True, text=True, timeout=30, check=True)
     assert json.loads(out.stdout.strip()) == [1, 1, 2, 2]
 
+
+
+def _dead_pid() -> int:
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def _queue_offline_event(db: Path, tmp_path: Path, clock: Clock) -> Path:
+    sink = FlakySink(SqliteSink(db))
+    sink.online = False
+    reg = _registry(db, tmp_path, clock, sink)
+    reg.start("run_ticket", "codex", "ticket", "USR-9")
+    return tmp_path / "state" / er.OUTBOX_NAME
+
+
+def test_orphan_sending_of_dead_pid_is_resent_and_removed(db: Path, tmp_path: Path, clock: Clock) -> None:
+    outbox = _queue_offline_event(db, tmp_path, clock)
+    orphan = outbox.with_name(f"{er.OUTBOX_NAME}.{_dead_pid()}.abc123.sending")
+    outbox.replace(orphan)
+    sink = FlakySink(SqliteSink(db))
+    reg = _registry(db, tmp_path, clock, sink)
+    assert reg._flush_outbox() is True
+    assert [e.cause_code for e in sink.writes] == [er.KIND_START]
+    assert not orphan.exists()
+
+
+def test_recent_sending_of_live_pid_is_left_alone(db: Path, tmp_path: Path, clock: Clock) -> None:
+    import os
+
+    outbox = _queue_offline_event(db, tmp_path, clock)
+    live = outbox.with_name(f"{er.OUTBOX_NAME}.{os.getpid()}.abc123.sending")
+    outbox.replace(live)
+    sink = FlakySink(SqliteSink(db))
+    reg = _registry(db, tmp_path, clock, sink)
+    assert reg._flush_outbox() is True
+    assert sink.writes == [] and live.exists()
