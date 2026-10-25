@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -54,6 +56,55 @@ if str(IMPORT_ROOT) not in sys.path:
 
 from core.harness import suite_lock as _suite_lock
 from tests import _cache_dir, _tree_hygiene, _worker_capacity
+
+
+def _git_for_fixture(repo: Path, *args: str) -> str:
+    kwargs: dict[str, Any] = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    result = subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", **kwargs,
+    )
+    assert result.returncode == 0, f"git {args} failed: {result.stderr}"
+    return result.stdout
+
+
+@pytest.fixture(scope="session")
+def git_repo_templates(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """Immutable seed repositories copied by git-heavy tests instead of recreated per test."""
+    root = tmp_path_factory.mktemp("git_repo_templates")
+    populated = root / "populated"
+    populated.mkdir()
+    _git_for_fixture(populated, "init", "-q", "-b", "main")
+    _git_for_fixture(populated, "config", "user.email", "tests@example.com")
+    _git_for_fixture(populated, "config", "user.name", "DarkFac Tests")
+    _git_for_fixture(populated, "config", "commit.gpgsign", "false")
+    _git_for_fixture(populated, "config", "core.autocrlf", "false")
+    (populated / "a.txt").write_text("one\n", encoding="utf-8")
+    _git_for_fixture(populated, "add", "-A")
+    _git_for_fixture(populated, "commit", "-q", "-m", "base")
+    (populated / "a.txt").write_text("two\n", encoding="utf-8")
+    _git_for_fixture(populated, "add", "-A")
+    _git_for_fixture(populated, "commit", "-q", "-m", "second")
+
+    empty = root / "empty"
+    empty.mkdir()
+    _git_for_fixture(empty, "init", "-q", "-b", "main")
+    _git_for_fixture(empty, "config", "user.email", "tests@example.com")
+    _git_for_fixture(empty, "config", "user.name", "DarkFac Tests")
+    _git_for_fixture(empty, "config", "commit.gpgsign", "false")
+    _git_for_fixture(empty, "config", "core.autocrlf", "false")
+    return {"populated": populated, "empty": empty}
+
+
+@pytest.fixture
+def copy_git_repo(git_repo_templates: dict[str, Path]):
+    """Copy a session template into a test-owned path without invoking git."""
+    def _copy(name: str, destination: Path) -> Path:
+        shutil.copytree(git_repo_templates[name], destination)
+        return destination
+    return _copy
 
 # Mitigate Windows WMI query crashes (0x8007000e) during worker startup (USR-95)
 _worker_capacity.mitigate_windows_wmi_startup()

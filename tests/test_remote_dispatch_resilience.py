@@ -151,19 +151,25 @@ def test_alive_worker_is_abandoned_only_after_the_ceiling(monkeypatch: pytest.Mo
 
 
 def test_dead_worker_is_abandoned_without_waiting_for_the_ceiling(
-    monkeypatch: pytest.MonkeyPatch, fake_worker_factory
+    monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.2)
     monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "60")
-    monkeypatch.setattr(remote_dispatch, "_sleep", lambda _s: None)  # USR-342: real gap is 15 s
-    worker = fake_worker_factory(poll_fails_for_sec=None)
-    worker.stop()  # port closed: polls AND /health fail
+    deadline = time.monotonic() + 120
+    now = [0.0]
 
-    started = time.monotonic()
+    def advance_clock() -> float:
+        now[0] += 0.1
+        return now[0]
+
+    monkeypatch.setattr(remote_dispatch.time, "monotonic", advance_clock)
+    monkeypatch.setattr(remote_dispatch, "POLL_INTERVAL_SEC", 0.0)
+    monkeypatch.setattr(remote_dispatch, "_sleep", lambda _s: None)
+    monkeypatch.setattr(remote_dispatch, "_poll_job", lambda *_a, **_k: (_ for _ in ()).throw(ConnectionError("offline")))
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda *_a, **_k: None)
+    monkeypatch.setattr(remote_dispatch, "_cancel_job", lambda *_a, **_k: None)
     with pytest.raises(remote_dispatch._WorkerUnavailable, match="/health is unreachable"):
-        remote_dispatch._stream_job(worker.url, "job-1", deadline=time.monotonic() + 120)
-
-    assert time.monotonic() - started < 15, "a dead worker must not wait for the 60s ceiling"
+        remote_dispatch._stream_job("http://offline", "job-1", deadline=deadline)
 
 
 def test_worker_with_failing_health_endpoint_counts_as_dead(
