@@ -11376,5 +11376,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T01:56:25.600840Z",
     "updated_at": "2026-10-25T01:56:25.600840Z"
+  },
+  {
+    "id": "USR-382",
+    "project_id": "darkfac",
+    "title": "Probe de cota do Claude le rate_limits da CLI em vez de chamada com User-Agent falsificado (fatia do USR-378)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Hoje core.line.routing reporta 'Claude live quota probe returned no reading; only a stale snapshot' (snapshot de ~83h) e a cota do Claude fica desconhecida, entao o roteador nunca elege o Claude. Plano V0 Frente 5: o probe do Claude passa a ler rate_limits da CLI (claude) e cota desconhecida vira modo degradado (so tickets de complexidade baixa), nao bloqueio. Arquivos: core/usage/adapters.py e core/line/routing.py (somente a parte de cota). Nao mexer em run_ticket.py nem core/line/stage*.",
+    "core_journey": [
+      "Hoje core.line.routing reporta 'Claude live quota probe returned no reading; only a stale snapshot' (snapshot de ~83h) e a cota do Claude fica desconhecida, entao o roteador nunca elege o Claude. Plano V0 Frente 5: o probe do Claude passa a ler rate_limits da CLI (claude) e cota desconhecida vira modo degradado (so tickets de complexidade baixa), nao bloqueio. Arquivos: core/usage/adapters.py e core/line/routing.py (somente a parte de cota). Nao mexer em run_ticket.py nem core/line/stage*."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Probe do Claude obtem leitura real a partir da CLI no Notebook (teste com saida simulada da CLI)",
+      "Cota desconhecida permite tickets low e bloqueia medium/high, com teste",
+      "Nenhum User-Agent falsificado no codigo de probe"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T02:30:26.902308Z",
+    "updated_at": "2026-10-25T02:30:26.902308Z"
   }
 ]
