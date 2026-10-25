@@ -11412,8 +11412,8 @@
     "project_id": "darkfac",
     "title": "Testes lentos por git e sockets: fixtures mais leves (fatia S4b do USR-377)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "d16da67c81ee1cfbd4f6090d3a101d5a753bc3fc",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11435,7 +11435,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T02:32:45.942759Z",
-    "updated_at": "2026-10-25T02:32:45.942759Z"
+    "updated_at": "2026-10-25T14:33:33.427933Z"
   },
   {
     "id": "USR-384",
