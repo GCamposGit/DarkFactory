@@ -99,14 +99,16 @@ jobs:
       - name: Enforce base-owned governance policy
         working-directory: candidate
         run: python ../trusted/core/orchestrator/guard.py ${{ github.event.pull_request.base.sha }}
-      - name: Materialize base-owned verifier
+      - name: Materialize base-owned protected files
         working-directory: candidate
         shell: bash
+        # Only paths still governance-protected (see PROTECTED_PATTERNS in
+        # core/orchestrator/guard.py) come from the base. core/harness/*,
+        # harness.config.json and core/testing/* are candidate-owned since USR-343 S1.
         run: |
-          cp -R ../trusted/core/harness/. core/harness/
-          cp ../trusted/harness.config.json harness.config.json
-          mkdir -p core/testing
-          cp ../trusted/core/testing/shards.py core/testing/shards.py
+          mkdir -p core/orchestrator core/governance
+          cp ../trusted/core/orchestrator/guard.py core/orchestrator/guard.py
+          cp -R ../trusted/core/governance/. core/governance/
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
