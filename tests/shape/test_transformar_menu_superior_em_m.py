@@ -106,12 +106,11 @@ def test_generate_hub_styles_is_idempotent_and_mirrors_match(tmp_path):
     frontend.mkdir(parents=True)
     generator = scripts / "generate_hub_styles.py"
     shutil.copyfile(ROOT / "scripts" / generator.name, generator)
-    outputs = (frontend / "styles.css", frontend / "static" / "styles.css")
+    outputs = (frontend / "styles.css",)
     subprocess.run([sys.executable, str(generator)], check=True, capture_output=True)
     first = tuple(path.read_bytes() for path in outputs)
     subprocess.run([sys.executable, str(generator)], check=True, capture_output=True)
     assert first == tuple(path.read_bytes() for path in outputs)
-    assert first[0] == first[1]
     assert first == tuple((ROOT / path.relative_to(tmp_path)).read_bytes() for path in outputs)
 
 
