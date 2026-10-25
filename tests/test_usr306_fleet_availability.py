@@ -113,7 +113,7 @@ def test_managed_mode_requires_verified_health(store, monkeypatch):
     assert CloudCoordinator(store=store, host_health_prober=boom).admit_eligible_cycles(now) == []
 
     admitted = CloudCoordinator(
-        store=store, host_health_prober=lambda h: h == "notebook"
+        store=store, host_health_prober=lambda h: h == "notebook", capacity_probe=lambda: 1
     ).admit_eligible_cycles(now)
     assert [r.host_id for r in admitted] == ["notebook"]
 
@@ -122,7 +122,7 @@ def test_unmanaged_legacy_mode_keeps_presuming_hosts_available(store, monkeypatc
     monkeypatch.delenv(FLEET_MANAGED_ENV, raising=False)
     now = datetime.now(UTC)
     _accept(store, now)
-    admitted = CloudCoordinator(store=store).admit_eligible_cycles(now)
+    admitted = CloudCoordinator(store=store, capacity_probe=lambda: 1).admit_eligible_cycles(now)
     assert [r.host_id for r in admitted] == ["grokbox"]
 
 
