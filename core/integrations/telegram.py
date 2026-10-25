@@ -670,104 +670,15 @@ class TelegramGateway:
         if grill_reply is not None:
             return grill_reply
 
-        if self.config.role == "owner":
-            # Owner bot (@darkfac_bot) = alerts only. Commands, demands (text/voice), /linha and
-            # grill decisions are handled by the ops bot (@darkfac_ops_bot).
-            redirect = TelegramDispatchResult(
-                update_id=update.update_id, action=TelegramActionType.UNKNOWN, authorized=True
-            )
-            if raw_text.startswith("/"):
-                redirect.response_text = "Comandos, demandas e decisões de grill ficam no @darkfac_ops_bot. Este canal (@darkfac_bot) envia apenas alertas."
+        redirect = self._redirect_owner_command(update, raw_text)
+        if redirect is not None:
             return redirect
 
-        # Handle voice and audio input (USR-60): support voice, audio, video_note, and audio documents
-        voice_obj = msg.voice or msg.audio or msg.video_note
-        if not voice_obj and msg.document:
-            mime = (msg.document.mime_type or "").lower()
-            fname = (msg.document.file_name or "").lower()
-            if (
-                mime.startswith("audio/")
-                or mime.startswith("video/")
-                or mime in ("application/ogg", "application/octet-stream")
-                or any(fname.endswith(ext) for ext in (".ogg", ".oga", ".opus", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".mp4", ".weba"))
-            ):
-                voice_obj = msg.document
-
-        if not raw_text and voice_obj:
-            if msg.voice:
-                tmp_ext = ".ogg"
-            elif msg.video_note:
-                tmp_ext = ".mp4"
-            else:
-                fname = getattr(voice_obj, "file_name", "") or "audio.wav"
-                tmp_ext = Path(fname).suffix or ".wav"
-
-            import uuid
-            upload_dir = Path(os.environ.get("DARKFAC_AUDIO_TMP", Path(os.environ.get("TEMP", "/tmp")) / "darkfac_audio"))
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            tmp_audio_path = upload_dir / f"tg_{uuid.uuid4().hex[:8]}{tmp_ext}"
-            transcribed = ""
-            try:
-                downloaded = self.download_telegram_file(voice_obj.file_id, tmp_audio_path)
-                if downloaded or tmp_audio_path.is_file():
-                    if self.audio_engine:
-                        t_res = self.audio_engine.transcribe(tmp_audio_path)
-                        transcribed = t_res.text.strip()
-                    else:
-                        from core.audio.engine import AudioTranscriptionEngine
-                        engine = AudioTranscriptionEngine()
-                        t_res = engine.transcribe(tmp_audio_path)
-                        transcribed = t_res.text.strip()
-            except Exception as exc:
-                logger.error("Failed transcribing Telegram voice message: %s", exc)
-            finally:
-                tmp_audio_path.unlink(missing_ok=True)
-
-            if not transcribed:
-                return TelegramDispatchResult(
-                    update_id=update.update_id,
-                    action=TelegramActionType.UNKNOWN,
-                    authorized=True,
-                    response_text="⚠️ Não foi possível transcrever a mensagem de voz. Verifique a qualidade do áudio ou envie como texto.",
-                )
-
-            # Contextual Routing (Gate G1 approved):
-            reply_text = msg.reply_to_message.text if (msg.reply_to_message and msg.reply_to_message.text) else ""
-            match_ticket = re.search(r"\b((?:USR|DF)-\d+|[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+)\b", reply_text + " " + transcribed, re.IGNORECASE)
-            is_grill_context = ("grill" in reply_text.lower() or "intervenção prioritária" in reply_text.lower() or "desambiguação" in reply_text.lower() or "grill" in transcribed.lower())
-
-            if is_grill_context and match_ticket:
-                target_ticket_id = match_ticket.group(1).upper()
-                result = TelegramDispatchResult(
-                    update_id=update.update_id,
-                    action=TelegramActionType.GRILL,
-                    authorized=True,
-                    target_id=target_ticket_id,
-                )
-                if self.grill_handler:
-                    try:
-                        res = self.grill_handler(target_ticket_id, transcribed, user_id or 0)
-                        result.resumed = res.get("resumed", True)
-                        result.response_text = (
-                            f"✅ Resposta de voz registrada para o Grill de <b>{target_ticket_id}</b>:\n"
-                            f"<i>\"{transcribed}\"</i>\n"
-                            f"Avanço autônomo retomado."
-                        )
-                    except Exception as exc:
-                        result.error = str(exc)
-                        result.response_text = f"❌ Falha ao aplicar resposta do Grill: {exc}"
-                else:
-                    result.resumed = True
-                    result.response_text = f"✅ Resposta de voz registrada para {target_ticket_id}."
-                return result
-
-            # Standalone voice note -> Ingest as /demand
-            is_voice_demand = True
-            voice_transcription = transcribed
-            raw_text = f"/demand {transcribed}"
-        else:
-            is_voice_demand = False
-            voice_transcription = ""
+        media_result, raw_text, is_voice_demand, voice_transcription = self._ingest_message_media(
+            update, msg, user_id, raw_text
+        )
+        if media_result is not None:
+            return media_result
 
         parts = raw_text.split(maxsplit=1)
         cmd_str = parts[0].lower() if parts else ""
@@ -782,381 +693,520 @@ class TelegramGateway:
         )
 
         if cmd_str in ("/start", "/help"):
-            result.action = TelegramActionType.START
-            if self.config.role == "owner":
-                result.response_text = (
-                    "👑 <b>Dark Factory Owner Governance Bot (@darkfac_bot)</b>\n\n"
-                    "Canal oficial para governança estratégica, decisões humanas e aprovações do Owner.\n\n"
-                    "Comandos disponíveis:\n"
-                    "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento e desbloquear WAITING_HUMAN\n"
-                    "• <code>/approve [project_id] [digest]</code> - Aprovar release para deploy em produção\n"
-                    "• <code>/alerts</code> - Consultar alertas de segurança, orçamento e cotas\n"
-                    "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
-                    "• <code>/demand [texto da demanda]</code> - Registrar demanda prioritária do Owner\n"
-                    "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
-                    "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
-                    "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n\n"
-                    "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
-                )
-            elif self.config.role == "ops":
-                result.response_text = (
-                    "⚙️ <b>Dark Factory Autonomous Orchestrator Bot (@darkfac_ops_bot)</b>\n\n"
-                    "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
-                    "Comandos disponíveis:\n"
-                    "• <code>/demand [texto da demanda]</code> - Ingerir nova demanda no backlog autônomo\n"
-                    "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
-                    "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
-                    "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n"
-                    "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
-                    "• <code>/alerts</code> - Consultar telemetria operacional\n\n"
-                    "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento (Grill)\n"
-                    "• <code>/approve [projeto] [digest]</code> - Aprovar release\n\n"
-                    "ℹ️ <i>Alertas críticos chegam pelo @darkfac_bot (somente alertas)</i>"
-                )
-            else:
-                result.response_text = (
-                    "👋 <b>Dark Factory Autonomous Control Bot</b>\n\n"
-                    "Available commands:\n"
-                    "• <code>/demand [text]</code> - Ingest a new demand into backlog\n"
-                    "• <code>/tickets</code> - List open tickets (ID and description)\n"
-                    "• <code>/linha [ticket_id]</code> - Send existing ticket to autonomous line\n"
-                    "• <code>/cancelar [ticket_id|run_id]</code> - Cancel an in-flight autonomous line run\n"
-                    "• <code>/status [ticket_id]</code> - Check status of runs and pipelines\n"
-                    "• <code>/alerts</code> - Check active token quota and operational alerts\n"
-                    "• <code>/grill [ticket_id] [choice]</code> - Answer Grill clarification questions\n"
-                    "• <code>/approve [project_id] [digest]</code> - Approve production release\n"
-                )
+            return self._handle_start_help(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/demand":
+            return self._handle_demand(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/newproject":
+            return self._handle_newproject(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str in ("/linha", "/line"):
+            return self._handle_line(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str in ("/cancelar", "/cancel"):
+            return self._handle_cancel(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/tickets":
+            return self._handle_tickets(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/status":
+            return self._handle_status(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/grill":
+            return self._handle_grill(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/approve":
+            return self._handle_approve(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if cmd_str == "/alerts":
+            return self._handle_alerts(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        if not cmd_str.startswith("/"):
+            return self._handle_demand0(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
+        return self._handle_command_fallback(result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription)
 
-        elif cmd_str == "/demand":
-            result.action = TelegramActionType.DEMAND
-            route = None
-            if arg_str:
-                from core.intake.project_routing import resolve_demand
+    def _redirect_owner_command(
+        self, update: TelegramUpdate, raw_text: str
+    ) -> TelegramDispatchResult | None:
+        if self.config.role != "owner":
+            return None
+        # Owner bot (@darkfac_bot) = alerts only. Ops bot handles commands and decisions.
+        redirect = TelegramDispatchResult(
+            update_id=update.update_id, action=TelegramActionType.UNKNOWN, authorized=True
+        )
+        if raw_text.startswith("/"):
+            redirect.response_text = "Comandos, demandas e decisões de grill ficam no @darkfac_ops_bot. Este canal (@darkfac_bot) envia apenas alertas."
+        return redirect
 
-                route = resolve_demand(
-                    arg_str, self.state_dir,
-                    external_id=f"tg-msg-{chat_id}-{msg.message_id}", requested_by=user_id,
-                )
-            if not arg_str:
-                result.response_text = (
-                    "⚠️ Usage: /demand [<project_id>:] <description of feature or bugfix> "
-                    "(sem projeto = darkfac; /newproject <nome>: <texto> para produto novo)"
-                )
-            elif route.action != "accept":
-                result.target_id = route.onboarding_request_id
-                result.response_text = route.message
-            else:
-                demand_project = route.project_id
-                arg_str = route.text
-                active_intake = self.intake_service
-                if active_intake is None and demand_project != "darkfac" and self.project_demand_handler is not None:
-                    # USR-340: other projects register a ticket with their own prefix (PH-..), never USR-.
-                    try:
-                        res = self.project_demand_handler(demand_project, arg_str, user_id or 0)
-                        ticket_id = res.get("ticket_id", "")
-                        result.target_id = ticket_id
-                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        result.response_text = (
-                            f"✅ {prefix}Demanda registrada no projeto {demand_project}: <b>{ticket_id}</b>"
-                        )
-                    except Exception as exc:
-                        logger.error("Telegram project demand error: %s", exc)
-                        result.error = str(exc)
-                        result.response_text = (
-                            f"❌ Intake indisponivel para o projeto {demand_project}: nada foi registrado ({exc})."
-                        )
-                elif demand_project != "darkfac" and active_intake is None:
-                    result.response_text = (
-                        f"Este canal nao encaminha demandas ao projeto {demand_project}: nada foi registrado."
-                    )
-                elif active_intake is not None:
-                    try:
-                        from core.workflow.control_contracts import IntakeCommand
-                        ext_id = f"tg-msg-{chat_id}-{msg.message_id}"
-                        cmd = IntakeCommand(
-                            project_id=demand_project,
-                            channel="telegram",
-                            external_id=ext_id,
-                            payload={
-                                "title": arg_str[:80],
-                                "problem": arg_str,
-                                "journey": [f"Telegram user {user_id} in chat {chat_id}"],
-                                "non_goals": [],
-                                "criteria": ["Autonomous intake verification"],
-                            },
-                            mode="autonomous",
-                            policy_ref="telegram-policy-v1",
-                        )
-                        receipt = active_intake.accept(cmd, datetime.now(UTC))
-                        demand_id = receipt.demand_id
-                        result.target_id = demand_id
-                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        result.response_text = f"✅ {prefix}Demand registered successfully: <b>{demand_id}</b>"
-                    except Exception as exc:
-                        logger.error("Telegram intake_service error: %s", exc)
-                        result.error = str(exc)
-                        result.response_text = _demand_failure_response(exc)
-                elif self.demand_handler:
-                    try:
-                        res = self.demand_handler(arg_str, user_id or 0)
-                        ticket_id = res.get("ticket_id", "TICKET-AUTO")
-                        title = res.get("title", arg_str[:60])
-                        status_val = res.get("status", "planned")
-                        result.target_id = ticket_id
-                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        if is_voice_demand and voice_transcription:
-                            result.response_text = (
-                                f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
-                                f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
-                                f"📌 <b>Título:</b> {title}\n"
-                                f"📊 <b>Status:</b> {status_val}\n\n"
-                                f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
-                                f"<i>\"{voice_transcription}\"</i>\n\n"
-                                f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
-                            )
-                        else:
-                            result.response_text = (
-                                f"✅ {prefix}Demanda registrada com sucesso!\n\n"
-                                f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
-                                f"📌 <b>Título:</b> {title}\n"
-                                f"📊 <b>Status:</b> {status_val}\n\n"
-                                f"<i>Demanda inserida no backlog da Dark Factory.</i>"
-                            )
-                        line_message = res.get("line_message")
-                        if line_message:
-                            result.response_text += f"\n\nLinha autonoma: {line_message}"
-                    except Exception as exc:
-                        logger.error("Demand handler error: %s", exc)
-                        result.error = str(exc)
-                        result.response_text = _demand_failure_response(exc)
+    def _ingest_message_media(
+        self, update: TelegramUpdate, msg: TelegramMessage, user_id: int | None, raw_text: str
+    ) -> tuple[TelegramDispatchResult | None, str, bool, str]:
+        # Handle voice and audio input (USR-60): voice, audio, video_note, and audio documents.
+        voice_obj = msg.voice or msg.audio or msg.video_note
+        if not voice_obj and msg.document:
+            mime = (msg.document.mime_type or "").lower()
+            fname = (msg.document.file_name or "").lower()
+            if (
+                mime.startswith("audio/")
+                or mime.startswith("video/")
+                or mime in ("application/ogg", "application/octet-stream")
+                or any(fname.endswith(ext) for ext in (".ogg", ".oga", ".opus", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".mp4", ".weba"))
+            ):
+                voice_obj = msg.document
+
+        if raw_text or not voice_obj:
+            return None, raw_text, False, ""
+
+        if msg.voice:
+            tmp_ext = ".ogg"
+        elif msg.video_note:
+            tmp_ext = ".mp4"
+        else:
+            fname = getattr(voice_obj, "file_name", "") or "audio.wav"
+            tmp_ext = Path(fname).suffix or ".wav"
+
+        import uuid
+        upload_dir = Path(os.environ.get("DARKFAC_AUDIO_TMP", Path(os.environ.get("TEMP", "/tmp")) / "darkfac_audio"))
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        tmp_audio_path = upload_dir / f"tg_{uuid.uuid4().hex[:8]}{tmp_ext}"
+        transcribed = ""
+        try:
+            downloaded = self.download_telegram_file(voice_obj.file_id, tmp_audio_path)
+            if downloaded or tmp_audio_path.is_file():
+                if self.audio_engine:
+                    t_res = self.audio_engine.transcribe(tmp_audio_path)
+                    transcribed = t_res.text.strip()
                 else:
-                    try:
-                        from core.demands.models import DemandInput
-                        from core.demands.service import DemandsService
+                    from core.audio.engine import AudioTranscriptionEngine
+                    engine = AudioTranscriptionEngine()
+                    t_res = engine.transcribe(tmp_audio_path)
+                    transcribed = t_res.text.strip()
+        except Exception as exc:
+            logger.error("Failed transcribing Telegram voice message: %s", exc)
+        finally:
+            tmp_audio_path.unlink(missing_ok=True)
 
-                        demands_svc = DemandsService()
-                        ticket = demands_svc.create_ticket_from_input(
-                            DemandInput(
-                                title=arg_str[:70],
-                                problem_statement=arg_str,
-                                project_id="darkfac",
-                            ),
-                            force_heuristic=True,
-                        )
-                        result.target_id = ticket.id
-                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        if is_voice_demand and voice_transcription:
-                            result.response_text = (
-                                f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
-                                f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
-                                f"📌 <b>Título:</b> {ticket.title}\n"
-                                f"📊 <b>Status:</b> {ticket.status.value}\n\n"
-                                f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
-                                f"<i>\"{voice_transcription}\"</i>\n\n"
-                                f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
-                            )
-                        else:
-                            result.response_text = (
-                                f"✅ {prefix}Demanda registrada com sucesso!\n\n"
-                                f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
-                                f"📌 <b>Título:</b> {ticket.title}\n"
-                                f"📊 <b>Status:</b> {ticket.status.value}\n\n"
-                                f"<i>Demanda inserida no backlog da Dark Factory.</i>"
-                            )
-                    except Exception as exc:
-                        logger.error("Durable demand creation error: %s", exc)
-                        if _is_missing_git_error(exc):
-                            result.error = str(exc)
-                            result.response_text = _demand_failure_response(exc)
-                        else:
-                            result.target_id = "DEMAND-RECORDED"
-                            result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
+        if not transcribed:
+            failed = TelegramDispatchResult(
+                update_id=update.update_id,
+                action=TelegramActionType.UNKNOWN,
+                authorized=True,
+                response_text="⚠️ Não foi possível transcrever a mensagem de voz. Verifique a qualidade do áudio ou envie como texto.",
+            )
+            return failed, raw_text, False, ""
 
-        elif cmd_str == "/newproject":
-            from core.intake.project_routing import resolve_newproject
+        reply_text = msg.reply_to_message.text if (msg.reply_to_message and msg.reply_to_message.text) else ""
+        match_ticket = re.search(r"\b((?:USR|DF)-\d+|[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+)\b", reply_text + " " + transcribed, re.IGNORECASE)
+        is_grill_context = ("grill" in reply_text.lower() or "intervenção prioritária" in reply_text.lower() or "desambiguação" in reply_text.lower() or "grill" in transcribed.lower())
+        if is_grill_context and match_ticket:
+            return self._handle_voice_grill_reply(update, match_ticket.group(1).upper(), transcribed, user_id), raw_text, False, ""
 
-            result.action = TelegramActionType.DEMAND
-            route = resolve_newproject(
+        # Standalone voice note -> Ingest as /demand.
+        return None, f"/demand {transcribed}", True, transcribed
+
+    def _handle_voice_grill_reply(
+        self, update: TelegramUpdate, target_ticket_id: str, transcribed: str, user_id: int | None
+    ) -> TelegramDispatchResult:
+        result = TelegramDispatchResult(
+            update_id=update.update_id,
+            action=TelegramActionType.GRILL,
+            authorized=True,
+            target_id=target_ticket_id,
+        )
+        if self.grill_handler:
+            try:
+                res = self.grill_handler(target_ticket_id, transcribed, user_id or 0)
+                result.resumed = res.get("resumed", True)
+                result.response_text = (
+                    f"✅ Resposta de voz registrada para o Grill de <b>{target_ticket_id}</b>:\n"
+                    f"<i>\"{transcribed}\"</i>\n"
+                    "Avanço autônomo retomado."
+                )
+            except Exception as exc:
+                result.error = str(exc)
+                result.response_text = f"❌ Falha ao aplicar resposta do Grill: {exc}"
+        else:
+            result.resumed = True
+            result.response_text = f"✅ Resposta de voz registrada para {target_ticket_id}."
+        return result
+
+    def _handle_start_help(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.START
+        if self.config.role == "owner":
+            result.response_text = (
+                "👑 <b>Dark Factory Owner Governance Bot (@darkfac_bot)</b>\n\n"
+                "Canal oficial para governança estratégica, decisões humanas e aprovações do Owner.\n\n"
+                "Comandos disponíveis:\n"
+                "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento e desbloquear WAITING_HUMAN\n"
+                "• <code>/approve [project_id] [digest]</code> - Aprovar release para deploy em produção\n"
+                "• <code>/alerts</code> - Consultar alertas de segurança, orçamento e cotas\n"
+                "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
+                "• <code>/demand [texto da demanda]</code> - Registrar demanda prioritária do Owner\n"
+                "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
+                "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
+                "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n\n"
+                "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
+            )
+        elif self.config.role == "ops":
+            result.response_text = (
+                "⚙️ <b>Dark Factory Autonomous Orchestrator Bot (@darkfac_ops_bot)</b>\n\n"
+                "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
+                "Comandos disponíveis:\n"
+                "• <code>/demand [texto da demanda]</code> - Ingerir nova demanda no backlog autônomo\n"
+                "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
+                "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
+                "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n"
+                "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
+                "• <code>/alerts</code> - Consultar telemetria operacional\n\n"
+                "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento (Grill)\n"
+                "• <code>/approve [projeto] [digest]</code> - Aprovar release\n\n"
+                "ℹ️ <i>Alertas críticos chegam pelo @darkfac_bot (somente alertas)</i>"
+            )
+        else:
+            result.response_text = (
+                "👋 <b>Dark Factory Autonomous Control Bot</b>\n\n"
+                "Available commands:\n"
+                "• <code>/demand [text]</code> - Ingest a new demand into backlog\n"
+                "• <code>/tickets</code> - List open tickets (ID and description)\n"
+                "• <code>/linha [ticket_id]</code> - Send existing ticket to autonomous line\n"
+                "• <code>/cancelar [ticket_id|run_id]</code> - Cancel an in-flight autonomous line run\n"
+                "• <code>/status [ticket_id]</code> - Check status of runs and pipelines\n"
+                "• <code>/alerts</code> - Check active token quota and operational alerts\n"
+                "• <code>/grill [ticket_id] [choice]</code> - Answer Grill clarification questions\n"
+                "• <code>/approve [project_id] [digest]</code> - Approve production release\n"
+            )
+        return result
+
+    def _handle_demand(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.DEMAND
+        route = None
+        if arg_str:
+            from core.intake.project_routing import resolve_demand
+
+            route = resolve_demand(
                 arg_str, self.state_dir,
                 external_id=f"tg-msg-{chat_id}-{msg.message_id}", requested_by=user_id,
             )
+        if not arg_str:
+            result.response_text = (
+                "⚠️ Usage: /demand [<project_id>:] <description of feature or bugfix> "
+                "(sem projeto = darkfac; /newproject <nome>: <texto> para produto novo)"
+            )
+        elif route.action != "accept":
             result.target_id = route.onboarding_request_id
             result.response_text = route.message
-
-        elif cmd_str in ("/linha", "/line"):
-            result.action = TelegramActionType.DEMAND
-            target = arg_str.strip().split()[0].upper() if arg_str.strip() else ""
-            if not target:
-                result.response_text = "Uso: /linha <ticket_id>  (ex.: /linha USR-62)"
-            elif self.line_handler is None:
-                result.target_id = target
-                result.response_text = "Envio para a linha autonoma indisponivel neste canal."
-            else:
-                result.target_id = target
-                try:
-                    res = self.line_handler(target, user_id or 0)
-                    result.response_text = str(res.get("message") or f"Ticket {target} processado.")
-                    if not res.get("ok", True):
-                        result.error = result.response_text
-                except Exception as exc:
-                    logger.error("Line handler error: %s", exc)
-                    result.error = str(exc)
-                    result.response_text = f"Falha ao enviar {target} para a linha: {exc}"
-
-        elif cmd_str in ("/cancelar", "/cancel"):
-            result.action = TelegramActionType.DEMAND
-            target = arg_str.strip().split()[0] if arg_str.strip() else ""
-            if not target:
-                result.response_text = "Uso: /cancelar <ticket_id|run_id>  (ex.: /cancelar USR-62 ou /cancelar run-xxx)"
-            elif self.cancel_handler is None:
-                result.target_id = target
-                result.response_text = "Cancelamento de run indisponivel neste canal."
-            else:
-                result.target_id = target
-                try:
-                    res = self.cancel_handler(target, user_id or 0)
-                    result.response_text = str(res.get("message") or f"Alvo {target} processado.")
-                    if not res.get("ok", True):
-                        result.error = result.response_text
-                except Exception as exc:
-                    logger.error("Cancel handler error: %s", exc)
-                    result.error = str(exc)
-                    result.response_text = f"Falha ao cancelar {target}: {exc}"
-
-        elif cmd_str == "/tickets":
-            result.action = TelegramActionType.TICKETS
-            try:
-                from core.integrations import telegram_tickets as tickets_mod
-
-                rows = tickets_mod.load_open_tickets()
-                parts = tickets_mod.format_open_tickets_messages(rows)
-                result.response_parts = parts
-                result.response_text = parts[0]
-            except Exception as exc:
-                logger.error("Telegram /tickets failed: %s", exc)
-                result.error = str(exc)
-                result.response_text = "❌ Não foi possível listar os tickets abertos."
-
-        elif cmd_str == "/status":
-            result.action = TelegramActionType.STATUS
-            ticket_id_query = arg_str.strip() or None
-            if self.status_handler:
-                try:
-                    res = self.status_handler(ticket_id_query)
-                    summary = res.get("summary") or "Resumo de status indisponivel."
-                    result.response_text = f"📊 DarkFac Status:\n{summary}"
-                except Exception as exc:
-                    result.error = str(exc)
-                    result.response_text = f"❌ Failed to fetch status: {exc}"
-            else:
-                result.response_text = (
-                    "📊 DarkFac Status:\nResumo real indisponivel neste bot (sem status_handler). "
-                    "Use o bot de operacoes ou o DarkHub (/live)."
-                )
-
-        elif cmd_str == "/grill":
-            result.action = TelegramActionType.GRILL
-            subparts = arg_str.split(maxsplit=1)
-            if len(subparts) < 2:
-                result.response_text = "⚠️ Usage: /grill <ticket_id> <your answer / choice>"
-            else:
-                t_id, answer = subparts[0].strip(), subparts[1].strip()
-                result.target_id = t_id
-                if self.grill_handler:
-                    try:
-                        res = self.grill_handler(t_id, answer, user_id or 0)
-                        result.resumed = res.get("resumed", True)
-                        result.response_text = f"✅ Grill answer recorded for <b>{t_id}</b>. Workflow resumed."
-                    except Exception as exc:
-                        result.error = str(exc)
-                        result.response_text = f"❌ Failed to record grill answer: {exc}"
-                else:
-                    result.resumed = True
-                    result.response_text = f"✅ Grill answer received for {t_id}."
-
-        elif cmd_str == "/approve":
-            result.action = TelegramActionType.APPROVE
-            subparts = arg_str.split(maxsplit=1)
-            if len(subparts) < 2:
-                result.response_text = "⚠️ Usage: /approve <project_id> <artifact_digest>"
-            else:
-                p_id, digest = subparts[0].strip(), subparts[1].strip()
-                result.target_id = f"{p_id}:{digest}"
-                if self.approval_handler:
-                    try:
-                        res = self.approval_handler(p_id, digest, user_id or 0)
-                        result.resumed = True
-                        receipt_id = res.get("receipt_id", "RCPT-OK")
-                        result.response_text = (
-                            f"🚀 Release Approved for <b>{p_id}</b>!\n"
-                            f"Digest: <code>{digest[:12]}...</code>\n"
-                            f"Receipt: <b>{receipt_id}</b>\n"
-                            f"Production promotion authorized."
-                        )
-                    except Exception as exc:
-                        result.error = str(exc)
-                        result.response_text = f"❌ Release approval rejected: {exc}"
-                else:
-                    result.resumed = True
-                    result.response_text = f"🚀 Release approved for {p_id} ({digest[:8]})."
-
-        elif cmd_str == "/alerts":
-            result.action = TelegramActionType.ALERTS
-            try:
-                from core.notifications.models import AlertSeverity
-                from core.notifications.store import NotificationStore
-                store = NotificationStore()
-                events = store.list_notifications(limit=5)
-                if not events:
-                    result.response_text = "✅ <b>Nenhum alerta operacional ativo.</b> Todas as cotas e serviços estão saudáveis."
-                else:
-                    lines = ["🔔 <b>Alertas Operacionais Recentes:</b>\n"]
-                    for ev in events:
-                        icon = "🚨" if ev.severity == AlertSeverity.CRITICAL else ("⚠️" if ev.severity == AlertSeverity.WARNING else "ℹ️")
-                        lines.append(f"{icon} <b>[{ev.severity.value.upper()}] {ev.title}</b>\n   {ev.message}")
-                    result.response_text = "\n\n".join(lines)
-            except Exception as exc:
-                result.error = str(exc)
-                result.response_text = f"❌ Erro ao consultar alertas: {exc}"
-
         else:
-            if not cmd_str.startswith("/"):
-                lower_text = raw_text.lower()
-                if any(w in lower_text for w in ("ticket", "registrad", "confirm", "numero", "número", "status")):
-                    try:
-                        from core.demands.service import DemandsService
-
-                        demands_svc = DemandsService()
-                        tickets = demands_svc.list_tickets("darkfac")
-                        if tickets:
-                            latest = tickets[-1]
-                            result.response_text = (
-                                f"📋 <b>Último Ticket Registrado:</b>\n\n"
-                                f"🆔 <b>ID:</b> <code>{latest.id}</code>\n"
-                                f"📌 <b>Título:</b> {latest.title}\n"
-                                f"📊 <b>Status:</b> {latest.status.value}\n"
-                                f"📝 <b>Descrição:</b> {(latest.problem_statement or latest.title)[:140]}..."
-                            )
-                        else:
-                            result.response_text = "ℹ️ Nenhum ticket registrado no momento."
-                    except Exception as exc:
-                        result.response_text = "ℹ️ Envie /status ou /help para ver os comandos disponíveis."
-                elif not raw_text:
+            demand_project = route.project_id
+            arg_str = route.text
+            active_intake = self.intake_service
+            if active_intake is None and demand_project != "darkfac" and self.project_demand_handler is not None:
+                # USR-340: other projects register a ticket with their own prefix (PH-..), never USR-.
+                try:
+                    res = self.project_demand_handler(demand_project, arg_str, user_id or 0)
+                    ticket_id = res.get("ticket_id", "")
+                    result.target_id = ticket_id
+                    prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
                     result.response_text = (
-                        "ℹ️ <b>Dark Factory Bot:</b> Mensagem recebida sem conteúdo textual ou de áudio reconhecido.\n\n"
-                        "Para registrar uma nova demanda, envie uma <b>mensagem de voz</b> ou digite:\n"
-                        "<code>/demand [sua ideia ou requisito]</code>\n\n"
-                        "Envie <code>/help</code> para ver a lista de comandos."
+                        f"✅ {prefix}Demanda registrada no projeto {demand_project}: <b>{ticket_id}</b>"
+                    )
+                except Exception as exc:
+                    logger.error("Telegram project demand error: %s", exc)
+                    result.error = str(exc)
+                    result.response_text = (
+                        f"❌ Intake indisponivel para o projeto {demand_project}: nada foi registrado ({exc})."
+                    )
+            elif demand_project != "darkfac" and active_intake is None:
+                result.response_text = (
+                    f"Este canal nao encaminha demandas ao projeto {demand_project}: nada foi registrado."
+                )
+            elif active_intake is not None:
+                try:
+                    from core.workflow.control_contracts import IntakeCommand
+                    ext_id = f"tg-msg-{chat_id}-{msg.message_id}"
+                    cmd = IntakeCommand(
+                        project_id=demand_project,
+                        channel="telegram",
+                        external_id=ext_id,
+                        payload={
+                            "title": arg_str[:80],
+                            "problem": arg_str,
+                            "journey": [f"Telegram user {user_id} in chat {chat_id}"],
+                            "non_goals": [],
+                            "criteria": ["Autonomous intake verification"],
+                        },
+                        mode="autonomous",
+                        policy_ref="telegram-policy-v1",
+                    )
+                    receipt = active_intake.accept(cmd, datetime.now(UTC))
+                    demand_id = receipt.demand_id
+                    result.target_id = demand_id
+                    prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                    result.response_text = f"✅ {prefix}Demand registered successfully: <b>{demand_id}</b>"
+                except Exception as exc:
+                    logger.error("Telegram intake_service error: %s", exc)
+                    result.error = str(exc)
+                    result.response_text = _demand_failure_response(exc)
+            elif self.demand_handler:
+                try:
+                    res = self.demand_handler(arg_str, user_id or 0)
+                    ticket_id = res.get("ticket_id", "TICKET-AUTO")
+                    title = res.get("title", arg_str[:60])
+                    status_val = res.get("status", "planned")
+                    result.target_id = ticket_id
+                    prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                    if is_voice_demand and voice_transcription:
+                        result.response_text = (
+                            f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
+                            f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
+                            f"📌 <b>Título:</b> {title}\n"
+                            f"📊 <b>Status:</b> {status_val}\n\n"
+                            f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
+                            f"<i>\"{voice_transcription}\"</i>\n\n"
+                            f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
+                        )
+                    else:
+                        result.response_text = (
+                            f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                            f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
+                            f"📌 <b>Título:</b> {title}\n"
+                            f"📊 <b>Status:</b> {status_val}\n\n"
+                            f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                        )
+                    line_message = res.get("line_message")
+                    if line_message:
+                        result.response_text += f"\n\nLinha autonoma: {line_message}"
+                except Exception as exc:
+                    logger.error("Demand handler error: %s", exc)
+                    result.error = str(exc)
+                    result.response_text = _demand_failure_response(exc)
+            else:
+                try:
+                    from core.demands.models import DemandInput
+                    from core.demands.service import DemandsService
+
+                    demands_svc = DemandsService()
+                    ticket = demands_svc.create_ticket_from_input(
+                        DemandInput(
+                            title=arg_str[:70],
+                            problem_statement=arg_str,
+                            project_id="darkfac",
+                        ),
+                        force_heuristic=True,
+                    )
+                    result.target_id = ticket.id
+                    prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                    if is_voice_demand and voice_transcription:
+                        result.response_text = (
+                            f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
+                            f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                            f"📌 <b>Título:</b> {ticket.title}\n"
+                            f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                            f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
+                            f"<i>\"{voice_transcription}\"</i>\n\n"
+                            f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
+                        )
+                    else:
+                        result.response_text = (
+                            f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                            f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                            f"📌 <b>Título:</b> {ticket.title}\n"
+                            f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                            f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                        )
+                except Exception as exc:
+                    logger.error("Durable demand creation error: %s", exc)
+                    if _is_missing_git_error(exc):
+                        result.error = str(exc)
+                        result.response_text = _demand_failure_response(exc)
+                    else:
+                        result.target_id = "DEMAND-RECORDED"
+                        result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
+        return result
+
+    def _handle_newproject(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        from core.intake.project_routing import resolve_newproject
+
+        result.action = TelegramActionType.DEMAND
+        route = resolve_newproject(
+            arg_str, self.state_dir,
+            external_id=f"tg-msg-{chat_id}-{msg.message_id}", requested_by=user_id,
+        )
+        result.target_id = route.onboarding_request_id
+        result.response_text = route.message
+        return result
+
+    def _handle_line(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.DEMAND
+        target = arg_str.strip().split()[0].upper() if arg_str.strip() else ""
+        if not target:
+            result.response_text = "Uso: /linha <ticket_id>  (ex.: /linha USR-62)"
+        elif self.line_handler is None:
+            result.target_id = target
+            result.response_text = "Envio para a linha autonoma indisponivel neste canal."
+        else:
+            result.target_id = target
+            try:
+                res = self.line_handler(target, user_id or 0)
+                result.response_text = str(res.get("message") or f"Ticket {target} processado.")
+                if not res.get("ok", True):
+                    result.error = result.response_text
+            except Exception as exc:
+                logger.error("Line handler error: %s", exc)
+                result.error = str(exc)
+                result.response_text = f"Falha ao enviar {target} para a linha: {exc}"
+        return result
+
+    def _handle_cancel(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.DEMAND
+        target = arg_str.strip().split()[0] if arg_str.strip() else ""
+        if not target:
+            result.response_text = "Uso: /cancelar <ticket_id|run_id>  (ex.: /cancelar USR-62 ou /cancelar run-xxx)"
+        elif self.cancel_handler is None:
+            result.target_id = target
+            result.response_text = "Cancelamento de run indisponivel neste canal."
+        else:
+            result.target_id = target
+            try:
+                res = self.cancel_handler(target, user_id or 0)
+                result.response_text = str(res.get("message") or f"Alvo {target} processado.")
+                if not res.get("ok", True):
+                    result.error = result.response_text
+            except Exception as exc:
+                logger.error("Cancel handler error: %s", exc)
+                result.error = str(exc)
+                result.response_text = f"Falha ao cancelar {target}: {exc}"
+        return result
+
+    def _handle_tickets(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.TICKETS
+        try:
+            from core.integrations import telegram_tickets as tickets_mod
+
+            rows = tickets_mod.load_open_tickets()
+            parts = tickets_mod.format_open_tickets_messages(rows)
+            result.response_parts = parts
+            result.response_text = parts[0]
+        except Exception as exc:
+            logger.error("Telegram /tickets failed: %s", exc)
+            result.error = str(exc)
+            result.response_text = "❌ Não foi possível listar os tickets abertos."
+        return result
+
+    def _handle_status(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.STATUS
+        ticket_id_query = arg_str.strip() or None
+        if self.status_handler:
+            try:
+                res = self.status_handler(ticket_id_query)
+                summary = res.get("summary") or "Resumo de status indisponivel."
+                result.response_text = f"📊 DarkFac Status:\n{summary}"
+            except Exception as exc:
+                result.error = str(exc)
+                result.response_text = f"❌ Failed to fetch status: {exc}"
+        else:
+            result.response_text = (
+                "📊 DarkFac Status:\nResumo real indisponivel neste bot (sem status_handler). "
+                "Use o bot de operacoes ou o DarkHub (/live)."
+            )
+        return result
+
+    def _handle_grill(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.GRILL
+        subparts = arg_str.split(maxsplit=1)
+        if len(subparts) < 2:
+            result.response_text = "⚠️ Usage: /grill <ticket_id> <your answer / choice>"
+        else:
+            t_id, answer = subparts[0].strip(), subparts[1].strip()
+            result.target_id = t_id
+            if self.grill_handler:
+                try:
+                    res = self.grill_handler(t_id, answer, user_id or 0)
+                    result.resumed = res.get("resumed", True)
+                    result.response_text = f"✅ Grill answer recorded for <b>{t_id}</b>. Workflow resumed."
+                except Exception as exc:
+                    result.error = str(exc)
+                    result.response_text = f"❌ Failed to record grill answer: {exc}"
+            else:
+                result.resumed = True
+                result.response_text = f"✅ Grill answer received for {t_id}."
+        return result
+
+    def _handle_approve(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.APPROVE
+        subparts = arg_str.split(maxsplit=1)
+        if len(subparts) < 2:
+            result.response_text = "⚠️ Usage: /approve <project_id> <artifact_digest>"
+        else:
+            p_id, digest = subparts[0].strip(), subparts[1].strip()
+            result.target_id = f"{p_id}:{digest}"
+            if self.approval_handler:
+                try:
+                    res = self.approval_handler(p_id, digest, user_id or 0)
+                    result.resumed = True
+                    receipt_id = res.get("receipt_id", "RCPT-OK")
+                    result.response_text = (
+                        f"🚀 Release Approved for <b>{p_id}</b>!\n"
+                        f"Digest: <code>{digest[:12]}...</code>\n"
+                        f"Receipt: <b>{receipt_id}</b>\n"
+                        f"Production promotion authorized."
+                    )
+                except Exception as exc:
+                    result.error = str(exc)
+                    result.response_text = f"❌ Release approval rejected: {exc}"
+            else:
+                result.resumed = True
+                result.response_text = f"🚀 Release approved for {p_id} ({digest[:8]})."
+        return result
+
+    def _handle_alerts(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.action = TelegramActionType.ALERTS
+        try:
+            from core.notifications.models import AlertSeverity
+            from core.notifications.store import NotificationStore
+            store = NotificationStore()
+            events = store.list_notifications(limit=5)
+            if not events:
+                result.response_text = "✅ <b>Nenhum alerta operacional ativo.</b> Todas as cotas e serviços estão saudáveis."
+            else:
+                lines = ["🔔 <b>Alertas Operacionais Recentes:</b>\n"]
+                for ev in events:
+                    icon = "🚨" if ev.severity == AlertSeverity.CRITICAL else ("⚠️" if ev.severity == AlertSeverity.WARNING else "ℹ️")
+                    lines.append(f"{icon} <b>[{ev.severity.value.upper()}] {ev.title}</b>\n   {ev.message}")
+                result.response_text = "\n\n".join(lines)
+        except Exception as exc:
+            result.error = str(exc)
+            result.response_text = f"❌ Erro ao consultar alertas: {exc}"
+        return result
+
+    def _handle_demand0(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        lower_text = raw_text.lower()
+        if any(w in lower_text for w in ("ticket", "registrad", "confirm", "numero", "número", "status")):
+            try:
+                from core.demands.service import DemandsService
+
+                demands_svc = DemandsService()
+                tickets = demands_svc.list_tickets("darkfac")
+                if tickets:
+                    latest = tickets[-1]
+                    result.response_text = (
+                        f"📋 <b>Último Ticket Registrado:</b>\n\n"
+                        f"🆔 <b>ID:</b> <code>{latest.id}</code>\n"
+                        f"📌 <b>Título:</b> {latest.title}\n"
+                        f"📊 <b>Status:</b> {latest.status.value}\n"
+                        f"📝 <b>Descrição:</b> {(latest.problem_statement or latest.title)[:140]}..."
                     )
                 else:
-                    result.response_text = (
-                        f"💬 Para abrir uma nova demanda com este texto, digite:\n"
-                        f"<code>/demand {raw_text}</code>\n\n"
-                        f"Envie /help para ver a lista de comandos."
-                    )
-            else:
-                result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
+                    result.response_text = "ℹ️ Nenhum ticket registrado no momento."
+            except Exception as exc:
+                result.response_text = "ℹ️ Envie /status ou /help para ver os comandos disponíveis."
+        elif not raw_text:
+            result.response_text = (
+                "ℹ️ <b>Dark Factory Bot:</b> Mensagem recebida sem conteúdo textual ou de áudio reconhecido.\n\n"
+                "Para registrar uma nova demanda, envie uma <b>mensagem de voz</b> ou digite:\n"
+                "<code>/demand [sua ideia ou requisito]</code>\n\n"
+                "Envie <code>/help</code> para ver a lista de comandos."
+            )
+        else:
+            result.response_text = (
+                f"💬 Para abrir uma nova demanda com este texto, digite:\n"
+                f"<code>/demand {raw_text}</code>\n\n"
+                f"Envie /help para ver a lista de comandos."
+            )
+        return result
 
+    def _handle_command_fallback(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
+        result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
         return result
 
     def _handle_callback(self, update: TelegramUpdate) -> TelegramDispatchResult:
