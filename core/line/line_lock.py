@@ -137,7 +137,11 @@ def lock_dir(root: Optional[Path] = None) -> Path:
     return (root if root is not None else state_root()) / LOCK_DIRNAME
 
 
-def lock_path(root: Optional[Path] = None) -> Path:
+def lock_path(root: Optional[Path] = None, *, fleet_host: Optional[str] = None) -> Path:
+    """Machine-wide lock file; in fleet mode (``fleet_host``) a per-gate-host slot file instead."""
+    if fleet_host:
+        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in fleet_host.strip().lower())
+        return lock_dir(root) / f"line.fleet-{safe}.lock"
     return lock_dir(root) / LOCK_FILENAME
 
 
@@ -307,7 +311,10 @@ class LineLock:
     ) -> None:
         self._require_reservation = require_reservation
         self._ticket_id = ticket_id
-        self._path = lock_path(root)
+        # Fleet mode (USR-366): one lock slot per gate host, so several hosts can run in parallel from
+        # the same machine; outside fleet mode the single machine-wide lock is kept.
+        _fleet_slot = fleet_mode if fleet_mode is not None else is_fleet_mode()
+        self._path = lock_path(root, fleet_host=resolve_host_id(host_id) if _fleet_slot else None)
         self._root = root
         self._store = store
         self._host_id = host_id

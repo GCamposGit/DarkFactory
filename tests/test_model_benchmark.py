@@ -30,7 +30,6 @@ from core.benchmarks.frontier import (
     select_best_model_for_task,
 )
 from core.benchmarks.fetcher import DailyBenchmarkService, ensure_daily_benchmark
-from core.router.model_router import recommend_model
 from hub.backend.main import app
 
 
@@ -256,16 +255,6 @@ def test_select_best_model_by_complexity():
     assert high_rec.coding_score >= 84.0
 
 
-def test_model_router_recommend_integration():
-    """Validates that model_router.py integrates daily efficiency frontier."""
-    rec = recommend_model("coding", complexity="high", offline=False)
-    assert "model" in rec
-    assert "daily_efficiency_frontier" in rec
-    frontier_info = rec["daily_efficiency_frontier"]
-    assert "optimal_cloud_model" in frontier_info
-    assert frontier_info["coding_score"] > 0
-
-
 def test_hub_rest_api_benchmarks():
     """Validates FastAPI endpoints for benchmarks in DarkHub."""
     client = TestClient(app)
@@ -424,31 +413,3 @@ def test_deepseek_v41_flash_present_in_catalog_and_pareto_frontier():
     )
 
 
-def test_router_resolves_deepseek_v41_flash_provider_as_openrouter():
-    """
-    Regression test: when the daily benchmark picks deepseek/deepseek-v4.1-flash
-    as the Pareto leader, the router must resolve its provider to 'openrouter'
-    (not the old hardcoded 'siliconflow').
-    """
-    rec = recommend_model("coding", complexity="high", offline=False)
-    assert "model" in rec
-    # If V4.1-Flash is the Pareto leader (it should be given catalog scores)
-    if rec.get("model") == "deepseek/deepseek-v4.1-flash":
-        assert rec.get("provider") == "openrouter", (
-            f"deepseek/deepseek-v4.1-flash must be routed via 'openrouter', got: {rec.get('provider')}"
-        )
-    # Frontier data must always be present
-    assert "daily_efficiency_frontier" in rec
-    frontier = rec["daily_efficiency_frontier"]
-    assert "optimal_cloud_model" in frontier
-
-
-def test_adversarial_review_uses_deepseek_v41_flash():
-    """
-    Regression test: the adversarial_review task type must return
-    deepseek/deepseek-v4.1-flash as tier2_cloud reviewer via openrouter.
-    """
-    rec = recommend_model("review", complexity="high", offline=False)
-    assert rec.get("tier2_cloud") == "deepseek/deepseek-v4.1-flash", (
-        f"adversarial review tier2_cloud must be 'deepseek/deepseek-v4.1-flash', got: {rec.get('tier2_cloud')}"
-    )

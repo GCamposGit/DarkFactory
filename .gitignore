@@ -107,7 +107,13 @@ hub/data/owner_actions/
 
 # Artefatos de runtime da fabrica (USR-352)
 .factory/executions/active/
+.factory/executions/
 .factory/hub_availability.json
 .factory/owner_actions/OA-*.png
 .factory/owner_actions/OA-*.jsonl
 .factory/owner_actions/OA-*.ps1
+
+# Runtime do despachante da frota e do resumo diario (estado local; sujava o checkout compartilhado e o run_ticket recusava todo lancamento da frota)
+.factory/runs/fleet_dispatcher_logs/
+.factory/runs/fleet_dispatcher_state.json
+.factory/daily_digest_state.json

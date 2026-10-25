@@ -251,11 +251,6 @@ def test_frontend_credits_integration():
 def test_non_goals_isolation():
     """Verify that credits do not interfere with model selection or subscription quotas."""
     from core.usage.models import AccountUsageReport
-    from core.router.model_router import recommend_model
-
-    # Check that model router does not require or depend on credits
-    decision = recommend_model(task_type="code", complexity="low", offline=True)
-    assert decision.get("model") is not None
 
     # Check that AccountUsageReport remains strictly percentage/window quota
     assert "connected_count" in AccountUsageReport.model_fields

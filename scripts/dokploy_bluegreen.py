@@ -3,7 +3,8 @@
     python C:\\dev\\DarkFac\\scripts\\dokploy_bluegreen.py [--sha <40hex>] [--timeout 900]
 
 Reads the compose at origin/main (or --sha), waits for the GHCR image, installs the overlap compose
-in Dokploy, gates on the public /health serving the new sha, then installs the cutover compose.
+in Dokploy, gates on the new colour's own route (/__bg/<colour>/health), installs the cutover
+compose and confirms the public /health shows the new sha (USR-388).
 Exit 0 ok, 1 deploy failed (previous colour kept), 2 usage/credentials.
 """
 
@@ -107,6 +108,8 @@ def main(argv: Optional[Sequence[str]] = None, env: Optional[Dict[str, str]] = N
             read_compose=read_compose,
             apply_compose=apply_compose,
             sha_is_serving=sha_is_serving,
+            color_is_serving=dr._bluegreen_color_serving(log=lambda m: print(m, file=sys.stderr)),
+            restore_allowed=dr.hub_restore_is_secure,
             wait_ghcr=lambda s: wait_for_ghcr_image(s),
             sleep_fn=time.sleep,
         )

@@ -26,9 +26,6 @@ Sem uso em producao (nenhum import fora de testes), removidos em 2026-10-24:
 `scripts/run_practical_activations.py`, junto com seus testes dedicados.
 `core/knowledge`, `core/game` e `core/workflow` permanecem (em uso).
 
-
-# Arquitetura
-
 ## Orquestrador
 
 O pacote `core/orchestrator` guarda a infraestrutura de execução e entrega que a esteira
@@ -53,3 +50,19 @@ substituída pelo estado da esteira em `core/line`), `target_journey.py` (a etap
 
 Regra para novos módulos: todo módulo em `core/orchestrator` precisa ter um chamador fora de
 `tests/`; uma varredura de código morto semanal abre ticket de limpeza quando isso deixa de valer.
+
+## Roteamento (USR-378)
+
+O unico roteador de producao e `core/line/routing.pick`. Os roteadores
+paralelos `core/router/model_router.py` e `core/router/harness_router.py` foram
+removidos (sem chamador fora de testes). `core/router/token_budget.py` fica
+porque `pick` e o monitor de tokens usam `_quota_headroom`;
+`core/benchmarks/router.py`, `core/portfolio/router_optimizer.py` e
+`core/workflow/qualified_routes.py` permanecem por terem chamadores vivos.
+
+## Backend do Hub (USR-377 S7b)
+
+`hub/backend/service.py` e fachada fina: `HubService` (construtor, `get_line_live`) e
+reexports. A logica vive em mixins por dominio: `service_line`, `service_interventions`,
+`service_progress`, `service_catalog`, `service_usage`, `service_ai`, `service_integrations`
+e a guarda SSRF em `service_net`.

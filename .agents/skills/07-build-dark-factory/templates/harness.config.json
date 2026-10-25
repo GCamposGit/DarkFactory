@@ -4,7 +4,7 @@
   "steps": [
     {
       "name": "static_analysis",
-      "cmd": "python -m py_compile core/router/model_router.py",
+      "cmd": "python -m py_compile core/line/routing.py",
       "timeout_sec": 30,
       "quick": true
     },

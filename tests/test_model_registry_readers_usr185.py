@@ -10,7 +10,6 @@ import pytest
 from core.line import agent_cli, routing, subagent_routing
 from core.models import registry
 from core.portfolio import router_optimizer
-from core.router import model_router
 from core.usage import adapters
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -84,23 +83,6 @@ def test_subagent_legacy_models_key_still_honored() -> None:
     raw = json.loads((REPO_ROOT / ".factory" / "config" / "subagent_model_routing.json").read_text(encoding="utf-8"))
     raw["models"] = {"haiku": "h", "sonnet": "s", "opus": "o"}
     assert subagent_routing.parse_config(raw).models == {"haiku": "h", "sonnet": "s", "opus": "o"}
-
-
-def test_model_router_ids_unchanged() -> None:
-    mm = model_router.MODEL_MATRIX
-    assert mm["research"]["primary"] == "gemini-3.8-flash"
-    assert mm["research"]["secondary"] == "grok-4.6"
-    assert mm["code_scout"]["secondary"] == "claude-opus-5"
-    assert mm["architecture"]["secondary"] == "gpt-sol"
-    assert mm["coding"]["medium_complexity"]["secondary"] == "deepseek/deepseek-v4.1-flash"
-    assert mm["adversarial_review"]["tier2_alt"] == "grok-4.6"
-    assert model_router.HIGH_INTELLIGENCE_BY_HARNESS["codex"]["model"] == "gpt-6-astra"
-    assert model_router.HIGH_INTELLIGENCE_BY_HARNESS["grok_build"]["model"] == "grok-4.6"
-    fo = model_router._QUOTA_FAILOVER_MODELS
-    assert (fo["anthropic"], fo["openai"], fo["codex"], fo["xai"], fo["google"]) == (
-        "claude-opus-5", "gpt-sol", "gpt-sol", "grok-4.6", "gemini-3.8-flash",
-    )
-    assert fo["openrouter"] == fo["deepseek"] == fo["siliconflow"] == "deepseek/deepseek-v4.1-flash"
 
 
 def test_router_optimizer_and_usage_ids_unchanged() -> None:

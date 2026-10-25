@@ -11,6 +11,7 @@ from core.orchestrator import compose_render as cr
 from core.orchestrator.bluegreen import (
     BlueGreenError,
     BlueGreenState,
+    has_serving_replica,
     parse_state,
     plan_next,
     render_bluegreen_compose,
@@ -176,13 +177,51 @@ def test_restore_legacy_cli_only_updates_without_marker(monkeypatch: pytest.Monk
     assert "restore-legacy ok" in capsys.readouterr().out
 
 
-def test_refused_restore_takes_the_hub_offline_instead_of_reviving_the_old_colour() -> None:
+def test_refused_restore_keeps_serving_colour_and_never_writes_zero_replicas() -> None:
+    """USR-388: refused restore writes nothing; the overlap compose (old colour up) stays in place."""
     initial = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
     applied: List[str] = []
-    with pytest.raises(BlueGreenError, match="Hub offline"):
+    with pytest.raises(BlueGreenError, match="NOT taken offline"):
         run_bluegreen_deploy(
             source=SRC, new_sha=C, read_compose=lambda: initial, apply_compose=applied.append,
             sha_is_serving=lambda _s: False, health_attempts=2, restore_allowed=lambda _prev: False,
         )
-    assert applied[-1] != initial
-    assert applied[-1].count("replicas: 0") == 2
+    assert len(applied) == 1 and all(has_serving_replica(c) for c in applied)
+    assert "replicas: 0" not in applied[0]
+    with pytest.raises(cr.ComposeRenderError):
+        render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ())
+
+
+def test_overlap_gates_on_new_colour_route_while_public_health_shows_old_sha() -> None:
+    """USR-388 incident: public /health kept the old sha; the new colour's own route decides."""
+    initial = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",))
+    applied: List[str] = []
+    public = {"sha": A}
+    probed: List[str] = []
+
+    def apply(compose: str) -> None:
+        applied.append(compose)
+        if len(applied) == 2:
+            public["sha"] = C  # after cutover only the new colour serves the public route
+
+    final = run_bluegreen_deploy(
+        source=SRC, new_sha=C, read_compose=lambda: initial, apply_compose=apply,
+        sha_is_serving=lambda s: public["sha"] == s, health_attempts=2,
+        color_is_serving=lambda color, s: probed.append(color) or s == C,
+    )
+    assert final.active == "green" and probed == ["green"] and len(applied) == 2
+    assert "PathPrefix(`/__bg/green`)" in applied[0] and "routers.darkhub.service=darkhub" in applied[0]
+
+
+def test_zero_replica_previous_is_never_restored_nor_revived() -> None:
+    offline = render_bluegreen_compose(SRC, BlueGreenState("blue", A, A), ("blue",)).replace(
+        "replicas: 1", "replicas: 0")
+    assert not has_serving_replica(offline)
+    applied: List[str] = []
+    with pytest.raises(BlueGreenError, match="never restored"):
+        run_bluegreen_deploy(
+            source=SRC, new_sha=C, read_compose=lambda: offline, apply_compose=applied.append,
+            sha_is_serving=lambda _s: False, health_attempts=2, restore_allowed=lambda _prev: True,
+        )
+    assert offline not in applied and len(applied) == 1
+    assert applied[0].count("replicas: 1") == 1  # the old insecure colour is not revived in the overlap
