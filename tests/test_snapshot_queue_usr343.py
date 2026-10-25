@@ -41,15 +41,15 @@ def test_snapshot_produces_exactly_one_commit_and_is_idempotent(
     files = {DEMANDS_RELATIVE: '[{"id": "USR-1"}]\n', OWNER_ACTIONS_RELATIVE: '{"actions": []}\n'}
     before = _git(bare, "rev-list", "--count", "main")
 
-    first = run_snapshot(seed, files=files, token="", today="2026-10-24")
+    first = run_snapshot(seed, files=files, token="", today="2030-10-24")
     assert first.ok and first.action == "pushed", first.message
     assert int(_git(bare, "rev-list", "--count", "main")) == int(before) + 1
     assert _git(bare, "show", f"main:{DEMANDS_RELATIVE}") == '[{"id": "USR-1"}]'
     assert "snapshot diario" in _git(bare, "log", "-1", "--format=%s", "main")
 
-    same_day = run_snapshot(seed, files=files, token="", today="2026-10-24")
+    same_day = run_snapshot(seed, files=files, token="", today="2030-10-24")
     assert same_day.action == "skipped"
-    next_day = run_snapshot(seed, files=files, token="", today="2026-10-25")
+    next_day = run_snapshot(seed, files=files, token="", today="2030-10-25")
     assert next_day.action == "no_changes"
     assert int(_git(bare, "rev-list", "--count", "main")) == int(before) + 1
 
