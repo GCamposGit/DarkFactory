@@ -2863,6 +2863,27 @@
       "created_at": "2026-10-25T05:00:00Z",
       "created_by": "claude",
       "resolved_at": "2026-10-25T10:41:22Z"
+    },
+    {
+      "id": "OA-075",
+      "kind": "action",
+      "title": "Assinar o PR #745 (AGENTS.md como fonte unica; CLAUDE/GEMINI importam) [USR-379]",
+      "priority": "high",
+      "status": "open",
+      "why": "O PR #745 reescreve AGENTS.md (105 linhas, fonte unica) e reduz FACTORY_RULES.md a ponteiro; ambos sao protegidos pelo guard e so entram com autorizacao assinada do owner. O registro ja esta pronto em C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS.json (paths AGENTS.md e FACTORY_RULES.md, candidato d772bff9).",
+      "blocks": [
+        "USR-379"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, assinar o registro preparado (a fabrica publica a autorizacao e mescla o PR sozinha depois):",
+          "command": "cd C:\\dev\\DarkFac; python -m core.governance.keys sign C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS.json"
+        }
+      ],
+      "verify": "C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS.json passa a ter o campo signature; depois gh pr view 745 --repo GCamposGit/DarkFactory mostra MERGED",
+      "created_at": "2026-10-26T10:30:00Z",
+      "created_by": "claude"
     }
   ]
 }
