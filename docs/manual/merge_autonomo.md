@@ -29,3 +29,19 @@ A fabrica faz push e merge com um token de curta duracao de uma GitHub App, sem 
   `gh pr create|merge`. Sem as tres variaveis (ou se a troca falhar) vale a autenticacao atual do `gh`.
 - O padrao `^GH_APP_` em `.factory/config/agent_env_policy.json` mantem as variaveis fora dos agentes.
 - Para o merge sem `--admin`, o ruleset do `main` deve listar a App como bypass actor (ou exigir apenas os checks).
+
+## Entrega da branch (USR-385)
+
+`GitAutonomyManager.deliver_branch` continua o contrato publico: commit, push, abertura de PR, merge squash e limpeza. `merge=False` abre o PR e retem merge e limpeza (aceite comercial). USR-385 partiu essa sequencia; o `DeliveryReport` (ok, action, pr_url, branch, message) permanece o mesmo.
+
+1. `_prepare_delivery` valida o tipo e garante a branch `ticket/<id>` quando o trabalho esta em `main`, `HEAD` ou detached. `queue` so aceita arquivos de ledger e commita se a arvore esta suja. `implementation` recusa diff so de ledger e registra a conclusao. `registry` recusa arquivo fora da allowlist de modelos e commita sem mexer no ledger de demandas.
+2. `_synchronize_delivery` faz fetch de `origin`, recusa colisao de ledger, alinha a base local quando ela ja esta contida na branch e sincroniza com `origin/<base>`. Branch sem commit alem da base devolve `no_changes` (e limpa se `merge` esta ligado). Depois do sync, o diff volta a ser conferido contra o contrato do tipo.
+3. `_open_delivery_pr` faz push (`--force-with-lease`; `--force` so para atualizar a head de um PR de fila ja aberto com o mesmo titulo) e cria ou reaproveita o PR. Ajusta titulo e label (`queue`, `implementation` ou `registry`). Implementacao tambem registra o catalogo.
+4. Com `merge` ligado, `_deliver` so chama `gh pr merge --squash --delete-branch` depois do portao de CI no head exato. Se o ruleset bloquear, o portao roda de novo e ha uma segunda tentativa de merge. Se o PR nao estiver mergeable, a branch e reaplicada em `origin/<base>` e o portao roda de novo, ate 3 vezes. O SHA do merge precisa aparecer em `origin/<base>` antes da limpeza da branch.
+
+`complete_ticket` grava o ticket como concluido no `DemandsStore` e, com `auto_push`, entrega a branch. A sequencia interna:
+
+1. `_inspect_completion_changes` exige, contra `origin/main`, algum arquivo alem de `.factory/demands/demands.json`.
+2. `_commit_completion` grava a conclusao e commita quando `auto_commit` esta ligado. Sem esse commit a conclusao e recusada.
+3. `_deliver_completion` chama `deliver_branch` com `merge` desligado quando o projeto tem `requires_commercial_acceptance`. Sem `gh` autenticado, cai em push direto para a base.
+4. `_verify_live_completion` roda so com `is_live_deploy`. Falha de convergencia reabre o ticket (`requeue_ticket`) e abre um defeito `planned` dependente dele.
