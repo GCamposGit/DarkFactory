@@ -195,10 +195,10 @@ _FAKE_GH_SCRIPT = textwrap.dedent(
 
         if starts("pr", "checks"):
             rc = int(spec.get("pr_checks_returncode", 0))
+            sys.stdout.write(json.dumps(spec.get("pr_checks", [])))
             if rc != 0:
                 sys.stderr.write(spec.get("pr_checks_stderr", ""))
                 sys.exit(rc)
-            sys.stdout.write(json.dumps(spec.get("pr_checks", [])))
             sys.exit(0)
 
         if starts("run", "view"):
@@ -485,6 +485,35 @@ def test_checks_query_error_waits_before_retrying_integration(
     assert _parse_retry_cause_code(result.cause_code) == (
         None, (now + timedelta(seconds=handler.ci_check_window_s)).isoformat()
     )
+
+
+def test_failed_checks_in_nonzero_json_block_integration_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, calls = fake_gh
+    ws = checkout(project, "run-nonzero-red-checks")
+    ws_mod.write_context(ws, "DEMAND.md", "# Record queue change\n")
+    ws_mod.commit(ws, "feat: queue change", "run-nonzero-red-checks:T1")
+    ws_mod.push(ws)
+    set_spec({
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks_returncode": 1,
+        "pr_checks_stderr": "2 checks failed",
+        "pr_checks": [
+            {"bucket": "fail", "name": "ledger-fast", "workflow": "CI", "link": ""},
+            {"bucket": "fail", "name": "pr-validation", "workflow": "CI", "link": ""},
+        ],
+    })
+
+    result = IntegrationStageHandler(project, gh_executable=gh_path).handle(
+        _context("run-nonzero-red-checks")
+    )
+
+    assert result.outcome == "retry" and result.cause_code == "retry:development"
+    assert not any(call[:2] == ["pr", "merge"] for call in calls())
 
 
 def test_rebase_push_with_no_checks_does_not_merge_when_ci_is_configured(

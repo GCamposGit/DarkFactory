@@ -11591,8 +11591,8 @@
     "project_id": "darkfac",
     "title": "Merge de PR com ledger-fast vermelho deixou o main vermelho (OA-071 com kind invalido)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "66bede2afb8864f7ef04599bb2102fdc0c73693b",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11610,6 +11610,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T12:26:49.553801Z",
-    "updated_at": "2026-10-25T12:26:49.553801Z"
+    "updated_at": "2026-10-26T12:49:10.035042Z"
   }
 ]

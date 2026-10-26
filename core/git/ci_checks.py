@@ -174,9 +174,20 @@ def check_label(check: dict[str, Any]) -> str:
 
 def classify_checks(checks: Any) -> CheckSnapshot:
     """Classify the decoded JSON list produced by ``gh pr checks --json``."""
-    if not isinstance(checks, list) or not checks:
+    if not isinstance(checks, list):
+        return CheckSnapshot(state="error", error="gh pr checks returned a non-list payload")
+    if not checks:
         return CheckSnapshot(state="no_checks")
     entries = tuple(c for c in checks if isinstance(c, dict))
+    # A malformed row means the snapshot is incomplete. In particular, do not
+    # discard it and then allow a merge because the remaining rows happen to
+    # be green: every check reported by GitHub must be accounted for.
+    if len(entries) != len(checks):
+        return CheckSnapshot(
+            state="error",
+            checks=entries,
+            error="gh pr checks returned a non-object check entry",
+        )
     failing = tuple(c for c in entries if c.get("bucket") == "fail")
     if failing:
         return CheckSnapshot(state="failed", checks=entries, failing=failing)
@@ -188,16 +199,28 @@ def classify_checks(checks: Any) -> CheckSnapshot:
 
 def parse_checks_output(returncode: int, stdout: str, stderr: str) -> CheckSnapshot:
     """Classify a finished ``gh pr checks`` invocation (exit code + streams)."""
+    # gh exits non-zero when any check is failing or still pending, while still
+    # returning the requested JSON on stdout. Prefer that structured evidence
+    # over the process status so callers can report the actual checks and fail
+    # fast on a red check.
+    if stdout.strip():
+        try:
+            decoded = json.loads(stdout)
+        except json.JSONDecodeError:
+            decoded = None
+        else:
+            snapshot = classify_checks(decoded)
+            if returncode == 0 or snapshot.state != "no_checks":
+                return snapshot
+
     if returncode != 0:
         combined = f"{stdout}\n{stderr}".lower()
         if "no checks reported" in combined or "no commit found" in combined:
             return CheckSnapshot(state="no_checks")
         return CheckSnapshot(state="error", error=stderr if stderr.strip() else stdout)
-    try:
-        decoded = json.loads(stdout or "[]")
-    except json.JSONDecodeError:
-        return CheckSnapshot(state="error", error="gh pr checks returned invalid JSON")
-    return classify_checks(decoded)
+    if not stdout.strip():
+        return classify_checks([])
+    return CheckSnapshot(state="error", error="gh pr checks returned invalid JSON")
 
 
 def query_checks(pr_number: int, cwd: Path, runner: GhRunner) -> CheckSnapshot:

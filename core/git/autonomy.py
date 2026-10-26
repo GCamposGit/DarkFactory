@@ -957,6 +957,7 @@ class GitAutonomyManager:
             sleep_fn=self.ci_sleep_fn,
             clock_fn=self.ci_clock_fn,
             base_branch=base,
+            require_no_workflows=True,
         )
         note = f"ci_gate={verdict.status}"
         if verdict.passed:
