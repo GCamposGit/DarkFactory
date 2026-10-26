@@ -1044,10 +1044,11 @@ class GitAutonomyManager:
         self._close_open_phase(report)
         return report
 
-    def _deliver(
-        self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool,
+    def _prepare_delivery(
+        self, ticket_id: str, title: str, cwd: Path, base: str,
         kind: Literal["queue", "implementation", "registry"],
-    ) -> DeliveryReport:
+    ) -> tuple[Optional[DeliveryReport], str]:
+        """Apply delivery-kind validation and ensure work is on a ticket branch."""
         # (a) commit if dirty
         if kind == "registry":
             changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
@@ -1056,20 +1057,20 @@ class GitAutonomyManager:
                 return DeliveryReport(
                     ok=False, action="error",
                     message=f"Registry delivery refused: files outside the model allowlist: {', '.join(outside[:5])}",
-                )
+                ), ""
             if not changed:
-                return DeliveryReport(ok=False, action="no_changes", message="Registry delivery has no changes.")
+                return DeliveryReport(ok=False, action="no_changes", message="Registry delivery has no changes."), ""
             if self.is_dirty(cwd=cwd):  # never touches the demands ledger: no ticket is completed
                 self.commit_ticket(ticket_id, title, cwd=cwd, kind="registry")
         elif kind == "implementation":
             changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
             if is_ledger_only(list(changed)):
-                return DeliveryReport(ok=False, action="no_changes", message="Implementation changes only the ledger.")
+                return DeliveryReport(ok=False, action="no_changes", message="Implementation changes only the ledger."), ""
             self._record_completion(ticket_id, title, cwd)
         else:
             changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
             if not is_ledger_only(list(changed)):
-                return DeliveryReport(ok=False, action="error", message="Queue registration must change only ledger files.")
+                return DeliveryReport(ok=False, action="error", message="Queue registration must change only ledger files."), ""
             if self.is_dirty(cwd=cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, kind="queue")
 
@@ -1079,8 +1080,14 @@ class GitAutonomyManager:
             branch = f"ticket/{ticket_id.lower()}"
             co = _run_git(["checkout", "-B", branch], cwd=cwd)
             if co.returncode != 0:
-                return DeliveryReport(ok=False, action="error", message=f"checkout failed: {co.stderr.strip()}")
+                return DeliveryReport(ok=False, action="error", message=f"checkout failed: {co.stderr.strip()}"), ""
+        return None, branch
 
+    def _synchronize_delivery(
+        self, ticket_id: str, cwd: Path, base: str, branch: str,
+        kind: Literal["queue", "implementation", "registry"], merge: bool,
+    ) -> Optional[DeliveryReport]:
+        """Fetch and synchronize the ticket branch, enforcing its delivery contract."""
         # (c) fetch + sync with base
         fetch = _run_git(["fetch", "origin"], cwd=cwd)
         if fetch.returncode != 0:
@@ -1128,6 +1135,14 @@ class GitAutonomyManager:
                     message=f"Registry PR changes files outside the model allowlist: {', '.join(outside[:5])}",
                 )
 
+        return None
+
+    def _open_delivery_pr(
+        self, ticket_id: str, title: str, cwd: Path, base: str, branch: str,
+        runner: GhRunner, kind: Literal["queue", "implementation", "registry"],
+    ) -> tuple[Optional[DeliveryReport], str, int, str]:
+        """Push the branch and create or update its PR, returning PR identity."""
+
         # (d) push. USR-307: a queue registration is identified by its PR title (ticket + title). When
         # an open queue PR with the same identity already exists on ANOTHER branch (replay of the same
         # operation, e.g. a second oa-queue-watchdog sweep), its head is updated in place instead of
@@ -1147,7 +1162,7 @@ class GitAutonomyManager:
         if push.returncode != 0:
             return DeliveryReport(
                 ok=False, action="error", branch=branch, message=f"push failed: {push.stderr.strip()}"
-            )
+            ), remote_branch, 0, ""
 
         # (e) PR (reuse existing)
         existing = (duplicate[:2] if duplicate else None) or self._find_open_pr(branch, cwd, runner)
@@ -1168,20 +1183,25 @@ class GitAutonomyManager:
             if pr.returncode != 0:
                 return DeliveryReport(
                     ok=False, action="error", branch=branch, message=f"gh pr create failed: {pr.stderr.strip()}"
-                )
+                ), remote_branch, 0, ""
             pr_url = pr.stdout.strip().splitlines()[-1] if pr.stdout.strip() else ""
             m = re.search(r"/pull/(\d+)", pr_url)
             if not m:
                 return DeliveryReport(
                     ok=False, action="error", branch=branch, pr_url=pr_url, message="cannot parse PR number"
-                )
+                ), remote_branch, 0, pr_url
             number = int(m.group(1))
 
         pr_title = _delivery_pr_title(kind, ticket_id, title)
         title_update = runner(["pr", "edit", str(number), "--title", pr_title], cwd)
         if title_update.returncode != 0:
-            return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
-                                  message=f"Could not set {kind} PR title: {title_update.stderr.strip()}")
+            return (
+                DeliveryReport(
+                    ok=False, action="error", pr_url=pr_url, branch=branch,
+                    message=f"Could not set {kind} PR title: {title_update.stderr.strip()}",
+                ),
+                remote_branch, number, pr_url,
+            )
         label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
         if label.returncode != 0:
             color = {"queue": "D4C5F9", "registry": "FBCA04"}.get(kind, "0E8A16")
@@ -1190,16 +1210,43 @@ class GitAutonomyManager:
             created = runner(["label", "create", kind, "--color", color,
                               "--description", description, "--force"], cwd)
             if created.returncode != 0:
-                return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
-                                      message=f"Could not create {kind} label: {created.stderr.strip()}")
+                return (
+                    DeliveryReport(
+                        ok=False, action="error", pr_url=pr_url, branch=branch,
+                        message=f"Could not create {kind} label: {created.stderr.strip()}",
+                    ),
+                    remote_branch, number, pr_url,
+                )
             label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
             if label.returncode != 0:
-                return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
-                                      message=f"Could not label {kind} PR: {label.stderr.strip()}")
+                return (
+                    DeliveryReport(
+                        ok=False, action="error", pr_url=pr_url, branch=branch,
+                        message=f"Could not label {kind} PR: {label.stderr.strip()}",
+                    ),
+                    remote_branch, number, pr_url,
+                )
 
         self._phase("pr", "succeeded", pr_url)
         if kind == "implementation":
             self._register_catalog(ticket_id, title, cwd, base, pr_url)
+        return None, remote_branch, number, pr_url
+
+    def _deliver(
+        self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool,
+        kind: Literal["queue", "implementation", "registry"],
+    ) -> DeliveryReport:
+        prepared, branch = self._prepare_delivery(ticket_id, title, cwd, base, kind)
+        if prepared is not None:
+            return prepared
+        synchronized = self._synchronize_delivery(ticket_id, cwd, base, branch, kind, merge)
+        if synchronized is not None:
+            return synchronized
+        opened, remote_branch, number, pr_url = self._open_delivery_pr(
+            ticket_id, title, cwd, base, branch, runner, kind,
+        )
+        if opened is not None:
+            return opened
         if not merge:
             return DeliveryReport(
                 ok=True,
@@ -1213,6 +1260,7 @@ class GitAutonomyManager:
         # `gh pr merge` must never be reached without the gate approving the exact
         # head being merged (USR-85); the retry below re-runs the gate because the
         # re-sync pushes a new head.
+        remote_ref = f"origin/{base}"
         blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
         if blocked is not None:
             return blocked
@@ -1507,152 +1555,32 @@ class GitAutonomyManager:
                 ticket_id=ticket_id,
                 message=f"Ticket '{ticket_id}' not found in demands store.",
             )
-
-        # A previous implementation commit is visible in the branch diff; an as-yet
-        # uncommitted implementation is visible in status. Check both before touching
-        # the ledger so a ledger-only branch cannot be delivered as a completed ticket.
-        base_ref = "origin/main"
-        branch_diff = _run_git(["diff", "--name-only", "-z", f"{base_ref}...HEAD"], cwd=target_dir)
-        if branch_diff.returncode != 0:
-            return TicketCompletionReport(
-                ok=False,
-                ticket_id=ticket_id,
-                message=f"Could not inspect ticket changes against {base_ref}: {branch_diff.stderr.strip()}",
-            )
-        changed = set(branch_diff.stdout.split("\0")) | set(self.changed_paths(target_dir))
-        if not any(path and path != ".factory/demands/demands.json" for path in changed):
-            message = "Ticket branch has no implementation changes outside the demands ledger."
-            return TicketCompletionReport(
-                ok=False,
-                ticket_id=ticket_id,
-                delivery=DeliveryReport(
-                    ok=False, action="no_changes", branch=self._current_branch(target_dir), message=message
-                ),
-                message=message,
-            )
-
-        # Record a verifiable implementation SHA alongside completed in one ledger commit.
-        commit_sha: Optional[str] = None
-        if auto_commit:
-            self._phase("commit", "running", "commit da implementacao e do registro de conclusao")
-            try:
-                commit_sha = self._record_completion(ticket.id, ticket.title, target_dir, custom_message)
-            except StagedInspectError as exc:
-                # Explicit, resumable cause instead of a traceback after an approved gate (USR-264).
-                self._phase("commit", "failed", str(exc), STAGED_INSPECT_FAILED)
-                return TicketCompletionReport(
-                    ok=False,
-                    ticket_id=ticket_id,
-                    delivery=DeliveryReport(
-                        ok=False, action=STAGED_INSPECT_FAILED,
-                        branch=self._current_branch(target_dir), message=str(exc),
-                    ),
-                    message=str(exc),
-                )
-            except Exception as exc:
-                self._phase("commit", "failed", str(exc), type(exc).__name__)
-                raise
-            self._phase("commit", "succeeded", commit_sha or "")
-        else:
+        inspection_error = self._inspect_completion_changes(ticket_id, target_dir)
+        if inspection_error:
+            return inspection_error
+        commit_sha, commit_error = self._commit_completion(
+            ticket.id, ticket.title, ticket_id, target_dir, auto_commit, custom_message,
+        )
+        if commit_error:
+            return commit_error
+        if not auto_commit:
             return TicketCompletionReport(
                 ok=False, ticket_id=ticket_id,
                 message="Cannot complete a ticket without committing delivery evidence.",
             )
-
-        # 3. Remote sync if requested
         sync_result: Optional[GitSyncResult] = None
         delivery: Optional[DeliveryReport] = None
         if auto_push:
-            if self.gh_ready(cwd=target_dir, gh_runner=gh_runner):
-                needs_acceptance = self._requires_commercial_acceptance(ticket.project_id)
-                delivery = self.deliver_branch(
-                    ticket.id, ticket.title, cwd=target_dir, gh_runner=gh_runner,
-                    merge=not needs_acceptance, kind="implementation"
-                )
-                sync_result = GitSyncResult(
-                    ok=delivery.ok,
-                    action=delivery.action,
-                    remote_sha=delivery.merge_sha,
-                    message=delivery.message,
-                )
-                if not delivery.ok:
-                    return TicketCompletionReport(
-                        ok=False,
-                        ticket_id=ticket.id,
-                        commit_sha=commit_sha,
-                        sync_result=sync_result,
-                        delivery=delivery,
-                        message=f"Ticket {ticket.id} recorded but delivery failed: {delivery.message}",
-                    )
-            else:
-                logger.warning("gh unavailable or unauthenticated; falling back to direct push to main.")
-                sync_result = self.sync_environment(cwd=target_dir, allow_push=True)
-
-        # 4. Live proof verification for live-deploy tickets (USR-73)
-        if ticket.is_live_deploy:
-            target_sha = (
-                (delivery.merge_sha if delivery and delivery.merge_sha else None)
-                or commit_sha
-                or self.get_current_sha(target_dir)
+            sync_result, delivery, delivery_error = self._deliver_completion(
+                ticket.id, ticket.title, ticket.project_id, target_dir, gh_runner, commit_sha,
             )
-            verify_res = None
-            verify_ok = False
-            try:
-                verify_res = (
-                    live_verifier(target_sha)
-                    if live_verifier is not None
-                    else self._default_live_verify(target_sha, target_dir)
-                )
-                verify_ok = bool(
-                    getattr(verify_res, "ok", False)
-                    or (isinstance(verify_res, dict) and verify_res.get("ok"))
-                )
-            except Exception as exc:
-                verify_res = f"live verification exception: {type(exc).__name__}: {exc}"
-                verify_ok = False
-
-            if verify_ok:
-                t = store.get_ticket(ticket.id)
-                if t:
-                    t.delivery_evidence = f"{target_sha}:live_converged"
-                    t.updated_at = datetime.now(timezone.utc)
-                    store.save_ticket(t)
-            else:
-                failure_evidence = (
-                    f"[LIVE_CONVERGENCE_FAILURE] Failed at {datetime.now(timezone.utc).isoformat()} "
-                    f"on SHA {target_sha}: {verify_res}"
-                )
-                if store.get_ticket(ticket.id):
-                    store.requeue_ticket(ticket.id, reason=failure_evidence, reopen=True)
-
-                defect_id = store.next_ticket_id(ticket.project_id)
-                defect_ticket = UserTicket(
-                    id=defect_id,
-                    project_id=ticket.project_id,
-                    title=f"Defeito: Falha de convergência ao vivo pós-deploy de {ticket.id}",
-                    origin=DemandOrigin.AGENT,
-                    status=DeliveryStatus.PLANNED,
-                    item_type=RoadmapItemType.INFRASTRUCTURE,
-                    lifecycle_stage=LifecycleStage.EXECUTION,
-                    horizon=PlanningHorizon.NOW,
-                    tags=[TAG_USER_DEMAND, "defect", "deploy-live-failure", "auto-generated"],
-                    problem_statement=(
-                        f"O ticket {ticket.id} ({ticket.title}) falhou na prova de convergência ao vivo "
-                        f"pós-deploy no SHA {target_sha}.\nEvidência:\n{failure_evidence}"
-                    ),
-                    core_journey=[f"Investigar e restaurar convergência dos 3 nós após deploy do ticket {ticket.id}"],
-                    acceptance_criteria=["Todos os 3 nós (Notebook, Desktop, VPS) convergem para o SHA em produção"],
-                    dependencies=[ticket.id],
-                )
-                store.save_ticket(defect_ticket)
-                return TicketCompletionReport(
-                    ok=False,
-                    ticket_id=ticket.id,
-                    commit_sha=commit_sha,
-                    sync_result=sync_result,
-                    delivery=delivery,
-                    message=f"Live convergence proof failed for {ticket.id}. Reverted to planned; defect ticket {defect_id} opened. {verify_res}",
-                )
+            if delivery_error:
+                return delivery_error
+        proof_error = self._verify_live_completion(
+            ticket, store, target_dir, delivery, commit_sha, sync_result, live_verifier,
+        )
+        if proof_error:
+            return proof_error
 
         return TicketCompletionReport(
             ok=True,
@@ -1661,6 +1589,123 @@ class GitAutonomyManager:
             sync_result=sync_result,
             delivery=delivery,
             message=f"Ticket {ticket.id} successfully completed and recorded.",
+        )
+
+    def _inspect_completion_changes(self, ticket_id: str, target_dir: Path) -> Optional[TicketCompletionReport]:
+        """Require implementation changes before recording ticket completion."""
+        base_ref = "origin/main"
+        diff = _run_git(["diff", "--name-only", "-z", f"{base_ref}...HEAD"], cwd=target_dir)
+        if diff.returncode != 0:
+            return TicketCompletionReport(
+                ok=False, ticket_id=ticket_id,
+                message=f"Could not inspect ticket changes against {base_ref}: {diff.stderr.strip()}",
+            )
+        changed = set(diff.stdout.split("\0")) | set(self.changed_paths(target_dir))
+        if any(path and path != ".factory/demands/demands.json" for path in changed):
+            return None
+        message = "Ticket branch has no implementation changes outside the demands ledger."
+        return TicketCompletionReport(
+            ok=False, ticket_id=ticket_id,
+            delivery=DeliveryReport(
+                ok=False, action="no_changes", branch=self._current_branch(target_dir), message=message,
+            ),
+            message=message,
+        )
+
+    def _commit_completion(
+        self, ticket_id: str, title: str, report_ticket_id: str, target_dir: Path,
+        auto_commit: bool, custom_message: Optional[str],
+    ) -> tuple[Optional[str], Optional[TicketCompletionReport]]:
+        if not auto_commit:
+            return None, None
+        self._phase("commit", "running", "commit da implementacao e do registro de conclusao")
+        try:
+            sha = self._record_completion(ticket_id, title, target_dir, custom_message)
+        except StagedInspectError as exc:
+            self._phase("commit", "failed", str(exc), STAGED_INSPECT_FAILED)
+            error = TicketCompletionReport(
+                ok=False, ticket_id=report_ticket_id,
+                delivery=DeliveryReport(
+                    ok=False, action=STAGED_INSPECT_FAILED,
+                    branch=self._current_branch(target_dir), message=str(exc),
+                ),
+                message=str(exc),
+            )
+            return None, error
+        except Exception as exc:
+            self._phase("commit", "failed", str(exc), type(exc).__name__)
+            raise
+        self._phase("commit", "succeeded", sha or "")
+        return sha, None
+
+    def _deliver_completion(
+        self, ticket_id: str, title: str, project_id: str, target_dir: Path,
+        gh_runner: Optional[GhRunner], commit_sha: Optional[str],
+    ) -> tuple[Optional[GitSyncResult], Optional[DeliveryReport], Optional[TicketCompletionReport]]:
+        if not self.gh_ready(cwd=target_dir, gh_runner=gh_runner):
+            logger.warning("gh unavailable or unauthenticated; falling back to direct push to main.")
+            return self.sync_environment(cwd=target_dir, allow_push=True), None, None
+        needs_acceptance = self._requires_commercial_acceptance(project_id)
+        delivery = self.deliver_branch(
+            ticket_id, title, cwd=target_dir, gh_runner=gh_runner,
+            merge=not needs_acceptance, kind="implementation",
+        )
+        sync = GitSyncResult(
+            ok=delivery.ok, action=delivery.action, remote_sha=delivery.merge_sha, message=delivery.message,
+        )
+        if delivery.ok:
+            return sync, delivery, None
+        error = TicketCompletionReport(
+            ok=False, ticket_id=ticket_id, commit_sha=commit_sha, sync_result=sync, delivery=delivery,
+            message=f"Ticket {ticket_id} recorded but delivery failed: {delivery.message}",
+        )
+        return sync, delivery, error
+
+    def _verify_live_completion(
+        self, ticket: UserTicket, store: DemandsStore, target_dir: Path,
+        delivery: Optional[DeliveryReport], commit_sha: Optional[str],
+        sync_result: Optional[GitSyncResult], live_verifier: Optional[Callable[[str], Any]],
+    ) -> Optional[TicketCompletionReport]:
+        if not ticket.is_live_deploy:
+            return None
+        target_sha = (delivery.merge_sha if delivery and delivery.merge_sha else None) or commit_sha or self.get_current_sha(target_dir)
+        try:
+            result = live_verifier(target_sha) if live_verifier is not None else self._default_live_verify(target_sha, target_dir)
+            verified = bool(getattr(result, "ok", False) or (isinstance(result, dict) and result.get("ok")))
+        except Exception as exc:
+            result = f"live verification exception: {type(exc).__name__}: {exc}"
+            verified = False
+        if verified:
+            current = store.get_ticket(ticket.id)
+            if current:
+                current.delivery_evidence = f"{target_sha}:live_converged"
+                current.updated_at = datetime.now(timezone.utc)
+                store.save_ticket(current)
+            return None
+        evidence = f"[LIVE_CONVERGENCE_FAILURE] Failed at {datetime.now(timezone.utc).isoformat()} on SHA {target_sha}: {result}"
+        if store.get_ticket(ticket.id):
+            store.requeue_ticket(ticket.id, reason=evidence, reopen=True)
+        defect_id = store.next_ticket_id(ticket.project_id)
+        defect = UserTicket(
+            id=defect_id, project_id=ticket.project_id,
+            title=f"Defeito: Falha de convergência ao vivo pós-deploy de {ticket.id}",
+            origin=DemandOrigin.AGENT, status=DeliveryStatus.PLANNED,
+            item_type=RoadmapItemType.INFRASTRUCTURE, lifecycle_stage=LifecycleStage.EXECUTION,
+            horizon=PlanningHorizon.NOW,
+            tags=[TAG_USER_DEMAND, "defect", "deploy-live-failure", "auto-generated"],
+            problem_statement=(
+                f"O ticket {ticket.id} ({ticket.title}) falhou na prova de convergência ao vivo "
+                f"pós-deploy no SHA {target_sha}.\nEvidência:\n{evidence}"
+            ),
+            core_journey=[f"Investigar e restaurar convergência dos 3 nós após deploy do ticket {ticket.id}"],
+            acceptance_criteria=["Todos os 3 nós (Notebook, Desktop, VPS) convergem para o SHA em produção"],
+            dependencies=[ticket.id],
+        )
+        store.save_ticket(defect)
+        return TicketCompletionReport(
+            ok=False, ticket_id=ticket.id, commit_sha=commit_sha, sync_result=sync_result,
+            delivery=delivery,
+            message=f"Live convergence proof failed for {ticket.id}. Reverted to planned; defect ticket {defect_id} opened. {result}",
         )
 
     @staticmethod

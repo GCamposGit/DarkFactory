@@ -246,6 +246,17 @@ def test_ops_bot_executes_grill_approve_demand_and_callbacks(tmp_path: Path) -> 
     accept_mock.assert_called_once_with("run-abc", 10)
 
 
+def test_unknown_ops_command_keeps_unknown_command_response(tmp_path: Path) -> None:
+    gateway = TelegramGateway(
+        config=TelegramConfig(role="ops", authorized_user_ids=[10]),
+        state_dir=tmp_path,
+    )
+
+    result = gateway.process_update(_msg(99, "/foo"))
+
+    assert result.response_text == "❓ Unknown command: /foo. Send /help for command list."
+
+
 def test_notification_service_defaults_to_owner_bot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """NotificationService routes critical alerts to the Owner Bot by default."""
     monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", "1111:owner_token")

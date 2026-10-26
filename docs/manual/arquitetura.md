@@ -18,6 +18,18 @@ Layout atual:
 Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
 `SQLiteControlStore` (implementacao); nao e duplicata.
 
+## ReadinessGate (USR-385)
+
+`ReadinessGate.evaluate` avalia o handoff com o `VerificationContext` recebido, sem rede e sem arquivo. `require_delivery` e `mark_delivered` passam por ele. USR-385 partiu `evaluate` nos passos abaixo; o `ReadinessReport` (elegibilidade, razoes, evidencia faltante e dependencias bloqueantes) permanece o contrato publico.
+
+1. Estado e Grill (`_check_state_and_grill`): transicao pedida via `validate_transition`; workflow `cancelled` ou `failed`; contexto ausente (`CONTEXT_REQUIRED`); Grill sem `ready_for_spec`; decisao material sem resposta ou sem origem.
+2. Dependencias manuais (`_check_manual_dependencies`): ignora dependencia de outro ticket ou de estagio que o estado pedido nao bloqueia. Dependencia nao `resolved`, sem contexto, sem `resolution_receipt_ref` ou com recibo ausente entra em `blocking_dependency_ids`. O recibo precisa estar `passed`, bater probe/sujeito/ambiente/config/papel e estar dentro da idade maxima (politica ou 86400 s).
+3. Aprovacao do plano (`_check_plan_approval`): o digest do plano precisa coincidir; tier `economy` no handoff ou na aprovacao reprova; quando a politica lista papeis, o papel do aprovador precisa estar habilitado.
+4. Evidencia (`_check_evidence`): une os ids da politica do estagio com os do handoff aplicaveis. Com contexto, vale o recibo do supervisor (isencao expirada ou operacional na entrega reprova). Sem contexto, vale a evidencia carregada no handoff (ambiente, resultado, identidade, frescor e referencia de auditoria). Entrega sem nenhum id e sem evidencia operacional reprova.
+5. Entrega (`_check_delivery`), somente com estado pedido `delivered`: o handoff precisa estar em `independent_review` ou `delivered`, o ambiente precisa ser `target_environment` (`mock_only` nao autoriza) e, com contexto, precisa haver recibo de revisao de um sujeito distinto do implementador e prova `passed` em `target_environment`.
+
+`require_delivery` chama `evaluate` com alvo `delivered` e levanta `ReadinessError` quando `eligible` e falso. O estado de prontidao sai de `_readiness_state`: `operationally_verified` (entrega elegivel), `blocked` (entrega inelegivel, ou workflow cancelado/falho), `waiting_human` (ha dependencia bloqueante), `not_ready`, `validated_in_simulation` (ambiente `mock_only`), `ready_for_spec`, `ready_for_handoff` ou `ready_for_release`.
+
 # Arquitetura
 
 ## Modulos removidos (USR-377 S1)
