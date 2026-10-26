@@ -174,9 +174,20 @@ def check_label(check: dict[str, Any]) -> str:
 
 def classify_checks(checks: Any) -> CheckSnapshot:
     """Classify the decoded JSON list produced by ``gh pr checks --json``."""
-    if not isinstance(checks, list) or not checks:
+    if not isinstance(checks, list):
+        return CheckSnapshot(state="error", error="gh pr checks returned a non-list payload")
+    if not checks:
         return CheckSnapshot(state="no_checks")
     entries = tuple(c for c in checks if isinstance(c, dict))
+    # A malformed row means the snapshot is incomplete. In particular, do not
+    # discard it and then allow a merge because the remaining rows happen to
+    # be green: every check reported by GitHub must be accounted for.
+    if len(entries) != len(checks):
+        return CheckSnapshot(
+            state="error",
+            checks=entries,
+            error="gh pr checks returned a non-object check entry",
+        )
     failing = tuple(c for c in entries if c.get("bucket") == "fail")
     if failing:
         return CheckSnapshot(state="failed", checks=entries, failing=failing)

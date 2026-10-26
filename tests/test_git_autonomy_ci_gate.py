@@ -170,7 +170,7 @@ def gate(runner: GhScript, clock: FakeClock, **kwargs: Any) -> CiVerdict:
 
 def test_classify_checks_buckets() -> None:
     assert classify_checks([]).state == "no_checks"
-    assert classify_checks("garbage").state == "no_checks"
+    assert classify_checks("garbage").state == "error"
     assert classify_checks([check("pass"), check("skipping"), check("cancel")]).state == "green"
     assert classify_checks([check("pass"), check("pending")]).state == "pending"
     snap = classify_checks([check("pass"), check("fail"), check("pending")])
@@ -194,6 +194,13 @@ def test_parse_checks_output_classifies_json_even_when_gh_exits_nonzero() -> Non
     pending = parse_checks_output(1, json.dumps([check("pending")]), "1 pending check")
     assert pending.state == "pending"
     assert pending.pending == (check("pending"),)
+
+
+def test_malformed_check_entry_cannot_make_a_green_snapshot() -> None:
+    snapshot = parse_checks_output(0, json.dumps([check("pass"), None]), "")
+    assert snapshot.state == "error"
+    assert "non-object" in snapshot.error
+    assert parse_checks_output(0, "null", "").state == "error"
 
 
 def test_condense_log_keeps_failure_not_cleanup_and_redacts_tokens() -> None:

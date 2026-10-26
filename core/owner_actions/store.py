@@ -25,9 +25,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from core.git.safe_show import safe_show
 from core.owner_actions.models import (
@@ -70,6 +70,24 @@ class OwnerActionInvalid(OwnerActionError):
 
 class OwnerActionStoreCorrupt(OwnerActionError):
     pass
+
+
+class _LedgerEnvelope(BaseModel):
+    """Validated ledger envelope; extra metadata is retained for dynamic ledgers."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schema_version: Literal[SCHEMA_VERSION]
+    actions: list[Any]
+
+
+class _ResolutionEnvelope(BaseModel):
+    """Validated resolution overlay envelope."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schema_version: Literal[SCHEMA_VERSION]
+    resolutions: dict[str, Any]
 
 
 @dataclass
@@ -167,11 +185,11 @@ def _validate_candidate_document(document: dict[str, Any]) -> None:
     (or malformed envelope) that consumers would silently skip on the next read.
     """
 
-    if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
-        raise OwnerActionInvalid("documento de owner actions tem schema_version invalido")
-    rows = document.get("actions")
-    if not isinstance(rows, list):
-        raise OwnerActionInvalid("documento de owner actions precisa conter uma lista actions")
+    try:
+        envelope = _LedgerEnvelope.model_validate(document)
+    except ValidationError as exc:
+        raise OwnerActionInvalid(f"envelope de owner actions invalido: {_summarise(exc)}") from exc
+    rows = envelope.actions
     seen: set[str] = set()
     for index, raw in enumerate(rows):
         try:
@@ -185,6 +203,17 @@ def _validate_candidate_document(document: dict[str, Any]) -> None:
         if action.id in seen:
             raise OwnerActionInvalid(f"item {action.id} duplicado no documento")
         seen.add(action.id)
+
+
+def _validate_resolution_document(document: dict[str, Any]) -> None:
+    """Validate the complete overlay before replacing it."""
+
+    try:
+        envelope = _ResolutionEnvelope.model_validate(document)
+        for raw in envelope.resolutions.values():
+            Resolution.model_validate(raw)
+    except ValidationError as exc:
+        raise OwnerActionInvalid(f"envelope de resolucoes invalido: {_summarise(exc)}") from exc
 
 
 def apply_resolution(action: OwnerAction, resolution: Resolution | None) -> OwnerAction:
@@ -509,6 +538,7 @@ class OwnerActionStore:
     ) -> OwnerAction:
         """Mark done (``action``) or record the answer (``decision``). Idempotent for a repeat."""
 
+        self._validate_write_sources()
         current = self.get(action_id)
         if current is None:
             raise OwnerActionNotFound(f"{action_id} nao existe no backlog")
@@ -532,6 +562,26 @@ class OwnerActionStore:
                 raise OwnerActionInvalid("overlay de resolucoes nao configurado")
             return self._write_overlay(current, answer, note)
         return self._resolve_in_definitions(action_id, answer, note)
+
+    def _validate_write_sources(self) -> None:
+        """Fail closed before a mutation if any persisted definition row is invalid."""
+
+        payload, warning = _read_json(self.path)
+        if warning and self.path.exists():
+            raise OwnerActionStoreCorrupt(
+                f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
+            )
+        if isinstance(payload, list):
+            document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
+        elif isinstance(payload, dict):
+            document = payload
+        else:
+            document = {"schema_version": SCHEMA_VERSION, "actions": []}
+        _validate_candidate_document(document)
+        if self.control:
+            from core.owner_actions import control_queue
+
+            _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_queue.list_control_rows()})
 
     def reconcile_update(
         self,
@@ -590,16 +640,35 @@ class OwnerActionStore:
         assert self.overlay_path is not None
         resolution = Resolution(status=ActionStatus.DONE, resolved_at=utc_now(), answer=answer, note=note.strip())
         with _file_lock(self.overlay_path):
+            # Overlay writes must not hide a malformed source ledger that tolerant reads skipped.
+            payload, ledger_warning = _read_json(self.path)
+            if ledger_warning and self.path.exists():
+                raise OwnerActionStoreCorrupt(f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({ledger_warning})")
+            if isinstance(payload, list):
+                source_document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
+            elif isinstance(payload, dict):
+                source_document = payload
+            else:
+                source_document = {"schema_version": SCHEMA_VERSION, "actions": []}
+            _validate_candidate_document(source_document)
+            if self.control:
+                from core.owner_actions import control_queue
+
+                _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_queue.list_control_rows()})
+
             payload, warning = _read_json(self.overlay_path)
             if warning and self.overlay_path.exists():
                 backup = self.overlay_path.with_name(f"{self.overlay_path.name}.corrupt-{int(time.time())}")
                 with contextlib.suppress(OSError):
                     os.replace(self.overlay_path, backup)
                 payload = None
-            document = payload if isinstance(payload, dict) else {}
-            resolutions = document.get("resolutions") if isinstance(document.get("resolutions"), dict) else {}
+            document = payload if isinstance(payload, dict) else {"schema_version": SCHEMA_VERSION, "resolutions": {}}
+            _validate_resolution_document(document)
+            envelope = _ResolutionEnvelope.model_validate(document)
+            resolutions = dict(envelope.resolutions)
             resolutions[current.id] = json.loads(resolution.model_dump_json(exclude_none=True))
-            document = {"schema_version": SCHEMA_VERSION, "resolutions": resolutions}
+            document = {**document, "schema_version": SCHEMA_VERSION, "resolutions": resolutions}
+            _validate_resolution_document(document)
             _atomic_write_json(self.overlay_path, document)
         return apply_resolution(current, resolution)
 

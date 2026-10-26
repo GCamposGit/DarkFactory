@@ -327,6 +327,44 @@ def test_writes_reject_invalid_preexisting_rows_without_changing_file(tmp_path: 
     assert path.read_bytes() == original
 
 
+@pytest.mark.parametrize("mutation", ["add", "upsert", "resolve"])
+def test_every_mutation_rejects_invalid_ledger_without_changing_file(
+    tmp_path: Path, mutation: str,
+) -> None:
+    path = tmp_path / "owner_actions.json"
+    invalid = _draft().build("OA-071").to_record()
+    invalid["kind"] = "approval"
+    original = json.dumps({"schema_version": 1, "actions": [invalid]}, indent=2).encode("utf-8")
+    path.write_bytes(original)
+    store = OwnerActionStore(path, remote_ref=None)
+
+    with pytest.raises(OwnerActionInvalid):
+        if mutation == "add":
+            store.add(_draft(title="Novo item"))
+        elif mutation == "upsert":
+            store.upsert(_draft(title="Novo item").build("OA-072"))
+        else:
+            store.resolve("OA-071")
+    assert path.read_bytes() == original
+
+
+def test_overlay_write_rejects_invalid_existing_resolution_without_changing_overlay(
+    tmp_path: Path,
+) -> None:
+    definitions = tmp_path / "owner_actions.json"
+    overlay = tmp_path / "resolutions.json"
+    store = OwnerActionStore(definitions, overlay_path=overlay, remote_ref=None)
+    action = store.add(_draft())
+    original = json.dumps(
+        {"schema_version": 1, "resolutions": {action.id: {"status": "approval"}}}, indent=2
+    ).encode("utf-8")
+    overlay.write_bytes(original)
+
+    with pytest.raises(OwnerActionInvalid):
+        store.resolve(action.id, to_overlay=True)
+    assert overlay.read_bytes() == original
+
+
 def test_control_write_validates_all_rows_before_any_upsert(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from core.owner_actions import control_queue
 
