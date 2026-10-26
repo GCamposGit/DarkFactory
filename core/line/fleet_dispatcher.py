@@ -228,6 +228,19 @@ def default_launch(ticket_id: str, host: HostSpec) -> InFlight:
     return InFlight(ticket_id, host.id, proc, log_path, time.time())
 
 
+def running_fleet_tickets() -> set[str]:
+    """Tickets com ``run_ticket.py <ID> --fleet`` vivo neste host (sobrevivem a reinicio do despachante)."""
+    import psutil
+
+    ids: set[str] = set()
+    for proc in psutil.process_iter(["cmdline"]):
+        cmd = proc.info.get("cmdline") or []
+        for i, arg in enumerate(cmd[:-1]):
+            if arg.endswith("run_ticket.py") and "--fleet" in cmd:
+                ids.add(cmd[i + 1])
+    return ids
+
+
 def default_deploy() -> int:
     return subprocess.run([sys.executable, str(PROJECT_ROOT / "scripts" / "dokploy_redeploy.py")],
                           cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW).returncode
@@ -408,7 +421,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     configure_logging(log_dir)
     from core.notifications.daily_digest import maybe_send_due
 
-    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due)
+    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due,
+                        busy_ids_loader=running_fleet_tickets)
     if args.loop and not args.once:
         d.run_forever()
         return 0

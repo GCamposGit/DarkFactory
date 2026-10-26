@@ -136,3 +136,15 @@ def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
 def test_disabled_hosts_env_removes_host(monkeypatch):
     monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "Desktop, ")
     assert [h.id for h in fd.default_hosts()] == ["grokbox", "notebook"]
+
+
+def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):
+    import psutil
+
+    class P:
+        def __init__(self, cmd):
+            self.info = {"cmdline": cmd}
+
+    procs = [P(["python", "C:/x/run_ticket.py", "USR-1", "--fleet"]), P(["python", "run_ticket.py", "USR-2"]), P(None)]
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: procs)
+    assert fd.running_fleet_tickets() == {"USR-1"}
