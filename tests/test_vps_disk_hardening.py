@@ -473,7 +473,7 @@ def _compose_services() -> List[tuple[str, str, Dict[str, Any]]]:
 
 def test_there_are_compose_files_to_check() -> None:
     names = {f for f, _n, _s in _compose_services()}
-    assert {"docker-compose.cloud.yml", "docker-compose.hub.yml", "docker-compose.n8n.yml"} <= names
+    assert {"docker-compose.cloud.yml", "docker-compose.hub.yml"} <= names
 
 
 @pytest.mark.parametrize("fname,name,svc", _compose_services(), ids=lambda v: v if isinstance(v, str) else "")

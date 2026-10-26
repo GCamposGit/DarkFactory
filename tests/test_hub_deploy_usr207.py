@@ -38,6 +38,7 @@ NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
         (["docs/x.md", "core/infra/node_sync.py"], True),
         (["hub/frontend/app.js"], True),
         (["deploy/dokploy/docker-compose.hub.yml"], True),
+        ([".factory/config/subscription_prices.json"], True),
         (["requirements.txt"], True),
         (["scripts/dokploy_redeploy.py"], True),
         ([], True),
@@ -79,7 +80,11 @@ def _hub_image_workflow_paths() -> set[str]:
 
 def test_classifier_rebuild_paths_are_embedded_in_the_hub_image() -> None:
     copied_sources = _dockerfile_copy_sources()
-    missing_prefixes = sorted(prefix for prefix in dc.REBUILD_PREFIXES if prefix.rstrip("/") not in copied_sources)
+    # A prefix may be a sub-path of a COPY source (".factory/config/" lives under ".factory").
+    missing_prefixes = sorted(
+        prefix for prefix in dc.REBUILD_PREFIXES
+        if not any(prefix.rstrip("/") == src or prefix.startswith(src + "/") for src in copied_sources)
+    )
     missing_files = sorted(path for path in dc.REBUILD_FILES if path not in copied_sources)
 
     assert not missing_prefixes and not missing_files, (
@@ -306,3 +311,14 @@ def test_hub_net_node_behaviour() -> None:
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=180, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_cloud_sha_is_pinned_by_the_factory_not_the_owner() -> None:
+    posts: List[Any] = []
+    svc = mod.Service(name="darkfac-cloud", kind="compose", service_id="compose_cloud")
+    mod.pin_cloud_git_sha(lambda m, p, b=None: posts.append((m, p, b)), svc, {"env": "A=1\nDARKFAC_GIT_SHA=old\n"}, A)
+    assert posts == [("POST", "/api/compose.update", {"composeId": "compose_cloud", "env": f"A=1\nDARKFAC_GIT_SHA={A}\n"})]
+    with pytest.raises(mod.DokployUsageError):
+        mod.pin_cloud_git_sha(lambda *a, **k: None, svc, {"env": ""}, None)
+    with pytest.raises(mod.DokployUsageError):
+        mod.pin_cloud_git_sha(lambda *a, **k: None, svc, {}, A)

@@ -29,6 +29,19 @@ from scripts import dokploy_redeploy as mod
 _REAL_DEFAULT_DISK_HYGIENE = mod.default_disk_hygiene_runner
 _REAL_DEFAULT_CHECK_MAIN_RUNNER = mod.default_check_main_runner
 
+@pytest.fixture(autouse=True)
+def _no_network_for_cloud_ghcr_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-397: the darkfac-cloud deploy waits on GHCR; tests that do not inject a probe skip the network."""
+    real = mod._shared_wait_for_ghcr_image
+
+    def fake(sha: str, **kwargs: Any) -> None:
+        if kwargs.get("probe") is None and kwargs.get("repository") == mod.CLOUD_IMAGE_REPOSITORY:
+            return None
+        return real(sha, **kwargs)
+
+    monkeypatch.setattr(mod, "_shared_wait_for_ghcr_image", fake)
+
+
 
 @pytest.fixture(autouse=True)
 def _no_ambient_registry_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -356,8 +369,10 @@ def test_main_allows_default_project_explicitly() -> None:
 
 def test_select_services_no_filter_returns_all() -> None:
     services = mod.normalize_project_services(_new_shape_projects(), "darkfac-core", "production")
-    assert mod.select_services(services, None) == services
-    assert mod.select_services(services, []) == services
+    # USR-369: leftover n8n composes are excluded from the default (all services) selection.
+    expected = [s for s in services if s.name.lower() not in mod.EXCLUDED_FROM_DEFAULT]
+    assert mod.select_services(services, None) == expected
+    assert mod.select_services(services, []) == expected
 
 
 def test_select_services_only_case_insensitive() -> None:
@@ -701,7 +716,7 @@ def test_main_list_prints_services_and_exits_0() -> None:
     listing = out.getvalue()
     assert "darkfac-cloud" in listing
     assert "darkfac-canary" in listing
-    assert "darkfac-n8n" in listing  # the real darkfac-core compose service
+    assert "darkfac-n8n" not in listing  # USR-369: n8n removed from the default selection
     assert "compose_other_n8n" not in listing  # never the other project's decoy "n8n"
     assert "My First Project" not in listing
     assert not transport.post_calls  # --list never triggers a deploy
@@ -762,6 +777,7 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
         [],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
+        ghcr_probe=lambda repo, tag: 200,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
         clock_fn=clock.now,
@@ -769,7 +785,8 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    # 4 deploys plus the DarkHub pinned compose update.
+    # 3 deploys (n8n excluded, USR-369) plus the DarkHub pinned compose update and the
+    # darkfac-cloud DARKFAC_GIT_SHA env pin (USR-397).
     assert len(transport.post_calls) == 5
     assert {c[1] for c in transport.post_calls} == {"/api/compose.update", "/api/compose.deploy", "/api/application.deploy"}
     report = out.getvalue()
@@ -830,12 +847,13 @@ def test_main_no_wait_triggers_and_exits_0_without_polling() -> None:
         ["--no-wait", "--only", "darkfac-cloud"],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
+        ghcr_probe=lambda repo, tag: 200,
         transport_factory=lambda url, key: transport,
         stdout=out,
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    assert len(transport.post_calls) == 1
+    assert len(transport.post_calls) == 2  # cloud env pin + deploy
     assert "Not waiting" in out.getvalue()
 
 
@@ -855,6 +873,7 @@ def test_main_only_scopes_deploy_to_selected_services() -> None:
         ["--only", "darkfac-cloud"],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
         registry_reader=_no_registry,
+        ghcr_probe=lambda repo, tag: 200,
         transport_factory=lambda url, key: transport,
         sleep_fn=clock.sleep,
         clock_fn=clock.now,
@@ -862,7 +881,8 @@ def test_main_only_scopes_deploy_to_selected_services() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    assert transport.post_calls == [("POST", "/api/compose.deploy", {"composeId": "compose_cloud"})]
+    assert [c[1] for c in transport.post_calls] == ["/api/compose.update", "/api/compose.deploy"]
+    assert transport.post_calls[0][2]["env"].startswith("KEEP=secret-value\nDARKFAC_GIT_SHA=")
 
 
 # ---------------------------------------------------------------------------
@@ -2081,3 +2101,31 @@ def test_check_main_red_ticket_creation_never_hangs_the_deploy() -> None:
     assert mod.run_check_main_bounded(lambda: (0, {"state": "green"})) == (0, {"state": "green"})
     assert not mod.hub_restore_is_secure("# darkfac-bluegreen: active=blue blue=" + "a" * 40 + " green=" + "a" * 40
                                          + "\n      replicas: 0\n      replicas: 0\n")
+
+
+def test_cloud_deploy_waits_for_ghcr_tag_and_does_nothing_when_absent() -> None:
+    transport = _make_transport_with_full_project()
+    transport.program_get("/api/compose.one?composeId=compose_cloud", [{"deployments": [], "env": "KEEP=secret-value\n"}])
+    out, err = io.StringIO(), io.StringIO()
+    clock = FakeClock()
+    seen: list = []
+
+    def probe(repo: str, tag: str) -> int:
+        seen.append(repo)
+        return 404
+
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY, "DARKHUB_IMAGE_SOURCE": "build"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        ghcr_probe=probe,
+        sleep_fn=clock.sleep,
+        clock_fn=clock.now,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code != mod.EXIT_OK
+    assert seen and set(seen) == {"gcamposgit/darkfac-cloud"}
+    assert transport.post_calls == []  # no compose.update (sha unchanged), no deploy
+    assert "darkfac-cloud:" in err.getvalue() and "not published" in err.getvalue()

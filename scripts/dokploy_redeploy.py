@@ -98,6 +98,16 @@ ALLOWED_PROJECTS = frozenset({"darkfac-core"})
 # Darkhub's raw compose instead proves its commit through /health.
 CODE_BEARING_SERVICES = frozenset({"darkfac-cloud"})
 
+# USR-369: n8n was removed from the lean VPS stack. Dokploy may still list a leftover n8n
+# compose in the project; an "all services" redeploy must never bring it back. Restore
+# steps live in docs/manual/frota.md; an explicit --only still reaches it.
+EXCLUDED_FROM_DEFAULT = frozenset({"n8n", "darkfac-n8n", "n8n-postgres"})
+
+# USR-369: images come from GHCR (built in CI), so the VPS builds nothing. If a build ever
+# runs (opt-in DARKHUB_IMAGE_SOURCE=build), it is one at a time: triggers are sequential
+# and this script must not introduce thread/process pools.
+MAX_CONCURRENT_BUILDS = 1
+
 TERMINAL_SUCCESS_STATUSES = {"done"}
 TERMINAL_FAILURE_STATUSES = {"error", "failed"}
 
@@ -318,7 +328,7 @@ def select_services(services: Sequence[Service], only: Optional[Sequence[str]]) 
     falsy. Raises DokployUsageError listing valid names if any requested
     name does not match."""
     if not only:
-        return list(services)
+        return [svc for svc in services if svc.name.lower() not in EXCLUDED_FROM_DEFAULT]
 
     by_lower: Dict[str, Service] = {svc.name.lower(): svc for svc in services}
     selected: List[Service] = []
@@ -649,12 +659,13 @@ GhcrManifestProbe = Callable[[str, str], int]
 def wait_for_ghcr_tag(
     sha: str, *, probe: Optional[GhcrManifestProbe] = None, timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
     interval: float = GHCR_TAG_POLL_SECONDS, sleep_fn: Callable[[float], None] = time.sleep,
-    clock_fn: Callable[[], float] = time.monotonic,
+    clock_fn: Callable[[], float] = time.monotonic, repository: str = "gcamposgit/darkhub",
 ) -> None:
     """CLI compatibility wrapper around the shared GHCR waiter; never falls back to build."""
     try:
         _shared_wait_for_ghcr_image(
             sha, probe=probe, timeout=timeout, interval=interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
+            repository=repository,
         )
     except GhcrImageUnavailableError as exc:
         raise DokployUsageError(str(exc)) from None
@@ -675,6 +686,38 @@ def set_compose_git_sha(
         "sourceType": "raw",
         "composePath": "docker-compose.yml",
         "composeFile": compose_file,
+    })
+
+
+CLOUD_SHA_ENV = "DARKFAC_GIT_SHA"
+CLOUD_IMAGE_REPOSITORY = "gcamposgit/darkfac-cloud"
+
+
+def merge_env_var(env_text: str, name: str, value: str) -> str:
+    """Return a Dokploy env string with ``name=value`` set once; other lines are untouched."""
+    lines = [ln for ln in env_text.splitlines() if ln.split("=", 1)[0].strip() != name]
+    lines.append(f"{name}={value}")
+    return "\n".join(lines) + "\n"
+
+
+def pin_cloud_git_sha(
+    transport: Transport, service: Service, payload: Dict[str, Any], sha: Optional[str],
+) -> None:
+    """USR-397/369: the cloud compose pins ghcr.io/.../darkfac-cloud:${DARKFAC_GIT_SHA}.
+
+    The factory writes the merged origin/main sha into the compose env before each deploy, so
+    the owner never has to set it by hand. Preserves every other env line; fails closed.
+    """
+    if service.kind != "compose" or service.name.lower() != "darkfac-cloud":
+        return
+    if not sha or not SHA_PATTERN.fullmatch(sha):
+        raise DokployUsageError("darkfac-cloud needs the full origin/main SHA to pin its GHCR image")
+    env_text = payload.get("env")
+    if not isinstance(env_text, str):
+        raise DokployUsageError("darkfac-cloud compose.one has no string env; refusing to replace its settings")
+    transport("POST", "/api/compose.update", {
+        "composeId": service.service_id,
+        "env": merge_env_var(env_text, CLOUD_SHA_ENV, sha),
     })
 
 
@@ -1254,6 +1297,14 @@ def _run_main(
                 if is_bluegreen(baseline_payload.get("composeFile"), env):
                     continue
             else:
+                if svc.name.lower() == "darkfac-cloud":
+                    cloud_sha = expected_sha or get_origin_main_sha()
+                    # USR-397: never move DARKFAC_GIT_SHA (nor deploy) before the image exists;
+                    # on timeout the previous sha keeps running.
+                    print(f"Waiting for ghcr.io/{CLOUD_IMAGE_REPOSITORY}:{cloud_sha} on GHCR...", file=out, flush=True)
+                    wait_for_ghcr_tag(cloud_sha or "", probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn,
+                                      repository=CLOUD_IMAGE_REPOSITORY)
+                    pin_cloud_git_sha(transport, svc, baseline_payload, cloud_sha)
                 trigger_deploy(transport, svc)
         except (DokployUsageError, BlueGreenError) as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)

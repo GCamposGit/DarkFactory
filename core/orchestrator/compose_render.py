@@ -152,20 +152,22 @@ def wait_for_ghcr_image(
     interval: float = GHCR_WAIT_POLL_SECONDS,
     sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
+    repository: str = GHCR_IMAGE_REPOSITORY,
 ) -> None:
-    """Block until ``ghcr.io/gcamposgit/darkhub:<sha>`` exists; raise GhcrImageUnavailableError on timeout."""
+    """Block until ``ghcr.io/<repository>:<sha>`` exists (default: the Hub); raise GhcrImageUnavailableError on timeout."""
     check = probe or _ghcr_manifest_status
+    image_ref = f"ghcr.io/{repository}:{sha}"
     deadline = clock_fn() + timeout
     last: object = "no response"
     while True:
         try:
-            status = check(GHCR_IMAGE_REPOSITORY, sha)
+            status = check(repository, sha)
             if status == 200:
                 return
             last = f"HTTP {status}"
             if status in (401, 403) and not _ghcr_registry_token():
                 raise GhcrImageUnavailableError(
-                    f"Cannot verify GHCR image {ghcr_image_ref(sha)}: HTTP {status} and no GHCR token is configured; "
+                    f"Cannot verify GHCR image {image_ref}: HTTP {status} and no GHCR token is configured; "
                     "set GHCR_TOKEN with read:packages permission (OA-053). Deploy refused, no fallback to build."
                 )
         except GhcrImageUnavailableError:
@@ -175,7 +177,7 @@ def wait_for_ghcr_image(
         remaining = deadline - clock_fn()
         if remaining <= 0:
             raise GhcrImageUnavailableError(
-                f"GHCR image {ghcr_image_ref(sha)} not published within {int(timeout)}s (last: {last}); "
+                f"GHCR image {image_ref} not published within {int(timeout)}s (last: {last}); "
                 "deploy refused, no fallback to build (check the hub-image workflow)"
             )
         sleep_fn(min(interval, remaining))

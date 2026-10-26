@@ -337,8 +337,8 @@ def test_docker_compose_cloud_spec() -> None:
     # Dokploy builds from git on each push to main (no CI publishing to
     # GHCR exists), so `build:`/`:latest` is intentional here, NOT digest
     # pinning -- see docs/handoffs/continuous-autonomy/HF-03-08.md.
-    assert "context: https://github.com/GCamposGit/DarkFactory.git#main" in content
-    assert "image: ghcr.io/gcamposgit/darkfac-cloud:latest" in content
+    assert "build:" not in content  # USR-369: no build on the VPS
+    assert "image: ghcr.io/gcamposgit/darkfac-cloud:${DARKFAC_GIT_SHA:?" in content
     assert "DARKFAC_CLOUD_IMAGE_DIGEST" not in content
 
     # 2. Coordinator API auth (HF-03-08 closeout): token optional in compose

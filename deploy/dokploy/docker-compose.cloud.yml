@@ -6,10 +6,9 @@
 
 services:
   darkfac-coordinator:
-    build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
-      dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    # USR-369: image built in CI and published to GHCR (never built on the VPS).
+    image: ghcr.io/gcamposgit/darkfac-cloud:${DARKFAC_GIT_SHA:?set DARKFAC_GIT_SHA to the merged commit}
+    pull_policy: always
     container_name: darkfac-coordinator
     restart: unless-stopped
     stop_grace_period: 35s
@@ -57,16 +56,15 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1536M
+          memory: 512M
         reservations:
           cpus: "0.2"
-          memory: 512M
+          memory: 256M
 
   darkfac-worker:
-    build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
-      dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    # USR-369: image built in CI and published to GHCR (never built on the VPS).
+    image: ghcr.io/gcamposgit/darkfac-cloud:${DARKFAC_GIT_SHA:?set DARKFAC_GIT_SHA to the merged commit}
+    pull_policy: always
     container_name: darkfac-worker-1
     restart: unless-stopped
     stop_grace_period: 35s
@@ -176,9 +174,9 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          # CX23 (2 vCPU, 4 GB): 1 agent slot; 2 GB + coordinator 1.5 GB leaves
-          # headroom for Dokploy/OS. Raise only after a VPS upgrade.
-          memory: 2048M
+          # CX23 (2 vCPU, 4 GB): 1 agent slot. USR-369: sum of all limits <= 3.2 GB
+          # (tests/shape/test_vps_lean_usr369.py). Raise only after a VPS upgrade.
+          memory: 1536M
         reservations:
           cpus: "0.2"
           memory: 256M
@@ -189,10 +187,9 @@ services:
   # sandbox restore drill, prunes per asymmetric retention policy (7d R2 / 120d onprem),
   # and dispatches critical Telegram alerts on any failure.
   darkfac-backup-cron:
-    build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
-      dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    # USR-369: image built in CI and published to GHCR (never built on the VPS).
+    image: ghcr.io/gcamposgit/darkfac-cloud:${DARKFAC_GIT_SHA:?set DARKFAC_GIT_SHA to the merged commit}
+    pull_policy: always
     container_name: darkfac-backup-cron
     restart: unless-stopped
     # The same daemon also runs the VPS disk guard (core.infra.disk_guard) in a thread: every 30 min it
@@ -238,7 +235,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 384M
+          memory: 256M
         reservations:
           cpus: "0.05"
           memory: 64M
@@ -261,10 +258,9 @@ services:
   # cheap (DB reads + at most one HTTP GET), so it polls every 15 minutes:
   # that is also the cadence of a same-day retry after a terminal failure.
   darkfac-canary:
-    build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
-      dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    # USR-369: image built in CI and published to GHCR (never built on the VPS).
+    image: ghcr.io/gcamposgit/darkfac-cloud:${DARKFAC_GIT_SHA:?set DARKFAC_GIT_SHA to the merged commit}
+    pull_policy: always
     container_name: darkfac-canary
     restart: unless-stopped
     command: ["python", "-m", "core.line.canary", "run", "--base-url", "${DARKFAC_CANARY_BASE_URL:-}", "--every-seconds", "900"]
@@ -307,7 +303,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 192M
         reservations:
           cpus: "0.05"
           memory: 64M
