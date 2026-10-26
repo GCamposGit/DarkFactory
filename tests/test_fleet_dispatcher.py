@@ -131,3 +131,8 @@ def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
         raise ConnectionError("store down")
 
     assert merge_control_queue(ledger, unreachable) == ledger
+
+
+def test_disabled_hosts_env_removes_host(monkeypatch):
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "Desktop, ")
+    assert [h.id for h in fd.default_hosts()] == ["grokbox", "notebook"]
