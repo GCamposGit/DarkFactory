@@ -82,7 +82,6 @@ COPY hub /app/hub
 COPY docs /app/docs
 COPY scripts /app/scripts
 COPY deploy /app/deploy
-COPY spikes /app/spikes
 COPY .factory /app/.factory
 COPY harness.config.json /app/harness.config.json
 
