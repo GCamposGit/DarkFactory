@@ -11472,8 +11472,8 @@
     "project_id": "darkfac",
     "title": "Quebrar funcoes acima de 200 linhas fora do run_ticket (fatia do USR-377)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "e2ce4c2d1192284a90180346f3d18ac99da9f81f",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11495,7 +11495,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T02:37:08.641142Z",
-    "updated_at": "2026-10-25T02:37:08.641142Z"
+    "updated_at": "2026-10-26T02:22:47.812597Z"
   },
   {
     "id": "USR-386",
