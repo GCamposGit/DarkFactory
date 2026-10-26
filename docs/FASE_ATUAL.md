@@ -21,6 +21,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - OpenRouter: perto de US$ 10/mês; pode subir se aumentar a vazão. Hoje o código aplica só um teto por execução de US$ 2 (`run_caps.openrouter_usd` em `.factory/config/line_routing.json`); o teto mensal em código é parte do bloco USR-378.
 - Dentro desses tetos a fábrica decide sozinha; acima deles, pergunta ao owner (MISSION, princípio 2).
 - Piso de cota: nenhuma assinatura é usada para escrever código com 15% ou menos de cota restante (`core/line/routing.py`).
+- Claude Code: coletor versionado do statusLine e leitura de snapshots sanitizados estão disponíveis no código; a validação ponta a ponta no Notebook ainda está pendente. Em 26/10/2026, o preflight local com Claude Code 2.1.278 retornou Anthropic conectada via credenciais, sem quota (`quota_supported=false`) e sem janelas 5h/7d. Portanto, a fonte real do Desktop ainda não foi confirmada e o roteador deve tratar a quota como desconhecida até uma sessão autenticada acionar o statusLine. Evidência sanitizada: [`docs/evidence/USR-391-notebook-statusline.md`](evidence/USR-391-notebook-statusline.md).
 
 ## Tempo e participação do owner
 - 30 minutos de manhã (plano do dia) e 30 à noite (o que foi entregue), mais perguntas pontuais pelo celular. O resumo diário chega pelo bot às 08:00 e às 21:00.

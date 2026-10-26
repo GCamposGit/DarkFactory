@@ -391,6 +391,86 @@ def test_claude_adapter_reads_rate_limits_from_cli(tmp_path: Path, monkeypatch) 
     assert calls == [["claude", "auth", "status", "--json"]]
 
 
+def test_claude_statusline_capture_is_atomic_and_privacy_filtered(tmp_path: Path) -> None:
+    from scripts.claude_statusline import capture_statusline
+
+    usage_dir = tmp_path / "usage" / "providers"
+    payload = {
+        "session_id": "must-not-persist",
+        "workspace": {"current_dir": "C:/private/project"},
+        "prompt": "private prompt",
+        "rate_limits": {
+            "five_hour": {"used_percentage": 27.5, "resets_at": "2026-10-26T15:00:00Z"},
+            "seven_day": {"used_percentage": 61, "resets_at": "2026-10-30T08:00:00Z"},
+        },
+    }
+    assert capture_statusline(json.dumps(payload), usage_dir)
+    target = usage_dir / "anthropic.json"
+    captured = json.loads(target.read_text(encoding="utf-8"))
+    assert [(w["used_percent"], w["remaining_percent"], w["resets_at"]) for w in captured["windows"]] == [
+        (27.5, 72.5, "2026-10-26T15:00:00Z"),
+        (61.0, 39.0, "2026-10-30T08:00:00Z"),
+    ]
+    assert captured["checked_at"]
+    serialized = target.read_text(encoding="utf-8")
+    for private_value in ("must-not-persist", "private/project", "private prompt", "rate_limits"):
+        assert private_value not in serialized
+
+    before = target.read_bytes()
+    for invalid in ("not json", json.dumps({"session_id": "bad"}), json.dumps({
+        "rate_limits": {"five_hour": {"used_percentage": "invalid"}, "seven_day": None}
+    })):
+        assert not capture_statusline(invalid, usage_dir)
+        assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize("cli_status", [{"loggedIn": False}, {"loggedIn": True, "email": "x@y.test"}])
+def test_claude_adapter_prefers_fresh_statusline_snapshot_without_cli_quota(
+    tmp_path: Path, monkeypatch, cli_status: dict
+) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    spec = ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/usage")
+    adapter = ClaudeCodeAccountAdapter(spec, tmp_path)
+    from scripts.claude_statusline import snapshot_from_payload
+
+    snapshot = snapshot_from_payload({"rate_limits": {
+        "five_hour": {"used_percentage": 24, "resets_at": "2026-10-26T15:00:00Z"},
+        "seven_day": {"used_percentage": 70, "resets_at": "2026-10-30T08:00:00Z"},
+    }})
+    (tmp_path / "anthropic.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(cli_status)
+
+    monkeypatch.setattr("core.usage.adapters.subprocess.run", lambda *args, **kwargs: Result())
+    result = adapter.inspect(force=True)
+    assert result.adapter == "json_snapshot"
+    assert result.quota_supported is True
+    assert [window.used_percent for window in result.windows] == [24.0, 70.0]
+
+
+def test_find_claude_prefers_npm_install_over_path_cache(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    npm = tmp_path / "npm" / "claude.cmd"
+    npm.parent.mkdir()
+    npm.write_text("", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: "codex-cache/claude.ps1")
+    assert ClaudeCodeAccountAdapter._find_claude() == str(npm)
+
+
+def test_find_claude_falls_back_to_path_when_npm_missing(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "missing"))
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: "codex-cache/claude.ps1")
+    assert ClaudeCodeAccountAdapter._find_claude() == "codex-cache/claude.ps1"
+
+
 def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
