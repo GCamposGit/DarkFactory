@@ -2891,7 +2891,7 @@
       "kind": "action",
       "title": "Reassinar o PR #745 incluindo .agents/rules/AGENTS.md [USR-379]",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O PR #745 reescreve AGENTS.md (105 linhas, fonte unica) e reduz FACTORY_RULES.md a ponteiro; ambos sao protegidos pelo guard e so entram com autorizacao assinada do owner. O registro ja esta pronto em C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS-V2.json (paths .agents/rules/AGENTS.md, AGENTS.md e FACTORY_RULES.md, candidato d772bff9; a 1a assinatura nao cobria o .agents/rules/AGENTS.md, que o guard tambem protege).",
       "blocks": [
         "USR-379"
@@ -2905,7 +2905,8 @@
       ],
       "verify": "C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS-V2.json passa a ter o campo signature; depois gh pr view 745 --repo GCamposGit/DarkFactory mostra MERGED",
       "created_at": "2026-10-26T10:45:00Z",
-      "created_by": "claude"
+      "created_by": "claude",
+      "resolved_at": "2026-10-26T11:20:00Z"
     }
   ]
 }

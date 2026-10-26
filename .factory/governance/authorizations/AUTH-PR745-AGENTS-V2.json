@@ -1,0 +1,14 @@
+{
+  "id": "AUTH-PR745-AGENTS-V2",
+  "ticket_id": "USR-379",
+  "approver": "owner",
+  "paths": [
+    ".agents/rules/AGENTS.md",
+    "AGENTS.md",
+    "FACTORY_RULES.md"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "d772bff9be7c2469e26c7acada9379a3dacbb754",
+  "expires_at": "2026-10-29T23:59:00Z",
+  "signature": "Z/Bmmgz/tC6x6taDwloENbdZFqqleyV0ShwdU8Wi44gNHJnmVj9AZ1Qg0w/Q1ySgHrenTDZ6l/yWUMTJ1ddLBw=="
+}
