@@ -327,6 +327,40 @@ def test_writes_reject_invalid_preexisting_rows_without_changing_file(tmp_path: 
     assert path.read_bytes() == original
 
 
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"schema_version": 2, "actions": []},
+        {"schema_version": 1, "actions": "not-a-list"},
+    ],
+)
+def test_add_rejects_invalid_envelope_without_changing_file(
+    tmp_path: Path, document: dict[str, Any],
+) -> None:
+    path = tmp_path / "owner_actions.json"
+    original = json.dumps(document, indent=2).encode("utf-8")
+    path.write_bytes(original)
+    store = OwnerActionStore(path, remote_ref=None)
+
+    with pytest.raises(OwnerActionInvalid):
+        store.add(_draft())
+    assert path.read_bytes() == original
+
+
+def test_upsert_rejects_duplicate_ids_without_changing_file(tmp_path: Path) -> None:
+    path = tmp_path / "owner_actions.json"
+    duplicate = _draft().build("OA-071").to_record()
+    original = json.dumps(
+        {"schema_version": 1, "actions": [duplicate, duplicate]}, indent=2
+    ).encode("utf-8")
+    path.write_bytes(original)
+    store = OwnerActionStore(path, remote_ref=None)
+
+    with pytest.raises(OwnerActionInvalid, match="duplicado"):
+        store.upsert(_draft(title="Atualizacao").build("OA-071"))
+    assert path.read_bytes() == original
+
+
 @pytest.mark.parametrize("mutation", ["add", "upsert", "resolve"])
 def test_every_mutation_rejects_invalid_ledger_without_changing_file(
     tmp_path: Path, mutation: str,
