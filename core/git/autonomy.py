@@ -1670,7 +1670,7 @@ class GitAutonomyManager:
             return None
         target_sha = (delivery.merge_sha if delivery and delivery.merge_sha else None) or commit_sha or self.get_current_sha(target_dir)
         try:
-            result = live_verifier(target_sha) if live_verifier else self._default_live_verify(target_sha, target_dir)
+            result = live_verifier(target_sha) if live_verifier is not None else self._default_live_verify(target_sha, target_dir)
             verified = bool(getattr(result, "ok", False) or (isinstance(result, dict) and result.get("ok")))
         except Exception as exc:
             result = f"live verification exception: {type(exc).__name__}: {exc}"
