@@ -429,8 +429,6 @@ def test_model_ids_match_agent_definition_skills_and_docs() -> None:
     assert "core/line/subagent_routing.py" in router_skill
     assert ".factory/config/subagent_model_routing.json" in router_skill
 
-    claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    # USR-379: CLAUDE.md only imports AGENTS.md; the Haiku policy lives in the guide.
     guide = (REPO_ROOT / "docs" / "MODEL_SELECTION_GUIDE.md").read_text(encoding="utf-8")
-    # USR-185: CLAUDE.md references the registry alias instead of the literal id.
-    assert "alias `haiku` do registro" in claude_md
     assert cfg.models["haiku"] in guide

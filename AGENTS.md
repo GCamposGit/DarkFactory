@@ -1,132 +1,105 @@
-# Agent Contract
+# Contrato dos Agentes da DarkFac
 
-> Missao de longo prazo: [`MISSION.md`](MISSION.md). Contexto da fase atual (canais, maquinas, orcamento, metas, piloto): [`docs/FASE_ATUAL.md`](docs/FASE_ATUAL.md), consultar antes de decidir rota, gasto, host ou quando acionar o owner.
+Fonte única das regras para todo agente e harness (Claude Code, Codex, Grok Build, Antigravity, workers headless e subagentes). `CLAUDE.md` e `.agents/rules/GEMINI.md` apenas importam este arquivo; nenhuma regra é repetida em outro lugar.
 
-## Antes de começar
+- Missão de longo prazo: [`MISSION.md`](MISSION.md).
+- Contexto da fase atual (canais, máquinas, orçamento, metas, piloto): [`docs/FASE_ATUAL.md`](docs/FASE_ATUAL.md). Consulte antes de decidir rota, gasto, host ou quando acionar o owner.
+- Plano vigente: [`docs/plans/PLANO_V0_2026-10-24.md`](docs/plans/PLANO_V0_2026-10-24.md). Interoperabilidade de harnesses: [`docs/HARNESS_INTEROP.md`](docs/HARNESS_INTEROP.md).
 
-- Leia `MISSION.md` e `FACTORY_RULES.md`.
-- Preserve o escopo: o núcleo DarkFac é compartilhado.
-- Use `.agents/skills/` como catálogo de skills. Grok e outros harnesses devem seguir este contrato mesmo que não carreguem skills automaticamente.
+## 1. Como a fábrica evolui
 
-## Convenções de código
+1. **Processo no código.** Regra que importa vira verificação em código (guard, portão, hook, motor); este texto só aponta onde ela vive.
+2. **Um caminho só.** Toda demanda, de qualquer canal, passa por `run_ticket.py` (skill `19-run-ticket`) e pelo mesmo registro.
+3. **Saldo de código.** Ajuste e reaproveite antes de criar; o núcleo deve encolher com o tempo, salvo funcionalidade nova pedida pelo owner.
+4. **Orçamento de testes.** Teste novo de comportamento substitui ou consolida testes existentes; teste de forma (texto, contagem, presença de string em doc) não entra no portão.
+5. **Owner só para o que é dele.** Objetivo, critério de sucesso, decisão de negócio, segredo novo e aceite. Todo o resto a fábrica resolve.
+6. **Documentação a cada entrega.** Manual (`docs/manual/`), `docs/FASE_ATUAL.md` e learning pack são atualizados na mesma entrega que muda o fato.
 
-- Python 3.12+, type hints em APIs públicas e nomes `snake_case`.
-- UTF-8 na entrada/saída de CLI; não imprimir emojis sem fallback seguro no Windows.
-- `pathlib.Path` para caminhos e `logging` para diagnóstico.
-- Pydantic v2 para contratos de dados; FastAPI apenas na camada HTTP.
-- Mantenha domínio e I/O separados para permitir testes `library`, `cli` e `http`.
-- Trate falhas externas (Ollama, OpenRouter, GitHub, arXiv) com fallback ou erro estruturado, sem vazar credenciais.
+## 2. Intake e Gate G1
 
-## Instruções ao Usuário e Configurações Manuais
+- Demanda em linguagem natural com ambiguidade material (canais, limiares, permissões, regras de negócio) pausa em `WAITING_HUMAN`.
+- Faça o Grill estruturado (perguntas com opção recomendada e impacto) e espere a decisão explícita do owner antes de planejar ou codificar.
+- Nunca invente parâmetros nem trate respostas de ensaios anteriores como autorização para uma demanda nova.
 
-- Sempre que um passo envolver configuração manual pelo usuário (dashboards, portais, integrações, arquivos de ambiente, etc.), forneça instruções passo a passo, tela por tela na versão atual da interface da plataforma.
-- Forneça sugestões de conteúdo para absolutamente todos os campos que precisam ser preenchidos e seletores.
-- Nunca assuma que o usuário tem experiência na configuração ou sabe o que está fazendo; o guia deve ser à prova de falhas e retrabalho.
-- Toda ação que só o owner pode fazer deve ser registrada no mesmo turno no backlog de ações humanas (.factory/owner_actions/owner_actions.json, exibido no DarkHub) com passo a passo completo, comandos absolutos, criterio de verificacao e tickets bloqueados. E proibido pedir ao owner, apenas no chat, que descubra ou lembre o que precisa fazer.
+## 3. Execução de tickets e cota
 
-## Intake e Portão de Ambiguidade (Gate G1)
+- Todo ticket segue a skill `19-run-ticket`; o launcher headless é `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
+- **Preflight de cota** antes de planejar ou implementar:
+  ```powershell
+  python -c "from core.line.routing import pick; print(pick('development', ['harness:claude', 'harness:codex', 'harness:grok', 'harness:antigravity']))"
+  ```
+- **Piso de 15%**: com cota restante do próprio harness `<= 15%` (semanal ou janela móvel), o agente não implementa código com o próprio modelo no chat. Informa a cota e delega ao harness eleito ou ao launcher. Só o roteador elege `development`, e só entre harnesses com modo `write` (Claude, Codex, Grok Build; Antigravity é somente leitura).
+- **Override**: abaixo do piso, só com pedido textual inequívoco do owner no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", `--force`). Sem isso, falhe fechado.
+- **Harness de operação**: o harness pelo qual o owner opera (`DARKFAC_OPERATING_HARNESS` ou autodetecção) é eleito para `development` enquanto estiver acima do piso; abaixo dele vale o Dynamic Headroom. Não altera grill, planning, review nem integration.
+- **Modelos**: ids concretos vivem só em `.factory/config/model_registry.json` (lido por `core.models.registry`); textos citam apenas aliases. Planejamento usa o alias `opus`; implementação por subagente usa `sonnet`.
+- **Subagentes do chat gastam a cota do chat.** Antes de paralelizar, confira a cota; com a janela pressionada, mande o trabalho para a frota (`run_ticket.py --create --queue-only`).
+- **Revisão cruzada**: o revisor é sempre de família de modelo diferente da do implementador.
 
-- Toda nova demanda em linguagem natural que possua ambiguidades materiais (canais, limiares numéricos, permissões, regras de negócio não especificadas) exige pausa imediata em `WAITING_HUMAN`.
-- O agente nunca deve assumir parâmetros ou iniciar código antes de executar o Grill estruturado e receber as decisões explícitas do Owner.
+## 4. Código
 
-## Execução Canônica de Tickets e Roteamento Obrigatório (Skill 19-run-ticket)
+- Python 3.12+, type hints em APIs públicas, `snake_case`, `pathlib.Path`, `logging` estruturado, UTF-8 explícito na entrada/saída de CLI; sem emoji sem fallback no Windows.
+- Pydantic v2 para contratos; FastAPI só na camada HTTP. Regra de negócio fica em `core/` ou serviços, acessível headless (biblioteca, CLI ou HTTP), nunca em UI.
+- Nada de `except: pass`. Falha externa (Ollama, OpenRouter, GitHub, arXiv, Dokploy) vira fallback ou erro estruturado, sem vazar credencial.
+- Segredos nunca entram no repositório; `.env.example` sem valores reais.
+- Dependência nova atualiza `requirements.txt` (ou `requirements-audio.txt`) e o bootstrap.
+- Não altere nem versione o experimento Canaletto.
+- `.agents/skills/` é a fonte das skills; `.claude/skills/` é espelho via `python scripts/sync_skills.py`.
 
-- Toda demanda ou ticket do backlog deve ser executado seguindo a skill `19-run-ticket`.
-- **Preflight Obrigatório de Cota**: Antes de gerar código ou iniciar o PIV loop, o agente/harness deve verificar a saúde de cota via `core.line.routing.pick('development')`.
-- **Bloqueio de Quota Crítica no Chat**: Se a conta associada ao harness atual estiver com cota restante <= 15.0% (semanal ou janela móvel), o agente é TERMINANTEMENTE PROIBIDO de implementar código com seu próprio modelo no chat interativo. Deve recusar no chat, informar a cota restante e delegar para o harness saudavel eleito para desenvolvimento (o roteador so elege harnesses com modo `write`: Claude, Codex e Grok Build; o Antigravity e somente leitura e nunca e eleito para `development`) ou acionar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
-- **Harness de Operacao como Desenvolvedor Principal**: se o usuario opera a fabrica por um harness especifico (variavel `DARKFAC_OPERATING_HARNESS` ou autodeteccao pelo ambiente do harness pai), esse harness e eleito como desenvolvedor do estagio `development` sempre que sua cota estiver acima do piso critico de 15.0% (vence o maior headroom e a preferencia por faixa de complexidade). Se estiver critico, em cooldown, com cota desconhecida ou sem modo `write`, vale o Dynamic Headroom. A preferencia nunca relaxa o piso de 15.0%, nao altera grill/planning/review/integration (a revisao continua em outra familia que o implementador) e nao impede subagentes mais simples nem testes no desktop.
-- **Roteamento de Subagentes de Desenvolvimento no Claude Code (Haiku 5.5)**: o subagente de codigo usa Sonnet (alias `sonnet` do registro) por padrao e Opus (alias `opus` do registro) em planning; o Haiku 5.5 (alias `haiku` do registro) so e elegivel se TODAS valerem: tipo mecanico (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update), complexidade `low` (`medium` apenas para docs_sync e test_run_distill), no maximo 3 arquivos e 150 linhas alteradas, criterio de aceite executavel pre-definido pelo planejador, ambiguidade resolvida (Gate G1) e zero falhas anteriores do Haiku na tarefa. O Haiku e PROIBIDO em caminhos protegidos por governanca, em tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estagios planning, grill, review e integration (nunca planeja, revisa nem resolve conflito de integracao). Escalonamento: UMA tentativa com Haiku; se o portao focado falhar ou a revisao apontar defeito de correcao, nova tentativa com Sonnet (sem iterar 3 vezes com Haiku); o Haiku nunca escala sozinho para Opus nem Fable e `forbidden_autonomous_models` continua proibido. Piso de cota de 15.0% (mesma conta Anthropic), revisao em familia diferente do implementador (o revisor nunca e Haiku) e o portao unico `python C:\dev\DarkFac\core\harness\runner.py --quick` permanecem. Os ids concretos dos modelos vivem somente no registro `.factory/config/model_registry.json` (papeis e aliases, lido por `core.models.registry`; USR-185); este texto referencia apenas aliases. Implementacao: `core/line/subagent_routing.py` e `.factory/config/subagent_model_routing.json`.
-- **Exceção de Override Explícito pelo Usuário**: A execução em um harness com cota <= 15.0% SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", "estou ciente da cota crítica, prossiga" ou flag `--force`). Sem essa autorização textual inequívoca, o agente deve falhar fechado (*fail-closed*).
+## 5. Validação
 
-## Autonomia de Git e Sincronização Multi-Ambiente (Zero Toque Humano Pós-Grill, USR-57)
-
-- Em desenvolvimentos internos da fábrica (`project: darkfac`), o agente é expressamente proibido de orientar o usuário a executar commits, merges ou sincronizações manuais no terminal.
-- O ciclo de vida do ticket é encerrado de forma 100% autônoma pelo harness/launcher (`core.git.autonomy` / `run_ticket.py`), em TODOS os harnesses (Claude, Codex, Grok, Antigravity, locais), realizando:
-  1. Commit atômico das alterações vinculadas ao ticket (`feat(...): ... [TICKET_ID]`);
-  2. Push da branch de trabalho e abertura de PR (`gh pr create`);
-  3. Verificação de conflito com `origin/main` e com outras branches (rebase/merge; conflito é resolvido pelo próprio agente, nunca devolvido ao usuário);
-  4. Merge (`gh pr merge --squash --delete-branch`) e confirmação de que o SHA chegou em `origin/main`;
-  5. Limpeza de worktrees e branches já mergeadas (local e remota);
-  6. Deploy pós-merge (`scripts/dokploy_redeploy.py`) e atualização do status do ticket para `completed` em `.factory/demands/demands.json`.
-- **Proibido devolver o ciclo ao usuário**: nenhum agente encerra turno pedindo comando de push, revisão/confirmação do portão, autorização de merge ou de deploy. Se uma ferramenta for negada por permissão do harness, reporte a negação exata e a regra a ajustar; não a trate como passo humano normal.
-- **Defeito Encontrado = Correção Imediata ou Ticket Formal (todos os harnesses e modos)**: sempre que um agente (chat interativo, headless, subagente, worker, launcher ou linha de produção) identificar um erro, falha, bug, teste instável, regressão, inconsistência de configuração ou lacuna de processo, ele DEVE, no mesmo turno: (1) corrigir na hora, dentro do ciclo autônomo (commit, PR, merge, deploy), quando a correção for segura e pequena; ou (2) se não for possível corrigir agora (fora do escopo, exige investigação, outro harness ou acesso indisponível), abrir um ticket formal na fila de desenvolvimento (`.factory/demands/demands.json`, status `planned`, com problema, evidência e critérios de aceite) via `python C:\dev\DarkFac\run_ticket.py --create --queue-only ...` ou `core.demands`. É proibido apenas mencionar o problema na resposta, deixá-lo para 'depois' ou pedir ao usuário que o registre. O relatório final do turno deve listar cada defeito encontrado com o ID do ticket ou o commit/PR que o corrigiu.
-- Apenas projetos comerciais externos com flag `requires_commercial_acceptance: true` (cliente pago em produção real; hoje nenhum) exigem autorização manual prévia para merge/deploy.
-
-## Backups 100% Autônomos (Zero Toque Humano)
-
-- É expressamente proibido orientar o usuário a executar rotinas manuais de backup ou restauração no terminal ou PowerShell.
-- A gestão de resiliência e drills de recuperação em sandbox é 100% autônoma pela Dark Factory através do daemon agendado (`core.infra.backup_cron`), hooks pós-deploy (`scripts/dokploy_redeploy.py`), retenção assimétrica (7 dias R2 / 120 dias on-premise) e alertas críticos via Telegram em caso de anomalia.
-
-## Validação obrigatória
+Portão único oficial:
 
 ```powershell
-python core/harness/runner.py --quick
+python C:\dev\DarkFac\core\harness\runner.py --quick
 ```
 
-Este é o único portão oficial. `runner.py --quick` já executa a suíte inteira
-(`tests/`, ignorando `tests/test_canaletto.py`) em paralelo via
-`pytest-xdist`, com verdicts cacheados por árvore de commit (reaproveita um
-PASS anterior se a árvore não mudou) e enfileirados por máquina (um
-`suite_lock` global impede que dois harnesses/agentes no mesmo host rodem a
-suíte inteira ao mesmo tempo e disputem CPU/sqlite). Antes disso, o harness
-também tenta despachar a suíte inteira para o worker primário de testes no
-Desktop (`DARKFAC_TEST_WORKERS`, HF-27-11) e cai para execução local
-automaticamente se o worker estiver offline/ocupado além do tempo de
-espera; use `--local` para nunca despachar (detalhes em
-`docs/HARNESS_INTEROP.md`, seção "Worker primário de testes (Desktop)").
-Não rode `python -m pytest tests -v` separadamente como segundo portão:
-isso duplicava a mesma suíte e é a causa raiz de timeouts quando múltiplos
-agentes validam em paralelo no mesmo host. Detalhes de variáveis de
-ambiente, locks e cache cross-host em `docs/HARNESS_INTEROP.md`.
+- Roda a suíte inteira em paralelo (`pytest-xdist`), com verdict cacheado por árvore e `suite_lock` por máquina. Não rode `pytest tests` como segundo portão nem portões em paralelo no mesmo host.
+- Sucesso só com marcador `[HARNESS_PASS]` e ao menos uma checagem executada.
+- Loop interno: `python -m pytest tests/test_meu_modulo.py -q` ou `python -m core.harness.affected --run`. Nunca substitui o portão.
+- Antes de abrir PR, rode o que o CI exige: `lint-imports`, `python scripts/complexity_ratchet.py` e `python -m core.harness.docs_sync --base origin/main --head HEAD`.
+- Detalhes de workers, hosts e variáveis em `docs/HARNESS_INTEROP.md`.
 
-### Loop interno
+## 6. Entrega autônoma (zero toque humano)
 
-Para iteração rápida durante o desenvolvimento (antes do portão oficial),
-prefira testes focados no que você tocou:
+Em projetos internos (`project: darkfac`) o ciclo termina sem pedir nada ao owner, em qualquer harness:
 
-```powershell
-python -m pytest tests/test_meu_modulo.py -q
-```
+1. Commit atômico (`feat(...): ... [TICKET_ID]`) em branch/worktree própria.
+2. Push, PR (`gh pr create`) e resolução de conflito com `origin/main` pelo próprio agente.
+3. Merge squash depois do CI verde e confirmação do sha em `origin/main`.
+4. Limpeza de worktree e branch; sincronização dos ambientes via `core.git.autonomy`.
+5. Deploy pós-merge: `python C:\dev\DarkFac\scripts\dokploy_redeploy.py` (detalhes em `docs/runbooks/dokploy_redeploy.md`); relate o resultado por serviço.
+6. Ticket marcado `completed` com evidência.
 
-ou, quando disponível, `python -m core.harness.affected --run` (módulo
-mantido por outra frente de trabalho; calcula e roda apenas os testes
-afetados pelo diff atual). Nunca use o loop interno como substituto do portão
-oficial antes de declarar a tarefa concluída.
+- É proibido encerrar o turno pedindo push, revisão de portão, autorização de merge ou de deploy. Ferramenta negada por permissão: reporte a negação exata e a regra a ajustar.
+- Não faça merge com portão falho, suíte não descoberta ou governança alterada sem autorização assinada.
+- Única exceção: projeto com `requires_commercial_acceptance: true` (cliente pago em produção; hoje nenhum).
+- Backups e restauração são autônomos (`core.infra.backup_cron`, hooks pós-deploy); nunca peça rotina manual de backup.
 
-## Compatibilidade entre harnesses
+## 7. Defeito encontrado
 
-- Antigravity: carrega `.agents/skills/`.
-- Claude Code: carrega `.claude/skills/`, espelho sincronizado de `.agents/skills/` via `scripts/sync_skills.py`; trata este `AGENTS.md` como seu contrato equivalente a um `CLAUDE.md`.
-- Grok: use a raiz clonada como workspace, leia `AGENTS.md` e `FACTORY_RULES.md` e execute os comandos acima.
-- Outros agentes: `AGENTS.md` é o contrato mínimo; `docs/HARNESS_INTEROP.md` contém o fluxo de bootstrap.
+Todo erro, bug, teste instável, regressão, inconsistência de configuração ou lacuna de processo identificado por qualquer agente é, no mesmo turno:
 
-## Deploy pós-merge
+1. corrigido na hora dentro do ciclo autônomo, se for pequeno e seguro; ou
+2. registrado como ticket formal (`status: planned`, problema, evidência, critérios de aceite) via `python C:\dev\DarkFac\run_ticket.py --create --queue-only ...` ou `core.demands`.
 
-Depois que qualquer mudança do DarkFac chegar em `main`, rode:
+Nunca só mencione o problema. O relatório do turno lista cada defeito com o ticket ou o commit/PR.
 
-```powershell
-python scripts/dokploy_redeploy.py
-```
+## 8. Ações do owner e comunicação
 
-Isso redeploya todos os serviços (compose + application) do projeto
-`darkfac-core` no Dokploy (ambiente `production`) e espera cada um terminar
-(`done`/`error`/timeout), reportando o resultado por serviço. Relate o
-resultado (sucesso ou qual serviço falhou/expirou) ao Owner ou na
-conclusão do ticket. Use `--list` para só listar os serviços descobertos
-(nome, tipo, id, status, título do último deploy) sem disparar nada, e
-`--only NOME` (repetível) para restringir a um subconjunto. Credenciais vêm
-de `DOKPLOY_API_URL`/`DOKPLOY_API_KEY` (variáveis de ambiente; no Windows há
-fallback automático para o registro do usuário) — nunca imprima esses
-valores. `--project` é travado por um allowlist (`ALLOWED_PROJECTS` no
-script, hoje só `darkfac-core`) — qualquer outro valor sai com código 2
-antes de qualquer chamada HTTP, já que a permissão do Claude Code libera
-`python scripts/dokploy_redeploy.py *` com qualquer argumento sem prompt.
-Detalhes completos, variáveis, exit codes e o runbook de configuração do
-token em `docs/HARNESS_INTEROP.md` e `docs/runbooks/dokploy_redeploy.md`.
+- Ação que só o owner pode executar (segredo, portal, commit em protegido, decisão, aceite) vira, no mesmo turno, item `OA-NNN` em `.factory/owner_actions/owner_actions.json` (exibido no DarkHub): título, prioridade, por quê, tickets bloqueados, passo a passo tela a tela com comandos absolutos, critério de verificação e, se for decisão, as opções com a recomendada. Quem resolve marca `done` com `resolved_at`. O chat repete o passo a passo pronto.
+- Configuração manual: nunca assuma experiência; instrua tela por tela na interface atual e sugira valor para cada campo, seletor e toggle.
+- Comandos para o owner: PowerShell com caminho absoluto (`python C:\dev\DarkFac\run_ticket.py USR-01`).
+- Subprocesso PowerShell interno: sempre `-NoProfile -NonInteractive -ExecutionPolicy Bypass` (ou `core.harness.terminal_env`).
+- Nada é entregue só com mock: integração externa conta como entregue após validação real de ponta a ponta.
 
-## Pós-V0 (conclusão declarada pelo Owner em 17/10/2026)
+## 9. Governança protegida
 
-- O congelamento V0 foi encerrado. As tags `v0-critico` e `congelado-v0` não restringem a fila ativa; remova `v0-critico` dos tickets ainda abertos e preserve tags antigas em tickets concluídos como histórico.
-- A fila volta a ser alimentada pelo workflow atual, respeitando Gate G1, dependências, estado do ticket e capacidade disponível. A frota pode executar até 3 ciclos simultâneos, em hosts distintos na prioridade Grokbox, Notebook e Desktop, quando estiverem saudáveis e compatíveis.
-- Não há limite geral de critérios de aceite nem fatiamento obrigatório por quantidade de critérios. Gate G1 continua obrigatório para ambiguidades materiais.
-- A regra "Defeito Encontrado = Correção Imediata ou Ticket Formal" continua valendo. Registre o defeito com evidência e critérios de aceite, sem triagem ou tags específicas do V0.
+- Protegidos: a lista vive em `PROTECTED_PATTERNS` de `core/orchestrator/guard.py` (hoje `MISSION.md`, `AGENTS.md`, `FACTORY_RULES.md`, o guard, `core/governance/*`, a chave pública do owner e `.github/workflows/*`).
+- A fábrica pode propor mudanças neles, mas elas só entram com autorização assinada pelo owner em `.factory/governance/authorizations/` (registro com ticket, paths exatos e sha do candidato; o owner roda `python -m core.governance.keys sign <arquivo>`). Não faça `update-branch` depois de assinado: muda o sha.
+- `docs/FASE_ATUAL.md` não é protegido.
+
+## 10. Harnesses
+
+- Claude Code: `CLAUDE.md` importa este arquivo; skills em `.claude/skills/`.
+- Antigravity: `.agents/rules/GEMINI.md` importa este arquivo; skills em `.agents/skills/`; somente leitura no roteamento.
+- Codex, Grok e outros: leem este arquivo na raiz do repositório.
