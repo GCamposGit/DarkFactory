@@ -1,5 +1,7 @@
 # Agent Contract
 
+> Missao de longo prazo: [`MISSION.md`](MISSION.md). Contexto da fase atual (canais, maquinas, orcamento, metas, piloto): [`docs/FASE_ATUAL.md`](docs/FASE_ATUAL.md), consultar antes de decidir rota, gasto, host ou quando acionar o owner.
+
 ## Antes de começar
 
 - Leia `MISSION.md` e `FACTORY_RULES.md`.
