@@ -1,0 +1,12 @@
+{
+  "id": "AUTH-INFRA-HUBIMAGE",
+  "ticket_id": "USR-397",
+  "approver": "owner",
+  "paths": [
+    ".github/workflows/hub-image.yml"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "3e0ab51d3ede1287c4bef04a5e7779a22ad2c470",
+  "expires_at": "2026-10-27T23:22:28Z",
+  "signature": "kawXn/Ur808VB17d91nDU6AW9OgKhQ6qxdXX3XITiLdTyiCtvzXRC0/e5xVTgV42E0NXiG4AAyRF1FQmOg9CDw=="
+}
