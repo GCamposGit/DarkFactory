@@ -13,6 +13,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 ## Ambiente e máquinas
 - Windows é o ambiente principal; Linux roda no CI e na VM do Grok.
 - Hosts da frota, por prioridade de uso (`.factory/config/line_fleet.json`): **grokbox** (VM do Grok, sujeita a quedas constantes já conhecidas: queda é evento normal, o ticket volta para a fila e retoma em outro host), **Notebook** (máquina do owner; RAM limitada decide quantos workers cabem) e **Desktop**.
+- Para tirar um host da frota sem editar o config (ex.: Desktop ocupado com outra carga), o despachante lê `DARKFAC_FLEET_DISABLED_HOSTS` (ids separados por vírgula). Em 26/10 o Desktop está fora (indexação do Segundo Cérebro); Notebook dedicado à fábrica.
 - VPS pequena (Dokploy) com o Hub em blue-green; nenhuma imagem é construída na VPS (tudo vem do GHCR).
 
 ## Orçamento
@@ -52,3 +53,4 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 
 ## Histórico
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
+- 26/10/2026: Desktop fora da frota por `DARKFAC_FLEET_DISABLED_HOSTS=desktop` (pedido do owner).

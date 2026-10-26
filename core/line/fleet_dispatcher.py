@@ -72,12 +72,19 @@ class HostSpec:
 
 
 def default_hosts() -> list[HostSpec]:
-    """Ordem e URLs: prioridade de ``line_fleet.json``; URLs sobrescrevem por ``DARKFAC_FLEET_URL_<ID>``."""
+    """Ordem e URLs: prioridade de ``line_fleet.json``; URLs sobrescrevem por ``DARKFAC_FLEET_URL_<ID>``.
+
+    ``DARKFAC_FLEET_DISABLED_HOSTS`` (ids separados por virgula) tira hosts da frota sem editar o
+    config versionado, ex.: Desktop ocupado com outra carga.
+    """
     from core.line import fleet_policy
 
     defaults = {"grokbox": "http://100.77.130.5:8080", "desktop": "http://100.78.181.90:8080"}
+    disabled = {x.strip().lower() for x in os.environ.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(",") if x.strip()}
     hosts: list[HostSpec] = []
     for h in fleet_policy.load_fleet_config().sorted_hosts():
+        if h.id.lower() in disabled:
+            continue
         url = os.environ.get(f"DARKFAC_FLEET_URL_{h.id.upper()}", defaults.get(h.id))
         hosts.append(HostSpec(h.id, h.priority, url))
     return hosts
