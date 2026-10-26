@@ -1,0 +1,13 @@
+{
+  "id": "AUTH-MISSION-FASE",
+  "ticket_id": "USR-379",
+  "approver": "owner",
+  "paths": [
+    "AGENTS.md",
+    "MISSION.md"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "f67375855c106d9f2aa5c7a9c6bd6541aca195bc",
+  "expires_at": "2026-10-28T00:20:59Z",
+  "signature": "G30lH6lL7BpZl5wHDHU/83YBzgOLC0wD0FVs77p4BiyZrYkc0PwnTSEq1up6cHmSsScHb/Z95jhEJ3oQQ856CQ=="
+}
