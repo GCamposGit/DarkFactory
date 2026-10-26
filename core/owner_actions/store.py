@@ -160,6 +160,33 @@ def _raw_actions(payload: Any) -> list[Any]:
     return []
 
 
+def _validate_candidate_document(document: dict[str, Any]) -> None:
+    """Reject a write unless the complete candidate ledger conforms to its schema.
+
+    Reads intentionally remain tolerant, but writes must never carry forward a malformed row
+    (or malformed envelope) that consumers would silently skip on the next read.
+    """
+
+    if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
+        raise OwnerActionInvalid("documento de owner actions tem schema_version invalido")
+    rows = document.get("actions")
+    if not isinstance(rows, list):
+        raise OwnerActionInvalid("documento de owner actions precisa conter uma lista actions")
+    seen: set[str] = set()
+    for index, raw in enumerate(rows):
+        try:
+            action = OwnerAction.model_validate(raw)
+        except (ValidationError, TypeError, ValueError) as exc:
+            if isinstance(exc, ValidationError):
+                detail = _summarise(exc)
+            else:
+                detail = redact(str(exc))
+            raise OwnerActionInvalid(f"item #{index} invalido: {detail}") from exc
+        if action.id in seen:
+            raise OwnerActionInvalid(f"item {action.id} duplicado no documento")
+        seen.add(action.id)
+
+
 def apply_resolution(action: OwnerAction, resolution: Resolution | None) -> OwnerAction:
     """Overlay a resolution on a definition (a definition already ``done`` always wins)."""
 
@@ -382,9 +409,9 @@ class OwnerActionStore:
                 document = payload
             else:
                 document = {"schema_version": SCHEMA_VERSION, "actions": []}
-            if not isinstance(document.get("actions"), list):
-                document["actions"] = []
+            _validate_candidate_document(document)
             result = fn(document, document["actions"])
+            _validate_candidate_document(document)
             _atomic_write_json(self.path, document)
             return result
 
@@ -395,12 +422,28 @@ class OwnerActionStore:
         from core.owner_actions import control_queue
 
         with _file_lock(self.path):
-            payload, _warning = _read_json(self.path)
-            file_rows = _raw_actions(payload)
-            rows = copy.deepcopy(control_queue.merge_rows(file_rows, control_queue.list_control_rows()))
+            payload, warning = _read_json(self.path)
+            if warning and self.path.exists():
+                raise OwnerActionStoreCorrupt(
+                    f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
+                )
+            if isinstance(payload, list):
+                file_document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
+            elif isinstance(payload, dict):
+                file_document = payload
+            else:
+                file_document = {"schema_version": SCHEMA_VERSION, "actions": []}
+            _validate_candidate_document(file_document)
+            control_rows = control_queue.list_control_rows()
+            _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_rows})
+            rows = copy.deepcopy(
+                control_queue.merge_rows(file_document["actions"], control_rows)
+            )
             before = {str(r.get("id")): json.dumps(r, sort_keys=True) for r in rows if isinstance(r, dict)}
             document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": rows}
+            _validate_candidate_document(document)
             result = fn(document, rows)
+            _validate_candidate_document(document)
             changed = [
                 r for r in rows
                 if isinstance(r, dict) and before.get(str(r.get("id"))) != json.dumps(r, sort_keys=True)

@@ -186,6 +186,16 @@ def test_parse_checks_output_handles_gh_failures() -> None:
     assert parse_checks_output(0, json.dumps([check("pass")]), "").state == "green"
 
 
+def test_parse_checks_output_classifies_json_even_when_gh_exits_nonzero() -> None:
+    failed = parse_checks_output(1, json.dumps([check("fail")]), "1 failing check")
+    assert failed.state == "failed"
+    assert failed.failing == (check("fail"),)
+
+    pending = parse_checks_output(1, json.dumps([check("pending")]), "1 pending check")
+    assert pending.state == "pending"
+    assert pending.pending == (check("pending"),)
+
+
 def test_condense_log_keeps_failure_not_cleanup_and_redacts_tokens() -> None:
     prefix = "pr-validation (ubuntu-latest)\tUNKNOWN STEP\t2026-09-30T20:22:33.2430347Z "
     raw = "\n".join(
@@ -589,6 +599,22 @@ def test_delivery_without_checks_merges(repo: tuple[Path, Path]) -> None:
     assert gh.count(["pr", "checks"]) >= 1  # the gate did look
 
 
+def test_delivery_with_workflows_and_no_checks_stays_open(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    workflows = local / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("name: CI\n", encoding="utf-8")
+    gh = FakeRepoGh(bare, [])
+
+    rep = deliver(local, gh, FakeClock(), timeout_s=0)
+
+    assert not rep.ok and rep.action == "ci_pending", rep.message
+    assert "no result" in rep.message
+    assert gh.count(["pr", "merge"]) == 0
+    assert gh.prs[1]["state"] == "OPEN"
+
+
 def test_delivery_blocks_different_titles_for_same_id(repo: tuple[Path, Path]) -> None:
     local, bare = repo
     ledger = local / ".factory" / "demands" / "demands.json"
@@ -682,6 +708,32 @@ def test_ledger_only_queue_pr_with_red_checks_is_not_merged(repo: tuple[Path, Pa
     rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
     assert not rep.ok and rep.action == "ci_failed", rep.message
     assert gh.count(["pr", "merge"]) == 0
+
+
+def test_queue_pr_with_nonzero_gh_status_and_red_json_reports_failed_checks(
+    repo: tuple[Path, Path]
+) -> None:
+    local, bare = repo
+    write_ledger(local)
+
+    class NonzeroJsonGh(FakeRepoGh):
+        def __call__(self, args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+            if list(args)[:2] == ["pr", "checks"]:
+                self.calls.append(list(args))
+                red_checks = [check("fail", "ledger-fast"), check("fail", "pr-validation")]
+                return self.result(list(args), 1, json.dumps(red_checks), "checks failed")
+            return super().__call__(args, cwd)
+
+    gh = NonzeroJsonGh(bare, [])
+    rep = manager(local, FakeClock()).deliver_branch(
+        "USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue"
+    )
+
+    assert not rep.ok and rep.action == "ci_failed", rep.message
+    assert "ledger-fast" in rep.message and "pr-validation" in rep.message
+    assert "checks failed" not in rep.message  # the check names are the actionable diagnosis
+    assert gh.count(["pr", "merge"]) == 0
+    assert gh.prs[1]["state"] == "OPEN"
 
 
 def test_ledger_only_queue_pr_without_checks_merges_after_grace(repo: tuple[Path, Path]) -> None:
