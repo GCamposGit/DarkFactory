@@ -228,17 +228,28 @@ def default_launch(ticket_id: str, host: HostSpec) -> InFlight:
     return InFlight(ticket_id, host.id, proc, log_path, time.time())
 
 
-def running_fleet_tickets() -> set[str]:
-    """Tickets com ``run_ticket.py <ID> --fleet`` vivo neste host (sobrevivem a reinicio do despachante)."""
+def running_fleet_runs() -> dict[str, str]:
+    """``{ticket: host}`` dos ``run_ticket.py <ID> --fleet --host-id <H>`` vivos (sobrevivem a reinicio)."""
     import psutil
 
-    ids: set[str] = set()
+    runs: dict[str, str] = {}
     for proc in psutil.process_iter(["cmdline"]):
         cmd = proc.info.get("cmdline") or []
+        if "--fleet" not in cmd:
+            continue
         for i, arg in enumerate(cmd[:-1]):
-            if arg.endswith("run_ticket.py") and "--fleet" in cmd:
-                ids.add(cmd[i + 1])
-    return ids
+            if arg.endswith("run_ticket.py"):
+                host = cmd[cmd.index("--host-id") + 1] if "--host-id" in cmd[:-1] else ""
+                runs[cmd[i + 1]] = host
+    return runs
+
+
+def running_fleet_tickets() -> set[str]:
+    return set(running_fleet_runs())
+
+
+def running_fleet_hosts() -> set[str]:
+    return {h for h in running_fleet_runs().values() if h}
 
 
 def default_deploy() -> int:
@@ -277,6 +288,7 @@ class FleetDispatcher:
         deploy: Callable[[], int] = default_deploy,
         clock: Callable[[], float] = time.time,
         busy_ids_loader: Callable[[], set[str]] = lambda: set(),
+        busy_hosts_loader: Callable[[], set[str]] = lambda: set(),
         dry_run: bool = False,
         digest_hook: Optional[Callable[[], Any]] = None,
     ) -> None:
@@ -286,6 +298,7 @@ class FleetDispatcher:
         self.launch = launch
         self.deploy = deploy
         self.clock = clock
+        self.busy_hosts_loader = busy_hosts_loader  # hosts com run --fleet vivo fora deste processo
         self.busy_ids_loader = busy_ids_loader  # tickets com run/worktree de entrega fora deste processo
         self.dry_run = dry_run
         self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
@@ -345,8 +358,12 @@ class FleetDispatcher:
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
+        orphan_hosts = self.busy_hosts_loader()
         for host in sorted(self.config.hosts, key=lambda h: h.priority):
             if host.id in self.in_flight:
+                continue
+            if host.id in orphan_hosts:
+                idle[host.id] = "run_orfao_em_execucao"
                 continue
             if not queue:
                 idle[host.id] = "sem_ticket_executavel"
@@ -422,7 +439,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.notifications.daily_digest import maybe_send_due
 
     d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due,
-                        busy_ids_loader=running_fleet_tickets)
+                        busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts)
     if args.loop and not args.once:
         d.run_forever()
         return 0
