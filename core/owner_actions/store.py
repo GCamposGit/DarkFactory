@@ -178,6 +178,22 @@ def _raw_actions(payload: Any) -> list[Any]:
     return []
 
 
+def _writable_ledger_document(payload: Any) -> dict[str, Any]:
+    """Return a current ledger envelope, migrating the historical unversioned object shape.
+
+    Early ledgers stored ``{"actions": [...]}`` before the envelope version was introduced.
+    Preserve that supported shape on writes while still validating every explicit version and row.
+    """
+
+    if isinstance(payload, list):
+        return {"schema_version": SCHEMA_VERSION, "actions": payload}
+    if isinstance(payload, dict):
+        document = dict(payload)
+        document.setdefault("schema_version", SCHEMA_VERSION)
+        return document
+    return {"schema_version": SCHEMA_VERSION, "actions": []}
+
+
 def _validate_candidate_document(document: dict[str, Any]) -> None:
     """Reject a write unless the complete candidate ledger conforms to its schema.
 
@@ -432,12 +448,7 @@ class OwnerActionStore:
                 raise OwnerActionStoreCorrupt(
                     f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
                 )
-            if isinstance(payload, list):
-                document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
-            elif isinstance(payload, dict):
-                document = payload
-            else:
-                document = {"schema_version": SCHEMA_VERSION, "actions": []}
+            document = _writable_ledger_document(payload)
             _validate_candidate_document(document)
             result = fn(document, document["actions"])
             _validate_candidate_document(document)
@@ -456,12 +467,7 @@ class OwnerActionStore:
                 raise OwnerActionStoreCorrupt(
                     f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
                 )
-            if isinstance(payload, list):
-                file_document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
-            elif isinstance(payload, dict):
-                file_document = payload
-            else:
-                file_document = {"schema_version": SCHEMA_VERSION, "actions": []}
+            file_document = _writable_ledger_document(payload)
             _validate_candidate_document(file_document)
             control_rows = control_queue.list_control_rows()
             _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_rows})
@@ -571,12 +577,7 @@ class OwnerActionStore:
             raise OwnerActionStoreCorrupt(
                 f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
             )
-        if isinstance(payload, list):
-            document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
-        elif isinstance(payload, dict):
-            document = payload
-        else:
-            document = {"schema_version": SCHEMA_VERSION, "actions": []}
+        document = _writable_ledger_document(payload)
         _validate_candidate_document(document)
         if self.control:
             from core.owner_actions import control_queue
