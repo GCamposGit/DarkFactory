@@ -1897,7 +1897,7 @@ class PostgresControlStore:
                             current_lease_id = NULL
                         WHERE run_id = %s AND status = ANY(%s)
                         """,
-                        (reason, now_utc, now_utc, run_id, list(RUN_OPEN_JOB_STATUSES)),
+                        (normalize_cause_code(reason), now_utc, now_utc, run_id, list(RUN_OPEN_JOB_STATUSES)),
                     )
                     jobs_cancelled = cur.rowcount
 
