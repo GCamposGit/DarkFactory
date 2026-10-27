@@ -321,6 +321,11 @@ class _Store:
     def list_tickets(self) -> list[Any]:
         return [_TICKET]
 
+    parked: list[tuple[Any, ...]] = []
+
+    def update_status(self, ticket_id: str, status: Any, notes: Any = None, delivery_evidence: Any = None) -> None:
+        _Store.parked.append((ticket_id, status, delivery_evidence))
+
 
 class _Launcher:
     def __init__(self, sink: Any, agent: MagicMock, workspace: TicketWorkspace) -> None:
@@ -531,7 +536,9 @@ def test_red_ci_twice_requeues_with_cause_and_log(
     monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", lambda self, **k: _red("USR-99", "FAILED again"))
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == run_ticket.EXIT_ROUTE_WAIT
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 1
+    assert _Store.parked[-1][:2] == ("USR-99", run_ticket.DeliveryStatus.WAITING_HUMAN)
+    assert "FAILED again" in _Store.parked[-1][2]
     assert len(fixes) == 1
     assert sink.events[-1].cause_code == "ci_red_twice"
     assert "FAILED again" in sink.events[-1].message

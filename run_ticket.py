@@ -2213,18 +2213,24 @@ def _ci_red_twice_result(
     ticket: UserTicket, log: str, target_worktree: Path, current_branch: str, resume_cmd: str,
     progress: ProgressPublisher, as_json: bool, return_result: bool,
 ) -> Any:
-    """Second red CI: requeue the ticket (fleet requeue code) with cause `ci_red_twice` and the log recorded."""
+    """Second red CI: plain delivery failure (rc 1, no infra requeue); ticket parked in `waiting_human` with the log as evidence."""
     message = f"CI vermelho duas vezes no PR: {log}"
     progress.phase("ci", "failed", message, cause="ci_red_twice")
     progress.set_outcome(message, "ci_red_twice")
-    print(f"[AGUARDANDO] Ticket {ticket.id}: ci_red_twice ({ROUTE_WAIT_MARKER}).", file=sys.stderr)
+    try:
+        DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json").update_status(
+            ticket.id, DeliveryStatus.WAITING_HUMAN, delivery_evidence=f"ci_red_twice: {log}"
+        )
+    except Exception as exc:  # noqa: BLE001 - recording the park must not hide the failure itself
+        logger.warning("Could not park %s after ci_red_twice: %s", ticket.id, exc)
+    print(f"[ERRO] Ticket {ticket.id}: ci_red_twice. Worktree: {target_worktree}", file=sys.stderr)
     payload = {
-        "exit_code": EXIT_ROUTE_WAIT, "ok": False, "cause": "ci_red_twice", "error": log, "ticket_id": ticket.id,
+        "exit_code": 1, "ok": False, "cause": "ci_red_twice", "error": log, "ticket_id": ticket.id,
         "branch": current_branch, "worktree": str(target_worktree), "resume_command": resume_cmd,
     }
     if as_json and not return_result:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
-    return payload if return_result else EXIT_ROUTE_WAIT
+    return payload if return_result else 1
 
 
 def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> None:
