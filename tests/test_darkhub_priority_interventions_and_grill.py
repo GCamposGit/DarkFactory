@@ -401,3 +401,40 @@ def test_waiting_human_attempts_of_one_ticket_show_once_newest_wins(mock_hub_ser
         waiting = [i for i in report.items if i.kind == PriorityInterventionKind.WAITING_HUMAN]
         assert len(waiting) == 1 and waiting[0].metadata["run_id"] == "run-new"
         assert report.waiting_human_count == 1
+
+
+def test_stale_interventions_are_filtered_out(mock_hub_service: HubService):
+    """USR-407: planning-only tickets raise no WAITING_HUMAN; OA-HR of a dead run is hidden."""
+    from types import SimpleNamespace
+
+    from core.owner_actions.mirror import human_request_to_action
+
+    def hr(run_id: str) -> object:
+        return human_request_to_action(SimpleNamespace(
+            run_id=run_id, blocking_stage="development", kind="secret", guide_md="1. Faca algo",
+            probe_cmd="", created_at="2026-10-21T10:00:00+00:00",
+        ))
+
+    store = mock_hub_service.owner_action_store
+    store.upsert(hr("run-dead"))
+    store.upsert(hr("run-alive"))
+    mock_hub_service.demands_store.save_ticket(UserTicket(
+        id="USR-UMBRELLA", project_id="darkfac", title="Guarda-chuva", origin=DemandOrigin.USER,
+        status=DeliveryStatus.PLANNED, item_type=RoadmapItemType.FEATURE,
+        lifecycle_stage=LifecycleStage.EXECUTION, tags=["planning-only"], problem_statement="x",
+    ))
+    base = {"task_id": "j", "status": "WAITING_HUMAN", "title": "t", "project_id": "darkfac",
+            "cause_code": "grill_pending"}
+    queue = [
+        {**base, "ticket_id": "USR-UMBRELLA", "run_id": "run-umbrella", "run_status": "RUNNING"},
+        {**base, "ticket_id": "USR-REAL", "run_id": "run-real", "run_status": "RUNNING"},
+        {**base, "status": "RUNNING", "ticket_id": "USR-OLD", "run_id": "run-dead", "run_status": "expired"},
+    ]
+    with patch.object(mock_hub_service, "get_task_dashboard") as mock_dash:
+        mock_dash.return_value = MagicMock(queue=queue)
+        report = mock_hub_service.get_priority_interventions()
+    waiting = {i.action_target_id for i in report.items if i.kind == PriorityInterventionKind.WAITING_HUMAN}
+    assert waiting == {"USR-REAL"}
+    oa_ids = {i.action_target_id for i in report.items if i.kind == PriorityInterventionKind.OWNER_ACTION}
+    assert "OA-HR-run-alive-development" in oa_ids
+    assert "OA-HR-run-dead-development" not in oa_ids
