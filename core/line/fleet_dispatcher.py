@@ -21,6 +21,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import re
 import subprocess
 import sys
 import time
@@ -229,18 +230,23 @@ def default_launch(ticket_id: str, host: HostSpec) -> InFlight:
 
 
 def running_fleet_runs() -> dict[str, str]:
-    """``{ticket: host}`` dos ``run_ticket.py <ID> --fleet --host-id <H>`` vivos (sobrevivem a reinicio)."""
+    """``{ticket: host}`` dos ``run_ticket.py`` vivos (sobrevivem a reinicio).
+
+    ``--fleet --host-id <H>`` ocupa o host; ``--resume-delivery <ID>`` (entrega retomada pelo chat)
+    so tira o ticket da fila, sem host.
+    """
     import psutil
 
     runs: dict[str, str] = {}
     for proc in psutil.process_iter(["cmdline"]):
         cmd = proc.info.get("cmdline") or []
-        if "--fleet" not in cmd:
+        if not any(a.endswith("run_ticket.py") for a in cmd):
             continue
-        for i, arg in enumerate(cmd[:-1]):
-            if arg.endswith("run_ticket.py"):
-                host = cmd[cmd.index("--host-id") + 1] if "--host-id" in cmd[:-1] else ""
-                runs[cmd[i + 1]] = host
+        ticket = next((a for a in cmd if re.fullmatch(r"[A-Z]+-\d+", a)), None)
+        if ticket is None or not ({"--fleet", "--resume-delivery"} & set(cmd)):
+            continue
+        host = cmd[cmd.index("--host-id") + 1] if "--fleet" in cmd and "--host-id" in cmd[:-1] else ""
+        runs[ticket] = host
     return runs
 
 
