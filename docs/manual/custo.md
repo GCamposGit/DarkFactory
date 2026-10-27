@@ -13,9 +13,13 @@ da janela semanal e de 5h, custo de API e sucesso. Linha sem `ticket_id` e rejei
 
 ## Cota do Claude Code
 
-O Claude Code Desktop executa `scripts/claude_statusline.py` a cada 30 segundos. O script recebe
-o JSON do statusline, extrai somente `rate_limits.five_hour` e `rate_limits.seven_day` e grava
-`anthropic.json` atomicamente em `.factory/usage/providers/` (ou no `DARKFAC_STATE_ROOT` configurado).
+Durante uma sessão, o Claude Code executa `scripts/claude_statusline.py` quando o statusline é
+atualizado e, por causa de `refreshInterval: 30` em `.claude/settings.json`, também a cada 30
+segundos. O comando recebe o JSON do statusline pela entrada padrão. A documentação oficial
+confirma que `refreshInterval` repete o comando a cada N segundos, além das atualizações por
+eventos ([Claude Code — Customize your status line](https://code.claude.com/docs/en/statusline#manually-configure-a-status-line)).
+O script extrai somente `rate_limits.five_hour` e `rate_limits.seven_day` e grava `anthropic.json`
+atomicamente em `.factory/usage/providers/` (ou no `DARKFAC_STATE_ROOT` configurado).
 O adaptador considera snapshots de ate 120 segundos; assim, a leitura do statusline pode alimentar
 o roteador mesmo quando a CLI local nao esta autenticada ou nao fornece `rate_limits`.
 

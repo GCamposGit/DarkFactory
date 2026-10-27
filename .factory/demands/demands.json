@@ -11631,7 +11631,12 @@
     ],
     "non_goals": [],
     "reachability_contract": "",
-    "acceptance_criteria": [],
+    "acceptance_criteria": [
+      "Teste com payload simulado confirma que o statusline grava rate_limits.five_hour e rate_limits.seven_day como janelas de cota; anexar evidência sanitizada de leitura real no Claude Code Desktop do Notebook, com quota_supported=true e ambas as janelas preenchidas.",
+      "_find_claude prefere a instalação em %APPDATA%\\npm à cópia no cache do Codex, com teste cobrindo a precedência.",
+      "O código de probe não falsifica User-Agent.",
+      "O manual de custo descreve a coleta do statusline e o refreshInterval de 30 segundos conforme documentado oficialmente."
+    ],
     "suggested_files": [],
     "estimated_complexity": "medium",
     "dependencies": [],
