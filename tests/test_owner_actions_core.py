@@ -247,6 +247,25 @@ def test_next_id_and_add_consider_the_base_branch(tmp_path: Path) -> None:
     assert OwnerActionStore(isolated, remote_ref="main").next_id() == "OA-001"
 
 
+def test_next_id_considers_overlay_and_dynamic_sources(tmp_path: Path) -> None:
+    """USR-411: an id taken only in the overlay or dynamic file is never handed out again."""
+    base = tmp_path / "oa"
+    base.mkdir()
+    ledger = base / "owner_actions.json"
+    ledger.write_text(json.dumps({"schema_version": 1, "actions": [_draft().build("OA-001").to_record()]}), encoding="utf-8")
+    overlay = base / "resolutions.json"
+    overlay.write_text(json.dumps({"resolutions": {"OA-077": {}}}), encoding="utf-8")
+    dynamic = base / "dynamic.json"
+    dynamic.write_text(json.dumps({"schema_version": 1, "actions": [
+        _draft().build("OA-078").to_record(), _draft().build("OA-HR-x").to_record()]}), encoding="utf-8")
+    store = OwnerActionStore(ledger, overlay_path=overlay, dynamic_path=dynamic, remote_ref=None, control=False)
+    assert store.next_action_id() == "OA-079"
+    assert store.add(_draft()).id == "OA-079"
+    with pytest.raises(OwnerActionInvalid):
+        store.add(_draft().model_copy(update={"id": "OA-077"}))
+    assert cli.run(["next-id"], store=store, out=io.StringIO()) == 0
+
+
 def test_renumber_duplicate_owner_actions_after_sync(tmp_path: Path) -> None:
     """A rebase/merge that lands the same OA-NNN twice is repaired before the gate (USR-255).
 

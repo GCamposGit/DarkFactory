@@ -38,6 +38,10 @@ Quando um PR abre ou recebe novo commit tocando arquivos protegidos, o Hub avisa
 3. O PR fica pendente e e mergeado (squash, fixado no sha aprovado) assim que os checks obrigatorios ficarem verdes. Novo commit no PR muda o sha: o registro deixa de valer e o merge pendente e descartado; um novo aviso e enviado.
 4. Trilha de auditoria em `protected_publication/audit.jsonl` no diretorio de estado do Hub.
 
+### Fallback quando o aviso nao chega (USR-395)
+
+Se o envio ao Telegram falhar (variavel ausente, GitHub ou Telegram fora do ar), o Hub abre sozinho a OA "Assinar autorizacao do PR protegido #N" com o passo da assinatura manual. O motor (estagio de integracao) faz o mesmo ao abrir PR com arquivo protegido, mesmo que o webhook nao chegue. As variaveis abaixo precisam constar tambem no `environment` de `deploy/dokploy/docker-compose.hub.yml` (antes da correcao nao constavam, e o Hub nunca as via).
+
 ### Configuracao unica (Dokploy, servico do DarkHub)
 
 1. Dokploy, projeto darkfac-cloud, servico darkhub, aba Environment.

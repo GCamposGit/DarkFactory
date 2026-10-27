@@ -688,6 +688,20 @@ class IntegrationStageHandler:
             return self._find_open_pr(ws)
         return {"number": number, "url": url, "state": "OPEN"}
 
+    def _alert_protected_pr(self, ws: RunWorkspace, pr_number: int, default_branch: str) -> None:
+        """USR-395: PR com arquivo protegido vira OA de assinatura mesmo sem o webhook do Hub."""
+        try:
+            diff = self._git(["diff", "--name-only", f"origin/{default_branch}...HEAD"], ws)
+            if diff.returncode != 0:
+                return
+            from core.owner_actions.protected_pr_alert import alert_if_protected
+            from core.owner_actions.store import OwnerActionStore
+
+            files = [line.strip() for line in (diff.stdout or "").splitlines() if line.strip()]
+            alert_if_protected(OwnerActionStore(), pr_number, files, "PR aberto pelo motor sem autorizacao assinada")
+        except Exception as exc:  # noqa: BLE001 - side channel nunca bloqueia a integracao
+            logger.warning("protected pr alert skipped: %s", type(exc).__name__)
+
     def _find_or_create_pr(
         self, ws: RunWorkspace, default_branch: str, title: str, body: str
     ) -> Optional[dict[str, Any]]:
@@ -1126,6 +1140,8 @@ class IntegrationStageHandler:
             pr_number = pr.get("number")
             if not isinstance(pr_number, int):
                 return StageResult(outcome="failed", cause_code="gh_pr_missing_number")
+
+            self._alert_protected_pr(ws, pr_number, default_branch)
 
             ci_result = self._evaluate_checks(ws, pr_number, context)
             if ci_result is not None:

@@ -73,6 +73,8 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--hub-url", dest="hub_url", default=None)
     add.add_argument("--json", dest="as_json", action="store_true")
 
+    sub.add_parser("next-id", help="Mostra o proximo OA-NNN livre em todas as fontes")
+
     ls = sub.add_parser("list", help="Lista o backlog")
     ls.add_argument("--status", choices=["open", "done", "all"], default="open")
     ls.add_argument("--priority", choices=[p.value for p in ActionPriority], default=None)
@@ -181,6 +183,9 @@ def run(
                     emit("[ok] owner avisado no Telegram." if result["notified"] else "[aviso] Telegram nao enviou (item registrado mesmo assim).")
             return 0
 
+        if args.command == "next-id":
+            emit(active.next_action_id())
+            return 0
         if args.command == "list":
             loaded = active.load()
             for warning in loaded.warnings:

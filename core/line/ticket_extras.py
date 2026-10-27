@@ -82,9 +82,10 @@ def docs_sync_feedback(repo: Path, base: str = "origin/main", head: str = "HEAD"
     )
 
 
-_STATIC_CHECKS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("complexity_ratchet", (sys.executable, "scripts/complexity_ratchet.py")),
-    ("lint-imports", (sys.executable, "-m", "importlinter.cli")),
+# (rotulo, comando, arquivo que precisa existir no repo do ticket): projeto sem a ferramenta pula a checagem.
+_STATIC_CHECKS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("complexity_ratchet", (sys.executable, "scripts/complexity_ratchet.py"), "scripts/complexity_ratchet.py"),
+    ("lint-imports", (sys.executable, "-m", "importlinter.cli"), ".importlinter"),
 )
 
 
@@ -94,7 +95,9 @@ def static_checks_feedback(repo: Path) -> Optional[str]:
     Raises RuntimeError when a check cannot run (infra problem, not a violation).
     """
     failures: list[str] = []
-    for label, cmd in _STATIC_CHECKS:
+    for label, cmd, required in _STATIC_CHECKS:
+        if not (repo / required).is_file():
+            continue
         try:
             done = subprocess.run(
                 cmd, cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600
