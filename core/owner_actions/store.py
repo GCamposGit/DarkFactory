@@ -392,21 +392,38 @@ class OwnerActionStore:
     def get(self, action_id: str) -> OwnerAction | None:
         return next((a for a in self.load().actions if a.id == action_id), None)
 
-    def next_id(self) -> str:
-        highest = 0
-        for action in self._load_definitions().actions:
-            match = SEQUENTIAL_ID_PATTERN.match(action.id)
-            if match:
-                highest = max(highest, int(match.group(1)))
-        # Also reserve ids of rows that were skipped as invalid, so a repair never collides.
+    def next_action_id(self) -> str:
+        """Next free ``OA-NNN`` across every source of this store (USR-411)."""
+        return f"OA-{max(self._used_numbers(), default=0) + 1:03d}"
+
+    next_id = next_action_id
+
+    def _used_numbers(self, rows: list[Any] | None = None, remote_reserved: set[int] | None = None) -> set[int]:
+        """Numeric ids in definitions, skipped rows, control rows, dynamic file, overlay and base branch.
+
+        Non-numeric ids (``OA-HR-...``, ``OA-QR-...``) never match ``SEQUENTIAL_ID_PATTERN``.
+        """
+        ids: list[str] = [a.id for a in self._load_definitions().actions]
         payload, _ = _read_json(self.path)
-        for raw in _raw_actions(payload):
-            if isinstance(raw, dict):
-                match = SEQUENTIAL_ID_PATTERN.match(str(raw.get("id", "")))
-                if match:
-                    highest = max(highest, int(match.group(1)))
-        highest = max([highest, *self._remote_reserved_numbers()])
-        return f"OA-{highest + 1:03d}"
+        raw_rows = list(_raw_actions(payload)) + list(rows or [])
+        if self.control:
+            from core.owner_actions import control_queue
+
+            raw_rows += control_queue.list_control_rows()
+        if self.dynamic_path is not None:
+            dynamic_payload, _ = _read_json(self.dynamic_path)
+            raw_rows += _raw_actions(dynamic_payload)
+        ids += [str(r.get("id", "")) for r in raw_rows if isinstance(r, dict)]
+        ids += [str(key) for key in self._load_resolutions()[0]]
+        used = {int(m.group(1)) for m in map(SEQUENTIAL_ID_PATTERN.match, ids) if m}
+        return used | (self._remote_reserved_numbers() if remote_reserved is None else remote_reserved)
+
+    def _id_in_other_sources(self, action_id: str) -> bool:
+        if self.dynamic_path is not None:
+            payload, _ = _read_json(self.dynamic_path)
+            if any(isinstance(r, dict) and r.get("id") == action_id for r in _raw_actions(payload)):
+                return True
+        return action_id in self._load_resolutions()[0]
 
     def _remote_reserved_numbers(self) -> set[int]:
         """``OA-NNN`` numbers already used by ``self.remote_ref``'s copy of the file (USR-255).
@@ -496,7 +513,7 @@ class OwnerActionStore:
         def _append(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
             existing_ids = {str(r.get("id")) for r in rows if isinstance(r, dict)}
             action_id = draft.id or self._next_id_from_rows(rows, remote_reserved)
-            if action_id in existing_ids:
+            if action_id in existing_ids or self._id_in_other_sources(action_id):
                 raise OwnerActionInvalid(f"{action_id} ja existe")
             try:
                 action = draft.build(action_id)
@@ -508,15 +525,7 @@ class OwnerActionStore:
         return self._mutate_definitions(_append)
 
     def _next_id_from_rows(self, rows: list[Any], remote_reserved: set[int] | None = None) -> str:
-        highest = 0
-        for raw in rows:
-            if isinstance(raw, dict):
-                match = SEQUENTIAL_ID_PATTERN.match(str(raw.get("id", "")))
-                if match:
-                    highest = max(highest, int(match.group(1)))
-        reserved = self._remote_reserved_numbers() if remote_reserved is None else remote_reserved
-        highest = max([highest, *reserved])
-        return f"OA-{highest + 1:03d}"
+        return f"OA-{max(self._used_numbers(rows, remote_reserved), default=0) + 1:03d}"
 
     def upsert(self, action: OwnerAction) -> tuple[OwnerAction, bool]:
         """Idempotent insert for mirrored items: an existing id is returned untouched."""
