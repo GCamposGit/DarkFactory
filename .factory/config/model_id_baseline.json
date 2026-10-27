@@ -44,7 +44,7 @@
     ".factory/reviews/hf-critical-20260909/reviewer-dispositions.json": 1,
     ".factory/reviews/hf-wave1-luna/validation.json": 1,
     ".factory/roadmap/darkfac.json": 12,
-    "README.md": 3,
+    "README.md": 0,
     "core/acceptance/engine.py": 2,
     "core/acceptance/test_data.py": 1,
     "core/benchmarks/frontier.py": 1,

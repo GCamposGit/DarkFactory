@@ -1,6 +1,6 @@
 # DarkFac: Ecossistema de Skills & Fábrica Autônoma Multi-Modelo (2026 Edition)
 
-Framework de criação autônoma de software com múltiplos harnesses de agentes (Claude Code, Codex, Grok Build, Antigravity). Os modelos são citados apenas por alias; os ids concretos vivem em `.factory/config/model_registry.json` (hoje: `opus`, `sonnet`, `haiku`, `flash`, `grok-dev`, `grok-review`, `deepseek-flash`, `gemini-pro`, entre outros).
+Framework de criação autônoma de software com múltiplos harnesses de agentes (Claude Code, Codex, Grok Build, Antigravity). Os modelos são citados apenas por alias; os ids concretos vivem em `.factory/config/model_registry.json` (hoje: `opus`, `sonnet`, `haiku`, `flash`, entre outros).
 
 Construído sobre o conceito de **Dark Factory** (Fábrica sem luzes / Engenharia sem supervisão no teclado), operando em **Nível 3 de Autonomia**: especificações entram como issues, passam pelo pipeline PIV, são validadas por portões determinísticos de teste e recebem *auto-merge* quando 100% dos critérios forem atingidos.
 
