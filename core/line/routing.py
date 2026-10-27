@@ -434,6 +434,16 @@ def _probe_negative_write(provider_dir: Path, provider_id: str) -> None:
         logger.debug("negative probe cache not written: %s", exc)
 
 
+def _probe_negative_clear(provider_dir: Path, provider_id: str) -> None:
+    path = _probe_negative_path(provider_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.pop(provider_id, None) is not None:
+            path.write_text(json.dumps(data), encoding="utf-8")
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
 def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaDiagnosisReason]:
     """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing.
 
@@ -484,7 +494,7 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 continue
             from core.usage.probe_deadline import ProbeTimeout, run_with_deadline
 
-            if _probe_negative_read(provider_dir, provider_id):
+            if (snapshot_stale or not snapshot_file.is_file()) and _probe_negative_read(provider_dir, provider_id):
                 logger.info("Quota probe for %s skipped (negative cache); failing closed", provider_id)
                 return None, "probe_timeout"
             try:
@@ -499,16 +509,13 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 logger.warning(
                     "Quota data for %s is older than %ss (%s); failing closed", provider_id, max_age, reason
                 )
-                if snapshot_stale:
-                    _probe_negative_write(provider_dir, provider_id)
                 return None, reason
             raw_headroom = _quota_headroom(usage)
             if raw_headroom is None:
                 reason = "suspicious_reading" if usage.plausibility_flags else "probe_unavailable"
-                if reason == "probe_unavailable":
-                    _probe_negative_write(provider_dir, provider_id)
                 logger.info("Quota for %s is not usable (%s); failing closed", provider_id, reason)
                 return None, reason
+            _probe_negative_clear(provider_dir, provider_id)
             reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
             return max(0.0, raw_headroom - reserved), "healthy"
     except Exception as exc:  # pragma: no cover - defensive
