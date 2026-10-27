@@ -276,8 +276,7 @@ def failure_reason(rc: int, log_tail: str, lines: int = 8, chars: int = 800) -> 
     """Motivo da falha: ultimas linhas do log (sem segredo); nunca vazio."""
     from core.line.agent_cli import redact_secrets
 
-    kept = "
-".join(redact_secrets(log_tail or "").strip().splitlines()[-lines:])[-chars:]
+    kept = chr(10).join(redact_secrets(log_tail or "").strip().splitlines()[-lines:])[-chars:]
     return kept or f"sem saida no log; exit_code={rc}"
 
 
