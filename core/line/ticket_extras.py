@@ -4,6 +4,8 @@ Helpers without launcher globals, wired by `run_ticket.py`:
 - `run_research`: policy + Knowledge Ledger of the MAIN checkout; without a deterministic web search in
   this process the stage records `research_skipped` (never invents sources).
 - `docs_sync_feedback`: the manual-sync check over the ticket diff.
+- `static_checks_feedback` (USR-398): complexity ratchet and `lint-imports` over the worktree, as CI runs them.
+- `pre_review_feedback`: the combined output of both checks.
 - `build_learning` / `publish_learning`: learning pack of the delivery, stored where the Hub and the
   daily digest look for it (`LearningPackStore`, `packs_index.json`). Failures are logged, never raised.
 """
@@ -11,6 +13,8 @@ Helpers without launcher globals, wired by `run_ticket.py`:
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -76,6 +80,37 @@ def docs_sync_feedback(repo: Path, base: str = "origin/main", head: str = "HEAD"
         "docs-sync: arquivo coberto alterado sem alterar a pagina do manual. Atualize a pagina "
         "(docs/manual/) no mesmo diff, ou use o trailer 'Docs-Unchanged: <motivo>'.\n" + "\n".join(lines)
     )
+
+
+_STATIC_CHECKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("complexity_ratchet", (sys.executable, "scripts/complexity_ratchet.py")),
+    ("lint-imports", (sys.executable, "-m", "importlinter.cli")),
+)
+
+
+def static_checks_feedback(repo: Path) -> Optional[str]:
+    """None when the complexity ratchet and lint-imports pass; otherwise their combined output.
+
+    Raises RuntimeError when a check cannot run (infra problem, not a violation).
+    """
+    failures: list[str] = []
+    for label, cmd in _STATIC_CHECKS:
+        try:
+            done = subprocess.run(
+                cmd, cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"{label} nao executou: {type(exc).__name__}: {exc}") from exc
+        if done.returncode != 0:
+            output = (done.stdout + done.stderr).strip()[-3000:]
+            failures.append(f"{label} reprovou (exit {done.returncode}):\n{output}")
+    return "\n\n".join(failures) or None
+
+
+def pre_review_feedback(repo: Path) -> Optional[str]:
+    """Combined docs-sync, ratchet and lint-imports feedback for the agent; None when all pass."""
+    parts = [f for f in (docs_sync_feedback(repo), static_checks_feedback(repo)) if f]
+    return "\n\n".join(parts) or None
 
 
 def build_learning(repo: Path, ticket_id: str, base: str, head: str = "HEAD") -> Any:

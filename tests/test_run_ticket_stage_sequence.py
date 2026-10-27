@@ -249,6 +249,7 @@ def test_feature_without_research_artifact_never_reaches_merge(
 ) -> None:
     """USR-376: RESEARCH is mandatory between PLAN and BUILD; a skip WITH its reason is an artifact."""
     monkeypatch.setattr(run_ticket.ticket_extras, "run_research", lambda *a, **k: SimpleNamespace(kind="none"))
+    monkeypatch.setattr(run_ticket.ticket_extras, "static_checks_feedback", lambda *a, **k: None)
     assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) != 0
     assert "RESEARCH" in capsys.readouterr().err
     assert line.calls == ["PLAN"]  # BUILD never started
@@ -299,6 +300,7 @@ def test_docs_sync_failure_goes_back_to_build_and_blocks_delivery_if_unfixed(
 ) -> None:
     fixes: list[str] = []
     monkeypatch.setattr(run_ticket.ticket_extras, "docs_sync_feedback", lambda *_a, **_k: "docs-sync: falta motor.md")
+    monkeypatch.setattr(run_ticket.ticket_extras, "static_checks_feedback", lambda *_a, **_k: None)
     monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda wt, t, label, feedback: fixes.append(feedback))
     monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
 
@@ -308,3 +310,18 @@ def test_docs_sync_failure_goes_back_to_build_and_blocks_delivery_if_unfixed(
     assert "DOCS" in capsys.readouterr().err
     assert "REVIEW" not in line.calls
     line.merged.assert_not_called()
+
+
+def test_ratchet_failure_goes_back_to_agent_once_with_combined_output(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixes: list[str] = []
+    monkeypatch.setattr(run_ticket.ticket_extras, "docs_sync_feedback", lambda *_a, **_k: "docs-sync: falta motor.md")
+    monkeypatch.setattr(run_ticket.ticket_extras, "static_checks_feedback", lambda *_a, **_k: "complexity_ratchet reprovou")
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda wt, t, label, feedback: fixes.append(feedback))
+    monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
+
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) != 0
+
+    assert len(fixes) == 1 and "falta motor.md" in fixes[0] and "complexity_ratchet reprovou" in fixes[0]
+    assert "REVIEW" not in line.calls

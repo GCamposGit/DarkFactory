@@ -2135,18 +2135,19 @@ def _stage_docs_sync(
     progress: ProgressPublisher,
     external_project: bool,
 ) -> Any:
-    """DOCS stage (USR-376): None when the manual is in sync with the diff, else a refusal payload.
+    """DOCS stage (USR-376): None when manual, complexity ratchet and lint-imports pass, else a refusal.
 
     A violation sends the development agent back once to update the manual (same pattern as the gate's
     self-correction); if the manual is still out of sync the delivery is refused. A failure of the
-    version-control query is infra, not a violation: it is logged and the stage passes.
+    version-control query is infra, not a violation: it is logged and the stage passes. USR-398: the same
+    pass runs the complexity ratchet and `lint-imports`, so fleet PRs do not go red in CI.
     """
     if external_project:
         return None
     feedback: Optional[str] = None
     for attempt in range(2):
         try:
-            feedback = ticket_extras.docs_sync_feedback(target_worktree)
+            feedback = ticket_extras.pre_review_feedback(target_worktree)
         except RuntimeError as exc:
             logger.warning("docs-sync de %s nao verificado: %s", ticket.id, exc)
             return None
