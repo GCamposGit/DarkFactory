@@ -146,7 +146,7 @@ def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):
             self.info = {"cmdline": cmd}
 
     procs = [P(["python", "C:/x/run_ticket.py", "USR-1", "--fleet", "--host-id", "grokbox"]),
-             P(["python", "run_ticket.py", "USR-2"]), P(None)]
+             P(["python", "run_ticket.py", "USR-2"]), P(["py", "run_ticket.py", "--resume-delivery", "USR-3"]), P(None)]
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: procs)
-    assert fd.running_fleet_tickets() == {"USR-1"}
+    assert fd.running_fleet_tickets() == {"USR-1", "USR-3"}
     assert fd.running_fleet_hosts() == {"grokbox"}
