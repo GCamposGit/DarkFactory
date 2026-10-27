@@ -2909,7 +2909,7 @@
       "resolved_at": "2026-10-26T11:20:00Z"
     },
     {
-      "id": "OA-077",
+      "id": "OA-078",
       "kind": "decision",
       "title": "Ligar o aviso de PR protegido no Telegram: chat id no Hub e decidir sobre a chave de assinatura [USR-395]",
       "priority": "medium",
