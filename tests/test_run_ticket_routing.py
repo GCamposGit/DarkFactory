@@ -584,6 +584,20 @@ def test_dry_run_json_reports_the_operating_harness_and_why_it_was_elected(
     assert payload["operating_harness"] == "codex" and payload["route_reason"] == "headroom"
 
 
+def test_ticket_complexity_reaches_the_router_high_elects_the_operating_harness(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-399: high prefers the operating harness (quota > 15%); medium keeps the headroom winner."""
+    _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+    selected = {}
+    for complexity in ("high", "medium"):
+        monkeypatch.setattr(_TICKET, "estimated_complexity", complexity, raising=False)
+        assert main(["USR-99", "--dry-run", "--json"]) == 0
+        selected[complexity] = json.loads(capsys.readouterr().out)["selected_harness"]
+    assert selected == {"high": "codex", "medium": "claude"}
+
+
 def test_dry_run_without_any_signal_reports_no_operating_harness_and_the_headroom_reason(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

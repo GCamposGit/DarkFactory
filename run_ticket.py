@@ -124,6 +124,12 @@ PLAN_ATTEMPTS = 2
 REVIEW_ATTEMPTS = 4
 
 
+def _routing_complexity(ticket: UserTicket) -> Optional[str]:
+    """Ticket `estimated_complexity` normalized for `pick(complexity=...)`; unknown/absent => None (USR-399)."""
+    value = (ticket.estimated_complexity or "").lower().strip()
+    return value if value in ("low", "medium", "high") else None
+
+
 def estimate_ticket_size(ticket: UserTicket) -> tuple[str, list[str]]:
     """Classify ticket as 'small', 'medium', or 'large' based on complexity, criteria, and text volume (USR-113)."""
     reasons: list[str] = []
@@ -757,7 +763,10 @@ def _invoke_fix_agent(
     Best-effort: if no route is available or the call itself fails, the next focal/gate attempt simply
     fails again for the same reason, which the caller already treats as an (eventually final) failure.
     """
-    route = pick("development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE, project_id=ticket.project_id)
+    route = pick(
+        "development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
+        complexity=_routing_complexity(ticket),
+    )
     if route is None:
         logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
         return None
@@ -2553,7 +2562,10 @@ def _stage_route(
                 "preflight", "failed", f"harness {target_harness} recusado: {quota_reason}", cause="quota_critical"
             )
             # Find recommended healthy harness
-            rec_route = pick("development", caps, mode=DEVELOPMENT_MODE, project_id=ticket.project_id)
+            rec_route = pick(
+                "development", caps, mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
+                complexity=_routing_complexity(ticket),
+            )
             if rec_route:
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
             return 2
@@ -2570,7 +2582,7 @@ def _stage_route(
         print(f"[+] Harness de operacao detectado: {operating_harness}")
     route = pick(
         "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
-        project_id=ticket.project_id,
+        project_id=ticket.project_id, complexity=_routing_complexity(ticket),
     )
     if route is None:
         progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
