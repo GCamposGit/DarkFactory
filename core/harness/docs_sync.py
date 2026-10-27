@@ -102,6 +102,26 @@ def check(root: Path, base: str, head: str) -> list[Violation]:
     return find_violations(changed, load_pages(root))
 
 
+DICTIONARY_PAGE = f"{MANUAL_DIR}/dicionario_dados.md"
+_PATHS_RE = re.compile(r"^\s*<!--\s*paths:\s*(.*?)\s*-->\s*$")
+
+
+def check_dictionary(root: Path) -> list[str]:
+    """Lista os ``.factory/**/*.json`` versionados sem padrao ``<!-- paths: -->`` no dicionario."""
+    page = root / DICTIONARY_PAGE
+    patterns: list[str] = []
+    if page.is_file():
+        for line in page.read_text(encoding="utf-8").splitlines():
+            match = _PATHS_RE.match(line)
+            if match:
+                patterns += [p.strip() for p in match.group(1).split(",") if p.strip()]
+    tracked = [
+        p for p in _git(root, "-c", "core.quotepath=off", "ls-files", "-z", ".factory").split(chr(0))
+        if p.endswith(".json")
+    ]
+    return sorted(p for p in tracked if not any(_matches(p, pat) for pat in patterns))
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -109,10 +129,26 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             pass
     parser = argparse.ArgumentParser(description="Checagem docs-sync do manual")
-    parser.add_argument("--base", required=True)
-    parser.add_argument("--head", required=True)
+    parser.add_argument("--base")
+    parser.add_argument("--head")
     parser.add_argument("--root", default=".")
+    parser.add_argument(
+        "--dictionary", action="store_true", help="checa .factory/*.json sem entrada no dicionario"
+    )
     args = parser.parse_args(argv)
+    if args.dictionary:
+        try:
+            missing = check_dictionary(Path(args.root).resolve())
+        except RuntimeError as exc:
+            print(f"erro: {exc}", file=sys.stderr)
+            return 2
+        for path in missing:
+            print(f"dicionario: sem entrada para {path}")
+        if not missing:
+            print("dicionario: ok")
+        return 1 if missing else 0
+    if not args.base or not args.head:
+        parser.error("--base e --head sao obrigatorios sem --dictionary")
     try:
         violations = check(Path(args.root).resolve(), args.base, args.head)
     except RuntimeError as exc:

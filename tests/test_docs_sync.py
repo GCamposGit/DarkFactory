@@ -81,3 +81,18 @@ def test_tests_dir_never_triggers(shas):
 
 def test_glob_matches_covered_file(shas):
     assert [v.covered_file for v in _run(shas, "glob")] == ["pkg/x.py"]
+
+
+def test_dictionary_lists_tracked_json_without_entry(tmp_path):
+    repo = tmp_path / "dict_repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    page = "<!-- covers: docs/manual/dicionario_dados.md -->\n<!-- paths: .factory/config/*.json -->\n"
+    files = {
+        docs_sync.DICTIONARY_PAGE: page,
+        ".factory/config/a.json": "{}\n",
+        ".factory/novo/b.json": "{}\n",
+    }
+    _commit(repo, files, "base")
+    assert docs_sync.check_dictionary(repo) == [".factory/novo/b.json"]
+    assert docs_sync.main(["--dictionary", "--root", str(repo)]) == 1
