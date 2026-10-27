@@ -1,6 +1,6 @@
 # DarkFac: Ecossistema de Skills & Fábrica Autônoma Multi-Modelo (2026 Edition)
 
-Um framework completo para criação autônoma de software utilizando múltiplos agentes de codificação (**Antigravity com Gemini 3.8 Flash**, **Grok 4.6**, **Claude 3.7 Sonnet**, **DeepSeek-R1 / V4 Pro**, **Qwen3** e **Cluster Local Ollama**).
+Framework de criação autônoma de software com múltiplos harnesses de agentes (Claude Code, Codex, Grok Build, Antigravity). Os modelos são citados apenas por alias; os ids concretos vivem em `.factory/config/model_registry.json` (hoje: `opus`, `sonnet`, `haiku`, `flash`, `grok-dev`, `grok-review`, `deepseek-flash`, `gemini-pro`, entre outros).
 
 Construído sobre o conceito de **Dark Factory** (Fábrica sem luzes / Engenharia sem supervisão no teclado), operando em **Nível 3 de Autonomia**: especificações entram como issues, passam pelo pipeline PIV, são validadas por portões determinísticos de teste e recebem *auto-merge* quando 100% dos critérios forem atingidos.
 
@@ -37,44 +37,38 @@ O fluxo, a atualização idempotente, os seeds de governança e a preparação d
 
 ---
 
-## 🚀 Destaques da Arquitetura
+## Arquitetura em resumo
 
-1. **Pipeline Híbrido (Local-First + Nuvem)**:
-   - **Local (Ollama `localhost:11434`)**: Execução de custo $0 com `qwen-fast` (tarefas rápidas, boilerplate, schemas), `qwen-deep` (lógica local estruturada) e `gpt-review` (auditor independente de qualidade local).
-   - **Nuvem de Alto Rendimento**: `Gemini 3.8 Flash` como orquestrador nativo do Antigravity (1M-2M tokens de contexto), `Grok 4.6` para pesquisas dinâmicas e resolução ágil em poucos turnos, e `Claude 3.7 Sonnet` / `DeepSeek-R1` para planejamento arquitetural profundo.
-2. **Portões Determinísticos Invioláveis**:
-   - Validação executada via código (`core/harness/runner.py`) e verificador de marcadores (`core/harness/markers.py`). Nenhum prompt de LLM pode aprovar um PR por conversa.
-3. **Auditoria Adversarial Cruzada**:
-   - Todo PR é revisado por um modelo de família diferente daquele que implementou o código, eliminando viés de confirmação.
-4. **Governança Inalterável**:
-   - Guardrail determinístico (`core/orchestrator/guard.py`) que bloqueia alterações não autorizadas em arquivos de governança (`MISSION.md`, `FACTORY_RULES.md`).
-5. **Compatibilidade Multi-Agente**:
-   - Funciona nativamente no **Antigravity** (`.agents/skills/`), **Claude Code** (`.claude/skills/`), **Cursor** e CLI.
+Um motor único (`run_ticket.py`), fila no control store, despachante de frota, roteamento por cota, portão determinístico, deploy blue-green e governança protegida. Visão atual conferida contra o código: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Regras dos agentes: [`AGENTS.md`](AGENTS.md); contexto da fase: [`docs/FASE_ATUAL.md`](docs/FASE_ATUAL.md).
 
 ---
 
-## 📦 As 17 Skills do Ecossistema
+## Skills (`.agents/skills/`)
 
-| Pacote | Nome | Propósito |
-| :--- | :--- | :--- |
-| **00** | `continuous-self-improvement` | **Loop mestre prioritário**: checkpoint no 2º prompt, RCA 5-Whys, aprendizado ativo e meta One-Shot. |
-| **01** | `prime-intelligence` | Ingestão e mapeamento massivo de codebases sem queimar tokens. |
-| **02** | `plan-product-architecture` | Entrevista PRD, definição de *non-goals* e arquitetura headless. |
-| **03** | `model-router` | Roteamento dinâmico de modelos e otimização de custo/performance. |
-| **04** | `autonomous-piv-loop` | Loop Prime-Plan-Implement-Validate com isolamento de contexto fresco. |
-| **05** | `validation-harness` | Escada de validação em 5 níveis e contrato de marcadores. |
-| **06** | `adversarial-review` | Auditoria cruzada multi-modelo (Ollama local + nuvem independente). |
-| **07** | `build-dark-factory` | Instalador da fábrica autônoma completa (Níveis 0 a 5). |
-| **08** | `meta-skills-evolver` | Auto-evolução de regras, síntese de novas skills e detecção de drift. |
-| **09** | `local-audio-transcription` | Transcrição local na GPU com faster-whisper e separação estéreo. |
-| **10** | `topic-deep-research` | Fundamentação teórica, papers científicos (arXiv) e ledger de citações. |
-| **11** | `repo-code-scout` | Mineração de repositórios e reúso de componentes open-source testados. |
-| **12** | `daily-model-benchmark` | Benchmarking diário e Fronteira de Pareto de custo-benefício de LLMs. |
-| **13** | `session-learning-pack` | **Cognitive Uplift**: Síntese executiva pós-sessão (Feynman 3 níveis, âncoras mentais, escudo de defesa, Anki e HTML interativo). |
-| **14** | `speculative-model-racing` | Corridas especulativas A/B/n em cascata e torneios empíricos com os Top 3 modelos. |
-| **15** | `anti-slop-content-engine` | Geração multi-propósito com linter anti-AI-slop, auditoria de cadência rítmica e personas calibradas. |
-| **16** | `visual-asset-studio` | Ateliê visual para banners sociais, diagramas de arquitetura, mockups de UI e ícones com acoplamento a textos. |
+| Pasta | Propósito |
+| :--- | :--- |
+| `00-continuous-self-improvement` | Reavalia incidentes e falhas e transforma evidência em melhorias delimitadas de skills. |
+| `01-prime-intelligence` | Mapeia e ingere a estrutura de um repositório (arquitetura, stack, convenções). |
+| `02-plan-product-architecture` | Produz PRD, decisões de arquitetura e handoffs pequenos a partir da demanda. |
+| `03-model-router` | Avalia tarefa, privacidade e cota para despachar modelos locais ou de nuvem. |
+| `04-autonomous-piv-loop` | Executa tickets pelo ciclo Prime-Plan-Implement-Validate, fail-closed em worktrees. |
+| `05-validation-harness` | Opera validação determinística (sintaxe, tipos, unidade, integração, E2E, holdout). |
+| `06-adversarial-review` | Revisão adversarial com contraexemplos reproduzíveis e revisor independente. |
+| `07-build-dark-factory` | Adota ou inicia projetos greenfield/brownfield pela Project Adoption Gateway. |
+| `08-meta-skills-evolver` | Audita drift de regras, gasto de tokens e falhas recorrentes para evoluir skills e roteamento. |
+| `09-local-audio-transcription` | Transcreve áudio localmente com faster-whisper (GPU), com separação estéreo. |
+| `10-topic-deep-research` | Pesquisa aprofundada (papers, arXiv) registrada no Knowledge Ledger. |
+| `11-repo-code-scout` | Minera repositórios open-source com licença permissiva e testes, para reúso. |
+| `12-daily-model-benchmark` | Benchmark diário de modelos e Fronteira de Pareto custo-benefício. |
+| `13-session-learning-pack` | Learning Pack pós-sessão (Feynman, âncoras mentais, flashcards). |
+| `14-speculative-model-racing` | Corridas A/B/n e torneios empíricos entre modelos, com portões determinísticos. |
+| `15-anti-slop-content-engine` | Geração de conteúdo com auditoria léxica anti-AI-slop e personas calibradas. |
+| `16-visual-asset-studio` | Ativos visuais: banners, diagramas, mockups e ícones, com render local. |
+| `17-specialized-test-subagent` | Delega execução de testes a subagentes baratos e devolve um relatório destilado. |
+| `18-second-brain-knowledge` | Cliente MCP do Segundo Cérebro com citações verificáveis e fail-closed. |
+| `19-run-ticket` | Ciclo completo de ticket com roteamento por cota, piso de 15% e portão oficial. |
 
+`.agents/skills/` é a fonte; `.claude/skills/` é espelho gerado por `python scripts/sync_skills.py`.
 
 ---
 
@@ -139,16 +133,18 @@ python -m core.visual.cli diagram --title "Distributed Agent Event Bus"
 python -m core.visual.cli illustrate --text "Immutable write-ahead log for deterministic recovery" --type blog_hero --offline
 ```
 
-### 7. Sincronizar Skills para outros ambientes
+### 7. Sincronizar Skills
 ```bash
 python scripts/sync_skills.py
 ```
 
-`.agents/skills/` é o catálogo canônico para Antigravity e agentes compatíveis; `.claude/skills/` é o espelho para Claude Code. Grok deve seguir `AGENTS.md` e `FACTORY_RULES.md` na raiz.
+Grok e Codex seguem `AGENTS.md` e `FACTORY_RULES.md` na raiz.
 
 ---
 
 ## 📚 Documentação Completa
 - [Arquitetura do Sistema](docs/ARCHITECTURE.md)
+- [Manual por tema](docs/manual/)
+- [Plano vigente](docs/plans/PLANO_V0_2026-10-24.md)
 - [Guia e Benchmark de Modelos](docs/MODEL_SELECTION_GUIDE.md)
 - [Playbook de Operação da Dark Factory](docs/DARK_FACTORY_PLAYBOOK.md)
