@@ -2061,13 +2061,9 @@ def create_worker_app(
                     cwd=str(root_path),
                     **subp_kwargs,
                 )
-            runtime_saved: Dict[str, Any] = {}
-            try:  # USR-374/394: runtime state edited locally must not abort the pull
-                from core.infra.node_sync import stash_runtime_state
+            from core.infra.node_sync import restore_runtime_state, stash_runtime_state
 
-                runtime_saved = stash_runtime_state(root_path)
-            except Exception:  # noqa: BLE001
-                pass
+            runtime_saved = stash_runtime_state(root_path)  # USR-374/394: never raises
             preserved_notes = preserve_files_unversioned_upstream(root_path, subp_kwargs)
             pull_res = subprocess.run(
                 "git pull",
@@ -2087,10 +2083,7 @@ def create_worker_app(
             )
             commit = rev_res.stdout.strip() if rev_res.returncode == 0 else "unknown"
             output = (pull_res.stdout or "") + ("\n" + pull_res.stderr if pull_res.stderr else "")
-            if runtime_saved:
-                from core.infra.node_sync import restore_runtime_state
-
-                preserved_notes = [*preserved_notes, *restore_runtime_state(root_path, runtime_saved)]
+            preserved_notes = [*preserved_notes, *restore_runtime_state(root_path, runtime_saved)]
             if preserved_notes:
                 output = "\n".join(preserved_notes) + "\n" + output
             return SystemUpdateResponse(
