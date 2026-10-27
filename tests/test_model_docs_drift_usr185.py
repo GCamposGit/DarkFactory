@@ -58,8 +58,8 @@ def test_missing_and_unknown_markers_flagged(tmp_path: Path) -> None:
 _SLICE11 = {
     ".agents/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
     ".claude/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
-    ".agents/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
-    ".claude/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
+    ".agents/skills/19-run-ticket/SKILL.md": ("dev_subagent_models",),
+    ".claude/skills/19-run-ticket/SKILL.md": ("dev_subagent_models",),
     ".claude/agents/test-runner.md": ("test_subagent_model",),
 }
 

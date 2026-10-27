@@ -170,12 +170,62 @@ def test_telegram_login_link_grants_the_session_once_valid(access_service: HubSe
     assert not verify_login_code(code, "rotated-token", now=1500)
 
     remote = TestClient(app, client=("203.0.113.9", 4000))
-    sent = []
-    monkeypatch.setattr(HubService, "send_owner_login_link", lambda self: sent.append(1) or "sent")
-    assert remote.post("/api/auth/telegram-link").status_code == 200 and sent == [1]
+    monkeypatch.setattr(HubService, "request_owner_login", lambda self, now=None: ("sent", "poll-x"))
+    assert remote.post("/api/auth/telegram-link").status_code == 200
     page = remote.get("/api/auth/telegram-callback", params={"code": make_login_code(token)})
     assert page.status_code == 200 and token in page.text and page.headers["cache-control"] == "no-store"
     assert remote.get("/api/auth/telegram-callback", params={"code": "1-bad"}).status_code == 401
+
+
+def test_browser_login_request_is_approved_via_telegram_and_polled(access_service: HubService, monkeypatch):
+    """USR-406: pedido -> aprovacao (callback do bot) -> polling entrega a sessao uma unica vez."""
+    from core.integrations.telegram import TelegramConfig
+
+    token = access_service.session_token
+    remote = TestClient(app, client=("203.0.113.9", 4000))
+    sent = []
+    cfg = TelegramConfig(bot_token="t", authorized_chat_ids=[42])
+    monkeypatch.setattr("core.integrations.telegram.load_telegram_config", lambda role="ops": cfg)
+    monkeypatch.setattr(
+        "hub.backend.service_catalog.TelegramGateway.send_message",
+        lambda self, chat_id, text, buttons=None: sent.append(buttons) or True,
+    )
+    monkeypatch.setattr("core.integrations.telegram_webhooks.effective_webhook_secret", lambda: "")
+
+    res = remote.post("/api/auth/telegram-link")
+    assert res.status_code == 200
+    poll_token = res.json()["poll_token"]
+    approve_id = sent[0][0][0]["callback_data"].split(":", 1)[1]
+    assert remote.get("/api/auth/telegram-poll", params={"poll_token": poll_token}).json() == {"status": "pending"}
+
+    def tap(user_id):
+        update = {"update_id": 1, "callback_query": {"id": "c", "data": f"hublogin:{approve_id}", "from": {"id": user_id}}}
+        return remote.post("/api/webhooks/telegram/owner", json=update).json()
+
+    assert tap(7)["authorized"] is False  # not the owner chat
+    assert remote.get("/api/auth/telegram-poll", params={"poll_token": poll_token}).json()["status"] == "pending"
+    assert tap(42)["authorized"] is True
+    done = remote.get("/api/auth/telegram-poll", params={"poll_token": poll_token}).json()
+    assert done == {"status": "approved", "session_token": token}
+    assert remote.get("/api/auth/telegram-poll", params={"poll_token": poll_token}).json() == {"status": "expired"}
+    assert remote.get("/api/auth/telegram-poll", params={"poll_token": "guess"}).json() == {"status": "expired"}
+
+    # Remote caller holding the token is confirmed by /session (it used to 401 and wipe the token).
+    assert remote.get("/api/session", headers={"X-Hub-Session": token}).status_code == 200
+    assert remote.get("/api/session", headers={"X-Hub-Session": "wrong"}).status_code == 401
+
+
+def test_login_link_opened_on_another_device_also_releases_the_requesting_browser(access_service: HubService, monkeypatch):
+    from hub.backend.auth import make_login_code
+
+    token = access_service.session_token
+    desktop = TestClient(app, client=("203.0.113.9", 4000))
+    phone = TestClient(app, client=("198.51.100.7", 5000))
+    monkeypatch.setattr(HubService, "request_owner_login", lambda self, now=None: ("sent", "poll-1"))
+    access_service._login_reqs["poll-1"] = {"approve_id": "appr-1", "expires": 9e12, "approved": False}
+    page = phone.get("/api/auth/telegram-callback", params={"code": make_login_code(token), "req": "appr-1"})
+    assert page.status_code == 200 and token in page.text  # the phone itself gets the session
+    assert desktop.get("/api/auth/telegram-poll", params={"poll_token": "poll-1"}).json()["status"] == "approved"
 
 
 def test_telegram_webhook_requires_secret_derived_from_bot_token(access_service: HubService, monkeypatch):

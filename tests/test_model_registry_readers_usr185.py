@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.line import agent_cli, routing, subagent_routing
+from core.line import agent_cli, routing
 from core.models import registry
 from core.portfolio import router_optimizer
 from core.usage import adapters
@@ -70,21 +70,6 @@ def test_role_reference_only_for_registry_roles() -> None:
     assert routing.HarnessPin(model="some/other-model").model == "some/other-model"
 
 
-def test_subagent_config_json_has_no_literal_models_and_equals_defaults() -> None:
-    raw = json.loads((REPO_ROOT / ".factory" / "config" / "subagent_model_routing.json").read_text(encoding="utf-8"))
-    assert "models" not in raw
-    cfg = subagent_routing.parse_config(raw)
-    assert cfg.models == {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
-    assert cfg == subagent_routing.default_config()
-    assert subagent_routing._DEFAULT_FORBIDDEN_MODELS == ("astra", "claude-fable", "fable", "gpt-6-astra")
-
-
-def test_subagent_legacy_models_key_still_honored() -> None:
-    raw = json.loads((REPO_ROOT / ".factory" / "config" / "subagent_model_routing.json").read_text(encoding="utf-8"))
-    raw["models"] = {"haiku": "h", "sonnet": "s", "opus": "o"}
-    assert subagent_routing.parse_config(raw).models == {"haiku": "h", "sonnet": "s", "opus": "o"}
-
-
 def test_router_optimizer_and_usage_ids_unchanged() -> None:
     paid = router_optimizer.PAID_DIRECT_MODELS
     assert paid["research"]["model"] == paid["coding_medium"]["model"] == "gemini-3.8-flash"
@@ -138,11 +123,4 @@ def test_gateway_readers_ids_unchanged() -> None:
         "critical": "anthropic/claude-3.7-sonnet",
     }
     assert acceptance._PARETO_FLASH == "deepseek-v4.1-flash"
-
-
-def test_subagent_forbidden_models_come_from_registry_when_absent() -> None:
-    raw = json.loads((REPO_ROOT / ".factory" / "config" / "subagent_model_routing.json").read_text(encoding="utf-8"))
-    assert "forbidden_autonomous_models" not in raw
-    cfg = subagent_routing.parse_config(raw)
-    assert cfg.forbidden_autonomous_models == ["astra", "claude-fable", "fable", "gpt-6-astra"]
 

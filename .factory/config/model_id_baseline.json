@@ -56,7 +56,6 @@
     "core/line/agent_cli.py": 1,
     "core/line/auth_bootstrap.py": 1,
     "core/line/operating_harness.py": 1,
-    "core/line/subagent_routing.py": 1,
     "core/owner_actions/cli.py": 2,
     "core/owner_actions/models.py": 2,
     "core/owner_actions/protected_publish.py": 1,

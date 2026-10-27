@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -404,6 +405,45 @@ QuotaDiagnosisReason = Literal[
 ]
 
 
+PROBE_NEGATIVE_TTL_S = 600.0  # USR-404: a failed/expired probe is not repeated for 10 min
+
+
+def _probe_negative_path(provider_dir: Path) -> Path:
+    return provider_dir.parent / "probe_negative.json"
+
+
+def _probe_negative_read(provider_dir: Path, provider_id: str) -> bool:
+    try:
+        data = json.loads(_probe_negative_path(provider_dir).read_text(encoding="utf-8"))
+        return time.time() - float(data[provider_id]) < PROBE_NEGATIVE_TTL_S
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _probe_negative_write(provider_dir: Path, provider_id: str) -> None:
+    path = _probe_negative_path(provider_dir)
+    try:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[provider_id] = time.time()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError as exc:
+        logger.debug("negative probe cache not written: %s", exc)
+
+
+def _probe_negative_clear(provider_dir: Path, provider_id: str) -> None:
+    path = _probe_negative_path(provider_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.pop(provider_id, None) is not None:
+            path.write_text(json.dumps(data), encoding="utf-8")
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
 def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaDiagnosisReason]:
     """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing.
 
@@ -454,10 +494,14 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 continue
             from core.usage.probe_deadline import ProbeTimeout, run_with_deadline
 
+            if (snapshot_stale or not snapshot_file.is_file()) and _probe_negative_read(provider_dir, provider_id):
+                logger.info("Quota probe for %s skipped (negative cache); failing closed", provider_id)
+                return None, "probe_timeout"
             try:
                 usage = run_with_deadline(provider_id, lambda a=adapter: a.inspect(force=snapshot_stale))
             except ProbeTimeout as timeout_exc:
                 logger.warning("Quota probe timed out %s; failing closed", timeout_exc.as_dict())
+                _probe_negative_write(provider_dir, provider_id)
                 return None, "probe_timeout"
             checked = _parse_iso_utc(usage.checked_at)
             if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
@@ -471,6 +515,7 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 reason = "suspicious_reading" if usage.plausibility_flags else "probe_unavailable"
                 logger.info("Quota for %s is not usable (%s); failing closed", provider_id, reason)
                 return None, reason
+            _probe_negative_clear(provider_dir, provider_id)
             reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
             return max(0.0, raw_headroom - reserved), "healthy"
     except Exception as exc:  # pragma: no cover - defensive

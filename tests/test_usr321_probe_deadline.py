@@ -76,9 +76,13 @@ def test_routing_fails_closed_with_probe_timeout(monkeypatch: pytest.MonkeyPatch
         def inspect(self, force: bool = False):  # noqa: ANN201
             time.sleep(5)
 
+    monkeypatch.setattr(routing, "state_root", lambda: tmp_path)
     monkeypatch.setattr(adapters, "build_default_adapters", lambda _dir: [SlowAdapter()])
     monkeypatch.setenv(probe_deadline.ENV_PROBE_DEADLINE, "0.2")
     headroom, reason = routing._quota_headroom_diagnosis("anthropic")
     assert headroom is None
     assert reason == "probe_timeout"
+    # USR-404: the timeout is cached, so the second call does not probe (and does not wait) again.
+    started = time.monotonic()
     assert routing._default_quota_headroom("anthropic") is None
+    assert time.monotonic() - started < 0.1

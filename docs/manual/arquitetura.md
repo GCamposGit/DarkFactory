@@ -62,7 +62,7 @@ Módulos que permanecem, todos com chamador em produção:
 
 | Módulo | Para que serve | Quem usa |
 | --- | --- | --- |
-| `guard.py` | Lista de arquivos de governança protegidos | `core/line/protected_edit.py`, `dogfood.py`, `subagent_routing.py` |
+| `guard.py` | Lista de arquivos de governança protegidos | `core/line/protected_edit.py`, `dogfood.py` |
 | `delivery.py`, `delivery_executor.py` | Entrega e integração | `core/workflow/integration_handler.py`, `hub/backend/webhooks.py` |
 | `build_artifacts.py`, `deployment_adapter.py`, `compose_render.py`, `bluegreen.py` | Artefatos imutáveis, deploy e blue-green | `core/line/stage_release.py`, `scripts/dokploy_*.py` |
 | `release_pipeline.py` | Pipeline de release (build, staging, produção, backup) | `core/workflow/release_handlers.py`, `hub/backend/service.py` |
@@ -95,3 +95,7 @@ porque `pick` e o monitor de tokens usam `_quota_headroom`;
 reexports. A logica vive em mixins por dominio: `service_line`, `service_interventions`,
 `service_progress`, `service_catalog`, `service_usage`, `service_ai`, `service_integrations`
 e a guarda SSRF em `service_net`.
+
+## DarkHub remoto: login pelo rodape (USR-406)
+
+Sem sessao, o Hub remoto mostra "Modo leitura" no rodape. Tocar nele ja chama `POST /api/auth/telegram-link`, que cria um pedido pendente (token de consulta secreto, guardado so no navegador que pediu; vale 5 min) e envia ao Telegram do owner a mensagem com o botao "Aprovar" (callback `hublogin:<id>`, aceito so de chat/usuario autorizado) e um link. O navegador consulta `GET /api/auth/telegram-poll` a cada 2 s; ao aprovar, recebe a sessao uma unica vez, guarda e recarrega em modo edicao. Abrir o link no celular tambem libera o celular e o navegador que pediu. `/api/session` agora confirma (200) quem ja envia o token valido; antes devolvia 401 e o frontend apagava o token recem-obtido, deixando o Hub em somente leitura.
