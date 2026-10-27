@@ -150,3 +150,24 @@ def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: procs)
     assert fd.running_fleet_tickets() == {"USR-1", "USR-3"}
     assert fd.running_fleet_hosts() == {"grokbox"}
+
+
+def test_failure_records_exit_code_and_reason(tmp_path: Path):
+    log = tmp_path / "t.log"
+    log.write_text("linha\nTraceback\nValueError: boom token=sk-abcdefghijklmnopqrstuvwx\n", encoding="utf-8")
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.run_cycle()
+    e.d.in_flight["grokbox"].log_path = log
+    e.handles["USR-01"].rc = 3
+    cyc = e.d.run_cycle()
+    row = cyc["recent_failures"][0]
+    assert (row["ticket"], row["host"], row["exit_code"], row["kind"]) == ("USR-01", "grokbox", 3, "failure")
+    assert "ValueError: boom" in row["reason"] and "sk-abcdefghijklmnopqrstuvwx" not in row["reason"]
+
+
+def test_failure_without_log_still_has_reason(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.run_cycle()
+    e.handles["USR-01"].rc = 75
+    row = e.d.run_cycle()["recent_failures"][0]
+    assert row["kind"] == "infra" and "exit_code=75" in row["reason"]
