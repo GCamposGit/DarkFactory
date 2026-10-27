@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -35,6 +35,10 @@ from hub.backend.service_net import SafeRedirectHandler, DisallowedDestinationEr
 
 
 logger = logging.getLogger("darkhub.service")
+
+LOGIN_REQUEST_TTL_SEC = 300
+LOGIN_REQUEST_MIN_GAP_SEC = 10
+LOGIN_CALLBACK_PREFIX = "hublogin:"
 
 
 class CatalogMixin:
@@ -417,22 +421,43 @@ class CatalogMixin:
         return secrets.compare_digest(token.strip(), self._session_token)
 
     def send_owner_login_link(self, now: Optional[float] = None) -> str:
-        """Send a one-time DarkHub login link to the owner's Telegram chat.
+        """Open a browser login request and send the approval message to the owner's Telegram.
 
-        Returns "sent", "rate_limited" or "unavailable". The link only ever goes to the authorized
+        Returns "sent", "rate_limited" or "unavailable". The message only ever goes to the authorized
         owner chats already configured for the bots, so triggering it anonymously grants nothing.
         """
+        outcome, _ = self.request_owner_login(now)
+        return outcome
+
+    @property
+    def _login_reqs(self) -> Dict[str, Dict[str, Any]]:
+        return self.__dict__.setdefault("_login_requests_store", {})
+
+    @_login_reqs.setter
+    def _login_reqs(self, value: Dict[str, Dict[str, Any]]) -> None:
+        self.__dict__["_login_requests_store"] = value
+
+    def request_owner_login(self, now: Optional[float] = None) -> tuple[str, Optional[str]]:
+        """USR-406: create a pending login (poll token stays in the requesting browser only)."""
         from hub.backend.auth import make_login_code
 
         current = time.time() if now is None else now
-        last = getattr(self, "_last_login_link_at", 0.0)
-        if current - last < 60:
-            return "rate_limited"
+        if current - getattr(self, "_last_login_link_at", 0.0) < LOGIN_REQUEST_MIN_GAP_SEC:
+            return "rate_limited", None
         self._last_login_link_at = current
+        pending = {k: v for k, v in self._login_reqs.items() if v["expires"] > current}
+        if len(pending) >= 5:
+            self._login_reqs = pending
+            return "rate_limited", None
+        poll_token = secrets.token_urlsafe(32)
+        approve_id = secrets.token_urlsafe(16)
+        pending[poll_token] = {"approve_id": approve_id, "expires": current + LOGIN_REQUEST_TTL_SEC, "approved": False}
+        self._login_reqs = pending
         base = (os.getenv("DARKHUB_PUBLIC_URL") or os.getenv("DARKHUB_BASE_URL") or "https://darkhub.ggcampos.com").rstrip("/")
-        link = f"{base}/api/auth/telegram-callback?code={make_login_code(self._session_token, current)}"
-        text = "<b>DarkHub</b>: link de acesso de uso unico (vale 10 minutos). Se nao foi voce, ignore."
-        buttons = [[{"text": "Entrar no DarkHub", "url": link}]]
+        link = f"{base}/api/auth/telegram-callback?code={make_login_code(self._session_token, current)}&req={approve_id}"
+        text = "<b>DarkHub</b>: alguem pediu acesso de edicao (vale 5 minutos). Se nao foi voce, ignore."
+        buttons = [[{"text": "Aprovar", "callback_data": f"{LOGIN_CALLBACK_PREFIX}{approve_id}"}],
+                   [{"text": "Abrir no DarkHub deste aparelho", "url": link}]]
         from core.integrations.telegram import load_telegram_config
 
         for role in ("owner", "ops"):
@@ -443,10 +468,32 @@ class CatalogMixin:
                 gateway = TelegramGateway(config=cfg)
                 targets = list(cfg.authorized_chat_ids) or list(cfg.authorized_user_ids)
                 if any(gateway.send_message(chat_id=chat_id, text=text, buttons=buttons) for chat_id in targets):
-                    return "sent"
+                    return "sent", poll_token
             except Exception as exc:  # noqa: BLE001 - login must degrade, never crash the Hub
-                logger.warning("login link: telegram role %s falhou: %s", role, exc.__class__.__name__)
-        return "unavailable"
+                logger.warning("login request: telegram role %s falhou: %s", role, exc.__class__.__name__)
+        self._login_reqs.pop(poll_token, None)
+        return "unavailable", None
+
+    def approve_login_request(self, approve_id: str, now: Optional[float] = None) -> bool:
+        """Mark the pending request approved (callers must have proven owner identity)."""
+        current = time.time() if now is None else now
+        for entry in self._login_reqs.values():
+            if entry["expires"] > current and secrets.compare_digest(entry["approve_id"], approve_id or ""):
+                entry["approved"] = True
+                return True
+        return False
+
+    def poll_login_request(self, poll_token: str, now: Optional[float] = None) -> Dict[str, Any]:
+        """Poll a pending login; the session token is delivered once, only to the holder of poll_token."""
+        current = time.time() if now is None else now
+        entry = self._login_reqs.get(poll_token or "")
+        if not entry or entry["expires"] <= current:
+            self._login_reqs.pop(poll_token or "", None)
+            return {"status": "expired"}
+        if not entry["approved"]:
+            return {"status": "pending"}
+        del self._login_reqs[poll_token]
+        return {"status": "approved", "session_token": self._session_token}
 
     def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
         """

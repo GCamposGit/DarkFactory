@@ -1,5 +1,5 @@
 <!-- covers: docs/manual/dicionario_dados.md -->
-<!-- paths: .factory/config/*.json, .factory/context_intelligence.json, .factory/projects.json, .factory/demands/*.json, .factory/owner_actions/*.json, .factory/roadmap/*.json, .factory/infra/*.json, .factory/learning/*.json, .factory/telegram/*.json, .factory/n8n/workflows/*.json, .factory/governance/authorizations/*.json, .factory/worktrees/*.json, .factory/planning/*.json, .factory/research/*/ledger.json, .factory/baselines/*.json, .factory/experiments/*.json, .factory/reviews/*.json, .factory/reports/*.json, .factory/runs/*.json -->
+<!-- paths: .factory/config/*.json, .factory/projects.json, .factory/demands/*.json, .factory/owner_actions/*.json, .factory/roadmap/*.json, .factory/infra/*.json, .factory/learning/*.json, .factory/telegram/*.json, .factory/n8n/workflows/*.json, .factory/governance/authorizations/*.json, .factory/worktrees/*.json, .factory/planning/*.json, .factory/research/*/ledger.json, .factory/baselines/*.json, .factory/experiments/*.json, .factory/reviews/*.json, .factory/reports/*.json, .factory/runs/*.json -->
 # Dicionario de dados dos `.factory/**/*.json`
 
 Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `python C:\dev\DarkFac\core\harness\docs_sync.py --dictionary` sai com 1 se algum `.json` versionado nao casar com um padrao da linha `paths:` acima. Ao criar um JSON novo em `.factory/`, acrescente o padrao e a entrada.
@@ -17,7 +17,6 @@ Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `pyt
 | `.factory/learning/learning_ledger.json` | Registro de aprendizado da sessao (preferencias, erros, verificacoes). | `core/learning/`, `core/learning_pack/analyzer.py`, `core/line/retrospective.py` | `core/learning/tracker.py` | `session_id`, `turns`, `preferences`, `mistakes`, `transfers`, `verifications` |
 | `.factory/worktrees/manifest.json` | Leases de worktrees ativas. | `core/git/autonomy.py` | `core/git/autonomy.py` | `base_sha`, `leases`, `updated_at` |
 | `.factory/worktrees/autonomy-plan.json` | Plano de autonomia de uma worktree (ticket, branch, fencing). | `core/demands/specifier.py`, `core/roadmap/sources.py` | agente do ticket | `ticket_id`, `branch`, `cwd`, `base_sha`, `fencing_token` |
-| `.factory/context_intelligence.json` | Mapa de stack, entrypoints e camadas do repo (skill 01-prime-intelligence). | agentes (skill `01-prime-intelligence`) | skill `01-prime-intelligence` | `stack`, `entrypoints`, `domain_layers`, `reachability`, `governance`, `validation` |
 
 ## Configuracao (`.factory/config/*.json`, 12 arquivos)
 
@@ -32,9 +31,6 @@ Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `pyt
 | `subscription_prices.json` | Preco das assinaturas para custo por ticket. | `core/usage/ticket_cost.py`, `hub/backend/service_usage.py` | edicao via ticket | `status`, `plans` |
 | `complexity_baseline.json` | Baseline do ratchet de complexidade. | `scripts/complexity_ratchet.py` | `scripts/complexity_ratchet.py` | `functions`, `limit` |
 | `model_id_baseline.json` | Baseline do censo de ids de modelo fora do registry. | `scripts/model_id_census.py` | `scripts/model_id_census.py` | `total`, `files` |
-| `model_discovery.json` | Fontes e teto de gasto da descoberta de modelos. | skill `12-daily-model-benchmark` | edicao via ticket | `spend_cap_usd`, `sources` |
-| `qualification_battery.json` | Bateria de tarefas de referencia para qualificar modelos. | skill `14-speculative-model-racing` | edicao via ticket | `battery_version`, `default_budget`, `contract`, `tools`, `reference_tasks` |
-| `qualification_spend.json` | Tetos diarios e por candidato do gasto de qualificacao. | skill `14-speculative-model-racing` | edicao via ticket | `provider`, `api_key_env`, `daily_cap_usd`, `per_candidate_cap_usd`, `max_output_tokens` |
 
 
 ## Governanca (`.factory/governance/authorizations/*.json`, 5 arquivos)
