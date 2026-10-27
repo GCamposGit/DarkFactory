@@ -1391,7 +1391,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         executable = self._find_claude()
         if executable:
             cli_usage = self._probe_claude_cli(executable)
-            if cli_usage:
+            if cli_usage and cli_usage.quota_supported:
                 return cli_usage
 
         if snapshot and not self._is_snapshot_fresh(snapshot):
@@ -1480,15 +1480,21 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
 
     @staticmethod
     def _find_claude() -> Optional[str]:
-        direct = shutil.which("claude") or shutil.which("claude.cmd")
-        if direct:
-            return direct
         user_home = Path.home()
         app_data = os.environ.get("APPDATA")
         local_app_data = os.environ.get("LOCALAPPDATA")
         candidates = [
             Path(app_data) / "npm" / "claude.cmd" if app_data else None,
             Path(app_data) / "npm" / "claude" if app_data else None,
+        ]
+        for candidate in candidates:
+            if candidate and candidate.is_file():
+                return str(candidate)
+
+        direct = shutil.which("claude") or shutil.which("claude.cmd")
+        if direct:
+            return direct
+        candidates = [
             Path(local_app_data) / "Programs" / "Claude" / "claude.exe" if local_app_data else None,
             user_home / ".local" / "bin" / "claude",
             user_home / ".local" / "bin" / "claude.exe",
