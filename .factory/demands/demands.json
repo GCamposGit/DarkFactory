@@ -11617,8 +11617,8 @@
     "project_id": "darkfac",
     "title": "Cota do Claude sem fonte real: CLI nao logada e auth status sem rate_limits (seguimento do USR-382)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "d73b384e390bab37f201eefd718f35c1b8938c8d",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11641,6 +11641,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T13:39:43.691571Z",
-    "updated_at": "2026-10-25T13:39:43.691571Z"
+    "updated_at": "2026-10-27T10:00:34.860452Z"
   }
 ]
