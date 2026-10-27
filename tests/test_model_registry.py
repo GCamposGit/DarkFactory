@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from core.line import subagent_routing
 from core.models import registry as reg
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -82,11 +81,6 @@ def test_missing_file_uses_embedded_fallback(tmp_path: Path) -> None:
 def test_default_registry_is_cached() -> None:
     reg.clear_cache()
     assert reg.get_registry() is reg.get_registry()
-
-
-def test_subagent_routing_defaults_come_from_registry() -> None:
-    models = subagent_routing.default_config().models
-    assert models == {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
 
 
 def test_census_runs_and_reports_a_number() -> None:

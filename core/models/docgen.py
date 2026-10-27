@@ -23,12 +23,10 @@ TARGETS: dict[str, tuple[str, ...]] = {
     ".claude/skills/03-model-router/SKILL.md": ("roles_skill",),
     ".agents/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
     ".claude/skills/17-specialized-test-subagent/SKILL.md": ("test_subagent_model",),
-    ".agents/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
-    ".claude/skills/19-run-ticket/SKILL.md": ("dev_subagent_models", "haiku_rules"),
+    ".agents/skills/19-run-ticket/SKILL.md": ("dev_subagent_models",),
+    ".claude/skills/19-run-ticket/SKILL.md": ("dev_subagent_models",),
     ".claude/agents/test-runner.md": ("test_subagent_model",),
 }
-
-SUBAGENT_ROUTING_PATH = ".factory/config/subagent_model_routing.json"
 
 _MARKER_RE = re.compile(
     r"(?P<begin><!-- BEGIN model-registry:(?P<name>[a-z0-9_-]+) -->)\r?\n(?P<body>.*?)(?P<end><!-- END model-registry:(?P=name) -->)",
@@ -119,20 +117,6 @@ def render_dev_subagent_models(reg: ModelRegistry) -> str:
     return "\n".join([
         f"- **Padrao**: subagente {_alias(reg, 'subagent.sonnet').capitalize()} (`{reg.roles['subagent.sonnet']}`) para todo codigo; "
         f"planning usa {_alias(reg, 'subagent.opus').capitalize()} (`{reg.roles['subagent.opus']}`).",
-        f"- **Haiku** (`{reg.roles['subagent.haiku']}`): elegivel apenas pelas regras abaixo.",
-    ])
-
-
-def render_haiku_rules(reg: ModelRegistry) -> str:
-    cfg = json.loads((REPO_ROOT / SUBAGENT_ROUTING_PATH).read_text(encoding="utf-8"))
-    lim = cfg["limits"]
-    types = "; ".join(f"`{t}` ({'/'.join(c)})" for t, c in cfg["eligible_task_types"].items())
-    return "\n".join([
-        f"- Tipos elegiveis (complexidade): {types}.",
-        f"- Limites: ate {lim['max_files']} arquivos e {lim['max_changed_lines']} linhas; {lim['max_haiku_attempts']} tentativa(s) Haiku, "
-        f"depois Sonnet (`{reg.roles['subagent.sonnet']}`).",
-        "- Tags proibidas: " + ", ".join(f"`{t}`" for t in cfg["forbidden_tags"]) + ".",
-        "- Estagios proibidos: " + ", ".join(f"`{t}`" for t in cfg["forbidden_stages"]) + ".",
     ])
 
 
@@ -143,7 +127,6 @@ RENDERERS: dict[str, Callable[[ModelRegistry], str]] = {
     "grill_thresholds": render_grill_thresholds,
     "test_subagent_model": render_test_subagent_model,
     "dev_subagent_models": render_dev_subagent_models,
-    "haiku_rules": render_haiku_rules,
 }
 
 
