@@ -2664,7 +2664,7 @@
       "title": "Solicitar o developer token do Google Ads para o piloto da mansaodolago.com",
       "priority": "medium",
       "status": "done",
-      "why": "A fase M1 do piloto (USR-279) le dados do Google Ads; o acesso de producao a API exige um developer token aprovado pelo Google, o que pode levar dias. Comecar agora evita bloquear a prova da V0. | 27/10: owner gerou o developer token do Google Ads (nivel Test); aprovacao Basic pendente no Google. Token fica com o owner ate a fabrica pedir o cofre.",
+      "why": "A fase M1 do piloto (USR-279) le dados do Google Ads; o acesso de producao a API exige um developer token aprovado pelo Google, o que pode levar dias. Comecar agora evita bloquear a prova da V0. | 27/10: owner gerou o token, mas o Google informou que developer token nao e mais exigido; o acesso a API Google Ads passou a ser gerenciado no console do Google Cloud (projeto com a API Google Ads ativada + OAuth). Esse passo vira OA nova quando o piloto for escolhido.",
       "blocks": [
         "USR-279"
       ],
