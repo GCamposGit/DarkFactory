@@ -1,72 +1,70 @@
-# Arquitetura da Fábrica de Software Autônoma (Dark Factory)
+# Arquitetura da DarkFac
 
-A **Dark Factory Multi-Modelo** é uma infraestrutura de engenharia autônoma projetada para receber especificações e entregar software validado, testado e mesclado sem intervenção humana no teclado (Nível 3 de autonomia).
+Visão enxuta da fábrica **atual**, conferida contra o código em 27/10/2026. Detalhes por tema vivem em [`docs/manual/`](manual/); regras dos agentes em [`AGENTS.md`](../AGENTS.md); contexto da fase (hosts, canais, orçamento) em [`FASE_ATUAL.md`](FASE_ATUAL.md); plano vigente em [`plans/PLANO_V0_2026-10-24.md`](plans/PLANO_V0_2026-10-24.md). Planos substituídos ficam em `docs/archive/plans/`.
 
----
-
-## 1. Topologia do Sistema
-
-A fábrica é composta por três camadas integradas:
+## 1. Fluxo de ponta a ponta
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                    1. Camada de Intenção                    │
-│   • PRD / Issues do GitHub / Especificação de Requisitos    │
-│   • Lista Inegociável de Non-Goals (MISSION.md)            │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│             2. Roteador Híbrido (Local + Nuvem)             │
-│   • Ollama Local: qwen-fast (Micro-tarefas), qwen-deep      │
-│   • Antigravity Core: Gemini 3.8 Flash (Orquestrador)       │
-│   • Nuvem Especializada: Grok 4.6, Claude 3.7, DeepSeek-R1  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│            3. Motor de Execução & Validação (PIV)           │
-│   • Prime -> Plan -> Implement -> Validate                  │
-│   • Portões Determinísticos (runner.py + markers.py)        │
-│   • Auditoria Adversarial Cruzada (gpt-review + Nuvem)      │
-│   • Guardrail de Arquivos Protegidos (guard.py)             │
-│   • Auto-Merge em Nível 3 (Green-Gate Only)                 │
-└─────────────────────────────────────────────────────────────┘
+canal (chat, Telegram, Hub)  ->  fila (control store + demands.json)
+        -> despachante da frota  -> run_ticket.py (motor único) em um host
+        -> portão (runner.py) -> revisão cruzada -> PR + CI -> merge squash
+        -> deploy do Hub (GHCR + blue-green) -> ticket `completed` com evidência
 ```
 
----
+Todo canal passa pelo mesmo caminho e pelo mesmo registro.
 
-## 2. Os 5 Componentes Estruturais
+## 2. Motor único: `run_ticket.py` e `core/line/`
 
-1. **Guidance Layer**:
-   - `MISSION.md`: Define a visão, a jornada principal e os *non-goals* permanentes.
-   - `FACTORY_RULES.md`: Regras de execução sem supervisão e limites operacionais.
-   - `AGENTS.md`: Convenções de código, tipagem e padrões de engenharia.
-2. **Validation Harness**:
-   - Escada determinística em 5 níveis: Análise Estática -> Testes Unitários -> Integração -> E2E Headless -> Testes Holdout.
-   - Contrato de marcadores: `[STEP_START]`, `[STEP_PASS]`, `[STEP_FAIL]`, `[TEST_COUNT]`, `[HARNESS_PASS]`.
-3. **Workflow Engine**:
-   - Máquina de estados determinística (`core/line` (máquina de estados da esteira)).
-   - Guardrail de caminhos protegidos (`core/orchestrator/guard.py`).
-4. **Deploy & Entrega Contínua**:
-   - Pipeline automatizado de empacotamento e entrega acionado pós-merge.
-5. **Trigger / Agendador Autônomo**:
-   - Agendamento de polling via Task Scheduler (Windows) ou Cron/Systemd (Linux) que dispara o ciclo de trabalho sem depender de webhooks frágeis.
+- `run_ticket.py` é o launcher (skill `19-run-ticket`): cria tickets (`--create --queue-only`), prepara a worktree, escolhe o harness, roda os estágios e entrega.
+- Os estágios canônicos estão em `core/line/stages.py` (`Stage`): INTAKE, GRILL, PLAN, RESEARCH, BUILD, VALIDATE, REVIEW, MERGE, DEPLOY_SMOKE, DOCS, LEARNING. Cada um deixa um artefato em `.darkfac/runs/<run_id>/`, validado por `require_artifact`.
+- Implementação por estágio em `core/line/stage_*.py` (grill, planning, build, review, integration, release); orquestração em `ticket_engine.py` e `ticket_stages.py`; worktrees em `workspace.py`; reserva por host em `line_lock.py`.
+- Ambiguidade material em linguagem natural pausa em `WAITING_HUMAN` (Gate G1, `core/demands/grill.py`).
+- Persistência de workflow em `core/workflow/` (`control_store.py`, `readiness.py`); ver [`manual/arquitetura.md`](manual/arquitetura.md) e [`manual/motor.md`](manual/motor.md).
 
----
+## 3. Fila
 
-## 3. Vertical E2E de Referência: Echo Garden
+- Fonte de verdade: control store (`core/demands/queue_store.py`): Postgres se `DARKFAC_HF02_DATABASE_URL` estiver definida, senão SQLite local `control.db`. Tickets entram por `run_ticket.py --create --queue-only` ou pelo intake do Telegram, sem worktree nem PR.
+- `.factory/demands/demands.json` é o ledger versionado (histórico e fallback); `queue_store.merge_tickets` une as duas fontes. Ver [`manual/fila.md`](manual/fila.md).
+- Ações só do owner vivem em `.factory/owner_actions/owner_actions.json` (itens `OA-NNN`, exibidos no Hub).
 
-`core/game/` isola o domínio determinístico do jogo das integrações de modelo, imagem e apresentação. O motor aceita estado + movimento e retorna um novo estado sem rede, relógio ou I/O. A camada one-shot recebe contribuições estruturadas dos três tiers, valida-as contra o motor e somente então exporta o HTML autocontido.
+## 4. Despachante da frota
 
-O driver oficial é `cli`, com chamadas `library` nos níveis unitário e de integração. A suíte live é separada da validação compartilhada para não consumir APIs em clones limpos, mas não aceita `skip` como sucesso durante um ensaio solicitado: credencial ausente, modelo indisponível, resposta inválida ou fallback de provedor falham o gate.
+- `core/line/fleet_dispatcher.py` (`--loop` / `--once --dry-run`) roda sem sessão de chat: lê `demands.json` de `origin/main`, escolhe tickets `planned` executáveis e despacha **um por host livre** com `run_ticket.py --fleet --host-id <host>`.
+- Topologia em `.factory/config/line_fleet.json`: `grokbox` (prioridade 1), `notebook` (2), `desktop` (3), um slot cada, máximo 3 simultâneos.
+- `DARKFAC_FLEET_DISABLED_HOSTS` (ids separados por vírgula) tira hosts da frota sem editar o JSON.
+- Falha de infra reenfileira o ticket (continua `planned`, com cooldown). Ver [`manual/frota.md`](manual/frota.md).
 
-Os limites de segurança são:
+## 5. Roteamento por cota
 
-- respostas de LLM são dados validados, nunca código executado;
-- chaves permanecem no ambiente/registro e não entram nos artefatos;
-- chamadas cloud têm timeout e erro estruturado;
-- imagens usam bytes base64 retornados pela API oficial e limites de tamanho;
-- o HTML não carrega bibliotecas, scripts ou conteúdo remoto.
+- `core/line/routing.py` (`pick`) elege o harness por etapa entre Claude, Codex, Grok Build e Antigravity (este só leitura), usando a cota restante de cada conta e a configuração em `.factory/config/line_routing.json`.
+- **Piso de 15%**: com cota restante `<= 15%`, ou cota desconhecida/vencida, o harness não é eleito para escrever código; sem override textual do owner, falha fechado.
+- Modelos são resolvidos por alias em `.factory/config/model_registry.json` (`core/models/registry.py`). Revisão sempre por família de modelo diferente da do implementador. Ver [`manual/roteamento.md`](manual/roteamento.md).
 
-O plano completo e os critérios de aceitação estão em `docs/DARK_FACTORY_E2E_TEST_PLAN.md`.
+## 6. Portão e CI
+
+- Portão local único: `python core/harness/runner.py --quick` (suíte em paralelo com `pytest-xdist`, verdict cacheado por árvore, `suite_lock` por máquina, workers remotos via `remote_dispatch.py`). Sucesso exige `[HARNESS_PASS]` (`markers.py`). Ver [`manual/portao.md`](manual/portao.md).
+- CI (`.github/workflows/ci.yml`): `pr-tests` roda guard de governança, `lint-imports`, `scripts/complexity_ratchet.py`, `core.harness.docs_sync` e `runner.py --profile pr`; há validação em Ubuntu e Windows; `main-tests` e `continuous-deployment` rodam no `main`. O merge exige CI obrigatório (ruleset do `main`).
+
+## 7. Deploy do Hub
+
+- O Hub é publicado como imagem no GHCR por sha (`.github/workflows/hub-image.yml`) e implantado em **blue-green** no Traefik (`core/orchestrator/bluegreen.py`).
+- `scripts/dokploy_redeploy.py` é o passo pós-merge único; espera a imagem GHCR do sha e reporta o resultado por serviço. Runbook: [`runbooks/dokploy_redeploy.md`](runbooks/dokploy_redeploy.md).
+- `core/infra/deploy_classifier.py` decide se o merge exige rebuild: só caminhos embutidos na imagem (`core/`, `hub/`, `scripts/`, `deploy/`, `.factory/config/`, `requirements.txt`, `harness.config.json`) disparam; docs, testes e ledger não. Diff desconhecido ou vazio sempre reconstrói (fail closed).
+
+## 8. DarkHub
+
+- `hub/backend/` (FastAPI: `api.py`, `service_*.py`) e `hub/frontend/`. Mostra a fila, a frota, a esteira ao vivo (`/live`), custo, cotas e as intervenções do owner (`/api/interventions/priority`).
+- Regra de negócio fica em `core/`; o Hub só expõe e apresenta.
+
+## 9. Governança protegida
+
+- `core/orchestrator/guard.py` (`PROTECTED_PATTERNS`) bloqueia alterações de agentes em `MISSION.md`, `AGENTS.md`, `FACTORY_RULES.md`, no próprio guard, `core/governance/*`, na chave pública do owner e em `.github/workflows/*`.
+- Mudanças nesses caminhos só entram com autorização assinada pelo owner em `.factory/governance/authorizations/`. Ver [`manual/governanca.md`](manual/governanca.md).
+
+## 10. Skills e harnesses
+
+- `.agents/skills/` é a fonte; `.claude/skills/` é espelho (`python scripts/sync_skills.py`). Claude Code importa `AGENTS.md` via `CLAUDE.md`; Antigravity via `.agents/rules/GEMINI.md`; Codex e Grok leem `AGENTS.md` na raiz. Ver [`HARNESS_INTEROP.md`](HARNESS_INTEROP.md).
+
+## 11. Vertical de referência: Echo Garden
+
+`core/game/` isola o domínio determinístico do jogo (estado + movimento, sem rede, relógio ou I/O) das integrações de modelo e imagem. Plano e critérios: [`DARK_FACTORY_E2E_TEST_PLAN.md`](DARK_FACTORY_E2E_TEST_PLAN.md).
