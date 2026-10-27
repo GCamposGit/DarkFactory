@@ -34,10 +34,10 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 
 ## Piloto de produto (potencial, sujeito a mudança)
 - Gestor de SEO e redes sociais da mansaodolago.com, em fases:
-  - M1: auditoria de SEO e Search Console, relatório semanal, calendário de conteúdo, posts do Instagram com aprovação por toque.
+  - M1: auditoria de SEO e Search Console, relatório semanal e calendário de conteúdo (sem Instagram/Facebook: a empresa ainda não tem as contas).
   - M2: publicação recorrente e SEO on-page, aprovação por lote.
   - M3: ajustes no Google Ads com teto de gasto em código e aprovação obrigatória.
-- Pré-requisitos do owner (opcionais enquanto o piloto não for escolhido): developer token do Google Ads (OA-066) e Instagram/Search Console (OA-067).
+- Pré-requisitos do owner: developer token do Google Ads gerado em 27/10 (OA-066, aprovação Basic pendente). Instagram/Facebook cancelados em 27/10 (OA-067): a empresa ainda não tem as contas.
 
 ## Metas técnicas da fase (da fábrica, não dos produtos)
 - Suíte com até 4.000 testes e até 120 s no Linux com `-n auto`.
@@ -54,3 +54,4 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 ## Histórico
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
 - 26/10/2026: Desktop fora da frota por `DARKFAC_FLEET_DISABLED_HOSTS=desktop` (pedido do owner).
+- 27/10/2026: OA-066 feita (token Ads, Basic pendente); OA-067 cancelada (sem Instagram/Facebook), redes sociais fora do piloto por ora.

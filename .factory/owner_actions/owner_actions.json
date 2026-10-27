@@ -2663,8 +2663,8 @@
       "kind": "action",
       "title": "Solicitar o developer token do Google Ads para o piloto da mansaodolago.com",
       "priority": "medium",
-      "status": "open",
-      "why": "A fase M1 do piloto (USR-279) le dados do Google Ads; o acesso de producao a API exige um developer token aprovado pelo Google, o que pode levar dias. Comecar agora evita bloquear a prova da V0.",
+      "status": "done",
+      "why": "A fase M1 do piloto (USR-279) le dados do Google Ads; o acesso de producao a API exige um developer token aprovado pelo Google, o que pode levar dias. Comecar agora evita bloquear a prova da V0. | 27/10: owner gerou o developer token do Google Ads (nivel Test); aprovacao Basic pendente no Google. Token fica com o owner ate a fabrica pedir o cofre.",
       "blocks": [
         "USR-279"
       ],
@@ -2683,15 +2683,15 @@
       "verify": "API Center mostra o developer token com nivel de acesso Basic aprovado",
       "created_at": "2026-10-24T20:33:41Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-27T09:30:00Z"
     },
     {
       "id": "OA-067",
       "kind": "action",
       "title": "Preparar Instagram e Search Console da Mansao do Lago para o piloto",
       "priority": "medium",
-      "status": "open",
-      "why": "A publicacao de posts pela API exige conta profissional do Instagram ligada a uma pagina do Facebook, e a auditoria de SEO precisa de acesso ao Search Console do site.",
+      "status": "done",
+      "why": "A publicacao de posts pela API exige conta profissional do Instagram ligada a uma pagina do Facebook, e a auditoria de SEO precisa de acesso ao Search Console do site. | 27/10: CANCELADA pelo owner. A Mansao do Lago ainda nao tem Instagram nem Facebook; a etapa de redes sociais do piloto sai do escopo por ora.",
       "blocks": [
         "USR-279"
       ],
@@ -2710,7 +2710,7 @@
       "verify": "Instagram aparece como conta Empresa ligada a pagina do Facebook e o Search Console mostra a propriedade verificada",
       "created_at": "2026-10-24T20:33:41Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-27T09:30:00Z"
     },
     {
       "id": "OA-068",
