@@ -1161,7 +1161,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         summary_payload: Optional[Dict[str, Any]] = None
 
         # 1. Try RetrieveUserQuotaSummary across recent candidate ports
-        for port in candidate_ports[:6]:
+        for port in candidate_ports[:2]:  # USR-404: dead loopback ports cost ~1-2 s each
             summary_req = urllib.request.Request(
                 f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
                 data=b"{}",
@@ -1173,7 +1173,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(summary_req, context=ctx, timeout=2.5) as res:
+                with urllib.request.urlopen(summary_req, context=ctx, timeout=1.0) as res:
                     if res.status == 200:
                         summary_payload = json.loads(res.read().decode("utf-8"))
                         active_port = port
@@ -1231,7 +1231,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
         # 2. Fallback to GetAvailableModels if RetrieveUserQuotaSummary did not return windows
         if not windows:
-            ports_to_try = [active_port] if active_port else candidate_ports[:3]
+            ports_to_try = [active_port] if active_port else candidate_ports[:2]
             for port in ports_to_try:
                 req = urllib.request.Request(
                     f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
@@ -1244,7 +1244,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                     method="POST",
                 )
                 try:
-                    with urllib.request.urlopen(req, context=ctx, timeout=2.5) as res:
+                    with urllib.request.urlopen(req, context=ctx, timeout=1.0) as res:
                         models_payload = json.loads(res.read().decode("utf-8"))
                     models = models_payload.get("response", {}).get("models", {})
                     target_model = (
