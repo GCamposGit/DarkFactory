@@ -44,6 +44,7 @@ LOCK_MARKERS = ("[TRAVA DE LINHA]",)
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
+FAILURE_HISTORY_LIMIT = 20
 
 
 def configure_logging(log_dir: Path, *, stream: Any = None) -> RotatingFileHandler:
@@ -271,6 +272,15 @@ def is_infra_failure(rc: int, log_tail: str) -> bool:
     return rc in INFRA_EXIT_CODES or any(m in log_tail for m in INFRA_MARKERS)
 
 
+def failure_reason(rc: int, log_tail: str, lines: int = 8, chars: int = 800) -> str:
+    """Motivo da falha: ultimas linhas do log (sem segredo); nunca vazio."""
+    from core.line.agent_cli import redact_secrets
+
+    kept = "
+".join(redact_secrets(log_tail or "").strip().splitlines()[-lines:])[-chars:]
+    return kept or f"sem saida no log; exit_code={rc}"
+
+
 def _tail(path: Optional[Path], n: int = 6000) -> str:
     try:
         if path and path.exists():
@@ -315,6 +325,17 @@ class FleetDispatcher:
         self.pending_deploy = False
         self.deploys = 0
         self.last_cycle: dict[str, Any] = {}
+        self.failures: list[dict[str, Any]] = []  # ultimas falhas: ticket, host, exit_code, motivo, classe
+
+    def _record_failure(self, job: InFlight, rc: int, kind: str, tail: str) -> None:
+        reason = failure_reason(rc, tail)
+        self.failures = (self.failures + [{
+            "ts": datetime.now(timezone.utc).isoformat(), "ticket": job.ticket_id, "host": job.host_id,
+            "exit_code": rc, "kind": kind, "reason": reason,
+            "log": str(job.log_path) if job.log_path else None,
+        }])[-FAILURE_HISTORY_LIMIT:]
+        logger.error("%s falhou em %s: exit_code=%s kind=%s motivo=%s", job.ticket_id, job.host_id, rc, kind,
+                     " | ".join(reason.splitlines()))
 
     def _reap(self) -> None:
         for host_id, job in list(self.in_flight.items()):
@@ -322,19 +343,22 @@ class FleetDispatcher:
             if rc is None:
                 continue
             del self.in_flight[host_id]
+            tail = _tail(job.log_path) if rc != 0 else ""
             if rc == 0:
                 self.last_merge_at = self.clock()
                 self.pending_deploy = True
-            elif rc != 0 and is_lock_refusal(_tail(job.log_path)):
+            elif is_lock_refusal(tail):
+                self._record_failure(job, rc, "lock", tail)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.lock_requeue_cooldown_sec
                 self.lock_busy[host_id] = f"host_ocupado_trava:{job.ticket_id}"
                 logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
-            elif is_infra_failure(rc, _tail(job.log_path)):
+            elif is_infra_failure(rc, tail):
+                self._record_failure(job, rc, "infra", tail)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec
                 logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
             else:
+                self._record_failure(job, rc, "failure", tail)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
-                logger.error("%s falhou (rc=%s) em %s", job.ticket_id, rc, host_id)
 
     def _maybe_deploy(self) -> bool:
         """Um deploy por lote: so apos a janela de silencio desde o ultimo merge."""
@@ -402,6 +426,7 @@ class FleetDispatcher:
             "deploys_total": self.deploys,
             "deployed_this_cycle": deployed,
             "demands_error": load_error,
+            "recent_failures": self.failures,
         }
         self._write_state()
         return self.last_cycle
