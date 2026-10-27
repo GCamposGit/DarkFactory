@@ -840,7 +840,7 @@ class _DiffGit(FakeGit):
 
 @pytest.mark.parametrize(
     "changed,state",
-    [(".factory/demands/demands.json\ndocs/a.md", "converged"), ("core/a.py\ndocs/a.md", "divergent")],
+    [("README.md\ntests/x.py", "converged"), (".factory/demands/demands.json\ndocs/a.md", "divergent"), ("core/a.py\ndocs/a.md", "divergent")],
 )
 def test_vps_on_older_sha_is_converged_only_when_image_is_unchanged(changed: str, state: str) -> None:
     """USR-207: data-only merges intentionally skip the Hub rebuild, so an older VPS sha is not drift."""

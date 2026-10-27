@@ -147,21 +147,83 @@ def test_notify_has_buttons_and_signing_key_is_denied_to_agents(port: FakePort) 
     assert "OWNER_SIGNING_KEY" not in build_agent_env({"OWNER_SIGNING_KEY": "x", "PATH": "p"})
 
 
-def test_failed_telegram_send_is_loud_and_audited(port: FakePort, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from hub.backend.service import DarkHubService
+class _HubStub:
+    """Minimal HubService stand-in: real handler, fake Telegram, real OA store."""
 
-    class _Gateway:
-        def send_message(self, *a: object) -> bool:
-            return False
+    def __init__(self, tmp_path: Path, sent_ok: bool) -> None:
+        from hub.backend.service import DarkHubService
+        from core.owner_actions.store import OwnerActionStore
 
-    class _Stub:
-        _build_telegram_gateway = staticmethod(lambda role="ops": _Gateway())
-        _publication_state = staticmethod(lambda: (tmp_path / "p.json", tmp_path / "audit.jsonl"))
+        self.sent: list[tuple[int, str, list]] = []
+        self.ok = sent_ok
+        self.owner_action_store = OwnerActionStore(tmp_path / "oa.json", remote_ref=None, control=False)
+        self._tmp = tmp_path
+        self._fallback_protected_oa = lambda n, r: DarkHubService._fallback_protected_oa(self, n, r)  # type: ignore[arg-type]
+        self.handle = lambda event, payload: DarkHubService.handle_protected_publication_event(self, event, payload)  # type: ignore[arg-type]
 
+    def _build_telegram_gateway(self, role: str = "ops") -> object:
+        outer = self
+
+        class _Gateway:
+            def send_message(self, chat: int, text: str, buttons: list | None = None) -> bool:
+                outer.sent.append((chat, text, buttons or []))
+                return outer.ok
+
+        return _Gateway()
+
+    def _publication_state(self) -> tuple[Path, Path]:
+        return self._tmp / "p.json", self._tmp / "audit.jsonl"
+
+
+PR_EVENT = {"action": "opened", "pull_request": {"number": 1}}
+
+
+def test_webhook_sends_message_with_buttons_and_no_oa(port: FakePort, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hub = _HubStub(tmp_path, sent_ok=True)
     monkeypatch.setenv(pub.OWNER_CHAT_ENV, str(OWNER))
     monkeypatch.setattr(pub, "RestGitHubPort", lambda: port)
-    DarkHubService.handle_protected_publication_event(
-        _Stub(), "pull_request", {"action": "synchronize", "pull_request": {"number": 1}}  # type: ignore[arg-type]
-    )
+    hub.handle("pull_request", PR_EVENT)
+    chat, text, buttons = hub.sent[0]
+    assert chat == OWNER and PROTECTED in text
+    assert [b["text"] for b in buttons[0]] == ["Aprovar", "Rejeitar"]
+    assert hub.owner_action_store.list_actions() == []
+
+
+def test_failed_telegram_send_is_audited_and_opens_oa(port: FakePort, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hub = _HubStub(tmp_path, sent_ok=False)
+    monkeypatch.setenv(pub.OWNER_CHAT_ENV, str(OWNER))
+    monkeypatch.setattr(pub, "RestGitHubPort", lambda: port)
+    monkeypatch.setattr("core.owner_actions.protected_pr_alert.fetch_pr_files", lambda n, repo="": [PROTECTED])
+    monkeypatch.setattr("core.owner_actions.notify.notify_owner_action", lambda *a, **k: {})
+    hub.handle("pull_request", PR_EVENT)
+    hub.handle("pull_request", PR_EVENT)  # idempotent
     entry = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert entry["event"] == "notify_failed" and "telegram" in entry["reason"]
+    actions = hub.owner_action_store.list_actions()
+    assert len(actions) == 1 and "#1" in actions[0].title
+    assert "core.governance.keys sign" in (actions[0].steps[1].command or "")
+
+
+def test_missing_owner_chat_opens_oa_only_for_protected_prs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    hub = _HubStub(tmp_path, sent_ok=True)
+    monkeypatch.delenv(pub.OWNER_CHAT_ENV, raising=False)
+    monkeypatch.setattr("core.owner_actions.notify.notify_owner_action", lambda *a, **k: {})
+    monkeypatch.setattr("core.owner_actions.protected_pr_alert.fetch_pr_files", lambda n, repo="": ["README.md"])
+    hub.handle("pull_request", PR_EVENT)
+    assert hub.owner_action_store.list_actions() == []
+    monkeypatch.setattr("core.owner_actions.protected_pr_alert.fetch_pr_files", lambda n, repo="": [PROTECTED])
+    hub.handle("pull_request", PR_EVENT)
+    assert len(hub.owner_action_store.list_actions()) == 1
+    assert not hub.sent
+
+
+def test_engine_fallback_opens_oa_without_webhook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.owner_actions.protected_pr_alert import alert_if_protected
+    from core.owner_actions.store import OwnerActionStore
+
+    monkeypatch.setattr("core.owner_actions.notify.notify_owner_action", lambda *a, **k: {})
+    store = OwnerActionStore(tmp_path / "oa.json", remote_ref=None, control=False)
+    assert alert_if_protected(store, 7, ["README.md"], "x") is None
+    assert alert_if_protected(store, 7, [PROTECTED], "x", "USR-9")
+    assert alert_if_protected(store, 7, [PROTECTED], "x", "USR-9") == store.list_actions()[0].id
+    assert len(store.list_actions()) == 1
