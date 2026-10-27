@@ -51,7 +51,8 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    `origin/main...HEAD` depois do portao e antes do REVIEW: se uma pagina do manual ficou desatualizada, o
    agente de desenvolvimento e reinvocado uma vez com a mensagem (mesmo padrao da autocorrecao do portao);
    persistindo a violacao, a entrega e recusada (`stage_docs_refused`). Falha de infraestrutura do
-   controle de versao apenas registra aviso. **LEARNING**: o learning pack
+   controle de versao apenas registra aviso. Alem do docs-sync, o mesmo passo roda o ratchet de
+   complexidade e o `lint-imports` e devolve ao agente uma vez com a saida combinada (USR-398). **LEARNING**: o learning pack
    (`learning_pack.delivery.build_for_delivery`) e calculado antes do merge e, depois do merge
    bem-sucedido, gravado em `learning_pack.json` e no `LearningPackStore` (`.factory/learning_packs/`,
    `packs_index.json`), de onde o Hub (`/api/learning-packs/<id>/html`) e o resumo diario o leem; falha na
