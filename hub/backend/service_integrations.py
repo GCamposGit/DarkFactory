@@ -333,6 +333,9 @@ class IntegrationsMixin:
                 "authorized": False,
                 "error": "Invalid X-Telegram-Bot-Api-Secret-Token",
             }
+        login = self._login_callback(payload)
+        if login is not None:
+            return login
         if self._is_publication_callback(payload):
             return self.process_publication_callback(payload["callback_query"])
         gateway = self._build_telegram_gateway(role=role)
@@ -345,6 +348,27 @@ class IntegrationsMixin:
             if chat_id:
                 gateway.deliver_reply(chat_id, result)
         return result.model_dump()
+
+    def _login_callback(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """USR-406: owner tap on 'Aprovar' releases the browser session that asked for it."""
+        from core.integrations.telegram import load_telegram_config
+        from hub.backend.service_catalog import LOGIN_CALLBACK_PREFIX
+
+        cb = payload.get("callback_query")
+        data = cb.get("data") if isinstance(cb, dict) else None
+        if not isinstance(data, str) or not data.startswith(LOGIN_CALLBACK_PREFIX):
+            return None
+        sender = str(((cb.get("from") or {}).get("id")) or "")
+        chat = str((((cb.get("message") or {}).get("chat") or {}).get("id")) or "")
+        allowed: set[str] = set()
+        for role in ("owner", "ops"):
+            try:
+                cfg = load_telegram_config(role=role)
+            except Exception:  # noqa: BLE001 - missing config just means no owner for this role
+                continue
+            allowed |= {str(i) for i in (*cfg.authorized_chat_ids, *cfg.authorized_user_ids)}
+        ok = bool(allowed) and (sender in allowed or chat in allowed) and self.approve_login_request(data[len(LOGIN_CALLBACK_PREFIX):])
+        return {"action": "hub_login", "authorized": ok}
 
     @staticmethod
     def _is_publication_callback(payload: Dict[str, Any]) -> bool:
@@ -380,36 +404,63 @@ class IntegrationsMixin:
         return {"action": "protected_publication", "authorized": bool(result.get("ok")), **shown}
 
     def handle_protected_publication_event(self, event_type: str, payload: Dict[str, Any]) -> None:
-        """Notify the owner when a PR touching protected files opens/updates; sweep pending merges on check events."""
+        """Notify the owner when a PR touching protected files opens/updates; sweep pending merges on check events.
+
+        USR-395: any failure to notify (chat id/token missing, GitHub or Telegram down) opens an owner
+        action with the manual signing steps, so the request never depends on the Telegram path.
+        """
         from core.governance import publication as pub
 
         owner = (os.environ.get(pub.OWNER_CHAT_ENV) or "").strip()
         _, audit = self._publication_state()
+        is_open = event_type == "pull_request" and payload.get("action") in {"opened", "synchronize", "reopened"}
+        pr_number = 0
+        if event_type == "pull_request":
+            try:
+                pr_number = int((payload.get("pull_request") or {}).get("number") or payload.get("number") or 0)
+            except (TypeError, ValueError):
+                pr_number = 0
         if not owner.lstrip("-").isdigit():
-            if event_type == "pull_request":
-                logger.error("protected publication: %s missing/invalid; owner not notified", pub.OWNER_CHAT_ENV)
-                pub._audit(audit, {"event": "notify_failed", "reason": f"{pub.OWNER_CHAT_ENV} missing or invalid"})
+            if is_open:
+                reason = f"{pub.OWNER_CHAT_ENV} missing or invalid"
+                logger.error("protected publication: %s; owner not notified", reason)
+                pub._audit(audit, {"event": "notify_failed", "reason": reason})
+                self._fallback_protected_oa(pr_number, reason)
             return
         try:
             port = pub.RestGitHubPort()
-            if event_type == "pull_request" and payload.get("action") in {"opened", "synchronize", "reopened"}:
+            if is_open:
                 gateway = self._build_telegram_gateway(role="ops")
-                number = int((payload.get("pull_request") or {}).get("number") or payload.get("number"))
 
                 def _send(chat: int, text: str, buttons: list) -> None:
                     if not gateway.send_message(chat, text, buttons):
                         raise pub.PublicationError("telegram sendMessage falhou (token do bot ops/chat id?); ficou no outbox")
 
-                pub.notify_owner(port, number, _send, int(owner))
+                pub.notify_owner(port, pr_number, _send, int(owner))
             elif event_type in {"check_suite", "check_run", "status"}:
                 pending, audit = self._publication_state()
                 pub.sweep_pending(port, pending, audit)
         except Exception as exc:  # noqa: BLE001 - webhook processing must not fail because of this side channel
             logger.error("protected publication event failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+            reason = f"{type(exc).__name__}: {exc}"
             try:
-                pub._audit(audit, {"event": "notify_failed", "type": event_type, "reason": f"{type(exc).__name__}: {exc}"})
+                pub._audit(audit, {"event": "notify_failed", "type": event_type, "reason": reason})
             except Exception:  # noqa: BLE001
                 logger.error("protected publication: could not write audit entry")
+            if is_open:
+                self._fallback_protected_oa(pr_number, reason)
+
+    def _fallback_protected_oa(self, pr_number: int, reason: str) -> None:
+        """Open the manual-signing OA when the Telegram approval message could not be delivered."""
+        if pr_number <= 0:
+            return
+        from core.owner_actions.protected_pr_alert import alert_if_protected, ensure_signing_oa, fetch_pr_files
+
+        files = fetch_pr_files(pr_number)
+        if files is None:  # cannot tell: fail visible, the OA says to check the diff
+            ensure_signing_oa(self.owner_action_store, pr_number, (), reason[:300])
+        else:
+            alert_if_protected(self.owner_action_store, pr_number, files, reason[:300])
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:
         """Returns diagnostic status of Telegram Gateway (HF-14 / USR-110)."""

@@ -1,8 +1,0 @@
-{
-  "_comment": "Politica de gasto da qualificacao autonoma de candidatos (USR-341). Decisoes do owner em 22/10/2026 (Grill): teto diario total US$ 1,00; teto por candidato (qualificacao completa) US$ 0,50; provedor SOMENTE OpenRouter (chave em OPENROUTER_API_KEY; ausente => nao roda, sem erro). Candidato sem preco conhecido nao e chamado e segue para o Grill. Razao gasta fica em .factory/models/spend/ (gitignored).",
-  "provider": "openrouter",
-  "api_key_env": "OPENROUTER_API_KEY",
-  "daily_cap_usd": 1.0,
-  "per_candidate_cap_usd": 0.5,
-  "max_output_tokens": 512
-}

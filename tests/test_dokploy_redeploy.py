@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytest
 
+from core.infra import deploy_classifier
 from core.orchestrator import compose_render as _cr
 
 from scripts import dokploy_redeploy as mod
@@ -1889,11 +1890,13 @@ def test_darkhub_ghcr_mode_waits_for_tag_then_installs_image_start_first(monkeyp
 
 
 def test_hub_image_paths_come_from_workflow_and_gate_root_only_diffs() -> None:
-    patterns = mod.hub_image_paths()
+    patterns = deploy_classifier.hub_image_paths()
     assert "core/**" in patterns and "requirements.txt" in patterns
-    assert not mod.touches_hub_image(["AGENTS.md", "tests/test_x.py"], patterns)
-    assert mod.touches_hub_image(["AGENTS.md", "core/a.py"], patterns)
-    assert mod.touches_hub_image(["requirements.txt"], patterns)
+    assert not deploy_classifier.touches_hub_image(["AGENTS.md", "tests/test_x.py"], patterns)
+    assert deploy_classifier.touches_hub_image(["AGENTS.md", "core/a.py"], patterns)
+    assert deploy_classifier.touches_hub_image(["requirements.txt"], patterns)
+    assert deploy_classifier.touches_hub_image(["docs/x.md"], patterns)
+    assert deploy_classifier.needs_rebuild(["docs/x.md"])
 
 
 def test_darkhub_root_only_merge_skips_ghcr_wait_and_exits_ok(monkeypatch: pytest.MonkeyPatch) -> None:

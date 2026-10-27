@@ -136,12 +136,47 @@ function showLoginBanner() {
   if (document.getElementById("hub-login-banner")) return;
   const el = document.createElement("a");
   el.id = "hub-login-banner";
-  el.href = "/api/auth/login";
-  el.textContent = "Modo leitura. Toque aqui para entrar pelo Telegram e liberar as acoes.";
+  el.href = "#";
+  el.textContent = "Modo leitura. Toque aqui para pedir acesso de edicao pelo Telegram.";
   el.style.cssText =
     "position:fixed;bottom:0;left:0;right:0;z-index:99998;padding:10px 16px;text-align:center;" +
     "font:14px system-ui,sans-serif;background:#1d4ed8;color:#fff;text-decoration:none;";
+  el.addEventListener("click", (event) => {
+    event.preventDefault();
+    requestTelegramLogin(el);
+  });
   document.body.appendChild(el);
+}
+
+// USR-406: the footer link asks Telegram to approve THIS browser, then polls until released.
+async function requestTelegramLogin(el) {
+  if (el.dataset.busy) return;
+  el.dataset.busy = "1";
+  el.textContent = "Enviando pedido ao Telegram...";
+  try {
+    const res = await hubNetFetch(`${API_BASE}/auth/telegram-link`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.poll_token) throw new Error(data.detail || "Falha ao enviar.");
+    el.textContent = "Pedido enviado ao Telegram, aguardando aprovacao...";
+    const deadline = Date.now() + (data.expires_in || 300) * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const url = `${API_BASE}/auth/telegram-poll?poll_token=${encodeURIComponent(data.poll_token)}`;
+      const poll = await hubNetFetch(url).then((r) => r.json()).catch(() => ({}));
+      if (poll.status === "approved" && poll.session_token) {
+        try {
+          localStorage.setItem("darkhub_session_token", poll.session_token);
+        } catch (_) {}
+        window.location.reload();
+        return;
+      }
+      if (poll.status === "expired") break;
+    }
+    el.textContent = "Pedido expirou. Toque aqui para pedir de novo.";
+  } catch (err) {
+    el.textContent = `${err.message || "Falha."} Toque aqui para tentar de novo.`;
+  }
+  delete el.dataset.busy;
 }
 
 async function initApp() {
