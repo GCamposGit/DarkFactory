@@ -2091,6 +2091,15 @@ def _deliver_worktree(
         if _cancelled() and (completion_report is None or not completion_report.ok):
             return cancelled_payload()
 
+    if _ci_is_red(completion_report) and not _cancelled():
+        completion_report, red_twice = _retry_red_ci(
+            git_mgr, ticket, target_worktree, completion_report, no_push, progress
+        )
+        if red_twice is not None:
+            return _ci_red_twice_result(
+                ticket, red_twice, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
+            )
+
     delivered = completion_report is None or completion_report.ok
     current_sha = git_mgr.get_current_sha(target_worktree) if target_worktree.exists() else current_sha
 
@@ -2163,6 +2172,65 @@ def _stage_docs_sync(
         ticket, Stage.DOCS, feedback or "docs_sync", target_worktree, current_branch, resume_cmd,
         progress, as_json, return_result,
     )
+
+
+_CI_LOG_KEYWORDS = ("FAILED", "Error", "assert", "docs-sync")
+_CI_LOG_LIMIT = 3000
+
+
+def _ci_is_red(report: Any) -> bool:
+    delivery = getattr(report, "delivery", None)
+    return report is not None and not report.ok and delivery is not None and delivery.action == "ci_failed"
+
+
+def _ci_failure_feedback(message: str) -> str:
+    """Last ~3000 chars of the failed-job log, keeping only the lines that name the failure (USR-409)."""
+    lines = [ln for ln in message.splitlines() if any(k in ln for k in _CI_LOG_KEYWORDS)]
+    return ("\n".join(lines) or message)[-_CI_LOG_LIMIT:]
+
+
+def _retry_red_ci(
+    git_mgr: Any, ticket: UserTicket, target_worktree: Path, report: Any, no_push: bool, progress: ProgressPublisher
+) -> tuple[Any, Optional[str]]:
+    """USR-409: the fleet's own PR went red in CI. Send the log back to the development agent ONCE in the
+    same worktree, then deliver again (push + new CI wait). Returns (report, None) or (report, log) when
+    CI is red a second time."""
+    feedback = _ci_failure_feedback(report.delivery.message)
+    progress.phase("ci", "running", "CI vermelho: devolvendo o log ao agente (1x)")
+    _invoke_fix_agent(target_worktree, ticket, "ci-vermelho", feedback)
+    _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "ci-vermelho")
+    if commit_error:
+        return report, f"{feedback}\nfix_commit_failed: {commit_error}"
+    second = git_mgr.complete_ticket(
+        ticket_id=ticket.id, cwd=target_worktree, auto_push=not no_push, auto_commit=True,
+    )
+    if _ci_is_red(second):
+        return second, _ci_failure_feedback(second.delivery.message)
+    return second, None
+
+
+def _ci_red_twice_result(
+    ticket: UserTicket, log: str, target_worktree: Path, current_branch: str, resume_cmd: str,
+    progress: ProgressPublisher, as_json: bool, return_result: bool,
+) -> Any:
+    """Second red CI: plain delivery failure (rc 1, no infra requeue); ticket parked in `waiting_human` with the log as evidence."""
+    message = f"CI vermelho duas vezes no PR: {log}"
+    progress.phase("ci", "failed", message, cause="ci_red_twice")
+    progress.set_outcome(message, "ci_red_twice")
+    try:
+        DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json").update_status(
+            ticket.id, DeliveryStatus.WAITING_HUMAN, delivery_evidence=f"ci_red_twice: {log}"
+        )
+    except Exception as exc:  # noqa: BLE001 - recording the park must not hide the failure itself
+        logger.warning("Could not park %s after ci_red_twice: %s", ticket.id, exc)
+    print(f"[ERRO] Ticket {ticket.id}: ci_red_twice. Worktree: {target_worktree}", file=sys.stderr)
+    payload = {
+        "exit_code": 1, "ok": False, "cause": "ci_red_twice", "error": log, "ticket_id": ticket.id,
+        "branch": current_branch, "worktree": str(target_worktree), "resume_command": resume_cmd,
+    }
+    if as_json and not return_result:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return payload if return_result else 1
 
 
 def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> None:
