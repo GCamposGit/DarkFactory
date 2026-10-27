@@ -16,11 +16,16 @@ from hub.backend.models import (
 )
 from core.integrations.telegram import TelegramGateway
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
+from core.owner_actions.mirror import mirrored_id
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import blocked_by as owner_action_blocked_by, unblocks as owner_action_unblocks
 
 
 logger = logging.getLogger("darkhub.service")
+
+# USR-407: a run in one of these states can no longer be answered by the owner.
+_TERMINAL_RUN_STATES = frozenset({"completed", "failed", "cancelled", "expired", "succeeded"})
+PLANNING_ONLY_TAG = "planning-only"
 
 
 def _queue_text(task: Any, *names: str) -> str:
@@ -30,6 +35,12 @@ def _queue_text(task: Any, *names: str) -> str:
         if value:
             return str(value)
     return ""
+
+
+def _terminal_run_id(task: Any) -> set[str]:
+    run_id = _queue_text(task, "run_id")
+    done = _queue_text(task, "run_status").lower() in _TERMINAL_RUN_STATES
+    return {run_id} if run_id and done else set()
 
 
 def _queue_evidence(task: Any) -> list[dict[str, str]]:
@@ -66,9 +77,7 @@ class InterventionsMixin:
     ) -> PriorityInterventionsReport:
         """Aggregate all pending actions requiring human decision (Grills, G8 Deploys, WAITING_HUMAN)."""
         items: List[PriorityInterventionItem] = []
-        grill_count = 0
-        deploy_count = 0
-        waiting_human_count = 0
+        grill_count = deploy_count = waiting_human_count = 0
 
         # 1. Grills pendentes
         try:
@@ -114,10 +123,12 @@ class InterventionsMixin:
             logger.warning("Error collecting pending grills: %s", exc)
 
         # 2. Tarefas bloqueadas em WAITING_HUMAN
+        planning_only, terminal_runs = self._planning_only_ticket_ids(), set[str]()
         try:
             task_rep = self.get_task_dashboard()
             if hasattr(task_rep, "queue") and task_rep.queue:
                 for task in task_rep.queue:
+                    terminal_runs.update(_terminal_run_id(task))
                     t_status = getattr(task, "status", None) if not isinstance(task, dict) else task.get("status")
                     if str(t_status or "").upper() == "WAITING_HUMAN":
                         t_id = _queue_text(task, "task_id", "id")
@@ -129,8 +140,8 @@ class InterventionsMixin:
                         t_stage = _queue_text(task, "stage")
                         t_diag = _queue_text(task, "diagnostic")
                         label = t_ticket or t_run or t_id
-                        if project_id and t_proj != project_id:
-                            continue
+                        if (project_id and t_proj != project_id) or t_ticket in planning_only:
+                            continue  # planning-only umbrella tickets have no open question
                         if any(item.action_target_id == label and item.kind == PriorityInterventionKind.GRILL for item in items):
                             continue
 
@@ -197,7 +208,7 @@ class InterventionsMixin:
             logger.warning("Error collecting G8 deploy gates: %s", exc)
 
         # 4. Backlog de acoes humanas (.factory/owner_actions) - USR-190
-        owner_action_items, owner_action_warnings = self._collect_owner_action_items()
+        owner_action_items, owner_action_warnings = self._collect_owner_action_items(terminal_runs)
         owner_action_items.extend(self._collect_usage_sync_items())
         items.extend(owner_action_items)
 
@@ -236,7 +247,17 @@ class InterventionsMixin:
             unblocks=owner_action_unblocks(action, everything),
         )
 
-    def _collect_owner_action_items(self) -> Tuple[List[PriorityInterventionItem], List[str]]:
+    def _planning_only_ticket_ids(self) -> set[str]:
+        try:
+            return {
+                t.id for t in self.demands_service.list_tickets()
+                if PLANNING_ONLY_TAG in [tag.lower() for tag in t.tags]
+            }
+        except Exception as exc:
+            logger.warning("Error reading planning-only tickets: %s", exc)
+            return set()
+
+    def _collect_owner_action_items(self, terminal_runs: frozenset[str] | set[str] = frozenset()) -> Tuple[List[PriorityInterventionItem], List[str]]:
         """Open owner actions as priority-queue items. Never raises: the queue must keep working."""
         try:
             loaded = self.owner_action_store.load()
@@ -248,6 +269,10 @@ class InterventionsMixin:
         for action in loaded.actions:
             if action.status == ActionStatus.DONE:
                 continue
+            if action.id.startswith("OA-HR-") and any(
+                action.id.startswith(mirrored_id(run, "") + "-") for run in terminal_runs
+            ):
+                continue  # mirrored HumanRequest of a run that already ended
             view = self._owner_action_view(action, by_id, loaded.actions)
             record = view.action
             items.append(
