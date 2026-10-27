@@ -62,7 +62,7 @@ Módulos que permanecem, todos com chamador em produção:
 
 | Módulo | Para que serve | Quem usa |
 | --- | --- | --- |
-| `guard.py` | Lista de arquivos de governança protegidos | `core/line/protected_edit.py`, `dogfood.py`, `subagent_routing.py` |
+| `guard.py` | Lista de arquivos de governança protegidos | `core/line/protected_edit.py`, `dogfood.py` |
 | `delivery.py`, `delivery_executor.py` | Entrega e integração | `core/workflow/integration_handler.py`, `hub/backend/webhooks.py` |
 | `build_artifacts.py`, `deployment_adapter.py`, `compose_render.py`, `bluegreen.py` | Artefatos imutáveis, deploy e blue-green | `core/line/stage_release.py`, `scripts/dokploy_*.py` |
 | `release_pipeline.py` | Pipeline de release (build, staging, produção, backup) | `core/workflow/release_handlers.py`, `hub/backend/service.py` |
