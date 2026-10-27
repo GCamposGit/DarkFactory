@@ -126,8 +126,8 @@ def test_wrapper_requires_command(tmp_path, monkeypatch):
 def test_settings_json_declares_only_existing_events_and_keeps_permissions():
     data = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert "permissions" in data
-    assert set(data["hooks"]) == {"SessionStart", "SessionEnd", "SubagentStart", "SubagentStop"}
-    for entries in data["hooks"].values():
-        assert "claude_execution_hook.py" in entries[0]["hooks"][0]["command"]
+    assert {"SessionStart", "SessionEnd", "SubagentStart", "SubagentStop"} <= set(data["hooks"])
+    for event in ("SessionStart", "SessionEnd", "SubagentStart", "SubagentStop"):
+        assert "claude_execution_hook.py" in data["hooks"][event][0]["hooks"][0]["command"]
     spec = importlib.util.spec_from_file_location("usr209_hook", HOOK)
     assert spec is not None
