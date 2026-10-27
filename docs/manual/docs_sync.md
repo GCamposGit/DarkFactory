@@ -25,6 +25,10 @@ python -m core.harness.docs_sync --base origin/main --head HEAD
 
 Codigo 0 = ok; 1 = lista "arquivo coberto alterado -> pagina que deveria mudar".
 
+## Dicionario de dados (USR-403)
+
+`python -m core.harness.docs_sync --dictionary` (fora do portao) lista os `.factory/**/*.json` versionados sem padrao na linha `<!-- paths: -->` de `docs/manual/dicionario_dados.md`; codigo 1 se faltar algum.
+
 ## Passo de CI (acao do owner)
 
 `.github/workflows/*` e protegido pelo guard, entao o passo abaixo deve ser aplicado pelo owner no job de PR existente (o checkout precisa de `fetch-depth: 0`):

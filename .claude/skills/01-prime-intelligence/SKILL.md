@@ -28,7 +28,7 @@ Esta skill orienta o agente em uma base de código existente, extraindo seus pad
    - Registre estilo de nomenclatura, injeção de dependências, tratamento de exceções e utilitários internos existentes.
 
 ### Outputs Estruturados
-- **Relatório de Inteligência**: `.factory/context_intelligence.json` estruturado com:
+- **Relatório de Inteligência**: estruturado (devolvido na resposta, sem arquivo versionado) com:
   - `stack`: linguagem, runtime, framework, test runner.
   - `reachability`: driver (`library`, `cli`, `http`), comandos oficiais de teste.
   - `governance_detected`: confirmação dos contratos do repositório.

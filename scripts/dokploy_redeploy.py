@@ -777,39 +777,6 @@ def probe_deployed_sha() -> Optional[str]:
     return None
 
 
-def hub_image_paths(workflow: Optional[Path] = None) -> List[str]:
-    """USR-405: `on.push.paths` of hub-image.yml (unica fonte dos paths que geram imagem)."""
-    wf = workflow or REPO_ROOT / ".github" / "workflows" / "hub-image.yml"
-    try:
-        lines = wf.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    out: List[str] = []
-    in_paths = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped == "paths:":
-            in_paths = True
-        elif in_paths and stripped.startswith("- "):
-            out.append(stripped[2:].strip().strip("\"'"))
-        elif in_paths and stripped:
-            break
-    return out
-
-
-def touches_hub_image(changed: Sequence[str], patterns: Sequence[str]) -> bool:
-    """True quando algum path alterado casa com um padrao do hub-image.yml."""
-    for raw in changed:
-        path = raw.replace(chr(92), "/")
-        for pat in patterns:
-            if pat.endswith("/**"):
-                if path.startswith(pat[:-2]):
-                    return True
-            elif path == pat:
-                return True
-    return False
-
-
 def get_changed_paths(base: str, head: str, repo_root: Path = REPO_ROOT) -> Optional[List[str]]:
     """`git diff --name-only base head`; None on any failure (unknown commit, git missing)."""
     if not (SHA_PATTERN.fullmatch(base) and SHA_PATTERN.fullmatch(head)):
@@ -1218,10 +1185,10 @@ def _run_main(
             image_source = resolve_hub_image_source(env)
             render_darkhub_compose(darkhub_compose, expected_sha, image_source)
             if image_source == IMAGE_SOURCE_GHCR and not getattr(args, "force", False):
-                patterns = hub_image_paths()
+                patterns = deploy_classifier.hub_image_paths()
                 base = probe_deployed_sha()
                 diff = get_changed_paths(base, expected_sha) if patterns and base else None
-                if diff is not None and not touches_hub_image(diff, patterns):
+                if diff is not None and not deploy_classifier.touches_hub_image(diff, patterns):
                     print("sem mudanca de imagem (USR-405): merge nao toca paths do hub-image; Hub segue na imagem atual", file=out, flush=True)
                     return EXIT_OK
             if image_source == IMAGE_SOURCE_GHCR:
