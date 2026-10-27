@@ -333,6 +333,9 @@ class IntegrationsMixin:
                 "authorized": False,
                 "error": "Invalid X-Telegram-Bot-Api-Secret-Token",
             }
+        login = self._login_callback(payload)
+        if login is not None:
+            return login
         if self._is_publication_callback(payload):
             return self.process_publication_callback(payload["callback_query"])
         gateway = self._build_telegram_gateway(role=role)
@@ -345,6 +348,27 @@ class IntegrationsMixin:
             if chat_id:
                 gateway.deliver_reply(chat_id, result)
         return result.model_dump()
+
+    def _login_callback(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """USR-406: owner tap on 'Aprovar' releases the browser session that asked for it."""
+        from core.integrations.telegram import load_telegram_config
+        from hub.backend.service_catalog import LOGIN_CALLBACK_PREFIX
+
+        cb = payload.get("callback_query")
+        data = cb.get("data") if isinstance(cb, dict) else None
+        if not isinstance(data, str) or not data.startswith(LOGIN_CALLBACK_PREFIX):
+            return None
+        sender = str(((cb.get("from") or {}).get("id")) or "")
+        chat = str((((cb.get("message") or {}).get("chat") or {}).get("id")) or "")
+        allowed: set[str] = set()
+        for role in ("owner", "ops"):
+            try:
+                cfg = load_telegram_config(role=role)
+            except Exception:  # noqa: BLE001 - missing config just means no owner for this role
+                continue
+            allowed |= {str(i) for i in (*cfg.authorized_chat_ids, *cfg.authorized_user_ids)}
+        ok = bool(allowed) and (sender in allowed or chat in allowed) and self.approve_login_request(data[len(LOGIN_CALLBACK_PREFIX):])
+        return {"action": "hub_login", "authorized": ok}
 
     @staticmethod
     def _is_publication_callback(payload: Dict[str, Any]) -> bool:
