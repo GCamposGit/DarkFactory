@@ -537,3 +537,46 @@ def test_force_refresh_reprobes_everything(monkeypatch: pytest.MonkeyPatch) -> N
     clock.now = 10.0
     worker.refresh_capabilities(force=True)
     assert sorted(calls) == ["claude", "codex"]
+
+
+def test_postgres_cancel_run_truncates_long_reason_for_cause_code() -> None:
+    """USR-396: reason > 64 chars must not reach the varchar(64) cause_code column."""
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+
+    executed: list[tuple[str, tuple]] = []
+
+    class _Cur:
+        rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=()):
+            executed.append((sql, params))
+
+        def fetchone(self):
+            return ("run-1", "running")
+
+    class _Conn(_Cur):
+        def cursor(self):
+            return _Cur()
+
+        def commit(self):
+            pass
+
+    class _Pg:
+        @staticmethod
+        def connect(_url):
+            return _Conn()
+
+    store = PostgresControlStore(mock_mode=True)
+    store.mock_mode = False
+    store._psycopg = _Pg()
+    store.raw_url = "postgresql://fake"
+    result = store.cancel_run("run-1", reason="r" * 200)
+    assert result["ok"] is True
+    cause = next(p[0] for s, p in executed if "SET status = 'cancelled'" in s and "cause_code" in s)
+    assert len(cause) <= CAUSE_CODE_MAX_LEN
