@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -241,6 +242,58 @@ def reset_generated_ledgers(root: Path, git: GitRunner = run_git, backup_dir: Pa
         except Exception:  # noqa: BLE001 - best effort; the pull reports whatever remains
             continue
     return reset
+
+
+def stash_runtime_state(root: Path, git: GitRunner = run_git) -> dict[str, tuple[bytes, str]]:
+    """USR-394: set aside local edits of runtime-state files so a pull cannot abort; never raises.
+
+    Returns ``{path: (local_bytes, head_blob)}`` for the files that were modified and then restored to HEAD.
+    Only the explicit ``GENERATED_LEDGER_FILES`` are touched (no global stash, no hard reset).
+    """
+    saved: dict[str, tuple[bytes, str]] = {}
+    for rel in GENERATED_LEDGER_FILES:
+        try:
+            if not git(root, ["status", "--porcelain", "--", rel]):
+                continue
+            target = root / rel
+            data = target.read_bytes() if target.exists() else b""
+            blob = git(root, ["rev-parse", f"HEAD:{rel}"])
+            git(root, ["checkout", "--", rel])
+            saved[rel] = (data, blob)
+        except Exception:  # noqa: BLE001 - best effort; the pull reports whatever remains
+            continue
+    return saved
+
+
+def restore_runtime_state(
+    root: Path,
+    saved: dict[str, tuple[bytes, str]],
+    git: GitRunner = run_git,
+    conflict_dir: Path | None = None,
+) -> list[str]:
+    """Reapply stashed local runtime state after the update. Never raises; returns log notes.
+
+    Unchanged upstream -> the local content is written back. Changed upstream -> upstream wins and the local
+    copy goes to ``.factory/runs/node_sync_conflicts/<timestamp>-<name>``.
+    """
+    notes: list[str] = []
+    for rel, (data, old_blob) in saved.items():
+        try:
+            new_blob = git(root, ["rev-parse", f"HEAD:{rel}"])
+            if new_blob == old_blob:
+                (root / rel).write_bytes(data)
+                notes.append(f"[USR-394] kept local runtime state of {rel}")
+                continue
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            folder = conflict_dir or (root / ".factory" / "runs" / "node_sync_conflicts")
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{stamp}-{Path(rel).name}").write_bytes(data)
+            notes.append(f"[USR-394] {rel} changed upstream and locally: upstream kept, local copy saved in {folder}")
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"[USR-394] could not restore {rel}: {exc}")
+    for note in notes:
+        logging.getLogger(__name__).warning(note)
+    return notes
 
 
 def is_ephemeral_dirty_file(path_str: str) -> bool:
