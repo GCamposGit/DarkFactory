@@ -1888,6 +1888,24 @@ def test_darkhub_ghcr_mode_waits_for_tag_then_installs_image_start_first(monkeyp
     assert transport.post_calls[1][1] == "/api/compose.deploy"
 
 
+def test_hub_image_paths_come_from_workflow_and_gate_root_only_diffs() -> None:
+    patterns = mod.hub_image_paths()
+    assert "core/**" in patterns and "requirements.txt" in patterns
+    assert not mod.touches_hub_image(["AGENTS.md", "tests/test_x.py"], patterns)
+    assert mod.touches_hub_image(["AGENTS.md", "core/a.py"], patterns)
+    assert mod.touches_hub_image(["requirements.txt"], patterns)
+
+
+def test_darkhub_root_only_merge_skips_ghcr_wait_and_exits_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mod, "probe_deployed_sha", lambda: "b" * 40)
+    monkeypatch.setattr(mod, "get_changed_paths", lambda base, head: ["AGENTS.md"])
+    seen: List[Any] = []
+    code, transport, out, err = _ghcr_run(monkeypatch, lambda repo, tag: seen.append(tag) or 404)
+    assert code == mod.EXIT_OK, err
+    assert "sem mudanca de imagem" in out
+    assert seen == [] and transport.post_calls == []
+
+
 def test_darkhub_ghcr_tag_timeout_refuses_without_build_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     code, transport, _out, err = _ghcr_run(monkeypatch, lambda repo, tag: 404)
     assert code != mod.EXIT_OK
