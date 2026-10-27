@@ -1,22 +1,17 @@
-"""USR-207: classify changed paths to decide whether a Hub merge needs an image rebuild.
+"""USR-408: classify changed paths to decide whether a Hub merge needs an image rebuild.
 
-The Hub image (deploy/dokploy/Dockerfile.hub) embeds core/, hub/, scripts/, deploy/,
-requirements.txt and harness.config.json at runtime. Everything else (ledger under
-.factory/, docs/, tests/, CI config, root markdown) does not change the running Hub,
-so a merge that touches only those paths must not rebuild or recreate the container.
-Pure functions only; fail closed (unknown or empty diff => rebuild).
+The single source of "which paths build a Hub image" is `on.push.paths` of
+.github/workflows/hub-image.yml (read by `hub_image_paths`). A merge touching none of them
+must not rebuild or recreate the container. Fail closed (unknown or empty diff, or an
+unreadable workflow => rebuild).
 """
 
 from __future__ import annotations
 
-from typing import Iterable
+from pathlib import Path
+from typing import Iterable, Optional, Sequence
 
-REBUILD_PREFIXES: tuple[str, ...] = ("core/", "hub/", "scripts/", "deploy/", ".factory/config/")
-# USR-397: .factory/config/ is read at runtime (prices, routing, model registry); the ledger
-# (.factory/demands, .factory/owner_actions) stays data-only.
-# Keep this aligned with COPY sources in deploy/dokploy/Dockerfile.hub. In particular,
-# run_hub.py is not copied into the image and therefore cannot require a Hub rebuild.
-REBUILD_FILES: frozenset[str] = frozenset({"requirements.txt", "harness.config.json"})
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "hub-image.yml"
 
 REASON_NO_DIFF = "diff desconhecido"
 REASON_RUNTIME = "toca caminho embutido na imagem"
@@ -29,16 +24,45 @@ def _norm(path: str) -> str:
     return p[2:] if p.startswith("./") else p
 
 
+def hub_image_paths(workflow: Optional[Path] = None) -> list[str]:
+    """`on.push.paths` of hub-image.yml (unica fonte dos paths que geram imagem)."""
+    try:
+        lines = (workflow or WORKFLOW).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out: list[str] = []
+    in_paths = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "paths:":
+            in_paths = True
+        elif in_paths and stripped.startswith("- "):
+            out.append(stripped[2:].strip().strip("\"'"))
+        elif in_paths and stripped:
+            break
+    return out
+
+
+def touches_hub_image(changed: Sequence[str], patterns: Sequence[str]) -> bool:
+    """True quando algum path alterado casa com um padrao do hub-image.yml."""
+    for raw in changed:
+        path = _norm(raw)
+        for pat in patterns:
+            if pat.endswith("/**"):
+                if path.startswith(pat[:-2]):
+                    return True
+            elif path == pat:
+                return True
+    return False
+
+
 def runtime_paths(paths: Iterable[str]) -> list[str]:
     """Paths among ``paths`` that the Hub image embeds."""
-    out: list[str] = []
-    for raw in paths:
-        p = _norm(raw)
-        if not p:
-            continue
-        if p in REBUILD_FILES or p.startswith(REBUILD_PREFIXES):
-            out.append(p)
-    return out
+    cleaned = [p for p in (_norm(raw) for raw in paths) if p]
+    patterns = hub_image_paths()
+    if not patterns:  # workflow unreadable: fail closed
+        return cleaned
+    return [p for p in cleaned if touches_hub_image([p], patterns)]
 
 
 def needs_rebuild(changed_paths: Iterable[str] | None) -> bool:
