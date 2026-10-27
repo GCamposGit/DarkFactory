@@ -1,7 +1,7 @@
 # Relatório do Piloto de Throughput com Três Workers (USR-287)
 
 **Data**: 17 de Outubro de 2026  
-**Fatia**: F8 / USR-287 (`docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md`)  
+**Fatia**: F8 / USR-287 (`docs/archive/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md`)  
 **Status**: Concluído e Validado  
 
 ---

@@ -26,6 +26,7 @@ ALLOWLIST_PREFIXES: tuple[str, ...] = (
     "scripts/model_id_census.py",
     "docs/proposals/",
     "docs/plans/",
+    "docs/archive/",
     "tests/",
     "core/benchmarks/data/",
     ".darkfac/runs/",
