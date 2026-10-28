@@ -11675,5 +11675,37 @@
     "dependencies": [],
     "created_at": "2026-10-28T12:28:57.936851Z",
     "updated_at": "2026-10-28T13:25:19.072765Z"
+  },
+  {
+    "id": "USR-413",
+    "project_id": "darkfac",
+    "title": "Despachante bloqueia ticket isolado por runtime sujo no checkout compartilhado",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios.",
+    "core_journey": [
+      "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios."
+    ],
+    "non_goals": [
+      "Nao apagar ou comitar alteracoes de outra sessao; nao desabilitar o guard global; nao criar scheduler concorrente."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Despacho pelo servico executa ticket em checkout/worktree operacional limpo mesmo com runtime permitido modificado na raiz compartilhada.",
+      "Teste de comportamento reproduz checkout compartilhado sujo e comprova isolamento sem incluir alteracoes alheias.",
+      "Falha real de fonte/controle permanece estruturada e observavel, sem falso sucesso."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:13:00.136868Z",
+    "updated_at": "2026-10-28T10:13:00.136868Z"
   }
 ]
