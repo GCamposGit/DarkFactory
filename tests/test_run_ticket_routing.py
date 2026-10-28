@@ -79,7 +79,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     # servers listed in the user's real ~/.claude.json. None of that is under test here, and all of it
     # depends on the host (the cloud worker container has leftover worktrees and different MCP config).
     monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *a, **k: (True, []))
-    monkeypatch.setattr(run_ticket, "rebase_on_origin_main", lambda cwd: (True, [], "already up to date"))
+    monkeypatch.setattr(run_ticket, "rebase_on_origin_main", lambda cwd, **_k: (True, [], "already up to date"))
     monkeypatch.setattr(GitAutonomyManager, "sweep_stale", lambda self, *a, **k: SweepReport())
     agent = MagicMock(name="run_agent")
     monkeypatch.setattr(run_ticket, "run_agent", agent)

@@ -60,6 +60,32 @@ def _redact(text: str, token: str | None) -> str:
     return text.replace(token, "***") if token else text
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _ledger_rows(text: str) -> list[dict[str, Any]]:
+    """Rows of a ledger file (a list, or ``{"actions": [...]}``); unreadable text yields no rows."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    rows = data.get("actions", []) if isinstance(data, dict) else data
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def _shrunk_ledgers(wt: Path, content: dict[str, str]) -> list[str]:
+    """Ledgers whose id count would drop versus the checked-out origin/main (USR-419)."""
+    return [
+        f"{rel}: {before} -> {after}"
+        for rel, text in content.items()
+        if (after := len(_ledger_rows(text))) < (before := len(_ledger_rows(_read_text(wt / rel))))
+    ]
+
+
 def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
     """File contents (relative path -> text) rendered from the control store plus the current files.
 
@@ -77,7 +103,11 @@ def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
             DemandsStore(worktree / DEMANDS_RELATIVE).list_tickets(), queue_store.list_queue_tickets()
         )
     tickets = [json.loads(t.model_dump_json()) for t in sorted(stored, key=lambda t: t.id)]
-    actions = [a.to_record() for a in OwnerActionStore(control=True).list_actions()]
+    by_id: dict[str, Any] = {}
+    if worktree is not None:
+        by_id.update({str(r["id"]): r for r in _ledger_rows(_read_text(worktree / OWNER_ACTIONS_RELATIVE)) if "id" in r})
+    by_id.update({a.id: a.to_record() for a in OwnerActionStore(control=True).list_actions()})
+    actions = [by_id[k] for k in sorted(by_id)]
     return {
         DEMANDS_RELATIVE: json.dumps(tickets, indent=2, ensure_ascii=False) + "\n",
         OWNER_ACTIONS_RELATIVE: json.dumps(
@@ -128,6 +158,9 @@ def run_snapshot(
         attached = True
         wt = work / "wt"
         content = files if files is not None else render_ledgers(wt)
+        shrunk = _shrunk_ledgers(wt, content)
+        if shrunk:
+            return SnapshotResult(False, "error", "snapshot abortado: ledger perderia ids (" + "; ".join(shrunk) + ")")
         for rel, text in content.items():
             target = wt / rel
             target.parent.mkdir(parents=True, exist_ok=True)

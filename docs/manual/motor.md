@@ -100,3 +100,11 @@ entrega em `_deliver_sync`, `_deliver_external_project` e `_deliver_worktree`.
 (construtores de prompt, comando/ambiente da entrega, payloads e relatorios de falha, `GateState`).
 O fluxo que chama `pick`, `inspect_quotas`, `_run_bounded` etc. fica em `run_ticket.py` para que os
 `monkeypatch` existentes continuem valendo. Refatoracao pura: CLI, codigos de saida e mensagens inalterados.
+
+## Conflito de rebase na entrega (USR-412)
+
+Em `_deliver_sync` o rebase em origin/main deixa o conflito em andamento (`keep_conflict=True`) e `resolve_rebase_conflict`
+o trata: conflito so em ledger (`demands.json`, `owner_actions.json`) fica com a versao de origin/main e o rebase
+continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_invoke_fix_agent`, estagio
+`rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket vai a `waiting_human` e o run sai com rc 1
+(causa `rebase_conflict`), sem rc 2 e sem redespacho do despachante.
