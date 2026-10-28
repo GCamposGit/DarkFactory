@@ -152,7 +152,7 @@ def test_external_delivery_opens_pr_from_project_worktree_against_registered_bas
         commands={"validate": ["echo ok"]},
     )
     monkeypatch.setattr(registry, "get_project_registry", lambda: SimpleNamespace(get_project=lambda _id: project))
-    monkeypatch.setattr(run_ticket, "rebase_on_project_base", lambda _cwd, _base: (True, [], "ok"))
+    monkeypatch.setattr(run_ticket, "rebase_on_project_base", lambda _cwd, _base, **_k: (True, [], "ok"))
     monkeypatch.setattr(run_ticket, "_run_gate_with_self_correction", lambda *args, **kwargs: None)
     monkeypatch.setattr(run_ticket, "_cancelled", lambda: False)
 
