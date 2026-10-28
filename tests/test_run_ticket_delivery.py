@@ -172,7 +172,7 @@ def test_resume_delivery_rebase_conflict_cli_output(tmp_path: Path, capsys: pyte
 
     with patch("run_ticket.PROJECT_ROOT", repo):
         code = run_ticket.resume_delivery("USR-116", worktree_path=repo, skip_validation=True)
-        assert code == 2
+        assert code == 1
 
     captured = capsys.readouterr()
     assert "[ERRO DE CONFLITO NO REBASE]" in captured.err
@@ -387,3 +387,76 @@ def test_delivery_in_fresh_process_prevents_stale_module_value_error(tmp_path: P
     )
     assert res.returncode == 0
     assert "--resume-delivery" in res.stdout
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True)
+
+
+def _conflict_repo(tmp_path: Path, files: dict[str, tuple[str, str]]) -> Path:
+    """Repo on `ticket/usr-412` whose commit conflicts with main on every file in `files` (name -> (branch, main))."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _git(repo, "checkout", "-b", "ticket/usr-412")
+    for side, idx in (("ticket/usr-412", 0), ("main", 1)):
+        if side == "main":
+            _git(repo, "checkout", "main")
+        for name, texts in files.items():
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(texts[idx], encoding="utf-8")
+            _git(repo, "add", name)
+        _git(repo, "commit", "-m", f"{side} change")
+    _git(repo, "checkout", "ticket/usr-412")
+    return repo
+
+
+_TICKET_412 = UserTicket(id="USR-412", project_id="darkfac", title="Ticket 412", problem_statement="Problema 412", status=DeliveryStatus.PLANNED)
+
+
+def _rebase_in_progress(repo: Path) -> bool:
+    out = subprocess.run(["git", "status"], cwd=str(repo), capture_output=True, text=True).stdout
+    return "rebase in progress" in out
+
+
+def test_ledger_only_rebase_conflict_takes_origin_main_without_agent(tmp_path: Path) -> None:
+    ledger = ".factory/demands/demands.json"
+    repo = _conflict_repo(tmp_path, {ledger: ("branch\n", "main\n")})
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == [ledger]
+    with patch.object(run_ticket, "_invoke_fix_agent") as agent:
+        ok, files, _ = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert ok is True and files == []
+    agent.assert_not_called()
+    assert (repo / ledger).read_text(encoding="utf-8").strip() == "main"
+    assert not _rebase_in_progress(repo)
+
+
+def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(tmp_path: Path) -> None:
+    repo = _conflict_repo(tmp_path, {"mod.py": ("a = 1\n", "a = 2\n")})
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False
+
+    def fake_agent(worktree: Path, ticket: UserTicket, stage: str, feedback: str) -> None:
+        assert stage == "rebase-conflito" and "mod.py" in feedback
+        (worktree / "mod.py").write_text("a = 3\n", encoding="utf-8")
+        _git(worktree, "add", "mod.py")
+        _git(worktree, "-c", "core.editor=true", "rebase", "--continue")
+
+    with patch.object(run_ticket, "_invoke_fix_agent", side_effect=fake_agent) as agent:
+        ok, files, _ = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert ok is True and agent.call_count == 1
+    assert (repo / "mod.py").read_text(encoding="utf-8") == "a = 3\n"
+
+
+def test_unresolved_rebase_conflict_parks_ticket_waiting_human_with_rc_1(tmp_path: Path) -> None:
+    repo = _conflict_repo(tmp_path, {"mod.py": ("a = 1\n", "a = 2\n")})
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    DemandsStore(ledger).save_ticket(_TICKET_412)
+    with patch.object(run_ticket, "PROJECT_ROOT", repo), \
+            patch.object(run_ticket, "_invoke_fix_agent", return_value=None) as agent:
+        code = run_ticket.resume_delivery("USR-412", worktree_path=repo, skip_validation=True)
+    assert code == 1 and agent.call_count == 1
+    assert DemandsStore(ledger).get_ticket("USR-412").status == DeliveryStatus.WAITING_HUMAN
+    assert not _rebase_in_progress(repo)

@@ -143,7 +143,7 @@ def rebase_conflict_result(
         cause="rebase_conflict",
     )
     conflict_payload = {
-        "exit_code": 2,
+        "exit_code": 1,
         "ok": False,
         "cause": "rebase_conflict",
         "ticket_id": ticket.id,
@@ -155,7 +155,7 @@ def rebase_conflict_result(
     }
     if as_json and not return_result:
         print(json.dumps(conflict_payload, indent=2, ensure_ascii=False))
-    return conflict_payload if return_result else 2
+    return conflict_payload if return_result else 1
 
 
 def delivery_failure_result(
