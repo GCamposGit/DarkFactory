@@ -92,3 +92,43 @@ def test_node_sync_converges_with_a_dirty_owner_actions_ledger(
     _git(node, "pull", "-q", "--ff-only")
     assert ledger.read_text(encoding="utf-8") == '{"actions": [1]}\n'
     assert reset_generated_ledgers(node, backup_dir=tmp_path / "bk") == []
+
+
+def test_render_ledgers_keeps_ids_that_exist_only_in_the_files(
+    clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-419: the control store wins per id, but never removes an id that only the file has."""
+    import json
+
+    seed, _ = clone
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.chdir(seed)
+    root = Path(__file__).resolve().parents[1]
+    ticket = json.loads((root / DEMANDS_RELATIVE).read_text(encoding="utf-8"))[0]
+    ticket["id"] = "USR-9999"
+    wt = tmp_path / "wt"
+    (wt / DEMANDS_RELATIVE).parent.mkdir(parents=True)
+    (wt / DEMANDS_RELATIVE).write_text(json.dumps([ticket]), encoding="utf-8")
+    (wt / OWNER_ACTIONS_RELATIVE).parent.mkdir(parents=True)
+    (wt / OWNER_ACTIONS_RELATIVE).write_text(
+        json.dumps({"schema_version": 1, "actions": [{"id": "OA-9999", "title": "so no arquivo"}]}), encoding="utf-8"
+    )
+
+    out = render_ledgers(wt)
+    assert "USR-9999" in [t["id"] for t in json.loads(out[DEMANDS_RELATIVE])]
+    assert "OA-9999" in [a["id"] for a in json.loads(out[OWNER_ACTIONS_RELATIVE])["actions"]]
+
+
+def test_snapshot_aborts_when_a_ledger_would_lose_ids(
+    clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed, bare = clone
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    (seed / DEMANDS_RELATIVE).write_text('[{"id": "USR-1"}, {"id": "USR-2"}]\n', encoding="utf-8")
+    _git(seed, "commit", "-qam", "two tickets")
+    _git(seed, "push", "-q", "origin", "HEAD:main")
+    before = _git(bare, "rev-parse", "main")
+
+    result = run_snapshot(seed, files={DEMANDS_RELATIVE: '[{"id": "USR-1"}]\n'}, token="", today="2030-10-24")
+    assert not result.ok and result.action == "error" and DEMANDS_RELATIVE in result.message
+    assert _git(bare, "rev-parse", "main") == before
