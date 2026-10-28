@@ -54,6 +54,34 @@ def temp_demands_env():
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_shared_checkout_ticket_writes_leave_git_clean(tmp_path, monkeypatch):
+    """USR-415: create/update from a shared checkout go to the control store, never to tracked files."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]", encoding="utf-8")
+    for cmd in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]):
+        subprocess.run(["git", *cmd], cwd=repo, check=True, capture_output=True)
+    monkeypatch.delenv("DARKFAC_DEMANDS_PATH", raising=False)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(repo))
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    monkeypatch.chdir(repo)
+
+    store = DemandsStore(ledger)
+    store.save_ticket(UserTicket(id="USR-9001", project_id="darkfac", title="Controle", origin=DemandOrigin.USER))
+    store.update_status("USR-9001", DeliveryStatus.WAITING_HUMAN)
+
+    assert store.get_ticket("USR-9001").status == DeliveryStatus.WAITING_HUMAN
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    assert status.stdout.strip() == ""
+    ledger.unlink()
+    DemandsStore()
+    assert not ledger.exists()
+
+
 def test_user_demand_tag_enforcement():
     """Verify that UserTicket always enforces the user-demand tag and preserves classification."""
     # Even if tags are initially empty, user-demand must be injected

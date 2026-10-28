@@ -129,19 +129,34 @@ class DemandsStore:
     """Thread-safe, atomic persistence for user demands in JSON format."""
 
     def __init__(self, path: Path | str | None = None) -> None:
+        override = os.environ.get("DARKFAC_DEMANDS_PATH")
+        # USR-415: the implicit cwd-relative default never creates files on its own.
+        self._implicit_default = path is None and not override
         if path is not None:
             self.path = Path(path)
         else:
-            override = os.environ.get("DARKFAC_DEMANDS_PATH")
             self.path = Path(override) if override else DEFAULT_DEMANDS_PATH
         self._lock = _lock_for(self.path)
         self._ensure_storage()
 
     def _ensure_storage(self) -> None:
+        if self._implicit_default or self._control_only():
+            return
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if not self.path.exists():
                 self._write_raw([])
+
+    def _control_only(self) -> bool:
+        """USR-415: the shared checkout's tracked ledger is never rewritten; writes go to the control store."""
+        if os.environ.get("DARKFAC_DEMANDS_PATH"):
+            return False
+        from core.demands import queue_store
+        from core.paths import project_root
+
+        if not queue_store.is_default_ledger(self.path):
+            return False
+        return (project_root() / ".git").is_dir()
 
     def _read_raw(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -222,6 +237,11 @@ class DemandsStore:
                     f"Completed ticket {ticket.id} with live deployment requirements requires live convergence proof in delivery_evidence"
                 )
         with self._lock:
+            if self._control_only():
+                from core.demands import queue_store
+
+                queue_store.register_ticket(ticket)
+                return ticket
             raw_items = self._read_raw()
             updated = False
             ticket_dump = json.loads(ticket.model_dump_json())
