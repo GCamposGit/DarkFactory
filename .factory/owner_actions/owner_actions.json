@@ -2943,6 +2943,28 @@
       "created_at": "2026-10-27T09:40:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-079",
+      "kind": "action",
+      "title": "Capturar statusLine real do Claude no Notebook para USR-391",
+      "priority": "high",
+      "status": "done",
+      "why": "O aceite 1 exige comprovação real de rate_limits.five_hour e seven_day em uma sessão autenticada do Claude Code Desktop; a UI não está acessível ao agente headless e a evidência atual registra quota_supported=false. | 28/10: owner rodou accounts --refresh; snapshot anthropic com headers reais (65% semanal, 0% 5h). Probe sob demanda ainda nao le (USR-416). Entrada restaurada: o snapshot diario fb546fab a apagou (USR-419).",
+      "blocks": [
+        "USR-391"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Notebook, abra uma sessão do Claude Code Desktop neste repositório e aguarde a atualização do statusLine. Confirme que ele exibiu Claude quota synced.",
+          "command": "python -m core.usage.cli accounts --refresh"
+        }
+      ],
+      "verify": "A leitura deve indicar adapter=claude_statusline, quota_supported=true e duas janelas preenchidas (5h e semanal). Anexe somente os campos sanitizados, sem email, token, prompt ou identificador de sessão, em docs/evidence/USR-391-notebook-statusline.md; depois retome USR-391.",
+      "created_at": "2026-10-27T09:14:12Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-28T10:25:00Z"
     }
   ]
 }

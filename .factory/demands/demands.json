@@ -11614,5 +11614,36 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-391",
+    "project_id": "darkfac",
+    "title": "Cota do Claude sem fonte real: CLI nao logada e auth status sem rate_limits (seguimento do USR-382)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #777 mesclado (030d6128)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10 no Notebook: claude 2.1.278 (%APPDATA%\\npm\\claude.cmd e a copia em %USERPROFILE%\\.cache\\codex-runtimes\\...\\claude.ps1, que vem primeiro no PATH) responde 'claude auth status --json' com loggedIn=false e sem rate_limits; o app desktop usa autenticacao propria. Depois do USR-382 o probe le rate_limits da CLI, mas nenhuma fonte os fornece, entao a cota do Claude segue desconhecida (snapshot de 107 h) e o roteador nunca elege o Claude para medium/high. Candidato: o payload JSON do statusline do Claude Code traz rate_limits (five_hour/seven_day used_percentage, resets_at); um script de statusline versionado no repo grava snapshot em state_root()/usage que o ClaudeCodeAccountAdapter le. Criterios de aceite: (1) leitura real da cota do Claude no Notebook com origem documentada (teste com payload simulado + evidencia de uma leitura real no PR); (2) _find_claude prefere %APPDATA%\\npm ao cache do Codex; (3) sem User-Agent falsificado; (4) docs/manual atualizado.",
+    "core_journey": [
+      "Evidencia 25/10 no Notebook: claude 2.1.278 (%APPDATA%\\npm\\claude.cmd e a copia em %USERPROFILE%\\.cache\\codex-runtimes\\...\\claude.ps1, que vem primeiro no PATH) responde 'claude auth status --json' com loggedIn=false e sem rate_limits; o app desktop usa autenticacao propria. Depois do USR-382 o probe le rate_limits da CLI, mas nenhuma fonte os fornece, entao a cota do Claude segue desconhecida (snapshot de 107 h) e o roteador nunca elege o Claude para medium/high. Candidato: o payload JSON do statusline do Claude Code traz rate_limits (five_hour/seven_day used_percentage, resets_at); um script de statusline versionado no repo grava snapshot em state_root()/usage que o ClaudeCodeAccountAdapter le. Criterios de aceite: (1) leitura real da cota do Claude no Notebook com origem documentada (teste com payload simulado + evidencia de uma leitura real no PR); (2) _find_claude prefere %APPDATA%\\npm ao cache do Codex; (3) sem User-Agent falsificado; (4) docs/manual atualizado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste com payload simulado confirma que o statusline grava rate_limits.five_hour e rate_limits.seven_day como janelas de cota; anexar evidência sanitizada de leitura real no Claude Code Desktop do Notebook, com quota_supported=true e ambas as janelas preenchidas.",
+      "_find_claude prefere a instalação em %APPDATA%\\npm à cópia no cache do Codex, com teste cobrindo a precedência.",
+      "O código de probe não falsifica User-Agent.",
+      "O manual de custo descreve a coleta do statusline e o refreshInterval de 30 segundos conforme documentado oficialmente."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T13:39:43.691571Z",
+    "updated_at": "2026-10-28T10:30:00Z"
   }
 ]
