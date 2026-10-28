@@ -57,6 +57,7 @@ from core.workflow.job_board import (
     extract_title,
     resolve_cause_and_diagnostic,
 )
+from core.common.time import utc_now as _utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -317,10 +318,6 @@ class LineLiveSnapshot(_Model):
 
 
 # --------------------------------------------------------------------------- helpers
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _parse_dt(value: Any) -> datetime | None:

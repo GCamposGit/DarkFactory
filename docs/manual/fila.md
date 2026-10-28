@@ -35,7 +35,8 @@ Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
   marcador do dia) escreve `demands.json` e `owner_actions.json` a partir do control store em UM
   commit, publicado em `main` com o token do GitHub App (`core/git/app_token.py`). E idempotente
   (marcador no diretorio de estado; ledger igual nao gera commit) e roda uma vez por dia dentro do
-  laco de `scripts/sync_usage_to_cloud.py`.
+  laco de `scripts/sync_usage_to_cloud.py`. Le e escreve so numa worktree
+  descartavel de `origin/main`: o checkout de quem chama nunca fica sujo (USR-414).
 - `core/infra/node_sync.py` trata os dois ledgers como arquivos gerados: antes do pull do Desktop
   (`/system/update`) e na remediacao do Notebook, edicoes locais sao copiadas para
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).

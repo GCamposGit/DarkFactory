@@ -7,12 +7,7 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-
-
-def utc_now() -> datetime:
-    """Return an aware UTC timestamp so snapshots are portable across hosts."""
-
-    return datetime.now(timezone.utc)
+from core.common.time import utc_now
 
 
 class RoadmapItemType(str, Enum):

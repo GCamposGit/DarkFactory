@@ -8,11 +8,7 @@ from typing import Any, List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-
-def utc_now_iso() -> str:
-    """Return an RFC 3339 timestamp in UTC."""
-    return datetime.now(timezone.utc).isoformat()
+from core.common.time import utc_now_iso
 
 
 STALE_AFTER_SECONDS = 600

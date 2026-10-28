@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.cloud_db import sanitize_database_url
 from core.paths import state_root
+from core.common.time import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_records_lookup
 CREATE INDEX IF NOT EXISTS idx_tenant_records_updated 
     ON tenant_records (updated_at);
 """
-
-
-def utc_now() -> datetime:
-    """Return the current datetime in UTC timezone."""
-    return datetime.now(timezone.utc)
 
 
 def _iso_utc(dt: datetime | None = None) -> str:

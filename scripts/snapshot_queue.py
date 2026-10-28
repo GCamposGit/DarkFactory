@@ -60,12 +60,23 @@ def _redact(text: str, token: str | None) -> str:
     return text.replace(token, "***") if token else text
 
 
-def render_ledgers() -> dict[str, str]:
-    """File contents (relative path -> text) rendered from the control store plus the current files."""
+def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
+    """File contents (relative path -> text) rendered from the control store plus the current files.
+
+    With ``worktree`` the demands file is read from that throwaway checkout, so the store never
+    creates or rewrites ``demands.json`` in the caller's (shared) checkout (USR-414).
+    """
+    from core.demands import queue_store
     from core.demands.store import DemandsStore
     from core.owner_actions.store import SCHEMA_VERSION, OwnerActionStore
 
-    tickets = [json.loads(t.model_dump_json()) for t in DemandsStore().list_tickets()]
+    if worktree is None:
+        stored = DemandsStore().list_tickets()
+    else:
+        stored = queue_store.merge_tickets(
+            DemandsStore(worktree / DEMANDS_RELATIVE).list_tickets(), queue_store.list_queue_tickets()
+        )
+    tickets = [json.loads(t.model_dump_json()) for t in sorted(stored, key=lambda t: t.id)]
     actions = [a.to_record() for a in OwnerActionStore(control=True).list_actions()]
     return {
         DEMANDS_RELATIVE: json.dumps(tickets, indent=2, ensure_ascii=False) + "\n",
@@ -108,7 +119,6 @@ def run_snapshot(
             from core.git import app_token
 
             token = app_token.get_app_token()
-        content = files if files is not None else render_ledgers()
         fetch = _git(["fetch", "origin", "main"], repo_root, token=token)
         if fetch.returncode != 0:
             return SnapshotResult(False, "error", _redact(f"fetch falhou: {fetch.stderr.strip()}", token))
@@ -117,6 +127,7 @@ def run_snapshot(
             return SnapshotResult(False, "error", f"worktree falhou: {add.stderr.strip()}")
         attached = True
         wt = work / "wt"
+        content = files if files is not None else render_ledgers(wt)
         for rel, text in content.items():
             target = wt / rel
             target.parent.mkdir(parents=True, exist_ok=True)
