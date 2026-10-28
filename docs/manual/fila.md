@@ -40,6 +40,8 @@ Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
 - `core/infra/node_sync.py` trata os dois ledgers como arquivos gerados: antes do pull do Desktop
   (`/system/update`) e na remediacao do Notebook, edicoes locais sao copiadas para
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
+  USR-394: no `/system/update` a edicao local e guardada e reaplicada apos o pull se o arquivo nao mudou no
+  upstream; se mudou, vale o upstream e a copia local vai para `.factory/runs/node_sync_conflicts/`.
 
 # Fila de demandas (entrada)
 
