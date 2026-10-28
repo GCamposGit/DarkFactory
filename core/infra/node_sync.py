@@ -281,7 +281,9 @@ def restore_runtime_state(
         try:
             new_blob = git(root, ["rev-parse", f"HEAD:{rel}"])
             if new_blob == old_blob:
-                (root / rel).write_bytes(data)
+                target = root / rel
+                if not target.exists() or target.read_bytes() != data:
+                    target.write_bytes(data)
                 notes.append(f"[USR-394] kept local runtime state of {rel}")
                 continue
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
