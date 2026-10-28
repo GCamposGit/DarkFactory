@@ -664,3 +664,74 @@ def test_single_critical_floor_is_the_registry_floor():
     floor = {"anthropic": QUOTA_FLOOR_MIN, "openai": QUOTA_FLOOR_MIN, "xai": QUOTA_FLOOR_MIN}
     assert _dev_pick(floor) is None
 
+
+
+def _write_anthropic_snapshot(providers_dir, checked_at, five_used, five_reset, weekly_used=20.0):
+    providers_dir.mkdir(parents=True, exist_ok=True)
+    wk_reset = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    windows = [
+        {"quota_id": "claude:5h", "used_percent": five_used, "remaining_percent": 100 - five_used,
+         "window_duration_minutes": 300, "resets_at": five_reset, "metric": "subscription"},
+        {"quota_id": "claude:weekly", "used_percent": weekly_used, "remaining_percent": 100 - weekly_used,
+         "window_duration_minutes": 10080, "resets_at": wk_reset, "metric": "subscription"},
+    ]
+    (providers_dir / "anthropic.json").write_text(json.dumps({
+        "provider_id": "anthropic", "status": "connected", "adapter": "claude_statusline",
+        "quota_supported": True, "windows": windows, "checked_at": checked_at,
+    }), encoding="utf-8")
+
+
+def test_anthropic_stale_snapshot_held_until_5h_reset_with_margin(tmp_path, monkeypatch):
+    """USR-416: between Claude sessions the statusline snapshot goes stale; routing keeps it (used + 10
+    points) until the 5h window resets instead of treating the Claude quota as unknown."""
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: None))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    monkeypatch.setattr("core.line.routing._snapshot_max_age", lambda _dir: 1800.0)
+    providers_dir = tmp_path / "usage" / "providers"
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+    _write_anthropic_snapshot(providers_dir, old, 30.0, future)
+    assert _quota_headroom_diagnosis("anthropic") == (60.0, "healthy")  # 100 - (30 + 10)
+
+    _write_anthropic_snapshot(providers_dir, old, 92.0, future)
+    assert _quota_headroom_diagnosis("anthropic") == (0.0, "healthy")  # stays below the 15% floor
+
+    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    _write_anthropic_snapshot(providers_dir, old, 30.0, past)
+    headroom, reason = _quota_headroom_diagnosis("anthropic")
+    assert headroom is None and reason != "healthy"  # 5h window already reset: unknown again
+
+
+def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot(tmp_path, monkeypatch):
+    """USR-416: `claude -p --output-format stream-json` rate_limit_event -> fresh snapshot (fake subprocess)."""
+    import subprocess
+
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
+    lines = [
+        {"type": "system"},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "utilization": 0.25, "resetsAt": reset}},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "seven_day", "utilization": 0.65, "resetsAt": reset + 86400}},
+    ]
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, "\n".join(json.dumps(x) for x in lines), "")
+
+    monkeypatch.setattr(adapters_mod.subprocess, "run", fake_run)
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+    usage = adapter.inspect(force=True)
+    assert usage.quota_supported and usage.adapter == "claude_code_headless"
+    used = {w.quota_id: w.used_percent for w in usage.windows}
+    assert used == {"claude:5h": 25.0, "claude:weekly": 65.0}
+    assert "-p" in calls[0][0] and "--model" in calls[0][0]
+    assert (tmp_path / "anthropic.json").is_file()
