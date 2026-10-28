@@ -1,6 +1,5 @@
 {
   "schema_version": 1,
-  "description": "Backlog de acoes que SO o owner pode fazer. Fonte unica exibida no DarkHub (fila de intervencoes prioritarias). Quem identificar uma acao humana DEVE registra-la aqui no mesmo turno, com passo a passo completo; o owner nunca deve precisar perguntar no chat o que tem de fazer.",
   "actions": [
     {
       "id": "OA-001",
@@ -720,7 +719,7 @@
       "verify": "Feito pelo owner no commit ca62f21: core/harness/test_subagent.py contem _decode_partial e 3/3 testes passam.",
       "created_at": "2026-10-12T20:38:46Z",
       "created_by": "claude-code",
-      "resolved_at": "2026-10-17T13:21:19.573850+00:00"
+      "resolved_at": "2026-10-17T13:21:19Z"
     },
     {
       "id": "OA-019",
@@ -2921,23 +2920,19 @@
       "depends_on": [],
       "steps": [
         {
-          "text": "No Telegram, abra o chat privado com o bot da fabrica e envie /start. Depois abra https://api.telegram.org/bot<TOKEN>/getUpdates (TOKEN = TELEGRAM_OPS_BOT_TOKEN, ja no Dokploy) e copie o numero em message.chat.id.",
-          "command": null
+          "text": "No Telegram, abra o chat privado com o bot da fabrica e envie /start. Depois abra https://api.telegram.org/bot<TOKEN>/getUpdates (TOKEN = TELEGRAM_OPS_BOT_TOKEN, ja no Dokploy) e copie o numero em message.chat.id."
         },
         {
-          "text": "Dokploy > projeto darkfac-cloud > servico darkhub > aba Environment: adicione TELEGRAM_OWNER_CHAT_ID=<numero copiado>. Confira que TELEGRAM_OPS_BOT_TOKEN esta preenchido. Salve (Save).",
-          "command": null
+          "text": "Dokploy > projeto darkfac-cloud > servico darkhub > aba Environment: adicione TELEGRAM_OWNER_CHAT_ID=<numero copiado>. Confira que TELEGRAM_OPS_BOT_TOKEN esta preenchido. Salve (Save)."
         },
         {
-          "text": "Avise no chat; a fabrica faz o redeploy e um PR de teste em arquivo protegido para confirmar a mensagem com Aprovar/Rejeitar.",
-          "command": null
+          "text": "Avise no chat; a fabrica faz o redeploy e um PR de teste em arquivo protegido para confirmar a mensagem com Aprovar/Rejeitar."
         }
       ],
       "options": [
         {
           "id": "sem-chave",
-          "label": "Recomendado: NAO colocar OWNER_SIGNING_KEY na VPS; aviso chega no Telegram e a assinatura continua no PC com python -m core.governance.keys sign",
-          "recommended": true
+          "label": "Recomendado: NAO colocar OWNER_SIGNING_KEY na VPS; aviso chega no Telegram e a assinatura continua no PC com python -m core.governance.keys sign"
         },
         {
           "id": "com-chave",
@@ -2946,28 +2941,8 @@
       ],
       "verify": "Proximo PR que tocar arquivo protegido gera mensagem no Telegram do owner (ou OA automatica no Hub)",
       "created_at": "2026-10-27T09:40:00Z",
-      "created_by": "claude"
-    },
-    {
-      "id": "OA-079",
-      "kind": "action",
-      "title": "Capturar statusLine real do Claude no Notebook para USR-391",
-      "priority": "high",
-      "status": "open",
-      "why": "O aceite 1 exige comprovação real de rate_limits.five_hour e seven_day em uma sessão autenticada do Claude Code Desktop; a UI não está acessível ao agente headless e a evidência atual registra quota_supported=false.",
-      "blocks": [
-        "USR-391"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "No Notebook, abra uma sessão do Claude Code Desktop neste repositório e aguarde a atualização do statusLine. Confirme que ele exibiu Claude quota synced.",
-          "command": "python -m core.usage.cli accounts --refresh"
-        }
-      ],
-      "verify": "A leitura deve indicar adapter=claude_statusline, quota_supported=true e duas janelas preenchidas (5h e semanal). Anexe somente os campos sanitizados, sem email, token, prompt ou identificador de sessão, em docs/evidence/USR-391-notebook-statusline.md; depois retome USR-391.",
-      "created_at": "2026-10-27T09:14:12Z",
-      "created_by": "codex"
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }
