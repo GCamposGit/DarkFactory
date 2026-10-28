@@ -99,3 +99,5 @@ e a guarda SSRF em `service_net`.
 ## DarkHub remoto: login pelo rodape (USR-406)
 
 Sem sessao, o Hub remoto mostra "Modo leitura" no rodape. Tocar nele ja chama `POST /api/auth/telegram-link`, que cria um pedido pendente (token de consulta secreto, guardado so no navegador que pediu; vale 5 min) e envia ao Telegram do owner a mensagem com o botao "Aprovar" (callback `hublogin:<id>`, aceito so de chat/usuario autorizado) e um link. O navegador consulta `GET /api/auth/telegram-poll` a cada 2 s; ao aprovar, recebe a sessao uma unica vez, guarda e recarrega em modo edicao. Abrir o link no celular tambem libera o celular e o navegador que pediu. `/api/session` agora confirma (200) quem ja envia o token valido; antes devolvia 401 e o frontend apagava o token recem-obtido, deixando o Hub em somente leitura.
+
+- `core/common/time.py` concentra `utc_now`/`utc_now_iso`; modulos importam em vez de redefinir (USR-386).
