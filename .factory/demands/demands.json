@@ -11645,5 +11645,35 @@
     "dependencies": [],
     "created_at": "2026-10-25T13:39:43.691571Z",
     "updated_at": "2026-10-28T10:30:00Z"
+  },
+  {
+    "id": "USR-422",
+    "project_id": "darkfac",
+    "title": "Restaurar isolamento dos testes de entrega e reserva apos contratos de estagio",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "efa7133550f2d048bd621981a28506639004d850",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR.",
+    "core_journey": [
+      "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir e corrigir causas reais das falhas em fixtures ou codigo com testes existentes consolidados",
+      "Testes nao invocam agentes reais nem alteram candidato durante o portao",
+      "Portao oficial HARNESS_PASS, revisao cruzada, CI, merge e deploy com evidencias"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T12:28:57.936851Z",
+    "updated_at": "2026-10-28T13:25:19.072765Z"
   }
 ]

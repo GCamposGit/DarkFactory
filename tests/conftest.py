@@ -516,6 +516,10 @@ def _offline_ticket_stage_agents(request: pytest.FixtureRequest, monkeypatch: py
     run_ticket = sys.modules.get("run_ticket")
     if run_ticket is None or getattr(request.module, "REAL_TICKET_STAGES", False):
         return
+    # Ticket artifacts are keyed by ticket id. A session-wide state root lets parallel tests
+    # with the same fixture ticket race in ticket_engine.reset(), deleting another test's PLAN.
+    state_root = request.getfixturevalue("tmp_path") / "state"
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state_root))
     from core.line import ticket_engine
     from core.line import workspace as line_workspace
     from core.line.stage_review import ReviewVerdict
@@ -537,6 +541,18 @@ def _offline_ticket_stage_agents(request: pytest.FixtureRequest, monkeypatch: py
 
     ledger = request.getfixturevalue("tmp_path_factory").mktemp("research_ledger")
     monkeypatch.setattr(ticket_extras, "research_ledger_root", lambda _main_root: ledger)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_remote_worker_state_per_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Worker recovery state is private to one test, including under xdist.
+
+    A suite-wide directory is insufficient: independent pytest workers can recover or terminate
+    each other's persisted jobs when they construct a worker app without an explicit state path.
+    Keep the directory stable within a test so restart/recovery tests still exercise persistence.
+    """
+
+    monkeypatch.setenv("DARKFAC_WORKER_STATE_DIR", str(tmp_path / "worker_state"))
 
 
 @pytest.fixture(autouse=True)
