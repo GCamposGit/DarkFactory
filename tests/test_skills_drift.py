@@ -25,7 +25,7 @@ import pytest
 
 from scripts import sync_skills
 
-pytestmark = [pytest.mark.offline]
+pytestmark = [pytest.mark.offline, pytest.mark.repository_guard]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENTS_SKILLS_DIR = REPO_ROOT / ".agents" / "skills"
