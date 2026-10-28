@@ -26,6 +26,7 @@ from core.execution.contracts import (
     ReservationStatus,
     UnknownCostPolicy,
 )
+from core.common.time import utc_now as _utc_now
 
 _Clock = Callable[[], datetime]
 
@@ -64,10 +65,6 @@ class UnknownCostRejectedError(BudgetError):
 
 class InvalidReservationError(BudgetError):
     """Raised when a reservation is invalid or in an unexpected state."""
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def _as_utc(value: datetime) -> datetime:

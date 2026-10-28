@@ -65,6 +65,7 @@ from core.line.local_progress import (
     open_progress,
     stderr_warning,
 )
+from core.common.time import utc_now as _now
 
 logger = logging.getLogger("darkfac.live_run")
 
@@ -103,10 +104,6 @@ class LiveRunState(BaseModel):
     closing_cause: str | None = None
     opened_at: str
     updated_at: str
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def state_directory(root: Path | None = None) -> Path:

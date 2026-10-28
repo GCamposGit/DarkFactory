@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 from core.paths import state_root
+from core.common.time import utc_now
 
 logger = logging.getLogger("darkfac.git.ticket_workspace")
 
@@ -254,10 +255,6 @@ def shared_checkout_dirty_paths(
 def _slug(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9._-]+", "-", text.strip().lower()).strip("-.")
     return cleaned or "ticket"
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _stamp(now: datetime) -> str:

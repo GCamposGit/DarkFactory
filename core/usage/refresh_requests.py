@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from pydantic import BaseModel, Field
+from core.common.time import utc_now as _utc_now
 
 DEFAULT_TARGET_NODE = "predator-neo-16"
 MAX_REQUESTS_KEPT = 50
@@ -43,10 +44,6 @@ class RefreshRequestUpdate(BaseModel):
     status: RefreshStatus
     checked_at: Optional[str] = Field(default=None, max_length=64)
     failure_reason: Optional[str] = Field(default=None, max_length=500)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class RefreshRequestStore:

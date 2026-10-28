@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.workflow.contracts import WorkflowState
 from core.workflow.readiness import ReadinessError, validate_transition
+from core.common.time import utc_now as _utc_now
 
 
 class RuntimeModel(BaseModel):
@@ -200,10 +201,6 @@ _DISPATCHABLE_RUN_STATES = frozenset(
         WorkflowState.WAITING_DEPENDENCY,
     }
 )
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 def _iso(value: datetime) -> str:

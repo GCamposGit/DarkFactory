@@ -11,10 +11,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from core.common.time import utc_now_iso
 
 
 class JobSlotKind(str, Enum):

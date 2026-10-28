@@ -20,13 +20,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from core.common.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
-
-
-def utc_now_iso() -> str:
-    """Return RFC 3339 timestamp in UTC."""
-    return datetime.now(timezone.utc).isoformat()
 
 
 class CreditAccountStatus(str, Enum):
