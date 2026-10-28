@@ -45,3 +45,7 @@ confira se o statusLine está habilitado para o projeto, se Python consegue exec
 `scripts/claude_statusline.py` e se o arquivo sanitizado foi gravado sob `state_root()/usage/`.
 Uma captura acima de 120 segundos deixa de ser elegível; uma nova chamada à CLI, sem `rate_limits`,
 não estende a validade da quota antiga.
+
+## Cota do Claude entre sessoes (USR-416)
+
+O snapshot `anthropic` so e gravado pelo statusline enquanto ha sessao do Claude Code aberta. Sem leitura nova, `accounts --refresh` tenta uma chamada minima `claude -p` (stream-json, modelo haiku, diretorio vazio) e le o `rate_limit_event`. Se nao houver leitura, o roteador mantem o ultimo snapshot valido ate o `resets_at` da janela de 5h, somando 10 pontos ao uso (so anthropic; piso de 15 0nalterado). Depois do reset a cota volta a ser desconhecida.

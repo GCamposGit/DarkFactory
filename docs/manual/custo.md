@@ -28,3 +28,7 @@ captura e metadados fixos do provedor. Campos de sessao, workspace, prompt, cami
 do payload do Claude nao sao copiados. Payload invalido ou sem janelas com percentual valido nao
 substitui a ultima leitura boa. A CLI continua sendo consultada como fonte alternativa quando o
 snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
+
+## Probe headless do Claude (USR-416)
+
+`ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova).
