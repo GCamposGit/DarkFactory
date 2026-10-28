@@ -320,6 +320,96 @@ class ReviewStage:
         self.agent_timeout_s = agent_timeout_s
         self.route_waiter = route_waiter or RouteWaiter()
 
+    def _retry_invalid_response(
+        self,
+        ws: RunWorkspace,
+        state: ReviewState,
+        *,
+        project: ProjectDescriptor,
+        run_id: str,
+        harness: str,
+        text: str,
+        candidate_digest: str,
+        policy_digest: str,
+        implementing_harness: Optional[str],
+    ) -> StageResult:
+        """Record malformed output and route another independent reviewer."""
+        _record_invalid_response(ws, harness=harness, text=text)
+        invalid_route = {
+            "harness": harness,
+            "candidate_digest": candidate_digest,
+            "policy_digest": policy_digest,
+        }
+        if invalid_route not in state.invalid_response_routes:
+            state.invalid_response_routes.append(invalid_route)
+        _write_review_state(ws, state)
+
+        excluded = list(dict.fromkeys([
+            *state.timed_out_harnesses,
+            *(item["harness"] for item in state.invalid_response_routes
+              if item.get("candidate_digest") == candidate_digest
+              and item.get("policy_digest") == policy_digest
+              and item.get("harness")),
+        ]))
+        next_route = self.pick_func(
+            "review", self.host_caps, implementing_harness=implementing_harness,
+            config=self.routing_config, exclude=excluded,
+        )
+        if next_route is None:
+            return self.route_waiter.no_route_result(
+                "review", project, run_id, host_caps=self.host_caps,
+                config=self.routing_config, mode="read",
+                implementing_harness=implementing_harness, exclude=excluded,
+            )
+        return StageResult(
+            outcome="retry",
+            cause_code=f"review_invalid_json:harness={harness}:next={next_route[0]}",
+            output_refs=[],
+        )
+
+    def _handle_agent_failure(
+        self,
+        ws: RunWorkspace,
+        state: ReviewState,
+        result: AgentResult,
+        *,
+        run_id: str,
+        round_num: int,
+        harness: str,
+        implementing_harness: Optional[str],
+    ) -> StageResult:
+        """Persist retry state and choose a replacement after an agent error."""
+        if state.agent_error_streak >= MAX_REVIEW_AGENT_RETRIES:
+            logger.error(
+                "Review agent failed %d consecutive times in round %d for run %s; failing review stage",
+                state.agent_error_streak, round_num, run_id,
+            )
+            return StageResult(outcome="failed", cause_code="review_agent_exhausted", output_refs=[])
+
+        state.agent_error_streak += 1
+        if result.error_kind != "timeout":
+            _write_review_state(ws, state)
+            return StageResult(
+                outcome="retry", cause_code=f"review_agent_{result.error_kind}", output_refs=[]
+            )
+
+        if harness not in state.timed_out_harnesses:
+            state.timed_out_harnesses.append(harness)
+        _write_review_state(ws, state)
+        next_route = self.pick_func(
+            "review", self.host_caps, implementing_harness=implementing_harness,
+            config=self.routing_config, exclude=list(state.timed_out_harnesses),
+        )
+        nxt = f"{next_route[0]}/{next_route[1] or '-'}" if next_route else "none"
+        return StageResult(
+            outcome="retry",
+            cause_code=(
+                f"review_timeout:harness={harness}:duration_s={result.duration_s}"
+                f":next_route={nxt}"
+            ),
+            output_refs=[],
+        )
+
     def run(
         self,
         project: ProjectDescriptor,
@@ -443,39 +533,10 @@ class ReviewStage:
         record_result(agent_result, config=self.routing_config)
 
         if not agent_result.ok:
-            if state.agent_error_streak >= MAX_REVIEW_AGENT_RETRIES:
-                logger.error(
-                    "Review agent failed %d consecutive times in round %d for run %s; failing review stage",
-                    state.agent_error_streak,
-                    round_num,
-                    run_id,
-                )
-                return StageResult(
-                    outcome="failed", cause_code="review_agent_exhausted", output_refs=[]
-                )
-            state.agent_error_streak += 1
-            if agent_result.error_kind == "timeout":
-                # USR-328: a deadline is a structured failure, never a verdict or an approval. Record the
-                # duration and the next eligible route (other family, via the router) for diagnosis.
-                if harness not in state.timed_out_harnesses:
-                    state.timed_out_harnesses.append(harness)
-                _write_review_state(ws, state)
-                next_route = self.pick_func(
-                    "review", self.host_caps, implementing_harness=implementing_harness,
-                    config=self.routing_config, exclude=list(state.timed_out_harnesses),
-                )
-                nxt = f"{next_route[0]}/{next_route[1] or '-'}" if next_route else "none"
-                return StageResult(
-                    outcome="retry",
-                    cause_code=(
-                        f"review_timeout:harness={harness}:duration_s={agent_result.duration_s}"
-                        f":next_route={nxt}"
-                    ),
-                    output_refs=[],
-                )
-            _write_review_state(ws, state)
-            return StageResult(
-                outcome="retry", cause_code=f"review_agent_{agent_result.error_kind}", output_refs=[]
+            return self._handle_agent_failure(
+                ws, state, agent_result, run_id=run_id,
+                round_num=round_num, harness=harness,
+                implementing_harness=implementing_harness,
             )
 
         if state.agent_error_streak != 0:
@@ -484,42 +545,10 @@ class ReviewStage:
 
         verdict = _parse_verdict(agent_result.text)
         if verdict is None:
-            _record_invalid_response(ws, harness=harness, text=agent_result.text)
-            invalid_route = {
-                "harness": harness,
-                "candidate_digest": cur_candidate,
-                "policy_digest": cur_policy,
-            }
-            if invalid_route not in state.invalid_response_routes:
-                state.invalid_response_routes.append(invalid_route)
-            _write_review_state(ws, state)
-            next_route = self.pick_func(
-                "review", self.host_caps, implementing_harness=implementing_harness,
-                config=self.routing_config, exclude=list(dict.fromkeys([
-                    *state.timed_out_harnesses,
-                    *(item["harness"] for item in state.invalid_response_routes
-                      if item.get("candidate_digest") == cur_candidate
-                      and item.get("policy_digest") == cur_policy
-                      and item.get("harness")),
-                ])),
-            )
-            if next_route is None:
-                return self.route_waiter.no_route_result(
-                    "review", project, run_id,
-                    host_caps=self.host_caps, config=self.routing_config, mode="read",
-                    implementing_harness=implementing_harness,
-                    exclude=list(dict.fromkeys([
-                        *state.timed_out_harnesses,
-                        *(item["harness"] for item in state.invalid_response_routes
-                          if item.get("candidate_digest") == cur_candidate
-                          and item.get("policy_digest") == cur_policy
-                          and item.get("harness")),
-                    ])),
-                )
-            return StageResult(
-                outcome="retry",
-                cause_code=f"review_invalid_json:harness={harness}:next={next_route[0]}",
-                output_refs=[],
+            return self._retry_invalid_response(
+                ws, state, project=project, run_id=run_id, harness=harness,
+                text=agent_result.text, candidate_digest=cur_candidate,
+                policy_digest=cur_policy, implementing_harness=implementing_harness,
             )
 
         approved = verdict.verdict == "approve" and not bool(verdict.blocking)
