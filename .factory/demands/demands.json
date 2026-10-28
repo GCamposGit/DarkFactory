@@ -9188,8 +9188,8 @@
     "project_id": "darkfac",
     "title": "Helpers duplicados para core/common (fatia S7a do USR-377)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #779 mesclado (9956edcb): utc_now/utc_now_iso consolidados em core/common/time.py, -29 linhas",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9211,7 +9211,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-25T02:39:49.740880Z",
-    "updated_at": "2026-10-25T02:39:49.740880Z"
+    "updated_at": "2026-10-28T11:00:00Z"
   },
   {
     "id": "USR-387",
