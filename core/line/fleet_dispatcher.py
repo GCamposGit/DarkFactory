@@ -237,8 +237,11 @@ def _create_operational_checkout(ticket_id: str, host_id: str, demand: Mapping[s
     stamp = f"{os.getpid()}-{time.time_ns()}-{uuid.uuid4().hex[:8]}"
     path = main_root / ".worktrees" / f"fleet-dispatch-{ticket_id.lower()}-{host_id}-{stamp}"
     path.parent.mkdir(parents=True, exist_ok=True)
-    _git_checked(["worktree", "add", "--detach", str(path), "origin/main"], main_root)
     try:
+        # `worktree add` can create its admin entry/directory before returning an
+        # error. Keep it inside the cleanup scope so a failed launch cannot leave
+        # an orphan that later collides with workspace discovery.
+        _git_checked(["worktree", "add", "--detach", str(path), "origin/main"], main_root)
         ticket = UserTicket.model_validate(dict(demand))
         if ticket.id != ticket_id:
             raise ValueError(f"registro selecionado tem id {ticket.id}, esperado {ticket_id}")

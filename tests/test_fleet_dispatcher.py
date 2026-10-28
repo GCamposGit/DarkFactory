@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from core.line import fleet_dispatcher as fd
 
 HOSTS = [fd.HostSpec("grokbox", 1, "http://g"), fd.HostSpec("notebook", 2, None), fd.HostSpec("desktop", 3, "http://d")]
@@ -234,6 +236,24 @@ def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_p
     assert shared_runtime.read_text(encoding="utf-8") == '{"foreign":true}\n'
     fd._remove_operational_checkout(operational)
     assert not operational.exists()
+
+    # A `worktree add` that partially succeeds and then reports an error must
+    # still be removed; otherwise later dispatches discover a stale checkout.
+    real_git_checked = fd._git_checked
+    partial_path = {}
+
+    def fail_after_worktree_add(args, cwd):
+        result = real_git_checked(args, cwd)
+        if list(args[:2]) == ["worktree", "add"]:
+            partial_path["path"] = Path(args[3])
+            raise RuntimeError("git reported a late worktree creation failure")
+        return result
+
+    monkeypatch.setattr(fd, "_git_checked", fail_after_worktree_add)
+    with pytest.raises(RuntimeError, match="late worktree creation failure"):
+        fd._create_operational_checkout(ticket.id, "notebook", ticket.model_dump(mode="json"))
+    assert not partial_path["path"].exists()
+    assert str(partial_path["path"]) not in git("worktree", "list", "--porcelain").stdout
 
 
 def test_operational_checkout_source_failure_is_visible_and_not_dispatched(tmp_path: Path, monkeypatch):
