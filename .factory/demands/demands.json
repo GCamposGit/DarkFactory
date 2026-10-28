@@ -11681,8 +11681,8 @@
     "project_id": "darkfac",
     "title": "Despachante bloqueia ticket isolado por runtime sujo no checkout compartilhado",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c45af48cb84ce56a8b183d778898a03ee65b53d8",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11706,6 +11706,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-28T10:13:00.136868Z",
-    "updated_at": "2026-10-28T10:13:00.136868Z"
+    "updated_at": "2026-10-28T16:00:42.502705Z"
   }
 ]
