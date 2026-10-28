@@ -17,6 +17,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -1393,6 +1394,9 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             cli_usage = self._probe_claude_cli(executable)
             if cli_usage and cli_usage.quota_supported:
                 return cli_usage
+            headless_usage = self._probe_claude_headless(executable)
+            if headless_usage is not None:
+                return headless_usage
 
         if snapshot and not self._is_snapshot_fresh(snapshot):
             logger.warning("Claude CLI quota probe returned no reading; only a stale snapshot is available")
@@ -1557,6 +1561,59 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
             logger.debug("Claude CLI auth probe failed: %s", exc)
         return None
+
+    def _probe_claude_headless(self, executable: str) -> Optional[ProviderAccountUsage]:
+        """On-demand reading (USR-416): one minimal `claude -p` call authenticated by the installed CLI.
+
+        `--output-format stream-json --verbose` emits `rate_limit_event` messages carrying the
+        unified 5h/7d utilization (0..1) and reset epoch. Runs in an empty temp dir (no CLAUDE.md
+        context) with the cheapest model. Returns None when no event carries a utilization.
+        """
+        try:
+            with tempfile.TemporaryDirectory(prefix="darkfac-claude-probe-") as neutral:
+                result = subprocess.run(
+                    [executable, "-p", "ok", "--output-format", "stream-json", "--verbose",
+                     "--model", "haiku", "--max-turns", "1"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=40, check=False, cwd=neutral, stdin=subprocess.DEVNULL,
+                    creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.debug("Claude headless quota probe failed: %s", type(exc).__name__)
+            return None
+        limits: Dict[str, Any] = {}
+        for line in (result.stdout or "").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            info = event.get("rate_limit_info") if isinstance(event, dict) and event.get("type") == "rate_limit_event" else None
+            if not isinstance(info, dict):
+                continue
+            kind = {"five_hour": "five_hour", "seven_day": "seven_day"}.get(str(info.get("rateLimitType")))
+            utilization = info.get("utilization")
+            if kind is None or isinstance(utilization, bool) or not isinstance(utilization, (int, float)):
+                continue
+            limits[kind] = {"used_percentage": float(utilization) * 100.0, "resets_at": info.get("resetsAt")}
+        windows = self._claude_cli_rate_limit_windows(limits)
+        if not windows:
+            return None
+        limited = any(w.used_percent is not None and w.used_percent >= 100 for w in windows)
+        usage = ProviderAccountUsage(
+            provider_id=self.spec.provider_id,
+            provider_name=self.spec.provider_name,
+            family=self.spec.family,
+            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
+            adapter="claude_code_headless",
+            plan="Claude Pro",
+            quota_supported=True,
+            windows=windows,
+            message="Limites de uso lidos por chamada minima da CLI autenticada do Claude.",
+            dashboard_url=self.spec.dashboard_url,
+        )
+        usage = record_probe(usage, self.snapshot_dir)
+        self._save_snapshot(usage)
+        return usage
 
     @staticmethod
     def _claude_cli_rate_limit_windows(rate_limits: Any) -> List[QuotaWindow]:

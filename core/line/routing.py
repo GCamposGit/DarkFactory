@@ -444,6 +444,35 @@ def _probe_negative_clear(provider_dir: Path, provider_id: str) -> None:
         pass
 
 
+_STALE_RESET_MARGIN_POINTS = 10.0
+
+
+def _stale_until_reset_headroom(snapshot_file: Path, now: datetime) -> Optional[float]:
+    """Anthropic only (USR-416): the statusline writes the Claude quota only while a session is open.
+
+    Between sessions the last valid snapshot stays usable until its 5h window resets, with a
+    conservative margin added to the used percentage. After the reset it is unknown again.
+    """
+    try:
+        data = json.loads(snapshot_file.read_text(encoding="utf-8"))
+        windows = [w for w in data.get("windows", []) if isinstance(w, dict)]
+        five_hour = next((w for w in windows if w.get("quota_id") == "claude:5h"), None)
+        reset = _parse_iso_utc(five_hour.get("resets_at")) if five_hour else None
+        if reset is None or reset <= now or data.get("plausibility_flags"):
+            return None
+        values = []
+        for window in windows:
+            if window.get("used_percent") is None:
+                continue
+            window_reset = _parse_iso_utc(window.get("resets_at")) if window.get("resets_at") else None
+            if window_reset is not None and window_reset <= now:
+                continue
+            values.append(max(0.0, 100.0 - min(100.0, float(window["used_percent"]) + _STALE_RESET_MARGIN_POINTS)))
+        return min(values) if values else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaDiagnosisReason]:
     """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing.
 
@@ -496,16 +525,30 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
 
             if (snapshot_stale or not snapshot_file.is_file()) and _probe_negative_read(provider_dir, provider_id):
                 logger.info("Quota probe for %s skipped (negative cache); failing closed", provider_id)
+                if provider_id == "anthropic":
+                    held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
+                    if held is not None:
+                        return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
                 return None, "probe_timeout"
             try:
                 usage = run_with_deadline(provider_id, lambda a=adapter: a.inspect(force=snapshot_stale))
             except ProbeTimeout as timeout_exc:
                 logger.warning("Quota probe timed out %s; failing closed", timeout_exc.as_dict())
                 _probe_negative_write(provider_dir, provider_id)
+                if provider_id == "anthropic":
+                    held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
+                    if held is not None:
+                        return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
                 return None, "probe_timeout"
             checked = _parse_iso_utc(usage.checked_at)
             if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
                 reason: QuotaDiagnosisReason = "probe_unavailable" if snapshot_stale else "stale_snapshot"
+                if provider_id == "anthropic":
+                    held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
+                    if held is not None:
+                        logger.info("Anthropic snapshot stale; holding last reading until 5h reset (+margin)")
+                        reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
+                        return max(0.0, held - reserved), "healthy"
                 logger.warning(
                     "Quota data for %s is older than %ss (%s); failing closed", provider_id, max_age, reason
                 )
