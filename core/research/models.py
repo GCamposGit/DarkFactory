@@ -104,6 +104,7 @@ class ResearchLedger:
     summary_executive: str = ""
     decisions_linked: List[str] = field(default_factory=list)
     related_tickets: List[str] = field(default_factory=list)
+    provenance: Dict[str, Any] = field(default_factory=dict)
 
     def add_source(self, source: ResearchSource) -> None:
         # Avoid duplicate source URLs or IDs
@@ -124,6 +125,7 @@ class ResearchLedger:
             "insights": [i.to_dict() for i in self.insights],
             "decisions_linked": list(self.decisions_linked),
             "related_tickets": list(self.related_tickets),
+            "provenance": dict(self.provenance),
         }
 
     @classmethod
@@ -140,6 +142,7 @@ class ResearchLedger:
             summary_executive=data.get("summary_executive", ""),
             decisions_linked=list(data.get("decisions_linked", [])),
             related_tickets=list(data.get("related_tickets", [])),
+            provenance=dict(data.get("provenance", {})),
         )
 
     def to_markdown(self) -> str:

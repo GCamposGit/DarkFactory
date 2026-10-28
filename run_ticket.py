@@ -1009,7 +1009,11 @@ def _focal_test_timeout_s(target_count: int) -> float:
 # Output of the official gate (`core/harness/runner.py`) when it refuses a dirty candidate worktree. It is
 # a loop-infrastructure error (the previous fix-agent edit was never committed), never something another
 # agent reinvocation can fix (USR-249).
-_GATE_DIRTY_WORKTREE_MARKER = "Candidate worktree is dirty"
+_GATE_DIRTY_WORKTREE_LINE = re.compile(
+    r"^\[ERROR\] Candidate worktree is dirty; commit or use a clean checkout before "
+    r"running the official harness\s*$",
+    re.MULTILINE,
+)
 
 
 def _commit_fix_agent_changes(target_worktree: Path, ticket: UserTicket, stage: str) -> bool:
@@ -1422,7 +1426,7 @@ def _gate_classify_failure(
             "[WORKER REMOTO INDISPONIVEL]: RAM local nao comporta 2+ workers; portao local "
             f"evitado. Reenfileire/retome com: {resume_cmd} (USR-354).",
         )
-    if _GATE_DIRTY_WORKTREE_MARKER in st.last_output:
+    if _GATE_DIRTY_WORKTREE_LINE.search(st.last_output):
         return _infra(
             "gate_dirty_worktree",
             "[WORKTREE SUJA NO PORTÃO OFICIAL]: o portao recusou o candidato sujo. Nao reinvocando "

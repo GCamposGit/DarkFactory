@@ -34,9 +34,23 @@ AMBIENT_REMOTE_INFRA_ENV = (
 for _remote_env_name in AMBIENT_REMOTE_INFRA_ENV:
     os.environ.pop(_remote_env_name, None)
 
-if "DARKFAC_STATE_ROOT" not in os.environ:
-    _EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
-    os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
+# These values describe an active delivery run, not a test-suite default. In
+# particular, inheriting the lock/cancel/run markers can make run_ticket skip
+# acquiring its own lock or attach publications to the parent run. Scrub before
+# importing test modules, just like remote worker configuration above.
+for _test_control_env_name in (
+    "DARKFAC_LINE_LOCK_HELD",
+    "DARKFAC_LOCAL_CANCEL_PARENT",
+    "DARKFAC_LOCAL_RUN_ID",
+    "DARKFAC_RUN_ID",
+):
+    os.environ.pop(_test_control_env_name, None)
+
+# Always replace the inherited root before test modules import code that may
+# resolve paths at import time. Session and per-test fixtures narrow this root
+# further where state can be mutated concurrently.
+_EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
+os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
 
 # Always isolated, even when inherited: a test that builds the worker app without
 # a state dir (``create_worker_app()`` -> ``JobManager``) recovers the persisted
@@ -490,6 +504,20 @@ def isolated_state_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pa
             os.environ.pop("DARKFAC_OWNER_ACTIONS_PATH", None)
         else:
             os.environ["DARKFAC_OWNER_ACTIONS_PATH"] = old_owner_actions
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ticket_execution_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Give every test a private ticket state tree, including real stage tests.
+
+    Ticket artifacts are keyed by ticket id. A session root lets concurrent
+    tests using the same id race while resetting/writing SPEC.md, tickets.json,
+    or progress.json. Tests that intentionally share state must opt in by
+    creating it within their own test instead of relying on another test.
+    """
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
 
 
 @pytest.fixture(autouse=True)

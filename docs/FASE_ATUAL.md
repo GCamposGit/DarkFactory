@@ -56,3 +56,4 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
 - 26/10/2026: Desktop fora da frota por `DARKFAC_FLEET_DISABLED_HOSTS=desktop` (pedido do owner).
 - 27/10/2026: OA-066 encerrada (Google dispensou o developer token; acesso via Google Cloud); OA-067 cancelada (sem Instagram/Facebook), redes sociais fora do piloto por ora.
+- 28/10/2026: suíte Windows limpa marcadores de execução herdados antes da coleta e dá a cada teste um `DARKFAC_STATE_ROOT` privado; classificação de worktree suja exige a linha completa do runner.

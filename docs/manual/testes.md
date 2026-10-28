@@ -29,6 +29,18 @@ Testes nao devem esperar relogio real. Regras:
 - Subprocessos reais com prazo (`_run_bounded`) usam o menor prazo viavel (1 s).
 - Os padroes de producao nao mudam: `_sleep` so e trocado dentro de testes.
 
+## Isolamento de estado da suite (USR-425 T1)
+
+`tests/conftest.py` limpa, antes da coleta, marcadores herdados de execucao (`DARKFAC_LINE_LOCK_HELD`,
+`DARKFAC_LOCAL_CANCEL_PARENT`, `DARKFAC_LOCAL_RUN_ID` e `DARKFAC_RUN_ID`) e sempre troca
+`DARKFAC_STATE_ROOT` por uma raiz temporaria. Cada teste recebe outra raiz privada para estado de ticket,
+evitando corridas entre testes paralelos que reutilizam o mesmo `ticket_id` e produzem `SPEC.md`,
+`tickets.json` ou `progress.json`. Um teste que precise validar heranca desses marcadores deve configura-los
+explicitamente no subprocesso ou com `monkeypatch` no proprio teste.
+
+O laço de autocorrecao classifica `gate_dirty_worktree` somente quando encontra a linha completa `[ERROR]`
+emitida por `core/harness/runner.py`; menções ao texto em tracebacks ou logs de testes não bastam.
+
 ## Contratos de camada e ratchet de complexidade (USR-377)
 
 - `.importlinter` define dois contratos: `core` nao importa `hub`, e `core` nao importa `fastapi`/`starlette`. Rode `lint-imports` (dependencia `import-linter` em `requirements.txt`).

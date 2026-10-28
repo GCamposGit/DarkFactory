@@ -18,6 +18,7 @@ from core.research.arxiv_client import ArxivClient
 from core.research.github_scout import GitHubScout
 from core.research.trends_scout import ExpertTrendsScout
 from core.research.ledger import KnowledgeLedgerManager
+from core.research.compat import ResearchLedgerSchemaError
 from core.research.transport import (
     ResearchSearchResult,
     ResearchTransport,
@@ -39,6 +40,7 @@ __all__ = [
     "GitHubScout",
     "ExpertTrendsScout",
     "KnowledgeLedgerManager",
+    "ResearchLedgerSchemaError",
     "ResearchSearchResult",
     "ResearchTransport",
     "SearchStatus",

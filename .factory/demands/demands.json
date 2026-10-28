@@ -11707,5 +11707,35 @@
     "dependencies": [],
     "created_at": "2026-10-28T10:13:00.136868Z",
     "updated_at": "2026-10-28T16:00:42.502705Z"
+  },
+  {
+    "id": "USR-425",
+    "project_id": "darkfac",
+    "title": "Eliminar reincidencia de isolamento PLAN e gate_dirty_worktree na suite Windows",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "0104875bd9006d8f1edfa049bfe8a8e8fc464562",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada.",
+    "core_journey": [
+      "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir falhas de isolamento com execucao focal limitada e fixtures reais",
+      "Suite nao altera candidato nem compartilha artefatos PLAN entre testes",
+      "Nao desabilitar tree hygiene ou exigir mocks que ignorem contrato real"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T17:21:39.209183Z",
+    "updated_at": "2026-10-28T18:39:26.394308Z"
   }
 ]
