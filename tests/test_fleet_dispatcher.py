@@ -230,7 +230,10 @@ def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_p
     assert operational is not None and operational != root
     assert launched["cwd"] == operational
     assert Path(launched["cmd"][1]).parent == operational
-    assert json.loads((operational / ".factory/demands/demands.json").read_text(encoding="utf-8"))[0]["id"] == ticket.id
+    operational_tickets = json.loads(
+        (operational / ".factory/demands/demands.json").read_text(encoding="utf-8")
+    )
+    assert [row["id"] for row in operational_tickets] == [ticket.id]
     assert not (operational / ".factory/queue_snapshot.json").exists()
     assert ledger.read_text(encoding="utf-8") == foreign
     assert shared_runtime.read_text(encoding="utf-8") == '{"foreign":true}\n'
