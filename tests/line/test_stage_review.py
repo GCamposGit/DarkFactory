@@ -9,6 +9,7 @@ the "different family than development" rule is exercised for real.
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ from core.line.routing import load_routing_config
 from core.line.routing import pick as real_pick
 from core.line.stage_review import ReviewStage
 from core.projects.models import ProjectDescriptor
-from tests.line.conftest import copy_bare_origin
+from tests.line.conftest import copy_bare_origin, set_fake_response
 
 
 def _isolated_pick(tmp_path: Path):
@@ -225,20 +226,141 @@ def test_resume_after_approval_is_idempotent_and_does_not_call_agent_again(
     assert len(agent.calls) == 1  # second call short-circuits on persisted state
 
 
-def test_invalid_json_verdict_returns_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_claude_invalid_structured_response_records_sanitized_diagnostic_and_returns_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_fake_cli, caplog: pytest.LogCaptureFixture
+) -> None:
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
-    run_id = "run-5"
-    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+    run_id = "run-invalid-claude-envelope"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    cmd_path, env_var = make_fake_cli("claude")
+    monkeypatch.setattr("core.line.agent_cli.find_claude_binary", lambda: cmd_path)
+    secret = "sentinel-secret-value-426"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    raw_response = f"not JSON: OPENAI_API_KEY={secret}"
+    record_path = tmp_path / "claude-record.json"
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"record_path": str(record_path), "stdout": json.dumps({"result": raw_response}), "returncode": 0},
+    )
 
-    def bad_agent(req: AgentRequest) -> AgentResult:
-        return AgentResult(ok=True, text="not json at all", harness=req.harness, duration_s=0.01)
-
-    stage = ReviewStage(run_agent_func=bad_agent, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config())
+    stage = ReviewStage(
+        pick_func=lambda *_args, **_kwargs: ("claude", None),
+        routing_config=load_routing_config(),
+    )
     result = stage.run(project, run_id)
 
     assert result.outcome == "retry"
-    assert result.cause_code == "review_invalid_json"
+    assert result.cause_code.startswith("review_invalid_json:harness=claude:next=")
+    ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
+    diagnostic_path = ctx / "review_invalid_response.json"
+    diagnostic = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    assert diagnostic["harness"] == "claude"
+    assert diagnostic["reason"]
+    assert diagnostic["size_bytes"] == len(raw_response.encode("utf-8"))
+    assert diagnostic["sha256"] == hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
+    assert "[REDACTED]" in diagnostic["sanitized_excerpt"]
+    assert secret not in diagnostic_path.read_text(encoding="utf-8")
+    assert secret not in caplog.text
+    assert not (ctx / "review_verdict.json").exists()
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    argv = record["argv"]
+    assert argv[argv.index("--permission-mode") + 1] == "plan"
+    assert "--json-schema" in argv
+
+
+def test_invalid_review_response_excludes_harness_for_same_candidate_and_fails_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-invalid-review-failover"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+
+    choices = ["claude", "codex"]
+    picks: list[list[str]] = []
+
+    def picking(_stage, _caps, *, exclude=(), **_kwargs):
+        excluded = list(exclude)
+        picks.append(excluded)
+        return next(((name, None) for name in choices if name not in excluded), None)
+
+    def agent(req: AgentRequest) -> AgentResult:
+        if req.harness == "claude":
+            return AgentResult(ok=True, text="invalid", harness=req.harness, duration_s=0.01)
+        return AgentResult(
+            ok=True,
+            text=json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),
+            harness=req.harness,
+            duration_s=0.01,
+        )
+
+    stage = ReviewStage(run_agent_func=agent, pick_func=picking, routing_config=load_routing_config())
+    first = stage.run(project, run_id)
+    assert first.outcome == "retry"
+    assert first.cause_code == "review_invalid_json:harness=claude:next=codex"
+    ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
+    assert not (ctx / "review_verdict.json").exists()
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["invalid_response_routes"][0]["harness"] == "claude"
+
+    second = stage.run(project, run_id)
+    assert second.outcome == "success"
+    assert picks[0] == []
+    assert picks[2] == ["claude"]
+    assert (ctx / "review_verdict.json").is_file()
+
+
+def test_invalid_review_exclusion_expires_when_candidate_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-invalid-review-new-candidate"
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    ctx = ws_mod.context_dir(ws)
+    picks: list[list[str]] = []
+
+    def picking(_stage, _caps, *, exclude=(), **_kwargs):
+        picks.append(list(exclude))
+        return "claude", None
+
+    agent = lambda req: AgentResult(ok=True, text="invalid", harness=req.harness, duration_s=0.01)
+    stage = ReviewStage(run_agent_func=agent, pick_func=picking, routing_config=load_routing_config())
+    stage.run(project, run_id)
+    first_state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    first_digest = first_state["invalid_response_routes"][0]["candidate_digest"]
+
+    (ws.path / "feature.py").write_text("def add(a, b):\n    return a + b + 0\n", encoding="utf-8")
+    ws_mod.commit(ws, "change candidate", job_key=f"{run_id}:candidate-change")
+    stage.run(project, run_id)
+
+    assert picks[-2] == []
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    # The stale exclusion is discarded before routing, so Claude is attempted again against the new tree.
+    assert picks[-1] == ["claude"]
+    assert state["invalid_response_routes"][0]["candidate_digest"] != first_digest
+
+
+def test_review_agent_request_includes_review_verdict_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-review-schema"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    agent = _ScriptedAgent([{"verdict": "approve", "blocking": [], "non_blocking": []}])
+    stage = ReviewStage(
+        run_agent_func=agent,
+        pick_func=lambda *_args, **_kwargs: ("claude", None),
+        routing_config=load_routing_config(),
+    )
+
+    result = stage.run(project, run_id)
+
+    assert result.outcome == "success"
+    schema = agent.calls[0].output_schema
+    assert schema is not None
+    assert schema["properties"]["verdict"]["enum"] == ["approve", "changes_required"]
 
 
 def test_get_diff_summarizes_when_over_60kb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -519,11 +641,11 @@ def test_review_verdict_approve_with_blocking_items_fails_to_approve(
 
     res = stage.run(project, run_id)
     assert res.outcome == "retry"
-    assert res.cause_code.startswith("retry:development\nchanges_required:round=1")
+    assert res.cause_code == "review_invalid_json"
 
     ws = ws_mod.checkout(project, run_id)
     ctx = ws_mod.context_dir(ws)
-    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
-    assert state["rounds"][0]["verdict"] == "changes_required"
-    assert (ctx / "review-1.md").is_file()
+    assert not (ctx / "review_state.json").exists()
+    assert not (ctx / "review-1.md").exists()
+    assert not (ctx / "review_verdict.json").exists()
 
