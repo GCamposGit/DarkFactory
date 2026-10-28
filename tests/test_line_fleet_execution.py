@@ -93,7 +93,7 @@ def launcher_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, control_store:
     monkeypatch.setattr(routing, "default_cooldown_path", lambda: tmp_path / "cooldowns.json")
     monkeypatch.setattr(run_ticket, "time", SimpleNamespace(sleep=lambda *_a, **_k: None))
     monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *a, **k: (True, []))
-    monkeypatch.setattr(run_ticket, "rebase_on_origin_main", lambda cwd: (True, [], "already up to date"))
+    monkeypatch.setattr(run_ticket, "rebase_on_origin_main", lambda cwd, **_k: (True, [], "already up to date"))
     monkeypatch.setattr(GitAutonomyManager, "sweep_stale", lambda self, *a, **k: SweepReport())
     monkeypatch.setattr(GitAutonomyManager, "changed_paths", lambda self, cwd: ["feature.py"])
     monkeypatch.setattr(

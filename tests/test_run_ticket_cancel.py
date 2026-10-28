@@ -337,7 +337,7 @@ def test_cancelling_during_the_delivery_phase_never_commits_or_pushes(
     env = launcher(sink)
     complete, commit = _guard_delivery(monkeypatch)
 
-    def rebase_then_cancel(cwd: Path) -> tuple[bool, list[str], str]:
+    def rebase_then_cancel(cwd: Path, **_k: object) -> tuple[bool, list[str], str]:
         local_cancel.request_cancel("USR-99")  # the owner cancels while the delivery is syncing
         return True, [], "already up to date"
 
