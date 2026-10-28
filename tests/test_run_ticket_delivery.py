@@ -143,6 +143,9 @@ def test_resume_delivery_rebase_conflict_cli_output(
     # skip that compatibility path and stop before the rebase conflict.
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
     monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    # Exercise the unresolved-conflict CLI path without launching a real agent
+    # from an xdist worker (which may cancel or outlive that worker).
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *args, **kwargs: None)
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
