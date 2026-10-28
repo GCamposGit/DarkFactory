@@ -436,6 +436,9 @@
     "catalog": {
       "surface": "cross-catalog-section"
     },
+    "common": {
+      "internal": "Helpers compartilhados (relogio UTC) sem superficie propria (USR-386)."
+    },
     "content": {
       "surface": "content-studio-section"
     },

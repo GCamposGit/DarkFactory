@@ -36,6 +36,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.cloud_db import sanitize_database_url
+from core.common.time import utc_now as _utc_now
 
 logger = logging.getLogger("darkfac.local_progress")
 
@@ -160,10 +161,6 @@ class ProgressSink(Protocol):
     """Where events go; implementations may raise, the publisher contains every failure."""
 
     def write(self, event: LocalRunEvent) -> None: ...
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _clean(text: str | None, limit: int = _MAX_MESSAGE) -> str:
