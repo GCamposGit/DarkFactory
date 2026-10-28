@@ -16,12 +16,6 @@ REPO_ROOT = project_root()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Ensure UTF-8 on Windows consoles
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
 from core.research.models import ResearchTopicType, SourceInsight, AuthorityTier
 from core.research.classifier import (
     classify_research_intent,
@@ -200,6 +194,14 @@ def handle_list(args):
     print(json.dumps(ledgers, indent=2, ensure_ascii=False))
 
 
+def handle_migrate_ledgers(args):
+    mgr = KnowledgeLedgerManager()
+    result = mgr.migrate_ledgers(ledger_id=args.ledger_id, apply=args.apply)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    if result["errors"]:
+        raise SystemExit(1)
+
+
 def handle_show(args):
     mgr = KnowledgeLedgerManager()
     ledger = mgr.load_ledger(args.ledger_id)
@@ -258,6 +260,14 @@ def main():
     # Command: list
     subparsers.add_parser("list", help="List all saved research dossiers in .factory/research/")
 
+    # Command: migrate-ledgers
+    cmd_migrate = subparsers.add_parser(
+        "migrate-ledgers",
+        help="Report historical ledgers, or explicitly rewrite them in canonical form",
+    )
+    cmd_migrate.add_argument("--apply", action="store_true", help="Write canonical ledger.json and regenerate INSIGHTS.md")
+    cmd_migrate.add_argument("--ledger-id", help="Limit inspection or migration to one ledger")
+
     # Command: show
     cmd_show = subparsers.add_parser("show", help="Display an existing research ledger")
     cmd_show.add_argument("ledger_id", help="Ledger ID or slug")
@@ -277,6 +287,8 @@ def main():
         handle_auto(args)
     elif args.command == "list":
         handle_list(args)
+    elif args.command == "migrate-ledgers":
+        handle_migrate_ledgers(args)
     elif args.command == "show":
         handle_show(args)
     else:
@@ -285,4 +297,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # Configure only when executing the CLI. Importing this module from tests or
+    # another Python process must not replace its captured output streams.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     main()

@@ -9,7 +9,9 @@ main, and the self-correction edited that unrelated test to make it pass.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import run_ticket
 
@@ -77,6 +79,44 @@ def test_discovered_tests_failing_is_not_infra() -> None:
 def test_missing_or_garbled_result_is_not_infra() -> None:
     assert run_ticket._gate_failure_is_infra_no_tests("[HARNESS_FAIL]") is False
     assert run_ticket._gate_failure_is_infra_no_tests("[HARNESS_RESULT] {not json") is False
+
+
+def test_dirty_worktree_requires_the_canonical_runner_diagnostic() -> None:
+    attempts: list[dict] = []
+    traceback = SimpleNamespace(
+        stdout="Traceback (most recent call last):\nRuntimeError: [ERROR] Candidate worktree is dirty",
+        stderr="", returncode=1, duration_s=0.1,
+    )
+    state = run_ticket.ticket_stages.GateState(attempt=0)
+    assert run_ticket._gate_classify_failure(
+        state, ["python", "runner.py"], traceback, Path.cwd(), attempts, True, "resume"
+    ) is False
+    assert state.last_cause == "gate_failed"
+    assert attempts == []
+
+    state = run_ticket.ticket_stages.GateState(attempt=0)
+    canonical = SimpleNamespace(
+        stdout=(
+            "[ERROR] Candidate worktree is dirty; commit or use a clean checkout before running the official harness\n"
+            "[HARNESS_FAIL]"
+        ),
+        stderr="", returncode=1, duration_s=0.1,
+    )
+    assert run_ticket._gate_classify_failure(
+        state, ["python", "runner.py"], canonical, Path.cwd(), attempts, True, "resume"
+    ) is True
+    assert state.last_cause == "gate_dirty_worktree"
+
+
+def test_delivery_context_is_not_inherited_and_state_root_is_test_private(tmp_path: Path) -> None:
+    for name in (
+        "DARKFAC_LINE_LOCK_HELD",
+        "DARKFAC_LOCAL_CANCEL_PARENT",
+        "DARKFAC_LOCAL_RUN_ID",
+        "DARKFAC_RUN_ID",
+    ):
+        assert name not in os.environ
+    assert Path(os.environ["DARKFAC_STATE_ROOT"]) == tmp_path / "state"
 
 
 def test_inherited_failure_outside_the_diff_is_base_red(tmp_path: Path) -> None:

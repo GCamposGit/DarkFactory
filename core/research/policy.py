@@ -16,6 +16,7 @@ O ledger e consultado antes de qualquer busca; tema ja pesquisado e reutilizado.
 from __future__ import annotations
 
 import logging
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,7 +107,12 @@ def decide(ticket: Mapping[str, Any]) -> ResearchDecision:
 
 
 def topic_terms(ticket: Mapping[str, Any]) -> list[str]:
-    words = re.findall(r"[a-zà-ú0-9]{4,}", str(ticket.get("title") or "").lower())
+    # A research question is the ticket's explicit search intent; older tickets
+    # without it keep the title/problem fallback used by the original policy.
+    text = str(ticket.get("question") or " ".join(
+        str(ticket.get(field) or "") for field in ("title", "problem_statement")
+    ))
+    words = re.findall(r"[a-zà-ú0-9]{4,}", text.lower())
     return sorted({w for w in words if w not in _STOP})
 
 
@@ -124,7 +130,8 @@ def lookup(terms: list[str], ledger_root: Path, min_overlap: float = 0.6) -> lis
             continue
         if ledger is None or not ledger.sources:
             continue
-        hay = (ledger.query + " " + ledger.summary_executive).lower()
+        provenance_text = json.dumps(ledger.provenance, ensure_ascii=False, default=str)
+        hay = f"{ledger.query} {ledger.summary_executive} {provenance_text}".lower()
         if sum(t in hay for t in terms) / len(terms) >= min_overlap:
             found.append(ledger)
     return found
@@ -135,12 +142,17 @@ def _records(ledger: ResearchLedger) -> list[ResearchSourceRecord]:
     out = []
     for s in ledger.sources:
         ins = by_id.get(s.id)
-        influence = ins.architectural_implications.removeprefix(REUSED_PREFIX) if ins else ""
+        influence = ins.architectural_implications.removeprefix(REUSED_PREFIX).strip() if ins else ""
+        summary = (s.summary or "").strip()
+        insight = (ins.key_insight or "").strip() if ins else ""
+        accessed_at = str(s.metadata.get("accessed_at") or ledger.created_at[:10])
+        if len(accessed_at) < 10:
+            accessed_at = datetime.now(timezone.utc).date().isoformat()
         out.append(ResearchSourceRecord(
             title=s.title,
             url=s.url,
-            accessed_at=str(s.metadata.get("accessed_at", ledger.created_at[:10])),
-            insight=ins.key_insight if ins else (s.summary or s.title),
+            accessed_at=accessed_at,
+            insight=insight or summary or s.title.strip(),
             influence=influence or "reutilizado do ledger",
         ))
     return out
