@@ -14,6 +14,8 @@ import pytest
 
 from tests import _tree_hygiene
 
+pytestmark = pytest.mark.repository_guard
+
 
 def _git(repo: Path, *args: str) -> None:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}

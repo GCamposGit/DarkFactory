@@ -8,7 +8,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from tests._serial_marker_registry import SERIAL_ALLOWED
+
+pytestmark = pytest.mark.repository_guard
 
 TESTS_DIR = Path(__file__).resolve().parent
 

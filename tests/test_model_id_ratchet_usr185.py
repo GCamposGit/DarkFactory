@@ -10,10 +10,14 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import model_id_census as census  # noqa: E402
+
+pytestmark = pytest.mark.repository_guard
 
 BASELINE = REPO_ROOT / ".factory" / "config" / "model_id_baseline.json"
 HINT = "Use an alias via core.models.registry (resolve/id_of/gateway_id), or mark a wire id with 'census: wire-id'."

@@ -33,8 +33,12 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
+
 from core.paths import project_root
 from tests._clock_bomb_guard import scan_tests_tree
+
+pytestmark = pytest.mark.repository_guard
 
 # path (POSIX, relative to repo root) -> why the fixed 2026 date in that file does not depend on the
 # real clock at test time. Keep reasons specific enough that a future reader can re-verify them.

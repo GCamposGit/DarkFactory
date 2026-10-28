@@ -461,6 +461,58 @@ def compute_test_closures(graph: ImportGraph) -> dict[str, set[str]]:
     return {test_path: transitive_closure(test_path, graph) for test_path in graph.test_paths}
 
 
+def _has_repository_guard_marker(source: str, filename: str) -> bool:
+    """Return whether a module uses the explicit pytest repository_guard marker."""
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError:
+        return False
+
+    def is_repository_guard(expression: ast.expr) -> bool:
+        if isinstance(expression, ast.Call):
+            expression = expression.func
+        return (
+            isinstance(expression, ast.Attribute)
+            and expression.attr == "repository_guard"
+            and isinstance(expression.value, ast.Attribute)
+            and expression.value.attr == "mark"
+            and isinstance(expression.value.value, ast.Name)
+            and expression.value.value.id == "pytest"
+        )
+
+    decorated = any(
+        is_repository_guard(decorator)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        for decorator in node.decorator_list
+    )
+    module_marked = False
+    # ``pytestmark`` is a module-level pytest convention. A local variable
+    # with that name inside a helper or class is only a dynamic reference and
+    # does not mark the test module.
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in targets):
+            if value is None:
+                continue
+            # pytest accepts a single marker or a sequence of markers in
+            # pytestmark. Inspect only those direct values so an unrelated
+            # nested expression containing pytest.mark.repository_guard
+            # cannot accidentally promote the whole file to a repository guard.
+            candidates = value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value]
+            if any(is_repository_guard(candidate) for candidate in candidates):
+                module_marked = True
+                break
+    return decorated or module_marked
+
+
 def _compute_hot_modules(graph: ImportGraph, test_closures: dict[str, set[str]]) -> set[str]:
     """Repo-relative paths imported (transitively) by > HOT_MODULE_THRESHOLD
     of test files."""
@@ -596,9 +648,6 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
     merge_base = compute_merge_base(repo_root, resolved_base)
     changed_files = [f for f in get_changed_files(repo_root, merge_base) if f not in EXCLUDED_TEST_FILES]
 
-    if not changed_files:
-        return Selection(mode="none", tests=[], reasons={}, escalations=[], changed_files=[])
-
     try:
         graph = build_import_graph(repo_root)
     except GraphBuildError as exc:
@@ -643,6 +692,15 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
     selected: set[str] = set()
     reasons: dict[str, list[str]] = {}
     uncovered: list[str] = []
+
+    # Repository guards inspect files beyond their import closure. Always run
+    # explicitly marked guards for any PR selection, including an empty diff
+    # impact set. Filename conventions are intentionally not sufficient.
+    for test_path in graph.test_paths:
+        info = graph.files[test_path]
+        if _has_repository_guard_marker(info.source, test_path):
+            selected.add(test_path)
+            reasons.setdefault(test_path, []).append("repository_guard")
 
     for changed_path in changed_files:
         governance_hit = _governance_escalation(changed_path)

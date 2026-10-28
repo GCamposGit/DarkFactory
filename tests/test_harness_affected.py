@@ -10,7 +10,9 @@ the dedicated smoke test at the bottom.
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import subprocess
 import sys
 import time
@@ -189,6 +191,400 @@ def test_changed_test_file_always_selected(tmp_path: Path) -> None:
     assert "tests/test_alone.py" in selection.tests
     assert "tests/test_unrelated.py" not in selection.tests
     assert "changed_test_file" in selection.reasons["tests/test_alone.py"]
+
+
+def test_repository_guard_selected_for_unrelated_new_test(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_clock_bomb_guard.py",
+        "import pytest\n\npytestmark: object = pytest.mark.repository_guard\n\ndef test_scan():\n    pass\n",
+    )
+    _write(repo, "tests/test_existing.py", "def test_existing():\n    pass\n")
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    pass\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert "tests/test_new_unrelated.py" in selection.tests
+    assert "tests/test_clock_bomb_guard.py" in selection.tests
+    assert "repository_guard" in selection.reasons["tests/test_clock_bomb_guard.py"]
+
+
+def test_repository_guard_selected_when_no_files_changed(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_clock_bomb_guard.py",
+        "import pytest\n\npytestmark = pytest.mark.repository_guard\n\ndef test_scan():\n    pass\n",
+    )
+    _write(repo, "tests/test_existing.py", "def test_existing():\n    pass\n")
+    _commit_all(repo, "baseline")
+
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert selection.tests == ["tests/test_clock_bomb_guard.py"]
+    assert selection.reasons["tests/test_clock_bomb_guard.py"] == ["repository_guard"]
+
+
+def test_repository_guard_selected_when_new_test_contains_fixed_2026_date(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_clock_bomb_guard.py",
+        "import pytest\n\npytestmark = pytest.mark.repository_guard\n\ndef test_scan():\n    pass\n",
+    )
+    _commit_all(repo, "baseline")
+
+    fixed_date = "2026" + "-10-25"
+    _write(
+        repo,
+        "tests/test_new_date.py",
+        "def test_new():\n    date = " + repr(fixed_date) + "\n    assert date\n",
+    )
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert "tests/test_new_date.py" in selection.tests
+    assert "tests/test_clock_bomb_guard.py" in selection.tests
+    assert "repository_guard" in selection.reasons["tests/test_clock_bomb_guard.py"]
+
+
+def test_guard_named_file_without_marker_is_not_selected_as_repository_guard(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "tests/test_fake_guard.py", "def test_guard():\n    pass\n")
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    pass\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert "tests/test_fake_guard.py" not in selection.tests
+    assert "repository_guard" not in selection.reasons.get("tests/test_fake_guard.py", [])
+
+
+def test_repository_guard_marker_in_text_only_is_not_selected(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_marker_text_decoy.py",
+        '"""The string pytest.mark.repository_guard appears in this docstring."""\n'
+        "# pytest.mark.repository_guard is mentioned here, not applied.\n"
+        "def test_decoy():\n    pass\n",
+    )
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    pass\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert selection.tests == ["tests/test_new_unrelated.py"]
+    assert "repository_guard" not in selection.reasons.get(
+        "tests/test_marker_text_decoy.py", []
+    )
+
+
+def test_repository_guard_marker_nested_in_other_pytestmark_expression_is_ignored(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_marker_decoy.py",
+        "import pytest\n\n"
+        "def wrap(marker):\n    return marker\n\n"
+        "pytestmark = wrap(pytest.mark.repository_guard)\n\n"
+        "def test_decoy():\n    pass\n",
+    )
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    pass\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert "tests/test_marker_decoy.py" not in selection.tests
+    assert "repository_guard" not in selection.reasons.get("tests/test_marker_decoy.py", [])
+
+
+def test_repository_guard_marker_in_nested_pytestmark_assignment_is_ignored(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_marker_decoy.py",
+        "import pytest\n\n"
+        "def helper():\n"
+        "    pytestmark = pytest.mark.repository_guard\n\n"
+        "def test_decoy():\n"
+        "    pass\n",
+    )
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    pass\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert "tests/test_marker_decoy.py" not in selection.tests
+    assert "repository_guard" not in selection.reasons.get("tests/test_marker_decoy.py", [])
+
+
+def test_repository_guard_marker_referenced_only_by_dynamic_name_is_ignored(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_marker_decoy.py",
+        "import pytest\n\n"
+        "marker = pytest.mark.repository_guard\n"
+        "pytestmark = marker\n\n"
+        "@marker\n"
+        "def test_decoy():\n"
+        "    pass\n",
+    )
+    _write(repo, "tests/test_existing.py", "def test_existing():\n    pass\n")
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    pass\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert selection.tests == ["tests/test_new_unrelated.py"]
+    assert "repository_guard" not in selection.reasons.get("tests/test_marker_decoy.py", [])
+
+
+_NAMED_REPOSITORY_GUARDS = (
+    "tests/test_clock_bomb_guard.py",
+    "tests/test_serial_marker_guard.py",
+    "tests/test_tree_hygiene_guard.py",
+    "tests/test_skills_drift.py",
+    "tests/test_model_id_ratchet_usr185.py",
+)
+
+
+def test_global_repository_guards_declare_marker_and_skills_keeps_offline() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+
+    for rel in _NAMED_REPOSITORY_GUARDS:
+        source = (repository_root / rel).read_text(encoding="utf-8")
+        assert affected._has_repository_guard_marker(source, rel)
+
+    # The three guards covered by USR-390 T2 must opt in at module scope, so
+    # the PR selector cannot depend on individual test names or decorators.
+    for rel in (
+        "tests/test_clock_bomb_guard.py",
+        "tests/test_serial_marker_guard.py",
+        "tests/test_tree_hygiene_guard.py",
+    ):
+        tree = ast.parse((repository_root / rel).read_text(encoding="utf-8"))
+        module_marks = [
+            statement.value
+            for statement in tree.body
+            if isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "pytestmark"
+                for target in statement.targets
+            )
+        ]
+        assert any(
+            isinstance(mark, ast.Attribute)
+            and mark.attr == "repository_guard"
+            and isinstance(mark.value, ast.Attribute)
+            and mark.value.attr == "mark"
+            for mark in module_marks
+        ), f"{rel} must declare pytestmark = pytest.mark.repository_guard at module scope"
+
+    ratchet_source = (repository_root / "tests/test_model_id_ratchet_usr185.py").read_text(
+        encoding="utf-8"
+    )
+    ratchet_tree = ast.parse(ratchet_source)
+    ratchet_pytestmark = next(
+        statement.value
+        for statement in ratchet_tree.body
+        if isinstance(statement, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark"
+            for target in statement.targets
+        )
+    )
+    assert isinstance(ratchet_pytestmark, ast.Attribute)
+    assert ratchet_pytestmark.attr == "repository_guard"
+
+    skills_guard = (repository_root / "tests/test_skills_drift.py").read_text(encoding="utf-8")
+    tree = ast.parse(skills_guard)
+    module_marks = {
+        node.attr
+        for statement in tree.body
+        if isinstance(statement, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in statement.targets)
+        for node in ast.walk(statement.value)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    }
+    assert {"offline", "repository_guard"} <= module_marks
+
+
+def _assert_named_guards_selected(selection: affected.Selection) -> None:
+    assert selection.mode == "subset"
+    for rel in _NAMED_REPOSITORY_GUARDS:
+        assert rel in selection.tests
+        assert "repository_guard" in selection.reasons[rel]
+
+
+def test_pr_profile_selects_explicit_repository_guards_regardless_of_changed_files(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_clock_bomb_guard.py",
+        "import pytest\n\npytestmark = pytest.mark.repository_guard\n\ndef test_scan():\n    pass\n",
+    )
+    for rel in _NAMED_REPOSITORY_GUARDS[1:]:
+        if rel == "tests/test_skills_drift.py":
+            body = (
+                "import pytest\n\n"
+                "pytestmark = [pytest.mark.offline, pytest.mark.repository_guard]\n\n"
+                "def test_scan():\n    pass\n"
+            )
+        else:
+            body = "import pytest\n\npytestmark = pytest.mark.repository_guard\n\ndef test_scan():\n    pass\n"
+        _write(repo, rel, body)
+    _write(repo, "tests/test_existing.py", "def test_existing():\n    pass\n")
+    _commit_all(repo, "baseline")
+
+    _write(repo, "tests/test_new_unrelated.py", "def test_new():\n    assert True\n")
+    by_test = affected.select_affected(repo, "main")
+    _assert_named_guards_selected(by_test)
+    assert "tests/test_new_unrelated.py" in by_test.tests
+    assert "tests/test_existing.py" not in by_test.tests
+
+    _write(repo, "core/unrelated_leaf.py", "VALUE = 1\n")
+    by_source = affected.select_affected(repo, "main")
+    _assert_named_guards_selected(by_source)
+    assert "tests/test_new_unrelated.py" in by_source.tests
+    assert "tests/test_existing.py" not in by_source.tests
+    assert "core/unrelated_leaf.py" in by_source.uncovered
+
+
+def test_docs_change_selects_marked_repository_guards_without_full_suite(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_clock_bomb_guard.py",
+        "import pytest\n\npytestmark = pytest.mark.repository_guard\n\ndef test_scan():\n    pass\n",
+    )
+    _write(repo, "tests/test_existing.py", "def test_existing():\n    pass\n")
+    _write(repo, "docs/notes.md", "hello\n")
+    _commit_all(repo, "baseline")
+
+    _write(repo, "docs/notes.md", "hello world\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert selection.escalations == []
+    assert selection.tests == ["tests/test_clock_bomb_guard.py"]
+    assert selection.reasons["tests/test_clock_bomb_guard.py"] == ["repository_guard"]
+
+
+def test_pr_profile_discovers_direct_repository_guard_decorators(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(
+        repo,
+        "tests/test_class_guard.py",
+        "import pytest\n\n"
+        "@pytest.mark.repository_guard\n"
+        "class TestRepositoryScan:\n"
+        "    def test_scan(self):\n        pass\n",
+    )
+    _write(
+        repo,
+        "tests/test_function_guard.py",
+        "import pytest\n\n"
+        "@pytest.mark.repository_guard()\n"
+        "def test_scan():\n    pass\n",
+    )
+    _write(
+        repo,
+        "tests/test_method_guard.py",
+        "import pytest\n\n"
+        "class TestRepositoryScan:\n"
+        "    @pytest.mark.repository_guard\n"
+        "    def test_scan(self):\n        pass\n",
+    )
+    _write(repo, "tests/test_existing.py", "def test_existing():\n    pass\n")
+    _commit_all(repo, "baseline")
+
+    _write(repo, "docs/notes.md", "notes\n")
+    selection = affected.select_affected(repo, "main")
+
+    assert selection.mode == "subset"
+    assert selection.escalations == []
+    for rel in (
+        "tests/test_class_guard.py",
+        "tests/test_function_guard.py",
+        "tests/test_method_guard.py",
+    ):
+        assert rel in selection.tests
+        assert "repository_guard" in selection.reasons[rel]
+    assert "tests/test_existing.py" not in selection.tests
+
+
+def test_repository_guard_marker_is_registered_for_strict_markers(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    ini_text = (repo_root / "pytest.ini").read_text(encoding="utf-8")
+    assert "repository_guard:" in ini_text
+    assert "--strict-markers" in ini_text
+
+    target = tmp_path / "test_repository_guard_marker.py"
+    target.write_text(
+        "import pytest\n\n"
+        "pytestmark = pytest.mark.repository_guard\n\n"
+        "def test_marked():\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    isolated_ini = tmp_path / "pytest.ini"
+    isolated_ini.write_text(ini_text, encoding="utf-8")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--noconftest",
+            "-c",
+            str(isolated_ini),
+            "-o",
+            "addopts=--strict-markers",
+            "--collect-only",
+            "-q",
+            str(target),
+        ],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_root_conftest_escalates_to_full(tmp_path: Path) -> None:
