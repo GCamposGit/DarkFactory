@@ -279,6 +279,13 @@ def _remove_operational_checkout(path: Optional[Path]) -> None:
 
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any]) -> InFlight:
     env = dict(os.environ)
+    # The launcher runs from a temporary operational checkout, but its mutable
+    # control store is shared with the dispatcher and the other workers. Resolve
+    # the parent's effective root before changing cwd; this also makes a relative
+    # DARKFAC_STATE_ROOT override stable in the child process.
+    from core.paths import state_root
+
+    env["DARKFAC_STATE_ROOT"] = str(state_root().resolve())
     env["DARKFAC_HOST_ID"] = host.id
     if host.worker_url:
         env["DARKFAC_TEST_WORKERS"] = host.worker_url

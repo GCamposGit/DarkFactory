@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,31 @@ def test_disabled_hosts_env_removes_host(monkeypatch):
     assert [h.id for h in fd.default_hosts()] == ["grokbox", "notebook"]
 
 
+def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "shared-state"))
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
+    monkeypatch.setattr(
+        fd,
+        "subprocess",
+        type(
+            "Subprocess",
+            (),
+            {"Popen": staticmethod(lambda _cmd, **kwargs: captured.update(kwargs) or Process()), "STDOUT": -2},
+        )(),
+    )
+
+    fd.default_launch("USR-413", fd.HostSpec("notebook", 1), {"id": "USR-413"})
+
+    assert captured["env"]["DARKFAC_STATE_ROOT"] == str((tmp_path / "shared-state").resolve())
+
+
 def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):
     import psutil
 
@@ -215,10 +241,12 @@ def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_p
             return None
 
     def popen(cmd, **kwargs):
-        launched.update(cmd=cmd, cwd=kwargs["cwd"])
+        launched.update(cmd=cmd, cwd=kwargs["cwd"], env=kwargs["env"])
         return Process()
 
     monkeypatch.setattr(fd, "PROJECT_ROOT", root)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(root))
+    monkeypatch.delenv("DARKFAC_STATE_ROOT", raising=False)
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {
         "run": staticmethod(subprocess.run), "Popen": staticmethod(popen),
@@ -228,6 +256,20 @@ def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_p
 
     operational = job.operational_checkout
     assert operational is not None and operational != root
+    from core.line.store_selection import default_control_db_path, default_control_store
+
+    dispatcher_db = default_control_db_path()
+    assert launched["env"]["DARKFAC_STATE_ROOT"] == str((root / ".factory").resolve())
+    # Resolve the launcher's store under the exact child environment and persist
+    # a queue row. The operational checkout can then be removed independently.
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", launched["env"]["DARKFAC_STATE_ROOT"])
+    launcher_db = default_control_db_path()
+    assert launcher_db == dispatcher_db
+    launcher_store = default_control_store()
+    launcher_store.upsert_ticket(
+        "darkfac", "USR-413", "planned", {"id": "USR-413"}, datetime.now(timezone.utc)
+    )
+    assert default_control_store().list_tickets("darkfac") == [{"id": "USR-413"}]
     assert launched["cwd"] == operational
     assert Path(launched["cmd"][1]).parent == operational
     operational_tickets = json.loads(
@@ -239,6 +281,8 @@ def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_p
     assert shared_runtime.read_text(encoding="utf-8") == '{"foreign":true}\n'
     fd._remove_operational_checkout(operational)
     assert not operational.exists()
+    assert default_control_db_path() == dispatcher_db
+    assert default_control_store().list_tickets("darkfac") == [{"id": "USR-413"}]
 
     # A `worktree add` that partially succeeds and then reports an error must
     # still be removed; otherwise later dispatches discover a stale checkout.
