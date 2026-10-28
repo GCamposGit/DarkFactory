@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.models.registry import resolve_known
+from core.models.registry import id_of, resolve_known
 from core.usage.models import (
     AccountConnectionStatus,
     ProviderAccountUsage,
@@ -1570,10 +1570,10 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         context) with the cheapest model. Returns None when no event carries a utilization.
         """
         try:
-            with tempfile.TemporaryDirectory(prefix="darkfac-claude-probe-") as neutral:
+            with tempfile.TemporaryDirectory(prefix="darkfac-quota-probe-") as neutral:
                 result = subprocess.run(
                     [executable, "-p", "ok", "--output-format", "stream-json", "--verbose",
-                     "--model", "haiku", "--max-turns", "1"],
+                     "--model", id_of("haiku"), "--max-turns", "1"],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=40, check=False, cwd=neutral, stdin=subprocess.DEVNULL,
                     creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
