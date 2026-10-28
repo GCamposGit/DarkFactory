@@ -171,3 +171,86 @@ def test_failure_without_log_still_has_reason(tmp_path: Path):
     e.handles["USR-01"].rc = 75
     row = e.d.run_cycle()["recent_failures"][0]
     assert row["kind"] == "infra" and "exit_code=75" in row["reason"]
+
+
+def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_path: Path, monkeypatch):
+    """Shared runtime edits stay in place and cannot leak into the launched run_ticket checkout."""
+    import json
+    import subprocess
+
+    from core.demands.models import UserTicket
+
+    root = tmp_path / "shared"
+    root.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+
+    git("init", "-b", "main")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    (root / "run_ticket.py").write_text("# clean runner\n", encoding="utf-8")
+    ledger = root / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    (root / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
+    git("add", "run_ticket.py", ".factory/demands/demands.json", ".gitignore")
+    git("commit", "-m", "baseline")
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True, check=True)
+    git("remote", "add", "origin", str(bare))
+    git("push", "-u", "origin", "main")
+
+    foreign = '[{"id":"USR-900","title":"another session"}]\n'
+    ledger.write_text(foreign, encoding="utf-8")
+    shared_runtime = root / ".factory" / "queue_snapshot.json"
+    shared_runtime.parent.mkdir(parents=True, exist_ok=True)
+    shared_runtime.write_text('{"foreign":true}\n', encoding="utf-8")
+    ticket = UserTicket(id="USR-413", project_id="darkfac", title="isolated", problem_statement="test", status="planned")
+    launched = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    def popen(cmd, **kwargs):
+        launched.update(cmd=cmd, cwd=kwargs["cwd"])
+        return Process()
+
+    monkeypatch.setattr(fd, "PROJECT_ROOT", root)
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {
+        "run": staticmethod(subprocess.run), "Popen": staticmethod(popen),
+        "STDOUT": subprocess.STDOUT,
+    })())
+    job = fd.default_launch(ticket.id, fd.HostSpec("notebook", 1), ticket.model_dump(mode="json"))
+
+    operational = job.operational_checkout
+    assert operational is not None and operational != root
+    assert launched["cwd"] == operational
+    assert Path(launched["cmd"][1]).parent == operational
+    assert json.loads((operational / ".factory/demands/demands.json").read_text(encoding="utf-8"))[0]["id"] == ticket.id
+    assert not (operational / ".factory/queue_snapshot.json").exists()
+    assert ledger.read_text(encoding="utf-8") == foreign
+    assert shared_runtime.read_text(encoding="utf-8") == '{"foreign":true}\n'
+    fd._remove_operational_checkout(operational)
+    assert not operational.exists()
+
+
+def test_operational_checkout_source_failure_is_visible_and_not_dispatched(tmp_path: Path, monkeypatch):
+    cfg = fd.DispatcherConfig(hosts=[fd.HostSpec("grokbox", 1)], state_path=tmp_path / "state.json")
+    dispatcher = fd.FleetDispatcher(
+        cfg, demands_loader=lambda: [_d("USR-41")],
+        probe=lambda _host: fd.HostProbe(True), clock=lambda: 1000.0,
+    )
+
+    def source_failure(ticket_id, host_id, demand):
+        raise RuntimeError("git fetch origin main falhou (rc=128): source unavailable")
+
+    monkeypatch.setattr(fd, "_create_operational_checkout", source_failure)
+    cycle = dispatcher.run_cycle()
+
+    assert cycle["dispatched"] == []
+    assert cycle["idle_reasons"]["grokbox"].startswith("lancamento_falhou:git fetch origin main")
+    assert cycle["cooldown"] == ["USR-41"]
+    failure = cycle["recent_failures"][-1]
+    assert failure["kind"] == "launch" and "source unavailable" in failure["reason"]

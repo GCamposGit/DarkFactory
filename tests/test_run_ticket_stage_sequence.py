@@ -129,8 +129,13 @@ def _via_fleet(line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(fleet_dispatcher, "LOG_DIR", tmp_path / "fleet_logs")
     fake_popen = lambda cmd, **kw: launched.append(cmd) or MagicMock()  # noqa: E731
     monkeypatch.setattr(fleet_dispatcher, "subprocess", SimpleNamespace(Popen=fake_popen, STDOUT=-2))
+    monkeypatch.setattr(fleet_dispatcher, "_create_operational_checkout", lambda *_args: tmp_path)
     monkeypatch.setenv("DARKFAC_FLEET_MODE", "0")
-    fleet_dispatcher.default_launch("USR-990", fleet_dispatcher.HostSpec(id="notebook", priority=1))
+    fleet_dispatcher.default_launch(
+        "USR-990", fleet_dispatcher.HostSpec(id="notebook", priority=1),
+        {"id": "USR-990", "project_id": "darkfac", "title": "Stage sequence", "problem_statement": "test",
+         "status": "planned"},
+    )
     cmd = launched[0]
     assert Path(cmd[1]).name == "run_ticket.py" and cmd[2] == "USR-990"
     return run_ticket.main([*cmd[2:], "--harness", "codex", "--skip-validation"])

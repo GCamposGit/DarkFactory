@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,6 +111,7 @@ class InFlight:
     handle: Any  # tem .poll() -> int | None
     log_path: Optional[Path] = None
     started_at: float = 0.0
+    operational_checkout: Optional[Path] = None
 
 
 @dataclass(frozen=True)
@@ -212,7 +214,67 @@ def default_probe(host: HostSpec, stable_probes: int = 3) -> HostProbe:
     return HostProbe(True, "saudavel")
 
 
-def default_launch(ticket_id: str, host: HostSpec) -> InFlight:
+def _git_checked(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run git and turn source/control failures into visible launch errors."""
+    result = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=False, timeout=120, creationflags=CREATE_NO_WINDOW,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"git {' '.join(args)} falhou (rc={result.returncode}): {detail}")
+    return result
+
+
+def _create_operational_checkout(ticket_id: str, host_id: str, demand: Mapping[str, Any]) -> Path:
+    """Create a clean launcher checkout and seed only the selected ticket into its ledger."""
+    from core.demands.models import UserTicket
+    from core.demands.store import DemandsStore
+    from core.git.ticket_workspace import main_checkout_root
+
+    main_root = main_checkout_root(PROJECT_ROOT)
+    _git_checked(["fetch", "origin", "main", "-q"], main_root)
+    stamp = f"{os.getpid()}-{time.time_ns()}-{uuid.uuid4().hex[:8]}"
+    path = main_root / ".worktrees" / f"fleet-dispatch-{ticket_id.lower()}-{host_id}-{stamp}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _git_checked(["worktree", "add", "--detach", str(path), "origin/main"], main_root)
+    try:
+        ticket = UserTicket.model_validate(dict(demand))
+        if ticket.id != ticket_id:
+            raise ValueError(f"registro selecionado tem id {ticket.id}, esperado {ticket_id}")
+        DemandsStore(path / ".factory" / "demands" / "demands.json").save_ticket(ticket)
+        status = _git_checked(["status", "--porcelain=v1", "--untracked-files=all"], path).stdout.strip()
+        changed = [line[2:].strip() for line in status.splitlines() if len(line) >= 4]
+        if changed and changed != [".factory/demands/demands.json"]:
+            raise RuntimeError(f"checkout operacional recebeu arquivos inesperados: {changed}")
+    except Exception:
+        subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=main_root,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       check=False, timeout=120, creationflags=CREATE_NO_WINDOW)
+        raise
+    return path
+
+
+def _remove_operational_checkout(path: Optional[Path]) -> None:
+    if path is None:
+        return
+    try:
+        from core.git.ticket_workspace import main_checkout_root
+
+        main_root = main_checkout_root(path)
+        result = subprocess.run(
+            ["git", "worktree", "remove", "--force", str(path)], cwd=main_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+            timeout=120, creationflags=CREATE_NO_WINDOW,
+        )
+        if result.returncode:
+            logger.error("nao foi possivel remover checkout operacional %s: %s", path,
+                         (result.stderr or result.stdout).strip())
+    except Exception:
+        logger.exception("falha ao remover checkout operacional %s", path)
+
+
+def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any]) -> InFlight:
     env = dict(os.environ)
     env["DARKFAC_HOST_ID"] = host.id
     if host.worker_url:
@@ -223,11 +285,16 @@ def default_launch(ticket_id: str, host: HostSpec) -> InFlight:
         env["DARKFAC_REMOTE_HARNESS"] = "off"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{ticket_id}-{host.id}.log"
-    cmd = [sys.executable, str(PROJECT_ROOT / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
-    with open(log_path, "ab") as log:
-        proc = subprocess.Popen(cmd, cwd=PROJECT_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                creationflags=CREATE_NO_WINDOW)
-    return InFlight(ticket_id, host.id, proc, log_path, time.time())
+    operational_checkout = _create_operational_checkout(ticket_id, host.id, demand)
+    cmd = [sys.executable, str(operational_checkout / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
+    try:
+        with open(log_path, "ab") as log:
+            proc = subprocess.Popen(cmd, cwd=operational_checkout, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                    creationflags=CREATE_NO_WINDOW)
+    except Exception:
+        _remove_operational_checkout(operational_checkout)
+        raise
+    return InFlight(ticket_id, host.id, proc, log_path, time.time(), operational_checkout)
 
 
 def running_fleet_runs() -> dict[str, str]:
@@ -299,7 +366,7 @@ class FleetDispatcher:
         *,
         demands_loader: Callable[[], list[dict[str, Any]]] = default_demands_loader,
         probe: Optional[Callable[[HostSpec], HostProbe]] = None,
-        launch: Callable[[str, HostSpec], InFlight] = default_launch,
+        launch: Optional[Callable[[str, HostSpec], InFlight]] = None,
         deploy: Callable[[], int] = default_deploy,
         clock: Callable[[], float] = time.time,
         busy_ids_loader: Callable[[], set[str]] = lambda: set(),
@@ -342,6 +409,7 @@ class FleetDispatcher:
             if rc is None:
                 continue
             del self.in_flight[host_id]
+            _remove_operational_checkout(job.operational_checkout)
             tail = _tail(job.log_path) if rc != 0 else ""
             if rc == 0:
                 self.last_merge_at = self.clock()
@@ -406,10 +474,19 @@ class FleetDispatcher:
                 dispatched.append({"ticket": tid, "host": host.id, "dry_run": "1"})
                 continue
             try:
-                self.in_flight[host.id] = self.launch(tid, host)
+                if self.launch is None:
+                    demand = next(row for row in demands if str(row.get("id", "")) == tid)
+                    job = default_launch(tid, host, demand)
+                else:
+                    job = self.launch(tid, host)
+                self.in_flight[host.id] = job
                 dispatched.append({"ticket": tid, "host": host.id})
             except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
-                idle[host.id] = f"lancamento_falhou:{exc}"
+                from core.line.agent_cli import redact_secrets
+
+                safe_error = " | ".join(redact_secrets(str(exc)).splitlines())[-800:]
+                idle[host.id] = f"lancamento_falhou:{safe_error}"
+                self._record_failure(InFlight(tid, host.id, None), 1, "launch", str(exc))
                 self.cooldown[tid] = now + self.config.requeue_cooldown_sec
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
