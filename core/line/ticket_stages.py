@@ -207,8 +207,14 @@ def delivery_success_result(
     deploy_artifact = artifact_directory / "deploy_report.json" if artifact_directory else None
     merge_data = json.loads(merge_artifact.read_text(encoding="utf-8")) if merge_artifact and merge_artifact.is_file() else {}
     deploy_data = json.loads(deploy_artifact.read_text(encoding="utf-8")) if deploy_artifact and deploy_artifact.is_file() else {}
-    pr_url = merge_data.get("pr_url")
-    merge_sha = merge_data.get("merge_sha")
+    delivery = getattr(completion_report, "delivery", None) or completion_report
+    pr_url = merge_data.get("pr_url") or getattr(delivery, "pr_url", None) or f"branch:{current_branch}"
+    merge_sha = (
+        merge_data.get("merge_sha")
+        or getattr(delivery, "merge_sha", None)
+        or getattr(completion_report, "commit_sha", None)
+        or current_sha
+    )
     deploy_status = "awaiting_deploy" if awaiting_deploy else (
         "deployed" if deploy_data.get("deployed") else "not_run"
     )
@@ -225,8 +231,8 @@ def delivery_success_result(
             )
         if awaiting_deploy:
             print(
-                f"\n[MERGE] Ticket {ticket.id} mergeado e validado; PR {pr_url or '-'}; "
-                f"SHA {merge_sha or '-'}; deploy aguardando; relatorio {deploy_artifact}. "
+                f"\n[MERGE] Ticket {ticket.id} mergeado e validado; aguardando deploy; "
+                f"PR {pr_url}; SHA {merge_sha}; relatorio {deploy_artifact}. "
                 "Status: merged_awaiting_deploy, nao entregue."
             )
         else:
@@ -412,6 +418,9 @@ def final_json_payload(
         payload["sync_action"] = completion_info["sync_action"]
     if "status" in completion_info:
         payload["status"] = completion_info["status"]
+    for key in ("pr_url", "merge_sha", "deploy_status", "deploy_report"):
+        if key in completion_info:
+            payload[key] = completion_info[key]
     if not delivered and "error" in completion_info:
         payload["error"] = completion_info["error"]
     return payload
