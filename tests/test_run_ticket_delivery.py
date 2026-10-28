@@ -134,8 +134,18 @@ def test_rebase_conflict_detects_files_and_aborts_cleanly(tmp_path: Path) -> Non
     assert (repo / "shared.txt").read_text(encoding="utf-8") == "ticket content\n"
 
 
-def test_resume_delivery_rebase_conflict_cli_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_resume_delivery_rebase_conflict_cli_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """resume_delivery outputs clear conflict message and exact resume command on conflict (USR-116)."""
+    # The standalone resume path writes legacy plan/build artifacts. Keep its
+    # state in this test's temp directory so artifacts from another run cannot
+    # skip that compatibility path and stop before the rebase conflict.
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    # Exercise the unresolved-conflict CLI path without launching a real agent
+    # from an xdist worker (which may cancel or outlive that worker).
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *args, **kwargs: None)
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)

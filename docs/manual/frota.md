@@ -6,6 +6,13 @@ de host tem prazo; quando o host desaparece, o próximo reconciliador expira a r
 o job volta a ser elegível para admissão em outro host. A indisponibilidade de uma VM é
 tratada como falha normal de infraestrutura, sem concluir o ticket.
 
+Cada despacho inicia `run_ticket.py` em um worktree operacional limpo criado de `origin/main`.
+O despachante copia para esse checkout somente o registro do ticket selecionado; arquivos
+alterados no checkout compartilhado, inclusive estado de runtime, ficam preservados e fora
+da execução. Falhas ao atualizar a referência ou criar o worktree aparecem como falha de
+lançamento no estado do ciclo e colocam o ticket em cooldown; não são tratadas como despacho
+bem-sucedido.
+
 ## Notebook e Desktop (Windows)
 
 Instale a tarefa a partir do checkout principal atualizado, nunca de uma worktree.
@@ -161,4 +168,4 @@ Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) recon
 
 ## Falhas registradas
 
-Quando um `run_ticket` da frota termina com código diferente de zero, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra` ou `lock`) e o motivo (últimas linhas do log do ticket, sem segredos; nunca vazio). O histórico guarda as 20 últimas.
+Quando um `run_ticket` da frota termina com código diferente de zero, ou o checkout operacional não pode ser preparado, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra`, `lock` ou `launch`) e o motivo (últimas linhas do log do ticket ou erro de lançamento, sem segredos; nunca vazio). O histórico guarda as 20 últimas. Erros de lançamento mantêm o ticket em cooldown e não aparecem como despacho concluído.
