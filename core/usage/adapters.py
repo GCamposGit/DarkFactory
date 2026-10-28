@@ -1590,11 +1590,16 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             info = event.get("rate_limit_info") if isinstance(event, dict) and event.get("type") == "rate_limit_event" else None
             if not isinstance(info, dict):
                 continue
-            kind = {"five_hour": "five_hour", "seven_day": "seven_day"}.get(str(info.get("rateLimitType")))
-            utilization = info.get("utilization")
-            if kind is None or isinstance(utilization, bool) or not isinstance(utilization, (int, float)):
-                continue
-            limits[kind] = {"used_percentage": float(utilization) * 100.0, "resets_at": info.get("resetsAt")}
+            # CLI 2.1.x: utilization per window lives in `unifiedWindows`; older events carry it flat.
+            windows_info = info.get("unifiedWindows")
+            if not isinstance(windows_info, dict):
+                windows_info = {str(info.get("rateLimitType")): info}
+            for kind in ("five_hour", "seven_day"):
+                window = windows_info.get(kind)
+                utilization = window.get("utilization") if isinstance(window, dict) else None
+                if isinstance(utilization, bool) or not isinstance(utilization, (int, float)):
+                    continue
+                limits[kind] = {"used_percentage": float(utilization) * 100.0, "resets_at": window.get("resetsAt")}
         windows = self._claude_cli_rate_limit_windows(limits)
         if not windows:
             return None

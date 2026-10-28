@@ -718,8 +718,9 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
     lines = [
         {"type": "system"},
-        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "utilization": 0.25, "resetsAt": reset}},
-        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "seven_day", "utilization": 0.65, "resetsAt": reset + 86400}},
+        # CLI 2.1.x shape (captured 28/10): both windows under `unifiedWindows`.
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "resetsAt": reset, "unifiedWindows": {
+            "five_hour": {"utilization": 0.25, "resetsAt": reset}, "seven_day": {"utilization": 0.65, "resetsAt": reset + 86400}}}},
     ]
     calls = []
 
