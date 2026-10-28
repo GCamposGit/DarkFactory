@@ -9,6 +9,7 @@ the grill but still with a plan artifact.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,7 +19,7 @@ import pytest
 
 import run_ticket
 from core.demands.models import UserTicket
-from core.git.autonomy import GitAutonomyManager, SweepReport, TicketCompletionReport
+from core.git.autonomy import DeliveryReport, GitAutonomyManager, TicketCompletionReport
 from core.git.ticket_workspace import TicketWorkspace
 from core.line import bindings, fleet_dispatcher, routing, stage_integration, stage_planning, stage_review
 from core.line import workspace as line_workspace
@@ -52,6 +53,10 @@ def line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     """Hermetic launcher: fake ledger/quotas/workspace/agent; records which stages ran."""
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
     state = SimpleNamespace(ticket=_ticket("medium"), missing=None, calls=[], merged=MagicMock())
+    state.sweep_calls = []
+    state.launcher_checkout = tmp_path / "heartbeat-ops"
+    state.launcher_checkout.mkdir()
+    (state.launcher_checkout / "launcher-state.json").write_text("active", encoding="utf-8")
 
     class _Store:
         def __init__(self, _path: Path) -> None:
@@ -69,7 +74,12 @@ def line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(run_ticket, "time", SimpleNamespace(sleep=lambda *_a: None))
     monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *a, **k: (True, []))
     monkeypatch.setattr(run_ticket, "rebase_on_origin_main", lambda cwd, **_k: (True, [], "ok"))
-    monkeypatch.setattr(GitAutonomyManager, "sweep_stale", lambda self, *a, **k: SweepReport())
+    monkeypatch.setattr(
+        GitAutonomyManager, "sweep_stale",
+        lambda self, *a, **k: (
+            state.sweep_calls.append((self, a, k)), shutil.rmtree(state.launcher_checkout, ignore_errors=True)
+        ),
+    )
     monkeypatch.setattr(GitAutonomyManager, "changed_paths", lambda self, cwd: ["feature.py"])
     monkeypatch.setattr(run_ticket, "_resolve_project", lambda ticket: SimpleNamespace(id="darkfac"))
     wdir = tmp_path / "wt"
@@ -113,7 +123,13 @@ def line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
 
     def complete(self: Any, **kwargs: Any) -> TicketCompletionReport:
         state.merged(kwargs["ticket_id"])
-        return TicketCompletionReport(ok=True, ticket_id=kwargs["ticket_id"], commit_sha="c" * 40)
+        return TicketCompletionReport(
+            ok=True, ticket_id=kwargs["ticket_id"], commit_sha="c" * 40,
+            delivery=DeliveryReport(
+                ok=True, action="merged", pr_url="https://github.com/example/repo/pull/42",
+                merge_sha="d" * 40, branch="ticket/usr-990",
+            ),
+        )
 
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", complete)
     return state
@@ -272,6 +288,25 @@ def test_research_without_web_search_is_skipped_with_reason_and_never_invents_so
     assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
     research = json.loads((_context(line) / "research.json").read_text(encoding="utf-8"))
     assert research["kind"] == "research_skipped" and research["reason"].startswith("R3")  # policy skip
+
+
+def test_success_reports_merge_and_pending_deploy_without_global_sweep(
+    line: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A successful merge persists complete evidence outside the removable checkout and never sweeps peers."""
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation", "--json"]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    artifact_dir = run_ticket.ticket_engine.workspace.context_dir(run_ticket.ticket_engine.run_workspace(line.ticket))
+    assert line.sweep_calls == []
+    assert (line.launcher_checkout / "launcher-state.json").read_text(encoding="utf-8") == "active"
+    assert (artifact_dir / "merge.json").is_file()
+    assert (artifact_dir / "deploy_report.json").is_file()
+    assert output["status"] == "merged_awaiting_deploy"
+    assert output["pr_url"] == "https://github.com/example/repo/pull/42"
+    assert output["merge_sha"] == "d" * 40
+    assert output["deploy_status"] == "awaiting_deploy"
+    assert Path(output["deploy_report"]) == artifact_dir / "deploy_report.json"
 
 
 def test_learning_pack_is_recorded_and_indexed_after_the_merge(

@@ -230,9 +230,9 @@ def _create_operational_checkout(ticket_id: str, host_id: str, demand: Mapping[s
     """Create a clean launcher checkout and seed only the selected ticket into its ledger."""
     from core.demands.models import UserTicket
     from core.demands.store import DemandsStore
-    from core.git.ticket_workspace import main_checkout_root
+    from core.git import ticket_workspace
 
-    main_root = main_checkout_root(PROJECT_ROOT)
+    main_root = ticket_workspace.main_checkout_root(PROJECT_ROOT)
     _git_checked(["fetch", "origin", "main", "-q"], main_root)
     stamp = f"{os.getpid()}-{time.time_ns()}-{uuid.uuid4().hex[:8]}"
     path = main_root / ".worktrees" / f"fleet-dispatch-{ticket_id.lower()}-{host_id}-{stamp}"
@@ -251,28 +251,33 @@ def _create_operational_checkout(ticket_id: str, host_id: str, demand: Mapping[s
         if changed and changed != [".factory/demands/demands.json"]:
             raise RuntimeError(f"checkout operacional recebeu arquivos inesperados: {changed}")
     except Exception:
-        subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=main_root,
-                       capture_output=True, text=True, encoding="utf-8", errors="replace",
-                       check=False, timeout=120, creationflags=CREATE_NO_WINDOW)
+        _remove_operational_checkout(path, main_root=main_root)
         raise
     return path
 
 
-def _remove_operational_checkout(path: Optional[Path]) -> None:
+def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Path] = None) -> None:
     if path is None:
         return
     try:
-        from core.git.ticket_workspace import main_checkout_root
+        from core.git import ticket_workspace
 
-        main_root = main_checkout_root(path)
-        result = subprocess.run(
-            ["git", "worktree", "remove", "--force", str(path)], cwd=main_root,
-            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
-            timeout=120, creationflags=CREATE_NO_WINDOW,
-        )
-        if result.returncode:
-            logger.error("nao foi possivel remover checkout operacional %s: %s", path,
-                         (result.stderr or result.stdout).strip())
+        root = main_root or ticket_workspace.main_checkout_root(PROJECT_ROOT)
+        result = ticket_workspace.cleanup(path, root)
+        if result.method == "preserved":
+            logger.warning(
+                "checkout operacional preservado: path=%s holder=%s; recuperacao possivel "
+                "apos o processo encerrar, repetindo cleanup pelo despachante",
+                path, result.detail,
+            )
+        elif not result.removed:
+            logger.error(
+                "nao foi possivel remover checkout operacional: path=%s metodo=%s detalhe=%s; "
+                "recuperacao possivel repetindo cleanup apos liberar os handles",
+                path, result.method, result.detail or "; ".join(result.errors),
+            )
+        else:
+            logger.info("checkout operacional removido: path=%s metodo=%s", path, result.method)
     except Exception:
         logger.exception("falha ao remover checkout operacional %s", path)
 

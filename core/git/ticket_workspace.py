@@ -96,7 +96,7 @@ class CleanupResult:
 
     path: Path
     removed: bool
-    method: str  # absent | git | rmtree | trash | failed
+    method: str  # absent | preserved | git | rmtree | trash | failed
     attempts: int = 0
     trash_path: Optional[Path] = None
     detail: str = ""
@@ -460,9 +460,24 @@ def cleanup(
     3. when the directory is still there: RENAME it into the trash (never lose
        data, never leave a half-registered worktree) and ``git worktree prune``.
 
-    The process cwd is moved out of ``path`` for the whole operation (:func:`_outside_dir`).
+    Live processes with cwd inside ``path`` preserve the checkout before any Git or
+    filesystem mutation. Otherwise, this process cwd is moved out of ``path`` for the
+    removal operation (:func:`_outside_dir`).
     Never raises; ``CleanupResult.removed`` says whether ``path`` is gone.
     """
+    if path.exists():
+        holders = _find_holders(path)
+        if holders:
+            result = CleanupResult(
+                path=path,
+                removed=False,
+                method="preserved",
+                detail=f"{path} is in use; preserved because processes have cwd inside it: "
+                + ", ".join(holders),
+            )
+            logger.warning(result.detail)
+            return result
+
     with _outside_dir(path, main_root):
         return _cleanup_outside(
             path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,

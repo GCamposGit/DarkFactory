@@ -201,7 +201,17 @@ def delivery_failure_result(
 def delivery_success_result(
     ticket: Any, completion_report: Any, target_worktree: Path, current_branch: str, current_sha: str,
     attempts_log: list[dict[str, Any]], as_json: bool, return_result: bool, awaiting_deploy: bool = False,
+    artifact_directory: Optional[Path] = None,
 ) -> Any:
+    merge_artifact = artifact_directory / "merge.json" if artifact_directory else None
+    deploy_artifact = artifact_directory / "deploy_report.json" if artifact_directory else None
+    merge_data = json.loads(merge_artifact.read_text(encoding="utf-8")) if merge_artifact and merge_artifact.is_file() else {}
+    deploy_data = json.loads(deploy_artifact.read_text(encoding="utf-8")) if deploy_artifact and deploy_artifact.is_file() else {}
+    pr_url = merge_data.get("pr_url")
+    merge_sha = merge_data.get("merge_sha")
+    deploy_status = "awaiting_deploy" if awaiting_deploy else (
+        "deployed" if deploy_data.get("deployed") else "not_run"
+    )
     if not as_json:
         if completion_report:
             delivered_sha = (
@@ -215,11 +225,15 @@ def delivery_success_result(
             )
         if awaiting_deploy:
             print(
-                f"\n[MERGE] Ticket {ticket.id} mergeado e validado; aguardando deploy pos-merge "
-                "(smoke ainda nao rodou): merged-awaiting-deploy, nao entregue."
+                f"\n[MERGE] Ticket {ticket.id} mergeado e validado; PR {pr_url or '-'}; "
+                f"SHA {merge_sha or '-'}; deploy aguardando; relatorio {deploy_artifact}. "
+                "Status: merged_awaiting_deploy, nao entregue."
             )
         else:
-            print(f"\n[SUCESSO] Ticket {ticket.id} entregue e validado com sucesso!")
+            print(
+                f"\n[SUCESSO] Ticket {ticket.id}: PR {pr_url or '-'}; SHA de merge {merge_sha or '-'}; "
+                f"deploy {deploy_status}; relatorio {deploy_artifact or '-'}."
+            )
 
     success_payload = {
         "exit_code": 0,
@@ -229,6 +243,10 @@ def delivery_success_result(
         "commit_sha": getattr(completion_report, "commit_sha", None) if completion_report else current_sha,
         "worktree": str(target_worktree),
         "status": "merged_awaiting_deploy" if awaiting_deploy else "delivered",
+        "pr_url": pr_url,
+        "merge_sha": merge_sha,
+        "deploy_status": deploy_status,
+        "deploy_report": str(deploy_artifact) if deploy_artifact and deploy_artifact.is_file() else None,
     }
     if completion_report and getattr(completion_report, "sync_result", None):
         success_payload["sync_action"] = completion_report.sync_result.action

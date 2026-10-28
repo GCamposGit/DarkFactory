@@ -2197,14 +2197,10 @@ def _deliver_worktree(
             return refused(stage, getattr(exc, "reason", str(exc)))
     else:
         progress.phase("deploy", "skipped", "merge e deploy desligados por --no-commit/--no-push")
-    try:
-        git_mgr.sweep_stale(cwd=git_mgr.root)
-    except Exception as exc:
-        logger.warning("Sweep after delivery warning: %s", exc)
-
     return ticket_stages.delivery_success_result(
         ticket, completion_report, target_worktree, current_branch, current_sha, attempts_log,
         as_json, return_result, awaiting_deploy=awaiting_deploy,
+        artifact_directory=ticket_engine.workspace.context_dir(rws),
     )
 
 

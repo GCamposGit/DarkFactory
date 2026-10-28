@@ -321,3 +321,48 @@ def test_operational_checkout_source_failure_is_visible_and_not_dispatched(tmp_p
     assert cycle["cooldown"] == ["USR-41"]
     failure = cycle["recent_failures"][-1]
     assert failure["kind"] == "launch" and "source unavailable" in failure["reason"]
+
+
+def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(tmp_path, monkeypatch, caplog):
+    from core.git.ticket_workspace import CleanupResult
+
+    checkout = tmp_path / "operational-checkout"
+    checkout.mkdir()
+    holder = "python (pid 17192)"
+    calls = []
+
+    def protected_cleanup(path, main_root):
+        calls.append((path, main_root))
+        return CleanupResult(
+            path=path, removed=False, method="preserved",
+            detail=f"{path} is in use; preserved because processes have cwd inside it: {holder}",
+        )
+
+    monkeypatch.setattr("core.git.ticket_workspace.cleanup", protected_cleanup)
+    monkeypatch.setattr(fd, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("core.git.ticket_workspace.main_checkout_root", lambda _path: tmp_path)
+
+    fd._remove_operational_checkout(checkout)
+
+    assert calls == [(checkout, tmp_path)]
+    assert "checkout operacional preservado" in caplog.text
+    assert str(checkout) in caplog.text and holder in caplog.text
+    assert "recuperacao possivel" in caplog.text
+
+
+def test_reap_cleans_operational_checkout_after_job_exits_without_changing_deploy_batch(tmp_path, monkeypatch):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    checkout = tmp_path / "operational-checkout"
+    calls = []
+    monkeypatch.setattr(fd, "_remove_operational_checkout", lambda path: calls.append(path))
+    e.d.run_cycle()
+    job = e.d.in_flight["grokbox"]
+    job.operational_checkout = checkout
+    e.handles["USR-01"].rc = 0
+
+    e.d.run_cycle()
+    assert calls == [checkout]
+    assert e.d.pending_deploy and e.d.deploys == 0
+    e.now += e.d.config.deploy_window_sec + 1
+    e.d.run_cycle()
+    assert e.d.deploys == 1
