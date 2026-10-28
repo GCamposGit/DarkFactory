@@ -641,11 +641,13 @@ def test_review_verdict_approve_with_blocking_items_fails_to_approve(
 
     res = stage.run(project, run_id)
     assert res.outcome == "retry"
-    assert res.cause_code == "review_invalid_json"
+    assert res.cause_code.startswith("review_invalid_json:harness=")
+    assert ":next=" in res.cause_code
 
     ws = ws_mod.checkout(project, run_id)
     ctx = ws_mod.context_dir(ws)
-    assert not (ctx / "review_state.json").exists()
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["invalid_response_routes"][0]["harness"] in res.cause_code
     assert not (ctx / "review-1.md").exists()
     assert not (ctx / "review_verdict.json").exists()
 
