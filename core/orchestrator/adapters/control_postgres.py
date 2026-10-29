@@ -1203,6 +1203,29 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError("Manual ownership lookup unavailable") from exc
 
+    def get_active_ticket_reservation(
+        self, project_id: str, ticket_id: str, *, now: datetime
+    ) -> FleetReservation | None:
+        """Read the canonical, unexpired execution lease shared by launchers and fleet workers."""
+        if self.mock_mode:
+            return self._backend.get_active_ticket_reservation(project_id, ticket_id, now=now)
+        try:
+            with self._psycopg.connect(
+                self.raw_url, connect_timeout=5, options="-c statement_timeout=5000"
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                                  acquired_at, heartbeat_at, expires_at, metadata
+                           FROM fleet_reservations
+                           WHERE project_id = %s AND ticket_id = %s AND status = 'active' AND expires_at > %s""",
+                        (project_id, ticket_id, now),
+                    )
+                    row = cur.fetchone()
+                    return self._row_to_reservation(row) if row is not None else None
+        except Exception as exc:
+            raise StoreUnavailableError("Canonical ticket ownership lookup unavailable") from exc
+
     def get_run_status(self, run_id: str) -> dict[str, Any] | None:
         """Query full status of a run and its jobs."""
         if self.mock_mode:

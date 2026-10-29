@@ -29,7 +29,9 @@ a guarda local do launcher, que nao representa sessoes em outros hosts.
 O launcher e o intake do owner tambem consultam PRs abertos do repositorio pelo identificador exato do ticket
 em branch, titulo ou corpo. Encontrar um PR produz recusa com sua URL; indisponibilidade da consulta falha
 fechado. Esse sinal persiste depois que o lease do processo termina e impede que um PR ativo seja confundido
-com ausencia de trabalho.
+com ausencia de trabalho. Antes de aceitar outro run, o intake tambem consulta a reserva canonica ativa e
+retorna o run e o host que a possuem. A consulta e informativa; a exclusao entre canais e garantida pela
+reserva transacional unica em `reserve_cycle`, liberada ao encerrar a execucao.
 
 ## ReadinessGate (USR-385)
 

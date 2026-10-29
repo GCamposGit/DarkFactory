@@ -74,6 +74,12 @@ class ControlStore(Protocol):
         """Consult durable manual progress before admission; storage errors must raise."""
         ...
 
+    def get_active_ticket_reservation(
+        self, project_id: str, ticket_id: str, *, now: datetime
+    ) -> FleetReservation | None:
+        """Return the unexpired canonical execution reservation for this ticket, if any."""
+        ...
+
     def get_run_identity(self, run_id: str) -> dict[str, str] | None:
         """Read the persisted project independently of job telemetry; storage errors must raise."""
         ...
@@ -1582,6 +1588,23 @@ class SQLiteControlStore:
                 (project_id, ticket_id),
             ).fetchall()
             return active_manual_owner((dict(row) for row in rows), now=now)
+        finally:
+            conn.close()
+
+    def get_active_ticket_reservation(
+        self, project_id: str, ticket_id: str, *, now: datetime
+    ) -> FleetReservation | None:
+        """Read the canonical, unexpired ownership row shared by launchers and fleet workers."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                          acquired_at, heartbeat_at, expires_at, metadata
+                   FROM fleet_reservations
+                   WHERE project_id = ? AND ticket_id = ? AND status = 'active' AND expires_at > ?""",
+                (project_id, ticket_id, now.isoformat()),
+            ).fetchone()
+            return self._row_to_reservation(row) if row is not None else None
         finally:
             conn.close()
 

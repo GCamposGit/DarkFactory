@@ -491,8 +491,25 @@ def submit_ticket_to_line(
         # The PR outlives the line-store lease. Check it before opening Postgres so
         # an unavailable queue cannot hide the existing execution from the caller.
         line_store = store if store is not None else open_line_store()
+        reservation_lookup = getattr(line_store, "get_active_ticket_reservation", None)
+        reservation = (
+            reservation_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC))
+            if reservation_lookup else None
+        )
+        if reservation is not None:
+            return LineSubmission(
+                ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
+                run_id=reservation.run_id, state="canonical_ownership_conflict",
+                message=(
+                    f"Ticket {ticket.id} ja esta reservado pela execucao {reservation.run_id} "
+                    f"no host {reservation.host_id}; admissao retida."
+                ),
+            )
         ownership_lookup = getattr(line_store, "get_manual_ticket_owner", None)
-        manual_owner = ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC)) if ownership_lookup else None
+        manual_owner = (
+            ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC))
+            if ownership_lookup else None
+        )
         if manual_owner:
             return LineSubmission(
                 ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
