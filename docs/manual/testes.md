@@ -41,6 +41,14 @@ explicitamente no subprocesso ou com `monkeypatch` no proprio teste.
 O laço de autocorrecao classifica `gate_dirty_worktree` somente quando encontra a linha completa `[ERROR]`
 emitida por `core/harness/runner.py`; menções ao texto em tracebacks ou logs de testes não bastam.
 
+Teste que limpa todo prefixo `DARKFAC_*` do ambiente (ex.: `_isolated_env` em
+`tests/line/test_context_retention.py`) deve reinstalar `DARKFAC_STATE_ROOT` dentro do seu proprio
+`tmp_path` logo depois da limpeza. Sem isso, `core.paths.state_root()` cai de volta em
+`project_root() / ".factory"`, a raiz real do checkout/worktree — e o portao oficial roda a suite sob
+uma trava de linha propria e viva la (USR-413/425). `line_lock.is_locked()` entao ve essa trava do
+proprio portao e qualquer teste que dependa de `CloudWorker.poll_and_execute_once` (ex.: o sweep de
+retencao de contextos) é descartado antes de rodar, sem nenhuma excecao — falha muda (USR-427).
+
 ## Contratos de camada e ratchet de complexidade (USR-377)
 
 - `.importlinter` define dois contratos: `core` nao importa `hub`, e `core` nao importa `fastapi`/`starlette`. Rode `lint-imports` (dependencia `import-linter` em `requirements.txt`).
