@@ -11803,8 +11803,8 @@
     "project_id": "darkfac",
     "title": "Preservar checkout operacional ativo na limpeza pos-merge",
     "origin": "user",
-    "status": "waiting_human",
-    "delivery_evidence": "rebase_conflict: docs/FASE_ATUAL.md",
+    "status": "completed",
+    "delivery_evidence": "40ea2d0a552d8536bf87c64cab60abcb54777a78",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11825,6 +11825,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-28T13:36:37.709581Z",
-    "updated_at": "2026-10-29T01:13:13.186431Z"
+    "updated_at": "2026-10-29T03:51:14.718523Z"
   }
 ]
