@@ -82,6 +82,31 @@ def test_launcher_and_owner_intake_refuse_active_pr_before_creating_work(
     assert output["existing_execution"]["url"] == existing.url
 
 
+def test_owner_intake_reports_active_pr_before_opening_unavailable_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket = UserTicket(
+        id="USR-418", title="Active PR", problem_statement="Do not duplicate active implementation.",
+        core_journey=["Detect the open PR"], non_goals=["Do not change PR"],
+        acceptance_criteria=["Report existing PR even when the line store is unavailable"],
+    )
+    demands = DemandsStore(tmp_path / "demands.json")
+    demands.save_ticket(ticket)
+    existing = ActivePullRequest(779, "https://github.com/org/repo/pull/779", "USR-418", "ticket/usr-418")
+    monkeypatch.setattr(owner_intake, "find_active_pull_request", lambda *_a, **_k: existing)
+    monkeypatch.setattr(
+        owner_intake, "open_line_store",
+        lambda *_a, **_k: pytest.fail("active PR must be reported before opening the line store"),
+    )
+
+    result = owner_intake.submit_ticket_to_line(ticket.id, demands_store=demands)
+
+    assert not result.ok
+    assert result.state == "active_pull_request"
+    assert result.run_id == "pr-779"
+    assert existing.url in result.message
+
+
 def test_canonical_owner_conflict_reports_existing_run_as_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

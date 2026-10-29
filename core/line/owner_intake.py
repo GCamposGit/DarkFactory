@@ -431,7 +431,6 @@ def submit_ticket_to_line(
     attempt = 1
     replay = False
     try:
-        line_store = store if store is not None else open_line_store()
         registry = project_registry
         if registry is None:
             from core.projects.registry import ProjectRegistry
@@ -445,6 +444,9 @@ def submit_ticket_to_line(
                 run_id=f"pr-{active_pr.number}", state="active_pull_request",
                 message=f"Ticket possui PR ativo #{active_pr.number} ({active_pr.url}); admissao retida.",
             )
+        # The PR outlives the line-store lease. Check it before opening Postgres so
+        # an unavailable queue cannot hide the existing execution from the caller.
+        line_store = store if store is not None else open_line_store()
         ownership_lookup = getattr(line_store, "get_manual_ticket_owner", None)
         manual_owner = ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC)) if ownership_lookup else None
         if manual_owner:
