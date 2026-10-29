@@ -2287,7 +2287,10 @@ class SQLiteControlStore:
                     conn.rollback()
                     raise TicketAlreadyActiveError(
                         f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation "
-                        f"'{ticket_row['reservation_id']}' on host '{ticket_row['host_id']}'."
+                        f"'{ticket_row['reservation_id']}' on host '{ticket_row['host_id']}'.",
+                        reservation_id=str(ticket_row["reservation_id"]), project_id=str(ticket_row["project_id"]),
+                        ticket_id=str(ticket_row["ticket_id"]), run_id=str(ticket_row["run_id"]),
+                        host_id=str(ticket_row["host_id"]),
                     )
 
                 # 3. Check 1 cycle per host

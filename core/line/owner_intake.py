@@ -41,6 +41,7 @@ from pydantic import BaseModel
 from core.demands.autonomous_intake import AutonomousIntakeService
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
+from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.roadmap.models import DeliveryStatus
 from core.workflow.control_contracts import IdempotencyConflict, IntakeCommand, StoreUnavailableError
 from core.workflow.control_store import ControlStore
@@ -431,6 +432,19 @@ def submit_ticket_to_line(
     replay = False
     try:
         line_store = store if store is not None else open_line_store()
+        registry = project_registry
+        if registry is None:
+            from core.projects.registry import ProjectRegistry
+
+            registry_path = demands_store.path.parent.parent / "projects.json"
+            registry = ProjectRegistry(registry_path)
+        active_pr = find_active_pull_request(ticket.project_id, ticket.id, project_registry=registry)
+        if active_pr is not None:
+            return LineSubmission(
+                ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
+                run_id=f"pr-{active_pr.number}", state="active_pull_request",
+                message=f"Ticket possui PR ativo #{active_pr.number} ({active_pr.url}); admissao retida.",
+            )
         ownership_lookup = getattr(line_store, "get_manual_ticket_owner", None)
         manual_owner = ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC)) if ownership_lookup else None
         if manual_owner:
@@ -479,6 +493,9 @@ def submit_ticket_to_line(
             attempt=attempt,
             replayed=True,
         )
+    except PullRequestLookupError as exc:
+        logger.warning("Active PR lookup failed for %s: %s", ticket.id, exc)
+        return refused(f"Nao foi possivel verificar PRs ativos para {ticket.id}; admissao retida: {exc}")
     except Exception as exc:  # store down, schema, etc: fail closed, tell the caller
         logger.error("Line intake for ticket %s failed: %s", ticket.id, exc)
         return refused(f"Falha ao enfileirar {ticket.id} na linha: {exc}")

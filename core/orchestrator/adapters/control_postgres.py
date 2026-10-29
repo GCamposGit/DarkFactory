@@ -2045,7 +2045,9 @@ class PostgresControlStore:
                             return self._row_to_reservation(ticket_row)
                         raise TicketAlreadyActiveError(
                             f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation "
-                            f"'{ticket_row[0]}' on host '{ticket_row[4]}'."
+                            f"'{ticket_row[0]}' on host '{ticket_row[4]}'.",
+                            reservation_id=str(ticket_row[0]), project_id=str(ticket_row[1]),
+                            ticket_id=str(ticket_row[2]), run_id=str(ticket_row[3]), host_id=str(ticket_row[4]),
                         )
 
                     # 3. Check 1 cycle per host
@@ -2117,7 +2119,10 @@ class PostgresControlStore:
             if "uq_fleet_reservations_active_host" in msg or "host_id" in msg:
                 raise HostBusyError(f"Host '{host_id}' already has active reservation (race condition).") from exc
             if "uq_fleet_reservations_active_ticket" in msg or "ticket_id" in msg:
-                raise TicketAlreadyActiveError(f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation (race condition).") from exc
+                raise TicketAlreadyActiveError(
+                    f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation (race condition).",
+                    project_id=project_id, ticket_id=ticket_id,
+                ) from exc
             raise StoreUnavailableError(f"PostgreSQL reserve_cycle failed: {exc}") from exc
 
     def heartbeat_reservation(

@@ -91,6 +91,27 @@ class HostBusyError(ReservationConflictError):
 class TicketAlreadyActiveError(ReservationConflictError):
     """The demand ticket already has an active cycle reservation."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        reservation_id: str | None = None,
+        project_id: str | None = None,
+        ticket_id: str | None = None,
+        run_id: str | None = None,
+        host_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.existing_execution = {
+            key: value for key, value in {
+                "reservation_id": reservation_id,
+                "project_id": project_id,
+                "ticket_id": ticket_id,
+                "run_id": run_id,
+                "host_id": host_id,
+            }.items() if value is not None
+        }
+
 
 class FleetCapacityExceededError(ReservationConflictError):
     """The global ceiling of active cycles in the fleet has been reached."""

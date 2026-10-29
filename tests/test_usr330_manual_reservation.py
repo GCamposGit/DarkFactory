@@ -78,8 +78,16 @@ def test_manual_holds_then_line_refused_then_release_frees(tmp_path: Path) -> No
                               require_reservation=True)
     lock.acquire()
     assert lock.reservation is not None and lock.reservation.metadata == {"origin": "manual"}
-    with pytest.raises(TicketAlreadyActiveError):
+    with pytest.raises(TicketAlreadyActiveError) as conflict:
         store.reserve_cycle("darkfac", "USR-330", "line-run", "grokbox", datetime.now(UTC))
+    assert conflict.value.existing_execution["ticket_id"] == "USR-330"
+    assert conflict.value.existing_execution["run_id"]
+    assert conflict.value.existing_execution["host_id"] == "notebook"
+    # The ticket-scoped reservation does not block unrelated work on another host.
+    distinct = store.reserve_cycle("darkfac", "USR-331", "other-ticket", "grokbox", datetime.now(UTC))
+    store.release_reservation(
+        distinct.reservation_id, distinct.fencing_token, status="released", now=datetime.now(UTC),
+    )
     lock.release()  # terminal exit
     store.reserve_cycle("darkfac", "USR-330", "line-run", "grokbox", datetime.now(UTC))
 
