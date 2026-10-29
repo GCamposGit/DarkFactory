@@ -11826,5 +11826,37 @@
     "dependencies": [],
     "created_at": "2026-10-28T13:36:37.709581Z",
     "updated_at": "2026-10-29T03:51:14.718523Z"
+  },
+  {
+    "id": "USR-418",
+    "project_id": "darkfac",
+    "title": "Evitar nova implementacao quando ja existe PR ativo do mesmo ticket",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "f695a610f1c2a89d993a2012fd9b88a95a29b88a",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 launcher USR-386 PID4356 criou WT usr-386-20261028T101330Z e iniciou T1 enquanto outra sessao abriu PR779 head35dc99f ticket/usr-386. Estado fleet dizia in_flight vazio. Launcher proprio foi encerrado com arvore; WT e alteracoes preservadas. Evidencias heartbeat-usr386-20261028.log e PR779. Nao presumir ausencia de trabalho a partir de uma unica projecao.",
+    "core_journey": [
+      "Em 28/10/2026 launcher USR-386 PID4356 criou WT usr-386-20261028T101330Z e iniciou T1 enquanto outra sessao abriu PR779 head35dc99f ticket/usr-386. Estado fleet dizia in_flight vazio. Launcher proprio foi encerrado com arvore; WT e alteracoes preservadas. Evidencias heartbeat-usr386-20261028.log e PR779. Nao presumir ausencia de trabalho a partir de uma unica projecao."
+    ],
+    "non_goals": [
+      "Nao matar processos de outra sessao nem apagar trabalho preservado; nao criar scheduler concorrente."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Dois canais concorrentes para mesmo projeto/ticket compartilham exclusao canonica e nao criam segunda implementacao.",
+      "PR ativo ou ownership canonico vigente produz recusa estruturada e aponta execucao existente.",
+      "Teste de comportamento cobre concorrencia e liberacao apos encerramento, sem bloquear tickets distintos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:21:58.064069Z",
+    "updated_at": "2026-10-29T10:09:21.668352Z"
   }
 ]

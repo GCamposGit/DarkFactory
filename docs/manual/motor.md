@@ -124,6 +124,13 @@ apos o orcamento de relogio). Nunca ha queda para modelo barato e nenhum agente 
 (`_gate_run_official`, `_gate_classify_failure`, `_gate_reinvoke_for_gate`) e `_gate_exhausted_result`, e a
 entrega em `_deliver_sync`, `_deliver_external_project` e `_deliver_worktree`.
 
+Antes da rota e da criacao de worktree, `_run` adquire a guarda canonica do ticket e consulta os PRs abertos
+do repositorio. Se encontrar um PR que mencione o ticket exato no branch, titulo ou corpo, a execucao termina
+com recusa estruturada `active_pull_request` e referencia ao PR existente. Se a consulta ao GitHub falhar,
+tambem recusa com `pull_request_lookup_unavailable`; nao inicia uma segunda implementacao sem confirmar o estado.
+O intake da linha aplica a mesma verificacao e consulta a propriedade manual persistida antes de aceitar uma nova
+tentativa. Assim, o PR continua protegendo o ticket mesmo depois que o processo que abriu o PR encerra.
+
 `core/line/ticket_stages.py` guarda os helpers sem dependencia de globais substituidas pelos testes
 (construtores de prompt, comando/ambiente da entrega, payloads e relatorios de falha, `GateState`).
 O fluxo que chama `pick`, `inspect_quotas`, `_run_bounded` etc. fica em `run_ticket.py` para que os

@@ -64,6 +64,13 @@ envolve `BacklogFeeder` (avalia G1, dependencias e vagas). Um redeploy nao perde
 alimentador le o armazenamento duravel e o `submit_ticket_to_line` e idempotente
 (`ticket:<id>`).
 
+Antes de admitir trabalho, o launcher e o intake da linha consultam os PRs abertos no repositorio
+do projeto (`ProjectRegistry`). Um PR que identifica o mesmo ticket pela branch, titulo ou corpo
+bloqueia uma segunda implementacao e retorna o numero e o link da execucao existente. Se o GitHub
+nao puder ser consultado, a admissao falha fechada. Enquanto nao ha PR, a reserva unica por
+`project_id` e `ticket_id` no control store arbitra concorrencia entre launcher e linha; a reserva
+e liberada no encerramento, permitindo nova tentativa, e tickets diferentes continuam independentes.
+
 ## Grill de um toque
 
 A mensagem de grill no Telegram traz, por pergunta com recomendacao, o botao

@@ -41,6 +41,7 @@ from pydantic import BaseModel
 from core.demands.autonomous_intake import AutonomousIntakeService
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
+from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.roadmap.models import DeliveryStatus
 from core.workflow.control_contracts import IdempotencyConflict, IntakeCommand, StoreUnavailableError
 from core.workflow.control_store import ControlStore
@@ -372,6 +373,50 @@ def extract_run_delivery_evidence(store: Any, run_id: str | None) -> str:
     return f"line:run:{run_id}"
 
 
+def _existing_attempt_submission(
+    ticket: UserTicket,
+    *,
+    line_store: ControlStore,
+    demands_store: DemandsStore,
+    now: datetime | None,
+) -> tuple[int, bool, LineSubmission | None]:
+    """Replay an in-flight attempt, report delivery, or prepare its retry."""
+    attempts = _ticket_attempts(line_store, ticket.id)
+    if not attempts:
+        return 1, False, None
+
+    latest_attempt, latest_run = attempts[-1]
+    state = run_state(line_store, latest_run)
+    if state == "succeeded":
+        if ticket.status != DeliveryStatus.COMPLETED:
+            evidence = extract_run_delivery_evidence(line_store, latest_run)
+            if getattr(ticket, "is_live_deploy", False) and "live_converged" not in evidence:
+                evidence = f"{evidence}:live_converged"
+            try:
+                demands_store.update_status(ticket.id, DeliveryStatus.COMPLETED, delivery_evidence=evidence)
+            except Exception as exc:
+                logger.warning("Could not mark ticket %s completed: %s", ticket.id, exc)
+        return latest_attempt, True, LineSubmission(
+            ok=True, ticket_id=ticket.id, project_id=ticket.project_id, run_id=latest_run,
+            attempt=latest_attempt, replayed=True, state="delivered",
+            message=f"Ticket {ticket.id} ja foi entregue (tentativa {latest_attempt}, run {latest_run}).",
+        )
+    if state == "in_flight":
+        return latest_attempt, True, None
+
+    limit = max_ticket_attempts_from_env()
+    if latest_attempt >= limit:
+        return latest_attempt, False, LineSubmission(
+            ok=False, ticket_id=ticket.id, project_id=ticket.project_id, attempt=latest_attempt,
+            message=(
+                f"Ticket {ticket.id} ja usou as {limit} tentativas permitidas "
+                f"(ultima: tentativa {latest_attempt}, run {latest_run}, terminou sem entregar)."
+            ),
+        )
+    _supersede_open_attempts(line_store, attempts, now=now)
+    return latest_attempt + 1, False, None
+
+
 def submit_ticket_to_line(
     ticket_id: str,
     *,
@@ -430,9 +475,41 @@ def submit_ticket_to_line(
     attempt = 1
     replay = False
     try:
+        registry = project_registry
+        if registry is None:
+            from core.projects.registry import ProjectRegistry
+
+            registry_path = demands_store.path.parent.parent / "projects.json"
+            registry = ProjectRegistry(registry_path)
+        active_pr = find_active_pull_request(ticket.project_id, ticket.id, project_registry=registry)
+        if active_pr is not None:
+            return LineSubmission(
+                ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
+                run_id=f"pr-{active_pr.number}", state="active_pull_request",
+                message=f"Ticket possui PR ativo #{active_pr.number} ({active_pr.url}); admissao retida.",
+            )
+        # The PR outlives the line-store lease. Check it before opening Postgres so
+        # an unavailable queue cannot hide the existing execution from the caller.
         line_store = store if store is not None else open_line_store()
+        reservation_lookup = getattr(line_store, "get_active_ticket_reservation", None)
+        reservation = (
+            reservation_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC))
+            if reservation_lookup else None
+        )
+        if reservation is not None:
+            return LineSubmission(
+                ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
+                run_id=reservation.run_id, state="canonical_ownership_conflict",
+                message=(
+                    f"Ticket {ticket.id} ja esta reservado pela execucao {reservation.run_id} "
+                    f"no host {reservation.host_id}; admissao retida."
+                ),
+            )
         ownership_lookup = getattr(line_store, "get_manual_ticket_owner", None)
-        manual_owner = ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC)) if ownership_lookup else None
+        manual_owner = (
+            ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC))
+            if ownership_lookup else None
+        )
         if manual_owner:
             return LineSubmission(
                 ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
@@ -440,36 +517,11 @@ def submit_ticket_to_line(
                 message=f"Ticket possui execucao manual persistida ({manual_owner}); admissao retida.",
             )
         service = AutonomousIntakeService(store=line_store, demands_store=None)  # None: never re-project a dem-* ticket
-        attempts = _ticket_attempts(line_store, ticket.id)
-        if attempts:
-            latest_attempt, latest_run = attempts[-1]
-            state = run_state(line_store, latest_run)
-            if state == "succeeded":
-                if ticket.status != DeliveryStatus.COMPLETED and demands_store is not None:
-                    evidence = extract_run_delivery_evidence(line_store, latest_run)
-                    if getattr(ticket, "is_live_deploy", False) and "live_converged" not in evidence:
-                        evidence = f"{evidence}:live_converged"
-                    try:
-                        demands_store.update_status(ticket.id, DeliveryStatus.COMPLETED, delivery_evidence=evidence)
-                    except Exception as exc:
-                        logger.warning("Could not mark ticket %s completed: %s", ticket.id, exc)
-                return LineSubmission(
-                    ok=True, ticket_id=ticket.id, project_id=ticket.project_id, run_id=latest_run,
-                    attempt=latest_attempt, replayed=True, state="delivered",
-                    message=f"Ticket {ticket.id} ja foi entregue (tentativa {latest_attempt}, run {latest_run}).",
-                )
-            if state == "in_flight":
-                attempt, replay = latest_attempt, True
-            else:
-                limit = max_ticket_attempts_from_env()
-                if latest_attempt >= limit:
-                    return refused(
-                        f"Ticket {ticket.id} ja usou as {limit} tentativas permitidas "
-                        f"(ultima: tentativa {latest_attempt}, run {latest_run}, terminou sem entregar).",
-                        attempt=latest_attempt,
-                    )
-                attempt = latest_attempt + 1
-                _supersede_open_attempts(line_store, attempts, now=now)
+        attempt, replay, existing = _existing_attempt_submission(
+            ticket, line_store=line_store, demands_store=demands_store, now=now,
+        )
+        if existing is not None:
+            return existing
         command = command_for_ticket(ticket, attempt)
         receipt = service.accept(command, now or datetime.now(UTC))
     except IdempotencyConflict:
@@ -479,6 +531,9 @@ def submit_ticket_to_line(
             attempt=attempt,
             replayed=True,
         )
+    except PullRequestLookupError as exc:
+        logger.warning("Active PR lookup failed for %s: %s", ticket.id, exc)
+        return refused(f"Nao foi possivel verificar PRs ativos para {ticket.id}; admissao retida: {exc}")
     except Exception as exc:  # store down, schema, etc: fail closed, tell the caller
         logger.error("Line intake for ticket %s failed: %s", ticket.id, exc)
         return refused(f"Falha ao enfileirar {ticket.id} na linha: {exc}")

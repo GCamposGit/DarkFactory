@@ -37,6 +37,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.line import agent_retry, cancellation, line_lock, local_cancel
+from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
     AgentRequest,
@@ -2615,10 +2616,24 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
             )
         )
     except line_lock.LineLockHeld as exc:
-        print(f"\n{exc}\n", file=sys.stderr)
+        if args.json:
+            print(json.dumps({
+                "status": "refused", "reason": "canonical_ownership_conflict",
+                "ticket_id": lock_label, "existing_execution": exc.info.to_dict(), "message": str(exc),
+            }, ensure_ascii=False), file=sys.stderr)
+        else:
+            print(f"\n{exc}\n", file=sys.stderr)
         return 2
     except line_lock.ReservationConflictError as exc:
-        print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
+        if args.json:
+            print(json.dumps({
+                "status": "refused", "reason": "canonical_ownership_conflict",
+                "ticket_id": lock_label,
+                "existing_execution": getattr(exc, "existing_execution", None) or {"details": str(exc)},
+                "message": f"[RESERVA DE FROTA] {exc}",
+            }, ensure_ascii=False), file=sys.stderr)
+        else:
+            print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
         return 2
     return None
 
@@ -3408,6 +3423,29 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     ticket, intake_exit = _stage_intake(args)
     if ticket is None:
         return intake_exit
+
+    # An open PR outlives the process lease. Refuse before creating a second worktree or routing an
+    # agent, and identify the existing execution for both humans and machine callers.
+    if not args.dry_run:
+        try:
+            from core.projects.registry import ProjectRegistry
+
+            active_pr = find_active_pull_request(
+                ticket.project_id,
+                ticket.id,
+                project_registry=ProjectRegistry(PROJECT_ROOT / ".factory" / "projects.json"),
+            )
+        except PullRequestLookupError as exc:
+            refusal = {"status": "refused", "reason": "pull_request_lookup_unavailable", "ticket_id": ticket.id,
+                       "project_id": ticket.project_id, "message": str(exc)}
+            print(json.dumps(refusal, ensure_ascii=False) if args.json else f"[RECUSA] {exc}", file=sys.stderr)
+            return 2
+        if active_pr is not None:
+            refusal = {"status": "refused", "reason": "active_pull_request", "ticket_id": ticket.id,
+                       "project_id": ticket.project_id, "existing_execution": active_pr.to_dict()}
+            print(json.dumps(refusal, ensure_ascii=False) if args.json else
+                  f"[RECUSA] Ticket {ticket.id} ja possui PR ativo #{active_pr.number}: {active_pr.url}", file=sys.stderr)
+            return 2
 
     # Live line board (USR-140): best-effort phase events. Held until the run is known not to be a dry
     # run; a publishing failure can never block or change the outcome of this launcher.

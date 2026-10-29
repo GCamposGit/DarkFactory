@@ -77,6 +77,17 @@ SKIP_PATH_MARKERS = (
 #: both graph scanning and any selected/full test run.
 EXCLUDED_TEST_FILES = {"tests/test_canaletto.py"}
 
+# With an empty diff the only selected files are the repository guards. Keep
+# this small registry aligned with explicit repository_guard tests. Any changed
+# test file makes the diff non-empty and uses normal graph discovery.
+EMPTY_DIFF_REPOSITORY_GUARDS = (
+    "tests/test_clock_bomb_guard.py",
+    "tests/test_model_id_ratchet_usr185.py",
+    "tests/test_serial_marker_guard.py",
+    "tests/test_skills_drift.py",
+    "tests/test_tree_hygiene_guard.py",
+)
+
 #: Changed files that always force a full-suite run because they affect
 #: test collection/config globally rather than a traceable subset.
 FULL_ESCALATION_EXACT_FILES = {
@@ -513,6 +524,38 @@ def _has_repository_guard_marker(source: str, filename: str) -> bool:
     return decorated or module_marked
 
 
+def _select_repository_guards_without_graph(repo_root: Path, changed_files: list[str]) -> Selection:
+    """Select repository-wide guards cheaply when the candidate has no diff.
+
+    Building the import graph is unnecessary in this case: the only tests
+    selected for an empty diff are explicit repository guards from the small
+    registry above. A candidate that adds or changes a guard uses graph discovery.
+    """
+    selected: list[str] = []
+    try:
+        for relative in EMPTY_DIFF_REPOSITORY_GUARDS:
+            path = repo_root / relative
+            if not path.is_file():
+                continue
+            source = path.read_text(encoding="utf-8", errors="replace")
+            if _has_repository_guard_marker(source, relative):
+                selected.append(relative)
+    except OSError as exc:
+        return Selection(
+            mode="full", tests=[], reasons={},
+            escalations=[f"repository_guard_scan_failed: {exc}"], changed_files=changed_files,
+        )
+
+    selected.sort()
+    return Selection(
+        mode="subset" if selected else "none",
+        tests=selected,
+        reasons={path: ["repository_guard"] for path in selected},
+        escalations=[],
+        changed_files=changed_files,
+    )
+
+
 def _compute_hot_modules(graph: ImportGraph, test_closures: dict[str, set[str]]) -> set[str]:
     """Repo-relative paths imported (transitively) by > HOT_MODULE_THRESHOLD
     of test files."""
@@ -644,9 +687,23 @@ def _select_tests_for_non_python_change(
 
 
 def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
+    # `HEAD` is its own merge-base. A clean status proves there are no staged,
+    # unstaged, or untracked inputs, so skip repeated Git subprocesses and the
+    # import graph while retaining the explicit empty-diff repository guards.
+    if base_ref_requested == "HEAD":
+        try:
+            status = _run_git(repo_root, ["status", "--porcelain=v1", "--untracked-files=all"])
+        except (GraphBuildError, OSError):
+            status = "unavailable"
+        if not status.strip():
+            return _select_repository_guards_without_graph(repo_root, [])
+
     resolved_base = resolve_base_ref(repo_root, base_ref_requested)
     merge_base = compute_merge_base(repo_root, resolved_base)
     changed_files = [f for f in get_changed_files(repo_root, merge_base) if f not in EXCLUDED_TEST_FILES]
+
+    if not changed_files:
+        return _select_repository_guards_without_graph(repo_root, changed_files)
 
     try:
         graph = build_import_graph(repo_root)

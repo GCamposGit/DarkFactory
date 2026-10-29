@@ -19,11 +19,13 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Optional, Protocol
 
 from core.git import ci_checks
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
+from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.line import stages as line_stages
 from core.line import workspace as line_workspace
 from core.line.route_wait import RouteWaiter, run_started_at_lookup
@@ -404,12 +406,58 @@ class DevelopmentStageHandler:
 
     STAGE = "development"
 
-    def __init__(self, *, project_resolver: ProjectResolver, **stage_kwargs: Any) -> None:
+    def __init__(
+        self, *, project_resolver: ProjectResolver, store: Any | None = None, **stage_kwargs: Any
+    ) -> None:
         self.project_resolver = project_resolver
+        self.store = store
         self._stage = stage_build.DevelopmentStage(**stage_kwargs)
 
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
+        ticket_id = context.claim.job_key.ticket_id
+        run_id = context.claim.job_key.run_id
+        reservation_lookup = getattr(self.store, "get_active_ticket_reservation", None)
+        if reservation_lookup is not None:
+            try:
+                reservation = reservation_lookup(project.id, ticket_id, now=datetime.now(timezone.utc))
+            except Exception as exc:
+                logger.warning("Could not verify canonical ownership before development of %s: %s", ticket_id, exc)
+                return StageResult(
+                    outcome="failed", cause_code="canonical_ownership_lookup_failed", evidence_refs=[str(exc)]
+                )
+            if reservation is not None and reservation.run_id != run_id:
+                return StageResult(
+                    outcome="failed",
+                    cause_code="canonical_ownership_conflict",
+                    evidence_refs=[f"Run {reservation.run_id} on host {reservation.host_id}"],
+                )
+        repo_url = getattr(project, "repo_url", None)
+        try:
+            if repo_url and "github.com" not in str(repo_url).casefold():
+                # This guard covers GitHub pull requests. A known non-GitHub remote
+                # cannot own a GitHub PR for this ticket, so there is nothing to query.
+                active_pr = None
+            else:
+                active_pr = find_active_pull_request(
+                    project.id,
+                    ticket_id,
+                    project_registry=SimpleNamespace(get_project=lambda _project_id: project),
+                )
+        except PullRequestLookupError as exc:
+            logger.warning("Could not verify active PR before development of %s: %s", ticket_id, exc)
+            return StageResult(outcome="failed", cause_code="active_pr_lookup_failed", evidence_refs=[str(exc)])
+        if active_pr is not None:
+            logger.info(
+                "Skipping development of %s because active PR #%s already owns the ticket",
+                ticket_id,
+                active_pr.number,
+            )
+            return StageResult(
+                outcome="failed",
+                cause_code="active_pull_request",
+                evidence_refs=[f"PR #{active_pr.number}: {active_pr.url}"],
+            )
         return self._stage.run(project, context.claim.job_key.run_id)
 
 
@@ -734,7 +782,7 @@ def build_line_registry(
             intake_service=intake_service, route_waiter=waiter,
         ),
         "development": DevelopmentStageHandler(
-            project_resolver=resolver, host_caps=host_caps, routing_config=cfg, route_waiter=waiter,
+            project_resolver=resolver, store=store, host_caps=host_caps, routing_config=cfg, route_waiter=waiter,
             base_red_attempts=base_red_attempt_counter(store, "development"),
         ),
         "validation": ValidationStageHandler(project_resolver=resolver),

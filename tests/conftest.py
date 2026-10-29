@@ -72,6 +72,20 @@ from core.harness import suite_lock as _suite_lock
 from tests import _cache_dir, _tree_hygiene, _worker_capacity
 
 
+@pytest.fixture(autouse=True)
+def _disable_live_pull_request_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ordinary tests offline; USR-418 tests exercise the PR adapter with injected results."""
+    run_ticket = sys.modules.get("run_ticket")
+    owner_intake = sys.modules.get("core.line.owner_intake")
+    bindings = sys.modules.get("core.line.bindings")
+    if run_ticket is not None:
+        monkeypatch.setattr(run_ticket, "find_active_pull_request", lambda *_args, **_kwargs: None)
+    if owner_intake is not None:
+        monkeypatch.setattr(owner_intake, "find_active_pull_request", lambda *_args, **_kwargs: None)
+    if bindings is not None:
+        monkeypatch.setattr(bindings, "find_active_pull_request", lambda *_args, **_kwargs: None)
+
+
 def _git_for_fixture(repo: Path, *args: str) -> str:
     kwargs: dict[str, Any] = {}
     if sys.platform == "win32":

@@ -74,6 +74,12 @@ class ControlStore(Protocol):
         """Consult durable manual progress before admission; storage errors must raise."""
         ...
 
+    def get_active_ticket_reservation(
+        self, project_id: str, ticket_id: str, *, now: datetime
+    ) -> FleetReservation | None:
+        """Return the unexpired canonical execution reservation for this ticket, if any."""
+        ...
+
     def get_run_identity(self, run_id: str) -> dict[str, str] | None:
         """Read the persisted project independently of job telemetry; storage errors must raise."""
         ...
@@ -1585,6 +1591,23 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def get_active_ticket_reservation(
+        self, project_id: str, ticket_id: str, *, now: datetime
+    ) -> FleetReservation | None:
+        """Read the canonical, unexpired ownership row shared by launchers and fleet workers."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                          acquired_at, heartbeat_at, expires_at, metadata
+                   FROM fleet_reservations
+                   WHERE project_id = ? AND ticket_id = ? AND status = 'active' AND expires_at > ?""",
+                (project_id, ticket_id, now.isoformat()),
+            ).fetchone()
+            return self._row_to_reservation(row) if row is not None else None
+        finally:
+            conn.close()
+
     def get_run_status(self, run_id: str) -> dict[str, Any] | None:
         """Full status of a run and its jobs (HF-27-10 canary observer).
 
@@ -2227,6 +2250,28 @@ class SQLiteControlStore:
             (run_id,),
         )
 
+    @staticmethod
+    def _expire_fleet_reservations(cur: sqlite3.Cursor, now_iso: str) -> None:
+        """Expire stale reservations and return their running work to the queue."""
+        cur.execute(
+            """
+            SELECT run_id FROM fleet_reservations
+            WHERE status IN ('active', 'draining') AND expires_at <= ?
+            """,
+            (now_iso,),
+        )
+        expiring_runs = [str(row["run_id"]) for row in cur.fetchall()]
+        cur.execute(
+            """
+            UPDATE fleet_reservations
+            SET status = 'expired'
+            WHERE status IN ('active', 'draining') AND expires_at <= ?
+            """,
+            (now_iso,),
+        )
+        for run_id in expiring_runs:
+            SQLiteControlStore._requeue_expired_fleet_run(cur, run_id, now_iso)
+
     def reserve_cycle(
         self,
         project_id: str,
@@ -2250,24 +2295,7 @@ class SQLiteControlStore:
                 cur = conn.cursor()
 
                 # 1. Sweep expired active reservations to release slots
-                cur.execute(
-                    """
-                    SELECT run_id FROM fleet_reservations
-                    WHERE status IN ('active', 'draining') AND expires_at <= ?
-                    """,
-                    (now_iso,),
-                )
-                expiring_runs = [str(row["run_id"]) for row in cur.fetchall()]
-                cur.execute(
-                    """
-                    UPDATE fleet_reservations
-                    SET status = 'expired'
-                    WHERE status IN ('active', 'draining') AND expires_at <= ?
-                    """,
-                    (now_iso,),
-                )
-                for expiring_run_id in expiring_runs:
-                    self._requeue_expired_fleet_run(cur, expiring_run_id, now_iso)
+                self._expire_fleet_reservations(cur, now_iso)
 
                 # 2. Check active ticket uniqueness
                 cur.execute(
@@ -2287,7 +2315,10 @@ class SQLiteControlStore:
                     conn.rollback()
                     raise TicketAlreadyActiveError(
                         f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation "
-                        f"'{ticket_row['reservation_id']}' on host '{ticket_row['host_id']}'."
+                        f"'{ticket_row['reservation_id']}' on host '{ticket_row['host_id']}'.",
+                        reservation_id=str(ticket_row["reservation_id"]), project_id=str(ticket_row["project_id"]),
+                        ticket_id=str(ticket_row["ticket_id"]), run_id=str(ticket_row["run_id"]),
+                        host_id=str(ticket_row["host_id"]),
                     )
 
                 # 3. Check 1 cycle per host
