@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -21,16 +22,14 @@ def _run(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subpr
 
 
 def test_external_cache_dir_is_stable_and_per_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path / "temp"))
     a = _cache_dir.external_cache_dir(tmp_path / "a")
     assert a == _cache_dir.external_cache_dir(tmp_path / "a")
     assert a != _cache_dir.external_cache_dir(tmp_path / "b")
-    assert tmp_path in a.parents
+    assert a == tmp_path / "temp" / "DarkFac" / "pytest-cache" / a.name
 
 
 def test_worktree_remove_after_pytest_run_and_lf_persists(tmp_path: Path) -> None:
-    local_app = tmp_path / "localappdata"
-    local_app.mkdir()
     repo = tmp_path / "repo"
     repo.mkdir()
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
@@ -55,13 +54,14 @@ def test_worktree_remove_after_pytest_run_and_lf_persists(tmp_path: Path) -> Non
         "def test_ok():\n    assert True\n\ndef test_bad():\n    assert False\n",
         encoding="utf-8",
     )
+    pytest_ini = wt / "pytest.ini"
+    pytest_ini.write_text("[pytest]\ntestpaths = .\n", encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
-    env["LOCALAPPDATA"] = str(local_app)
-    base = [sys.executable, "-m", "pytest", "-q", "-c", "NUL" if os.name == "nt" else "/dev/null", "--rootdir", str(wt)]
+    base = [sys.executable, "-m", "pytest", "-q", "-c", str(pytest_ini), "--rootdir", str(wt)]
     first = _run(base, wt, env)
     assert first.returncode == 1, first.stdout + first.stderr
     assert not (wt / ".pytest_cache").exists()
-    cache_root = local_app / "DarkFac" / "pytest-cache"
+    cache_root = Path(tempfile.gettempdir()) / "DarkFac" / "pytest-cache"
     assert any(cache_root.rglob("lastfailed"))
 
     second = _run([*base, "--lf"], wt, env)

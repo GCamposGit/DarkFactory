@@ -4,15 +4,14 @@
 On Windows, Python 3.12 gives such a directory a protected, non-inheriting ACL
 (SYSTEM, Administrators and the creating owner only). Another principal, such
 as a sandboxed agent user or the trash cleaner, then gets WinError 5 on
-``git worktree remove`` / ``rmtree``. Redirecting ``cache_dir`` to a per-rootdir
-folder under the user profile keeps ``--lf`` working across runs (the path is
-stable for a given worktree) and leaves nothing protected inside the worktree.
+``git worktree remove`` / ``rmtree``. Keep ``cache_dir`` in a per-rootdir
+folder under the system temporary directory: ``--lf`` works across runs and
+the cache remains outside the worktree, while sandboxed runs can write it.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -21,8 +20,7 @@ from typing import Any
 def external_cache_dir(rootpath: Path) -> Path:
     """Return the stable out-of-tree cache directory for ``rootpath``."""
 
-    base_env = os.environ.get("LOCALAPPDATA")
-    base = Path(base_env) if base_env else Path(tempfile.gettempdir())
+    base = Path(tempfile.gettempdir())
     key = hashlib.sha256(str(Path(rootpath).resolve()).lower().encode("utf-8"))
     return base / "DarkFac" / "pytest-cache" / key.hexdigest()[:16]
 
