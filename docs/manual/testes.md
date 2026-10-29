@@ -65,3 +65,5 @@ retencao de contextos) é descartado antes de rodar, sem nenhuma excecao — fal
         working-directory: candidate
         run: python scripts/complexity_ratchet.py
 ```
+
+O fingerprint de higiene inclui os arquivos ignorados de `.factory/`, mas normaliza `heartbeat_at` apenas nas travas `line_lock` conhecidas. Assim, o heartbeat legítimo do launcher pode avançar durante o portão sem reprovar a suíte; mudanças nos demais campos ou remoção da trava continuam visíveis.

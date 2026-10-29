@@ -59,3 +59,4 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 28/10/2026: suíte Windows limpa marcadores de execução herdados antes da coleta e dá a cada teste um `DARKFAC_STATE_ROOT` privado; classificação de worktree suja exige a linha completa do runner.
 - 28/10/2026: retomada após REVIEW com JSON inválido preserva BUILD/VALIDATE apenas para worktree limpa e digests de candidato/política coincidentes; o gate continua vinculado ao hash da árvore.
 - 28/10/2026: limpeza dos checkouts operacionais da frota passa pelo `ticket_workspace.cleanup`; processo vivo com cwd no checkout preserva o registro e os arquivos, com caminho, holder e recuperação posterior registrados no log.
+- 29/10/2026: higiene da suíte ignora só o timestamp `heartbeat_at` das travas operacionais conhecidas, mantendo mudanças nos demais campos e remoções detectáveis.
