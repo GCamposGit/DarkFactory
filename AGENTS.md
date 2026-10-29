@@ -28,7 +28,7 @@ Fonte única das regras para todo agente e harness (Claude Code, Codex, Grok Bui
   ```powershell
   python -c "from core.line.routing import pick; print(pick('development', ['harness:claude', 'harness:codex', 'harness:grok', 'harness:antigravity']))"
   ```
-- **Piso de 15%**: com cota restante do próprio harness `<= 15%` (semanal ou janela móvel), o agente não implementa código com o próprio modelo no chat. Informa a cota e delega ao harness eleito ou ao launcher. Só o roteador elege `development`, e só entre harnesses com modo `write` (Claude, Codex, Grok Build; Antigravity é somente leitura).
+- **Piso de 15%**: com cota restante do próprio harness `<= 15%` (semanal ou janela móvel), o agente não implementa código com o próprio modelo no chat. Informa a cota e delega ao harness eleito ou ao launcher. Só o roteador elege `development`, e só entre harnesses com modo `write` (Claude, Codex, Grok Build; Antigravity escreve só quando é o harness de operação interativo, nunca headless ou na frota).
 - **Override**: abaixo do piso, só com pedido textual inequívoco do owner no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", `--force`). Sem isso, falhe fechado.
 - **Harness de operação**: o harness pelo qual o owner opera (`DARKFAC_OPERATING_HARNESS` ou autodetecção) é eleito para `development` enquanto estiver acima do piso; abaixo dele vale o Dynamic Headroom. Não altera grill, planning, review nem integration.
 - **Modelos**: ids concretos vivem só em `.factory/config/model_registry.json` (lido por `core.models.registry`); textos citam apenas aliases. Planejamento usa o alias `opus`; implementação por subagente usa `sonnet`.
@@ -101,5 +101,5 @@ Nunca só mencione o problema. O relatório do turno lista cada defeito com o ti
 ## 10. Harnesses
 
 - Claude Code: `CLAUDE.md` importa este arquivo; skills em `.claude/skills/`.
-- Antigravity: `.agents/rules/GEMINI.md` importa este arquivo; skills em `.agents/skills/`; somente leitura no roteamento.
+- Antigravity: `.agents/rules/GEMINI.md` importa este arquivo; skills em `.agents/skills/`; elegível para `development` só como harness de operação interativo; somente leitura em modo headless e na frota.
 - Codex, Grok e outros: leem este arquivo na raiz do repositório.
