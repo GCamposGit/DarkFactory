@@ -20,6 +20,7 @@ def test_line_intake_observes_canonical_reservation_and_releases_cleanly(
 ) -> None:
     now = datetime.now(UTC)
     store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    intake_store = SQLiteControlStore(db_path=tmp_path / "control.db")
     demands = DemandsStore(tmp_path / "demands.json")
     ticket = UserTicket(
         id="USR-418", title="Canonical owner", problem_statement="Do not duplicate active execution.",
@@ -37,40 +38,52 @@ def test_line_intake_observes_canonical_reservation_and_releases_cleanly(
         now=now, lease_duration_sec=600,
     )
 
-    blocked = owner_intake.submit_ticket_to_line(ticket.id, demands_store=demands, store=store, now=now)
+    blocked = owner_intake.submit_ticket_to_line(ticket.id, demands_store=demands, store=intake_store, now=now)
     assert not blocked.ok
     assert blocked.state == "canonical_ownership_conflict"
     assert blocked.run_id == "manual-418"
     assert "notebook" in blocked.message
 
-    independent = owner_intake.submit_ticket_to_line(distinct.id, demands_store=demands, store=store, now=now)
+    independent = owner_intake.submit_ticket_to_line(distinct.id, demands_store=demands, store=intake_store, now=now)
     assert independent.ok
 
     store.release_reservation(
         reservation_id=reservation.reservation_id, fencing_token=reservation.fencing_token,
         status="released", now=now,
     )
-    resumed = owner_intake.submit_ticket_to_line(ticket.id, demands_store=demands, store=store, now=now)
+    resumed = owner_intake.submit_ticket_to_line(ticket.id, demands_store=demands, store=intake_store, now=now)
     assert resumed.ok
 
 
-def test_concurrent_channel_reservations_have_one_winner_and_release_reopens_ticket(tmp_path: Path) -> None:
+def test_concurrent_channel_reservations_have_one_winner_and_release_reopens_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    stores = [SQLiteControlStore(db_path=tmp_path / "control.db") for _ in range(2)]
+    intake_store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    demands = DemandsStore(tmp_path / "demands.json")
+    ticket = UserTicket(
+        id="USR-418", title="Concurrent intake", problem_statement="Share canonical ownership.",
+        non_goals=["Do not duplicate implementation"], acceptance_criteria=["Intake reports the winner"],
+    )
+    demands.save_ticket(ticket)
+    monkeypatch.setattr(owner_intake, "find_active_pull_request", lambda *_args, **_kwargs: None)
     now = datetime.now(UTC)
     barrier = threading.Barrier(2)
     outcomes: list[object] = []
 
-    def reserve(host: str) -> None:
+    def reserve(index: int, host: str) -> None:
         barrier.wait()
         try:
-            outcomes.append(store.reserve_cycle(
+            outcomes.append(stores[index].reserve_cycle(
                 project_id="darkfac", ticket_id="USR-418", run_id=f"{host}-run", host_id=host,
                 now=now, lease_duration_sec=600,
             ))
         except TicketAlreadyActiveError as exc:
             outcomes.append(exc)
 
-    threads = [threading.Thread(target=reserve, args=(host,)) for host in ("notebook", "desktop")]
+    threads = [threading.Thread(target=reserve, args=(index, host))
+               for index, host in enumerate(("notebook", "desktop"))]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -81,6 +94,14 @@ def test_concurrent_channel_reservations_have_one_winner_and_release_reopens_tic
     assert len(winners) == len(losers) == 1
 
     winner = winners[0]
+    blocked = owner_intake.submit_ticket_to_line(
+        ticket.id, demands_store=demands, store=intake_store, now=now,
+    )
+    assert not blocked.ok
+    assert blocked.state == "canonical_ownership_conflict"
+    assert blocked.run_id == winner.run_id
+    assert winner.host_id in blocked.message
+
     store.release_reservation(
         reservation_id=winner.reservation_id, fencing_token=winner.fencing_token,
         status="released", now=now,

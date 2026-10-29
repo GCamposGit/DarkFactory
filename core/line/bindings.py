@@ -406,13 +406,32 @@ class DevelopmentStageHandler:
 
     STAGE = "development"
 
-    def __init__(self, *, project_resolver: ProjectResolver, **stage_kwargs: Any) -> None:
+    def __init__(
+        self, *, project_resolver: ProjectResolver, store: Any | None = None, **stage_kwargs: Any
+    ) -> None:
         self.project_resolver = project_resolver
+        self.store = store
         self._stage = stage_build.DevelopmentStage(**stage_kwargs)
 
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
         ticket_id = context.claim.job_key.ticket_id
+        run_id = context.claim.job_key.run_id
+        reservation_lookup = getattr(self.store, "get_active_ticket_reservation", None)
+        if reservation_lookup is not None:
+            try:
+                reservation = reservation_lookup(project.id, ticket_id, now=datetime.now(timezone.utc))
+            except Exception as exc:
+                logger.warning("Could not verify canonical ownership before development of %s: %s", ticket_id, exc)
+                return StageResult(
+                    outcome="failed", cause_code="canonical_ownership_lookup_failed", evidence_refs=[str(exc)]
+                )
+            if reservation is not None and reservation.run_id != run_id:
+                return StageResult(
+                    outcome="failed",
+                    cause_code="canonical_ownership_conflict",
+                    evidence_refs=[f"Run {reservation.run_id} on host {reservation.host_id}"],
+                )
         repo_url = getattr(project, "repo_url", None)
         try:
             if repo_url and "github.com" not in str(repo_url).casefold():
@@ -763,7 +782,7 @@ def build_line_registry(
             intake_service=intake_service, route_waiter=waiter,
         ),
         "development": DevelopmentStageHandler(
-            project_resolver=resolver, host_caps=host_caps, routing_config=cfg, route_waiter=waiter,
+            project_resolver=resolver, store=store, host_caps=host_caps, routing_config=cfg, route_waiter=waiter,
             base_red_attempts=base_red_attempt_counter(store, "development"),
         ),
         "validation": ValidationStageHandler(project_resolver=resolver),

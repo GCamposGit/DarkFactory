@@ -27,10 +27,15 @@ def test_development_rechecks_active_pr_after_admission_under_execution_reservat
     demands.save_ticket(ticket)
     store = SQLiteControlStore(db_path=tmp_path / "control.db")
     active_pr: ActivePullRequest | None = None
-    reservation_active = False
+    reservation = None
 
     def lookup(_project_id: str, _ticket_id: str, **_kwargs: object) -> ActivePullRequest | None:
-        assert reservation_active
+        assert reservation is not None
+        stored_reservation = store.get_active_ticket_reservation(
+            "darkfac", ticket.id, now=datetime.now(UTC),
+        )
+        assert stored_reservation is not None
+        assert stored_reservation.run_id == reservation.run_id
         return active_pr
 
     monkeypatch.setattr(owner_intake, "find_active_pull_request", lambda *_a, **_k: active_pr)
@@ -40,8 +45,11 @@ def test_development_rechecks_active_pr_after_admission_under_execution_reservat
     assert admitted.ok
 
     # Another channel completes the ticket and opens a PR before the queued run is dispatched.
+    reservation = store.reserve_cycle(
+        project_id="darkfac", ticket_id=ticket.id, run_id=admitted.run_id, host_id="notebook",
+        now=datetime.now(UTC), lease_duration_sec=600,
+    )
     active_pr = ActivePullRequest(779, "https://github.com/org/repo/pull/779", "USR-418", "ticket/usr-418")
-    reservation_active = True
     called: list[str] = []
 
     class DevelopmentStage:
@@ -54,7 +62,9 @@ def test_development_rechecks_active_pr_after_admission_under_execution_reservat
 
     monkeypatch.setattr(bindings, "find_active_pull_request", lookup)
     monkeypatch.setattr(bindings.stage_build, "DevelopmentStage", DevelopmentStage)
-    handler = bindings.DevelopmentStageHandler(project_resolver=lambda _project_id: SimpleNamespace(id="darkfac"))
+    handler = bindings.DevelopmentStageHandler(
+        project_resolver=lambda _project_id: SimpleNamespace(id="darkfac"), store=store,
+    )
     context = SimpleNamespace(
         project_id="darkfac",
         claim=SimpleNamespace(job_key=SimpleNamespace(ticket_id=ticket.id, run_id=admitted.run_id)),
@@ -66,3 +76,42 @@ def test_development_rechecks_active_pr_after_admission_under_execution_reservat
     assert result.cause_code == "active_pull_request"
     assert result.evidence_refs == [f"PR #779: {active_pr.url}"]
     assert called == []
+
+
+def test_development_refuses_another_run_canonical_reservation_without_pr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket_id = "USR-418"
+    store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    now = datetime.now(UTC)
+    reservation = store.reserve_cycle(
+        project_id="darkfac", ticket_id=ticket_id, run_id="existing-run", host_id="desktop",
+        now=now, lease_duration_sec=600,
+    )
+    looked_up: list[str] = []
+    monkeypatch.setattr(
+        bindings, "find_active_pull_request", lambda *_args, **_kwargs: looked_up.append("pr")
+    )
+
+    class DevelopmentStage:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def run(self, *_args: object) -> object:
+            pytest.fail("canonical ownership must prevent development from running")
+
+    monkeypatch.setattr(bindings.stage_build, "DevelopmentStage", DevelopmentStage)
+    handler = bindings.DevelopmentStageHandler(
+        project_resolver=lambda _project_id: SimpleNamespace(id="darkfac"), store=store,
+    )
+    context = SimpleNamespace(
+        project_id="darkfac",
+        claim=SimpleNamespace(job_key=SimpleNamespace(ticket_id=ticket_id, run_id="queued-run")),
+    )
+
+    result = handler.handle(context)  # type: ignore[arg-type]
+
+    assert result.outcome == "failed"
+    assert result.cause_code == "canonical_ownership_conflict"
+    assert result.evidence_refs == [f"Run {reservation.run_id} on host {reservation.host_id}"]
+    assert looked_up == []
