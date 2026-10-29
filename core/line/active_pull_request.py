@@ -52,7 +52,9 @@ def find_active_pull_request(
     project = project_registry.get_project(project_id)
     repo_url = getattr(project, "repo_url", None) if project is not None else None
     if not repo_url:
-        return None
+        raise PullRequestLookupError(
+            f"project '{project_id}' has no registered GitHub repository; active PR status cannot be verified"
+        )
     repo = _repo_slug(str(repo_url))
     try:
         result = run(

@@ -41,6 +41,10 @@ def test_active_pr_lookup_is_ticket_exact_and_fails_closed() -> None:
     with pytest.raises(PullRequestLookupError):
         find_active_pull_request("darkfac", "USR-418", project_registry=registry, run=unavailable)
 
+    missing_repo = SimpleNamespace(get_project=lambda _project: None)
+    with pytest.raises(PullRequestLookupError, match="cannot be verified"):
+        find_active_pull_request("darkfac", "USR-418", project_registry=missing_repo, run=fake_run)
+
 
 def test_launcher_and_owner_intake_refuse_active_pr_before_creating_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
