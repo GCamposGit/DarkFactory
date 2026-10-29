@@ -1,4 +1,4 @@
-<!-- covers: core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
 # Motor da esteira
 
 ## Sequencia canonica de estagios (USR-375 S2)
@@ -65,12 +65,35 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
 
 Os artefatos do ticket ficam fora da worktree (que o merge remove), em
 `<state_root>/artifacts/ticket_runs/<ID>/.darkfac/runs/<ID>/` (`core/line/ticket_engine.py`). Uma execucao
-nova do launcher apaga os artefatos anteriores; a entrega apaga validacao, merge e deploy anteriores.
+nova do launcher normalmente apaga os artefatos anteriores; a entrega apaga validacao, merge e deploy anteriores.
+Excecao de retomada (USR-426): se a worktree preservada estiver limpa, PLAN, RESEARCH, BUILD e VALIDATE
+forem validos, VALIDATE estiver verde e `review_state.json` registrar resposta JSON invalida para o mesmo
+digest de candidato e politica de REVIEW, o launcher preserva esses artefatos e retoma sem reinvocar BUILD.
+A entrega executa a validacao novamente; o runner so reutiliza o veredito do portao quando o hash da arvore,
+a configuracao e as etapas selecionadas ainda correspondem ao cache. Worktree suja, digest/politica diferentes
+ou artefato ausente/invalido seguem pelo fluxo normal de planejamento e desenvolvimento.
 Um `--resume-delivery` digitado pelo operador numa worktree anterior ao S4 (sem nenhum artefato) registra
 plano/build minimos e segue por VALIDATE, REVIEW e MERGE.
 
 Na linha, `bindings.IntegrationStageAdapter` recusa a integracao (`stage_artifact_missing:<ESTAGIO>`) sem
 `SPEC.md`/`tickets.json` e sem `review_verdict.json`, que o `ReviewStage` passou a gravar ao aprovar.
+
+### Transporte do veredito independente
+
+O estágio REVIEW envia ao Claude Code o schema JSON de `ReviewVerdict` com `--json-schema` e consome
+o campo `structured_output` do envelope JSON da CLI. Chamadas sem schema mantêm o tratamento legado
+do campo `result`. O parser da revisão exige exatamente um objeto JSON compatível (sem prosa, cercas,
+chaves duplicadas ou campos extras); uma resposta inválida retorna `review_invalid_json` e registra
+`review_invalid_response.json` com harness, motivo, tamanho em bytes, SHA-256 e trecho sanitizado limitado.
+O motivo distingue erro de sintaxe JSON, chave duplicada e falha de schema.
+Esse diagnóstico não é um veredito e não cria `review_verdict.json`. A aprovação exige `verdict=approve`
+sem itens bloqueantes e continua vinculada ao digest do candidato e à política de revisão.
+
+Uma falha de formato registra o harness como inelegível para a combinação atual de `candidate_digest` e
+`policy_digest`. O retry pede outra rota ao roteador, mantendo o modo `read`, o limite de cota e a família
+independente já aplicados por `pick()`. Se não houver outra rota elegível, REVIEW aguarda a próxima rota;
+nenhum veredito é criado. Uma alteração no candidato ou na política descarta a exclusão anterior e exige
+uma nova revisão independente.
 
 
 ## Planejamento

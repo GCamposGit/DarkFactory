@@ -3209,6 +3209,71 @@ def _stage_plan(
     return None
 
 
+def _can_resume_invalid_review(
+    ticket: UserTicket, workspace: TicketWorkspace
+) -> bool:
+    """Reuse a preserved candidate only when green validation and invalid review share its digest.
+
+    The independent review stage records the exact candidate and policy that produced an invalid
+    response. That binding, together with the green validation artifact, is enough to resume review
+    without rebuilding or trusting a stale validation result.
+    """
+    if ticket.project_id != "darkfac":
+        return False
+    from core.git.autonomy import _run_git
+
+    status = _run_git(["status", "--porcelain"], cwd=workspace.path)
+    if status.returncode != 0 or (status.stdout or "").strip():
+        return False
+    rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
+    try:
+        for stage in (Stage.PLAN, Stage.RESEARCH, Stage.BUILD, Stage.VALIDATE):
+            require_artifact(stage, rws)
+    except StageArtifactMissing:
+        return False
+
+    from core.line import workspace as line_workspace
+
+    context_dir = line_workspace.context_dir(rws)
+    state_path = context_dir / "review_state.json"
+    diagnostic_path = context_dir / "review_invalid_response.json"
+    if not state_path.is_file() or not diagnostic_path.is_file():
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(state, dict) or not isinstance(state.get("invalid_response_routes"), list):
+        return False
+    candidate_ws = rws.model_copy(update={"path": workspace.path})
+    candidate_digest = stage_review._candidate_digest(candidate_ws, "main")
+    policy_digest = stage_review._policy_digest(load_routing_config())
+    if candidate_digest is None:
+        return False
+    return any(
+        item.get("candidate_digest") == candidate_digest
+        and item.get("policy_digest") == policy_digest
+        for item in state.get("invalid_response_routes", [])
+        if isinstance(item, dict)
+    )
+
+
+def _resumed_build_result(ticket: UserTicket, workspace: TicketWorkspace, progress: ProgressPublisher) -> dict[str, Any]:
+    """Return the normal build summary shape when a validated candidate resumes at REVIEW."""
+    rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
+    build_report = require_artifact(Stage.BUILD, rws)
+    harness = getattr(build_report, "harness", None) or "unknown"
+    progress.phase("agent", "succeeded", "worktree validada retomada no estagio REVIEW", harness=harness)
+    return {
+        "agent_result": AgentResult(ok=True, harness=harness, text="candidate resumed at review", duration_s=0.0),
+        "harness": harness,
+        "model": None,
+        "effort": None,
+        "cost_record": {},
+        "agent_summary": "worktree validada retomada no estagio REVIEW",
+    }
+
+
 def _stage_build(
     args: argparse.Namespace,
     ticket: UserTicket,
@@ -3388,14 +3453,18 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if _cancelled():
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
-    # INTAKE -> GRILL -> PLAN (USR-375 S4): BUILD never starts without a validated plan artifact.
-    plan_refused = _stage_plan(args, ticket, workspace, route, progress)
-    if plan_refused is not None:
-        return plan_refused
-    if _cancelled():
-        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
-
-    built = _stage_build(args, ticket, workspace, quotas, route, progress)
+    resume_review = _can_resume_invalid_review(ticket, workspace)
+    if resume_review:
+        # Preserve the validated plan/build/review diagnostics and resume at REVIEW.
+        built = _resumed_build_result(ticket, workspace, progress)
+    else:
+        # INTAKE -> GRILL -> PLAN: BUILD never starts without a validated plan artifact.
+        plan_refused = _stage_plan(args, ticket, workspace, route, progress)
+        if plan_refused is not None:
+            return plan_refused
+        if _cancelled():
+            return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
+        built = _stage_build(args, ticket, workspace, quotas, route, progress)
     if isinstance(built, int):
         return built
 

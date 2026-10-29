@@ -26,12 +26,12 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from core.line import workspace
-from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.agent_cli import AgentRequest, AgentResult, redact_secrets, run_agent
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.stage_build import fill_template
@@ -82,6 +82,8 @@ e `{context_dir}/tickets.json` neste repositorio; leia-os antes de julgar.
 
 
 class ReviewFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     file: str = ""
     line: Optional[int] = None
     issue: str = ""
@@ -89,9 +91,17 @@ class ReviewFinding(BaseModel):
 
 
 class ReviewVerdict(BaseModel):
-    verdict: str
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["approve", "changes_required"]
     blocking: list[ReviewFinding] = Field(default_factory=list)
     non_blocking: list[ReviewFinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _reject_approval_with_blockers(self) -> "ReviewVerdict":
+        if self.verdict == "approve" and self.blocking:
+            raise ValueError("approve cannot include blocking findings")
+        return self
 
 
 class ReviewRound(BaseModel):
@@ -114,6 +124,8 @@ class ReviewState(BaseModel):
     agent_error_streak: int = 0
     # USR-328: harnesses whose review hit the deadline without a verdict; the next pick skips them.
     timed_out_harnesses: list[str] = Field(default_factory=list)
+    # USR-426: invalid structured output is scoped to the exact candidate and review policy.
+    invalid_response_routes: list[dict[str, str]] = Field(default_factory=list)
 
 
 def _load_prompt_template(name: str, fallback: str) -> str:
@@ -243,23 +255,58 @@ def _render_review_md(round_num: int, verdict: ReviewVerdict) -> str:
     return "\n".join(lines)
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject duplicate JSON object keys instead of silently trusting the last value."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _parse_verdict_with_reason(text: str) -> tuple[Optional[ReviewVerdict], str]:
+    """Parse one verdict and return a stable diagnostic reason when it is invalid."""
+    try:
+        raw = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except json.JSONDecodeError:
+        return None, "json_decode_error"
+    except ValueError as exc:
+        if "duplicate JSON key" in str(exc):
+            return None, "duplicate_key"
+        return None, "json_value_error"
+    if not isinstance(raw, dict):
+        return None, "schema_validation_error"
+    try:
+        return ReviewVerdict.model_validate(raw), ""
+    except ValidationError:
+        return None, "schema_validation_error"
+
+
 def _parse_verdict(text: str) -> Optional[ReviewVerdict]:
-    """Best-effort JSON extraction: the agent may wrap the object in prose or fences."""
-    candidates = [text]
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
-        try:
-            raw = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        try:
-            return ReviewVerdict.model_validate(raw)
-        except ValidationError:
-            continue
-    return None
+    """Parse exactly one JSON verdict object; prose, fences and duplicate keys fail closed."""
+    return _parse_verdict_with_reason(text)[0]
+
+
+def _record_invalid_response(ws: RunWorkspace, *, harness: str, text: str, reason: str) -> None:
+    """Persist a bounded, sanitized diagnostic without retaining the raw response."""
+    encoded = text.encode("utf-8", errors="replace")
+    diagnostic = {
+        "harness": harness,
+        "reason": reason,
+        "size_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "sanitized_excerpt": redact_secrets(text)[:500],
+    }
+    workspace.write_context(
+        ws,
+        "review_invalid_response.json",
+        json.dumps(diagnostic, ensure_ascii=False, sort_keys=True, indent=2),
+    )
+    logger.warning(
+        "Review returned an invalid structured response (harness=%s, reason=%s, size_bytes=%d, sha256=%s)",
+        diagnostic["harness"], diagnostic["reason"], diagnostic["size_bytes"], diagnostic["sha256"],
+    )
 
 
 class ReviewStage:
@@ -281,6 +328,97 @@ class ReviewStage:
         self.routing_config = routing_config or load_routing_config()
         self.agent_timeout_s = agent_timeout_s
         self.route_waiter = route_waiter or RouteWaiter()
+
+    def _retry_invalid_response(
+        self,
+        ws: RunWorkspace,
+        state: ReviewState,
+        *,
+        project: ProjectDescriptor,
+        run_id: str,
+        harness: str,
+        text: str,
+        reason: str,
+        candidate_digest: str,
+        policy_digest: str,
+        implementing_harness: Optional[str],
+    ) -> StageResult:
+        """Record malformed output and route another independent reviewer."""
+        _record_invalid_response(ws, harness=harness, text=text, reason=reason)
+        invalid_route = {
+            "harness": harness,
+            "candidate_digest": candidate_digest,
+            "policy_digest": policy_digest,
+        }
+        if invalid_route not in state.invalid_response_routes:
+            state.invalid_response_routes.append(invalid_route)
+        _write_review_state(ws, state)
+
+        excluded = list(dict.fromkeys([
+            *state.timed_out_harnesses,
+            *(item["harness"] for item in state.invalid_response_routes
+              if item.get("candidate_digest") == candidate_digest
+              and item.get("policy_digest") == policy_digest
+              and item.get("harness")),
+        ]))
+        next_route = self.pick_func(
+            "review", self.host_caps, implementing_harness=implementing_harness,
+            config=self.routing_config, exclude=excluded,
+        )
+        if next_route is None:
+            return self.route_waiter.no_route_result(
+                "review", project, run_id, host_caps=self.host_caps,
+                config=self.routing_config, mode="read",
+                implementing_harness=implementing_harness, exclude=excluded,
+            )
+        return StageResult(
+            outcome="retry",
+            cause_code=f"review_invalid_json:harness={harness}:next={next_route[0]}",
+            output_refs=[],
+        )
+
+    def _handle_agent_failure(
+        self,
+        ws: RunWorkspace,
+        state: ReviewState,
+        result: AgentResult,
+        *,
+        run_id: str,
+        round_num: int,
+        harness: str,
+        implementing_harness: Optional[str],
+    ) -> StageResult:
+        """Persist retry state and choose a replacement after an agent error."""
+        if state.agent_error_streak >= MAX_REVIEW_AGENT_RETRIES:
+            logger.error(
+                "Review agent failed %d consecutive times in round %d for run %s; failing review stage",
+                state.agent_error_streak, round_num, run_id,
+            )
+            return StageResult(outcome="failed", cause_code="review_agent_exhausted", output_refs=[])
+
+        state.agent_error_streak += 1
+        if result.error_kind != "timeout":
+            _write_review_state(ws, state)
+            return StageResult(
+                outcome="retry", cause_code=f"review_agent_{result.error_kind}", output_refs=[]
+            )
+
+        if harness not in state.timed_out_harnesses:
+            state.timed_out_harnesses.append(harness)
+        _write_review_state(ws, state)
+        next_route = self.pick_func(
+            "review", self.host_caps, implementing_harness=implementing_harness,
+            config=self.routing_config, exclude=list(state.timed_out_harnesses),
+        )
+        nxt = f"{next_route[0]}/{next_route[1] or '-'}" if next_route else "none"
+        return StageResult(
+            outcome="retry",
+            cause_code=(
+                f"review_timeout:harness={harness}:duration_s={result.duration_s}"
+                f":next_route={nxt}"
+            ),
+            output_refs=[],
+        )
 
     def run(
         self,
@@ -312,6 +450,16 @@ class ReviewStage:
                 cause_code="review_candidate_digest_unavailable",
                 output_refs=[],
             )
+
+        # A parser/schema failure only makes this harness ineligible for the exact inputs it saw.
+        # A changed candidate or policy gets a fresh independent review opportunity.
+        current_invalid = [
+            item for item in state.invalid_response_routes
+            if item.get("candidate_digest") == cur_candidate and item.get("policy_digest") == cur_policy
+        ]
+        if current_invalid != state.invalid_response_routes:
+            state.invalid_response_routes = current_invalid
+            _write_review_state(ws, state)
 
         if (
             state.rounds
@@ -352,12 +500,16 @@ class ReviewStage:
         round_num = len(state.rounds) + 1
         implementing_harness = _read_progress_harness(ws)
 
+        excluded_harnesses = list(dict.fromkeys([
+            *state.timed_out_harnesses,
+            *(item["harness"] for item in current_invalid if item.get("harness")),
+        ]))
         route = self.pick_func(
             "review",
             self.host_caps,
             implementing_harness=implementing_harness,
             config=self.routing_config,
-            exclude=list(state.timed_out_harnesses),
+            exclude=excluded_harnesses,
         )
         if route is None:
             # No route is a matter of time, not of the owner (USR-87): retry at the earliest reset.
@@ -385,55 +537,31 @@ class ReviewStage:
                 harness=harness,
                 model=model,
                 timeout_s=self.agent_timeout_s,
+                output_schema=ReviewVerdict.model_json_schema(),
             )
         )
         record_result(agent_result, config=self.routing_config)
 
         if not agent_result.ok:
-            if state.agent_error_streak >= MAX_REVIEW_AGENT_RETRIES:
-                logger.error(
-                    "Review agent failed %d consecutive times in round %d for run %s; failing review stage",
-                    state.agent_error_streak,
-                    round_num,
-                    run_id,
-                )
-                return StageResult(
-                    outcome="failed", cause_code="review_agent_exhausted", output_refs=[]
-                )
-            state.agent_error_streak += 1
-            if agent_result.error_kind == "timeout":
-                # USR-328: a deadline is a structured failure, never a verdict or an approval. Record the
-                # duration and the next eligible route (other family, via the router) for diagnosis.
-                if harness not in state.timed_out_harnesses:
-                    state.timed_out_harnesses.append(harness)
-                _write_review_state(ws, state)
-                next_route = self.pick_func(
-                    "review", self.host_caps, implementing_harness=implementing_harness,
-                    config=self.routing_config, exclude=list(state.timed_out_harnesses),
-                )
-                nxt = f"{next_route[0]}/{next_route[1] or '-'}" if next_route else "none"
-                return StageResult(
-                    outcome="retry",
-                    cause_code=(
-                        f"review_timeout:harness={harness}:duration_s={agent_result.duration_s}"
-                        f":next_route={nxt}"
-                    ),
-                    output_refs=[],
-                )
-            _write_review_state(ws, state)
-            return StageResult(
-                outcome="retry", cause_code=f"review_agent_{agent_result.error_kind}", output_refs=[]
+            return self._handle_agent_failure(
+                ws, state, agent_result, run_id=run_id,
+                round_num=round_num, harness=harness,
+                implementing_harness=implementing_harness,
             )
 
         if state.agent_error_streak != 0:
             state.agent_error_streak = 0
             _write_review_state(ws, state)
 
-        verdict = _parse_verdict(agent_result.text)
+        verdict, invalid_reason = _parse_verdict_with_reason(agent_result.text)
         if verdict is None:
-            return StageResult(outcome="retry", cause_code="review_invalid_json", output_refs=[])
+            return self._retry_invalid_response(
+                ws, state, project=project, run_id=run_id, harness=harness,
+                text=agent_result.text, reason=invalid_reason, candidate_digest=cur_candidate,
+                policy_digest=cur_policy, implementing_harness=implementing_harness,
+            )
 
-        approved = verdict.verdict == "approve" and not bool(verdict.blocking)
+        approved = verdict.verdict == "approve"
         exhausted = round_num > max_rounds and not approved
         content = _render_review_md(round_num, verdict)
         workspace.write_context(ws, f"review-{round_num}.md", content)

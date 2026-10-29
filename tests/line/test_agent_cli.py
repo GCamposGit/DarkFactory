@@ -94,6 +94,38 @@ def test_claude_read_mode_uses_plan_permission(tmp_path, make_fake_cli, monkeypa
     assert "--model" not in argv  # model omitted when None
 
 
+def test_claude_schema_mode_extracts_structured_output_and_serializes_schema_deterministically(
+    tmp_path, make_fake_cli, monkeypatch
+):
+    cmd_path, env_var = make_fake_cli("claude")
+    monkeypatch.setattr(agent_cli, "find_claude_binary", lambda: cmd_path)
+    record_path = tmp_path / "record.json"
+    schema = {"type": "object", "required": ["verdict"], "properties": {"verdict": {"type": "string"}}}
+    payload = {"verdict": "approve"}
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {
+            "record_path": str(record_path),
+            "stdout": json.dumps({"result": "display text is not the payload", "structured_output": payload}),
+            "returncode": 0,
+        },
+    )
+
+    result = run_agent(
+        AgentRequest(prompt="review", cwd=tmp_path, mode="read", harness="claude", output_schema=schema)
+    )
+
+    assert result.ok is True
+    assert result.text == json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    argv = record["argv"]
+    assert argv[argv.index("--permission-mode") + 1] == "plan"
+    assert argv[argv.index("--json-schema") + 1] == json.dumps(
+        schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+
+
 def test_claude_json_is_error_classifies_rate_limited_and_reset_at(tmp_path, make_fake_cli, monkeypatch):
     cmd_path, env_var = make_fake_cli("claude")
     monkeypatch.setattr(agent_cli, "find_claude_binary", lambda: cmd_path)

@@ -148,6 +148,9 @@ class AgentRequest(BaseModel):
     effort: Optional[str] = None
     timeout_s: int = 1800
     max_turns: Optional[int] = None
+    # Optional provider-enforced shape for machine-consumed responses. Claude Code
+    # receives this through --json-schema; absent means legacy text handling.
+    output_schema: Optional[dict[str, Any]] = None
     # USR-370: ticket-granted env names exempted from the credential scrub (tolerant when absent).
     capabilities: list[str] = Field(default_factory=list)
 
@@ -466,6 +469,9 @@ def build_claude_argv(
     argv = [executable, "-p", "--output-format", "json"]
     if req.model:
         argv += ["--model", req.model]
+    if req.output_schema is not None:
+        schema_json = json.dumps(req.output_schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        argv += ["--json-schema", schema_json]
     permission_mode = "bypassPermissions" if req.mode == "write" else "plan"
     argv += ["--permission-mode", permission_mode]
     if req.max_turns:
@@ -1012,7 +1018,14 @@ def _run_claude(req: AgentRequest) -> AgentResult:
 
     if parsed is not None:
         is_error = bool(parsed.get("is_error"))
-        result_text = str(parsed.get("result") or "")
+        if req.output_schema is not None and "structured_output" in parsed:
+            # Claude Code 2.1.278 wraps schema-constrained output in this field;
+            # `result` remains a display string and must not be parsed as verdict.
+            result_text = json.dumps(
+                parsed["structured_output"], sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            )
+        else:
+            result_text = str(parsed.get("result") or "")
         usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
         cost_raw = parsed.get("total_cost_usd")
         cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) else None
