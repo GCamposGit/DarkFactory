@@ -2630,6 +2630,7 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
                 "status": "refused", "reason": "canonical_ownership_conflict",
                 "ticket_id": lock_label,
                 "existing_execution": getattr(exc, "existing_execution", None) or {"details": str(exc)},
+                "message": f"[RESERVA DE FROTA] {exc}",
             }, ensure_ascii=False), file=sys.stderr)
         else:
             print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
