@@ -11767,5 +11767,35 @@
     "dependencies": [],
     "created_at": "2026-10-28T22:11:35.537039Z",
     "updated_at": "2026-10-29T00:55:47.279157Z"
+  },
+  {
+    "id": "USR-427",
+    "project_id": "darkfac",
+    "title": "Diagnosticar base_red_suspected na retencao de contextos do CloudWorker",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "11accffd04c9a58ef6a2e5881c20e7043ec0143d",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-423 aposrebase902b32b9 falhou gate3d256f08 em2testes tests/line/test_context_retention.py: sweeperinjetadonaochamado(len0esperado2), warningesperadoausente. 4608passed22skipped, terminalbase_red_suspected. Log C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z/.factory/test_logs/step-failures/20261029T013148Z-1793237508124432600-unit_and_integration_tests_parallel.log. Compararbaselineeambienteantesdeatribuir423; corrigircontratorelogio/flag/fixturessemremoverretencaoouasserts. 423preservado5c6c86e2, semPR.",
+    "core_journey": [
+      "USR-423 aposrebase902b32b9 falhou gate3d256f08 em2testes tests/line/test_context_retention.py: sweeperinjetadonaochamado(len0esperado2), warningesperadoausente. 4608passed22skipped, terminalbase_red_suspected. Log C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z/.factory/test_logs/step-failures/20261029T013148Z-1793237508124432600-unit_and_integration_tests_parallel.log. Compararbaselineeambienteantesdeatribuir423; corrigircontratorelogio/flag/fixturessemremoverretencaoouasserts. 423preservado5c6c86e2, semPR."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir focalmente os dois testes na baseline e candidato com ambiente registrado sem segredos",
+      "Corrigir causa real mantendo varredura periodica, protecao de ativos e fallback de erro",
+      "Liberar retomada423 pelo ciclo canonico sem bypassbase_red"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T01:36:53.758881Z",
+    "updated_at": "2026-10-29T02:42:38.368549Z"
   }
 ]

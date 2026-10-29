@@ -520,6 +520,111 @@ def test_human_probe_sweeper_resends_unnotified_grill(temp_stores):
 # USR-106: RouteWaiter on cloud_worker dispatch when route is unavailable
 # --------------------------------------------------------------------------
 
+def test_worker_resumes_sweeping_and_claiming_once_the_line_lock_is_released(temp_stores, tmp_path, monkeypatch):
+    """USR-427: ``poll_and_execute_once`` (core/orchestrator/cloud_worker.py:1359) bails out at
+    ``line_lock.is_locked()`` -- before any sweep or ``store.claim`` -- whenever another LIVE
+    process holds the local line lock (the gate's own ``run_ticket`` run holds exactly this kind
+    of lock while it runs this very suite, which is what made USR-423's context-retention
+    sweeper assertions flaky: see ``docs/manual/testes.md``/``tests/line/test_context_retention.py``
+    for the companion fix). This pins both halves of that contract: the early-return while held,
+    and the resumed sweeping/claiming once released, on the SAME worker instance.
+    """
+    import json
+    import subprocess
+    import sys
+    import time
+
+    from core.line import line_lock
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+
+    store, artifact_store = temp_stores
+    cmd = IntakeCommand(
+        project_id="darkfac",
+        channel="test_channel",
+        external_id=f"test-linelock-{uuid4().hex[:6]}",
+        mode="autonomous",
+        policy_ref="policy-v1",
+        payload={
+            "title": "Line Lock Early Return Test",
+            "problem": "Validate poll_and_execute_once bails out under a foreign line lock",
+            "journey": "Intake -> Claim",
+            "non_goals": ["No manual intervention"],
+            "criteria": ["Status = succeeded"],
+        },
+    )
+    receipt = store.accept(cmd, datetime.now(UTC))
+
+    worker = CloudWorker(
+        worker_id="test-linelock-worker",
+        store=store,
+        artifact_store=artifact_store,
+        registry=_fake_line_registry(),
+    )
+
+    sweep_calls: list[str] = []
+    for name in (
+        "sweep_waiting_human_requests",
+        "sweep_stale_workspaces",
+        "sweep_stale_artifacts",
+        "sweep_recovery_contexts",
+        "sweep_orphan_runs",
+    ):
+        monkeypatch.setattr(worker, name, lambda *a, _n=name, **kw: sweep_calls.append(_n))
+
+    claim_calls = []
+    orig_claim = store.claim
+
+    def _tracked_claim(*a, **kw):
+        claim_calls.append(True)
+        return orig_claim(*a, **kw)
+
+    monkeypatch.setattr(store, "claim", _tracked_claim)
+
+    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        lock_dir = line_lock.lock_dir()
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        line_lock.lock_path().write_text(
+            json.dumps(
+                {
+                    "pid": holder.pid,
+                    "ticket_id": "foreign",
+                    "hostname": "test",
+                    "started_at": now,
+                    "heartbeat_at": now,
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert line_lock.is_locked() is True
+
+        # Locked: poll bails out before touching any sweeper or claiming work.
+        executed_while_locked = worker.poll_and_execute_once()
+        assert executed_while_locked is False
+        assert sweep_calls == []
+        assert claim_calls == []
+
+        status_while_locked = store.get_run_status(receipt.run_id)
+        assert status_while_locked["jobs"][0]["status"] == "pending"
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
+
+    line_lock.lock_path().unlink()
+    assert line_lock.is_locked() is False
+
+    # Unlocked: the SAME worker instance resumes sweeping and claims the pending job.
+    executed_after_release = worker.poll_and_execute_once()
+    assert executed_after_release is True
+    assert sweep_calls, "sweeps must run once the foreign lock is gone"
+    assert claim_calls == [True]
+
+    status_after_release = store.get_run_status(receipt.run_id)
+    assert status_after_release["jobs"][0]["status"] == "succeeded"
+
+
 def test_cloud_worker_dispatch_no_route_uses_route_waiter(temp_stores):
     store, artifact_store = temp_stores
     cmd = IntakeCommand(

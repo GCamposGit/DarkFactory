@@ -10,13 +10,15 @@ import logging
 import math
 import os
 import subprocess
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import pytest
 
-from core.line import context_retention, recovery_context, workspace
+from core.line import context_retention, line_lock, recovery_context, workspace
 from core.line.context_retention import (
     CONTEXT_REF_PREFIX,
     DEFAULT_CONTEXT_RETENTION_DAYS,
@@ -24,6 +26,7 @@ from core.line.context_retention import (
     context_retention_config_from_env,
     sweep_recovery_contexts,
 )
+from core.paths import state_root
 from core.projects.models import ProjectDescriptor
 
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=UTC).timestamp()
@@ -37,12 +40,64 @@ _TERMINAL = {"completed", "failed", "cancelled", "succeeded"}
 
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Nothing from the host (DARKFAC_* knobs, GitHub token) may influence a scenario."""
+    """Nothing from the host (DARKFAC_* knobs, GitHub token) may influence a scenario.
+
+    Wiping every DARKFAC_* var also clears DARKFAC_STATE_ROOT. Left unset, `state_root()`
+    falls back to the real checkout's `.factory`, so `line_lock.is_locked()` (checked by
+    `CloudWorker.poll_and_execute_once`) can see the gate's own live line lock (USR-413/425
+    run the suite under one) and short-circuit the poll before the sweeper ever runs
+    (USR-427). Reinstall an isolated root right after the wipe.
+    """
     for name in list(os.environ):
         if name.startswith("DARKFAC_"):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "workspaces"))
+
+
+def test_state_root_and_lock_path_resolve_inside_tmp_path_even_with_a_foreign_lock_at_the_real_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-427: a live line lock held by another process at the real checkout root (as the
+    gate itself holds one while running the official suite) must never leak into
+    `state_root()`/`line_lock.lock_path()` here; `_isolated_env` reinstalls
+    `DARKFAC_STATE_ROOT` after the DARKFAC_* wipe so both resolve inside `tmp_path`
+    regardless of what `project_root()` (i.e. the real checkout) would resolve to.
+
+    The "real root" is a throwaway stand-in (`DARKFAC_PROJECT_ROOT` pointed at a tmp dir),
+    never the actual shared checkout: a test must not write into or race the gate's own
+    live lock file while the suite that proves this fix runs under it.
+    """
+    assert state_root() == tmp_path / "state"
+    assert line_lock.lock_path() == tmp_path / "state" / "line_lock" / "line.lock"
+
+    fake_real_root = tmp_path / "fake-real-checkout"
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(fake_real_root))
+    fake_lock_dir = fake_real_root / ".factory" / "line_lock"
+    fake_lock_dir.mkdir(parents=True, exist_ok=True)
+    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        now = time.time()
+        (fake_lock_dir / "line.lock").write_text(
+            json.dumps(
+                {
+                    "pid": holder.pid,
+                    "ticket_id": "foreign",
+                    "hostname": "test",
+                    "started_at": now,
+                    "heartbeat_at": now,
+                }
+            ),
+            encoding="utf-8",
+        )
+        # DARKFAC_STATE_ROOT (reinstalled by _isolated_env) still wins over DARKFAC_PROJECT_ROOT:
+        # both paths stay inside tmp_path and the foreign lock at the "real" root is never read.
+        assert state_root() == tmp_path / "state"
+        assert line_lock.is_locked() is False
+    finally:
+        holder.terminate()
+        holder.wait(timeout=10)
 
 
 def _git(args: list[str], cwd: Path) -> str:
