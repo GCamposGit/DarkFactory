@@ -11743,8 +11743,8 @@
     "project_id": "darkfac",
     "title": "Recuperar revisao independente com resposta JSON invalida apos retries",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3f9ec7d250c355fdf35db8073b794736ee867ca8",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11766,6 +11766,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-28T22:11:35.537039Z",
-    "updated_at": "2026-10-28T22:11:35.537039Z"
+    "updated_at": "2026-10-29T00:55:47.279157Z"
   }
 ]
