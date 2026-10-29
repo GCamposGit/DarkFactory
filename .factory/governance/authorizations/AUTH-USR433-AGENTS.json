@@ -1,0 +1,12 @@
+{
+  "id": "AUTH-USR433-AGENTS",
+  "ticket_id": "USR-433",
+  "approver": "owner",
+  "paths": [
+    "AGENTS.md"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "1edb1d4d701d014e27f5455c7559809e367334c2",
+  "expires_at": "2026-11-05T23:59:00Z",
+  "signature": "NYezIGaaunZYcK177UrAZiOhio3vaxJK4jRI+hs7WyQTT4/bHOBYE6qLgqEWV+iSswJD8Hs2j6m0kwDWWvlLAA=="
+}
