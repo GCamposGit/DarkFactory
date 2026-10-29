@@ -24,6 +24,7 @@ from typing import Any, Callable, Iterable, Optional, Protocol
 from core.git import ci_checks
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
+from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.line import stages as line_stages
 from core.line import workspace as line_workspace
 from core.line.route_wait import RouteWaiter, run_started_at_lookup
@@ -410,6 +411,23 @@ class DevelopmentStageHandler:
 
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
+        ticket_id = context.claim.job_key.ticket_id
+        try:
+            active_pr = find_active_pull_request(project.id, ticket_id)
+        except PullRequestLookupError as exc:
+            logger.warning("Could not verify active PR before development of %s: %s", ticket_id, exc)
+            return StageResult(outcome="failed", cause_code="active_pr_lookup_failed", evidence_refs=[str(exc)])
+        if active_pr is not None:
+            logger.info(
+                "Skipping development of %s because active PR #%s already owns the ticket",
+                ticket_id,
+                active_pr.number,
+            )
+            return StageResult(
+                outcome="failed",
+                cause_code="active_pull_request",
+                evidence_refs=[f"PR #{active_pr.number}: {active_pr.url}"],
+            )
         return self._stage.run(project, context.claim.job_key.run_id)
 
 
