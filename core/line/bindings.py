@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Optional, Protocol
 
 from core.git import ci_checks
@@ -412,8 +413,18 @@ class DevelopmentStageHandler:
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
         ticket_id = context.claim.job_key.ticket_id
+        repo_url = getattr(project, "repo_url", None)
         try:
-            active_pr = find_active_pull_request(project.id, ticket_id)
+            if repo_url and "github.com" not in str(repo_url).casefold():
+                # This guard covers GitHub pull requests. A known non-GitHub remote
+                # cannot own a GitHub PR for this ticket, so there is nothing to query.
+                active_pr = None
+            else:
+                active_pr = find_active_pull_request(
+                    project.id,
+                    ticket_id,
+                    project_registry=SimpleNamespace(get_project=lambda _project_id: project),
+                )
         except PullRequestLookupError as exc:
             logger.warning("Could not verify active PR before development of %s: %s", ticket_id, exc)
             return StageResult(outcome="failed", cause_code="active_pr_lookup_failed", evidence_refs=[str(exc)])
