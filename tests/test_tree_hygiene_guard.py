@@ -6,6 +6,7 @@ nothing here can touch (or depend on) the real checkout.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -42,7 +43,7 @@ def repo(tmp_path: Path) -> Path:
     _git(root, "config", "user.email", "tree-hygiene@example.invalid")
     _git(root, "config", "core.autocrlf", "false")
     _git(root, "config", "commit.gpgsign", "false")
-    (root / ".gitignore").write_text("cache/\n", encoding="utf-8", newline="\n")
+    (root / ".gitignore").write_text("cache/\n.factory/line_lock/\n", encoding="utf-8", newline="\n")
     (root / "tracked.txt").write_text("original\n", encoding="utf-8", newline="\n")
     _git(root, "add", ".gitignore", "tracked.txt")
     _git(root, "commit", "-q", "-m", "seed")
@@ -128,6 +129,28 @@ def test_preexisting_untracked_file_removed_during_session_is_reported(repo: Pat
     scratch.unlink()
 
     assert _violations(repo, before) == [("restored", "--", "scratch.txt")]
+
+
+def test_active_line_lock_heartbeat_is_volatile_but_lock_changes_are_reported(repo: Path) -> None:
+    lock_path = repo / ".factory" / "line_lock" / "line.lock"
+    lock_path.parent.mkdir(parents=True)
+    lock = {
+        "pid": 1234,
+        "ticket_id": "USR-423",
+        "hostname": "test-host",
+        "started_at": 100.0,
+        "heartbeat_at": 101.0,
+    }
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    before = _session(repo)
+
+    lock["heartbeat_at"] = 116.0
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    assert _violations(repo, before) == []
+
+    lock["ticket_id"] = "USR-999"
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    assert _violations(repo, before) == [("changed", "!!", ".factory/line_lock/line.lock")]
 
 
 def test_oversized_file_change_is_detected_by_size_and_head(repo: Path) -> None:

@@ -22,6 +22,7 @@ disables it: the guard must never break the suite by itself.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 from collections.abc import Mapping
@@ -123,7 +124,8 @@ def _scan_factory_dir(root: Path, fingerprint: Fingerprint) -> None:
     """Include unversioned/ignored files under .factory in the fingerprint.
 
     Tests must never mutate the real .factory state. We use stat size and mtime
-    which takes < 0.05s, detecting any created, modified, or deleted files under .factory.
+    for ordinary files, with stable-content hashing for lock sidecars whose heartbeat
+    timestamps are expected to change while the official gate runs.
     """
     factory_dir = root / ".factory"
     if not factory_dir.is_dir():
@@ -139,11 +141,42 @@ def _scan_factory_dir(root: Path, fingerprint: Fingerprint) -> None:
                     st = os.stat(full_path)
                     rel_path = os.path.relpath(full_path, root_str).replace("\\", "/")
                     if rel_path not in fingerprint:
-                        fingerprint[rel_path] = ("!!", f"{st.st_size}:{st.st_mtime_ns}")
+                        fingerprint[rel_path] = ("!!", _factory_digest(Path(full_path), rel_path, st))
                 except OSError:
                     continue
     except OSError:
         pass
+
+
+def _factory_digest(path: Path, relative_path: str, stat_result: os.stat_result) -> str:
+    """Fingerprint factory state while treating a live line-lock heartbeat as volatile.
+
+    The official gate may run as a delivery child while its launcher holds
+    ``.factory/line_lock/line.lock``. Its heartbeat timestamp changes throughout a long
+    suite, but that is expected coordination state rather than a test write. Keep every
+    other lock field in the digest so deletion or replacement of the active lock remains
+    visible to tree hygiene.
+    """
+    parts = relative_path.split("/")
+    is_line_lock = (
+        len(parts) == 3
+        and parts[0] == ".factory"
+        and parts[1] == "line_lock"
+        and (
+            parts[2] == "line.lock"
+            or (parts[2].startswith("line.fleet-") and parts[2].endswith(".lock"))
+        )
+    )
+    if is_line_lock:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "heartbeat_at" in data and "pid" in data:
+                data.pop("heartbeat_at")
+                stable = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                return "line-lock:" + hashlib.sha256(stable.encode("utf-8")).hexdigest()
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            pass
+    return f"{stat_result.st_size}:{stat_result.st_mtime_ns}"
 
 
 def take_fingerprint(root: Path, *, max_hash_bytes: int = MAX_HASH_BYTES) -> Fingerprint | None:

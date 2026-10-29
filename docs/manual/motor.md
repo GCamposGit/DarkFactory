@@ -47,6 +47,11 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    reportado como `merged_awaiting_deploy` (`[MERGE] ... aguardando deploy`), nunca como entregue. Um
    `smoke_ok=null` com `deployed=true` e invalido. Sem plano ou veredito nao ha merge; sem relatorio de deploy
    a execucao falha.
+   O fechamento pos-merge remove apenas a worktree da propria entrega (responsabilidade do ciclo Git) e nao
+   executa varredura global de worktrees. O launcher grava o resumo final com URL do PR, SHA de merge,
+   estado do deploy e caminho de `deploy_report.json`; `merge.json` e o relatorio ficam no state root, fora
+   do checkout removivel. Deploy ainda pendente encerra como `merged_awaiting_deploy`, sem declarar entrega
+   completa.
    **DOCS** (`_stage_docs_sync`, so projetos internos) roda `core/harness/docs_sync.py` sobre o diff
    `origin/main...HEAD` depois do portao e antes do REVIEW: se uma pagina do manual ficou desatualizada, o
    agente de desenvolvimento e reinvocado uma vez com a mensagem (mesmo padrao da autocorrecao do portao);

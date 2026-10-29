@@ -1,3 +1,4 @@
+<!-- covers: core/line/fleet_dispatcher.py -->
 # Operação da frota
 
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
@@ -12,6 +13,14 @@ alterados no checkout compartilhado, inclusive estado de runtime, ficam preserva
 da execução. Falhas ao atualizar a referência ou criar o worktree aparecem como falha de
 lançamento no estado do ciclo e colocam o ticket em cooldown; não são tratadas como despacho
 bem-sucedido.
+
+Ao encerrar um job, ou desfazer um checkout criado parcialmente, o despachante usa
+`core.git.ticket_workspace.cleanup`. Antes de remover o registro Git ou os arquivos, a rotina
+verifica processos com o diretório atual dentro do checkout. Se encontrar um holder, deixa o
+checkout registrado e intacto e grava no log seu caminho e o processo identificado; depois que
+ele encerrar, uma execução posterior da limpeza pode removê-lo. Para checkout sem holder, a
+limpeza ocorre normalmente após o término do job. A deduplicação do deploy continua agrupando
+merges pela janela de silêncio configurada.
 
 ## Notebook e Desktop (Windows)
 

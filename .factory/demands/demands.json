@@ -11797,5 +11797,34 @@
     "dependencies": [],
     "created_at": "2026-10-29T01:36:53.758881Z",
     "updated_at": "2026-10-29T02:42:38.368549Z"
+  },
+  {
+    "id": "USR-423",
+    "project_id": "darkfac",
+    "title": "Preservar checkout operacional ativo na limpeza pos-merge",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "40ea2d0a552d8536bf87c64cab60abcb54777a78",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Entrega USR-422 PR789 removeu registro e arquivos da worktree heartbeat-ops-20261028 usada pelo launcher pai16488 e pwsh17192; logs10:30:34-10:31:33 mostram tentativa de remocao, falhas WinError32 e limpeza global. Launcher terminou0 sem resumo final nem evidencia de deploy. Preservar checkouts usados por processos vivos e limitar limpeza ao escopo seguro, mantendo recuperacao.",
+    "core_journey": [
+      "Entrega USR-422 PR789 removeu registro e arquivos da worktree heartbeat-ops-20261028 usada pelo launcher pai16488 e pwsh17192; logs10:30:34-10:31:33 mostram tentativa de remocao, falhas WinError32 e limpeza global. Launcher terminou0 sem resumo final nem evidencia de deploy. Preservar checkouts usados por processos vivos e limitar limpeza ao escopo seguro, mantendo recuperacao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Limpeza identifica processos com cwd no checkout antes de remover registro ou arquivos",
+      "Entrega nao remove checkout do launcher pai e registra resultado pos-merge completo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T13:36:37.709581Z",
+    "updated_at": "2026-10-29T03:51:14.718523Z"
   }
 ]

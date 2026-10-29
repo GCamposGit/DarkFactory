@@ -239,7 +239,7 @@ def test_resume_delivery_failure_after_gate_prints_diagnostics(tmp_path: Path, c
 
 
 def test_resume_delivery_happy_path(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Successful resume_delivery delivers, syncs, sweeps, and exits 0 (USR-116)."""
+    """Successful resume_delivery delivers without a global worktree sweep (USR-423)."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
@@ -280,7 +280,7 @@ def test_resume_delivery_happy_path(tmp_path: Path, capsys: pytest.CaptureFixtur
     captured = capsys.readouterr()
     assert "[MERGE] Ticket USR-116 mergeado e validado; aguardando deploy" in captured.out  # USR-375 S4: smoke pendente
     assert "abcd1234ef5678" in captured.out
-    mock_sweep.assert_called_once()
+    mock_sweep.assert_not_called()
 
 
 def test_resume_delivery_renumbers_duplicate_owner_action_before_gate(

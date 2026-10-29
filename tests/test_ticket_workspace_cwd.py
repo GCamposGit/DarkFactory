@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterator, Sequence
@@ -95,8 +94,12 @@ def test_outside_dir_stays_out_when_the_previous_cwd_was_deleted(tmp_path: Path)
     assert _same(os.getcwd(), fallback)
 
 
-def test_cleanup_runs_every_git_call_with_the_process_cwd_outside_the_worktree(repo: SimpleNamespace) -> None:  # noqa: F811
+def test_cleanup_runs_every_git_call_with_the_process_cwd_outside_the_worktree(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: F811
     ws = create_workspace("USR-231", cwd=repo.local)
+    # Exercise _outside_dir independently from the live-holder preservation gate.
+    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: [])
     seen: list[str] = []
 
     def spy(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
@@ -112,19 +115,40 @@ def test_cleanup_runs_every_git_call_with_the_process_cwd_outside_the_worktree(r
     assert not ws.path.exists()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="the cwd handle only blocks removal on Windows")
-def test_cleanup_with_cwd_inside_the_worktree_removes_it_without_winerror_32(repo: SimpleNamespace) -> None:  # noqa: F811
+def test_cleanup_preserves_worktree_while_a_process_cwd_is_inside_it(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: F811
     ws = create_workspace("USR-231", cwd=repo.local)
     (ws.path / "sub").mkdir()
     (ws.path / "sub" / "work.txt").write_text("w\n", encoding="utf-8")
-    os.chdir(ws.path / "sub")  # exactly the `--resume-delivery` launched from inside the worktree
+    os.chdir(ws.path / "sub")
 
+    holders = ["powershell.exe (pid 17192)"]
+    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: list(holders))
+    git_calls: list[Sequence[str]] = []
+
+    def fail_if_git_mutates(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        git_calls.append(args)
+        raise AssertionError(f"cleanup must not run git while occupied: {args!r} in {cwd}")
+
+    result = cleanup(ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=fail_if_git_mutates)
+
+    assert not result.removed and result.method == "preserved"
+    assert "powershell.exe (pid 17192)" in result.detail
+    assert ws.path.exists() and (ws.path / "sub" / "work.txt").read_text(encoding="utf-8") == "w\n"
+    assert _same(os.getcwd(), ws.path / "sub")
+    assert any(
+        _same(ws.path, entry["worktree"])
+        for entry in ticket_workspace.list_worktrees(ws.main_root)
+    )
+    assert ticket_workspace._git(["branch", "--show-current"], ws.path).stdout.strip() == ws.branch
+    assert not git_calls
+
+    # Once the holder exits, the same checkout is eligible for the normal cleanup path.
+    holders.clear()
     result = cleanup(ws.path, ws.main_root, sleep_fn=lambda _s: None)
-
     assert result.removed and result.method in {"git", "rmtree"}, (result.method, result.errors)
     assert not ws.path.exists()
-    assert not any("WinError 32" in e or "Permission denied" in e for e in result.errors)
-    assert _same(os.getcwd(), ws.main_root)  # the old cwd is gone, so we stay at the main checkout
 
 
 def test_cleanup_failure_warning_names_the_holder_and_the_exact_command(
@@ -136,7 +160,8 @@ def test_cleanup_failure_warning_names_the_holder_and_the_exact_command(
         raise PermissionError("[WinError 32] in use")
 
     monkeypatch.setattr(ticket_workspace, "trash_directory", refuse)
-    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _p: ["Code.exe (pid 4242)"])
+    holder_checks = iter(([], ["Code.exe (pid 4242)"]))
+    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _p: next(holder_checks))
 
     result = cleanup(
         ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True), rmtree_fn=_locked_rmtree
