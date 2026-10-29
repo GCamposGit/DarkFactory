@@ -1,4 +1,4 @@
-<!-- covers: core/harness/runner.py -->
+<!-- covers: core/harness/runner.py, core/harness/affected.py -->
 # Portao em camadas (USR-377 S5)
 
 O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
@@ -8,6 +8,10 @@ O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
   completa se mudar config, governanca ou harness) e `smoke_tests` (`-m smoke`).
   Forca `--no-cache --local`. Mudanca so de docs roda apenas o smoke.
 - `full`: os mesmos checks de sintaxe/tipos mais a suite completa (paralela e serial).
+
+Quando `affected` recebe `--base HEAD` em uma worktree limpa, ele retorna somente
+os guards globais registrados sem montar o grafo de imports. Com qualquer mudanca
+staged, unstaged ou untracked, a selecao usa o diff e a analise normal.
 
 Os perfis vivem em `harness.config.json` (campo `profiles` de cada step; padrao `["full"]`).
 Comando: `python C:\dev\DarkFac\core\harness\runner.py --profile pr`
