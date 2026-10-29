@@ -10,7 +10,7 @@ import pytest
 
 from core.demands import DemandsStore, UserTicket
 from core.line import bindings, owner_intake
-from core.line.active_pull_request import ActivePullRequest
+from core.line.active_pull_request import ActivePullRequest, PullRequestLookupError
 from core.workflow.control_store import SQLiteControlStore
 
 
@@ -115,3 +115,45 @@ def test_development_refuses_another_run_canonical_reservation_without_pr(
     assert result.cause_code == "canonical_ownership_conflict"
     assert result.evidence_refs == [f"Run {reservation.run_id} on host {reservation.host_id}"]
     assert looked_up == []
+
+
+def test_development_fails_closed_when_active_pr_lookup_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket_id = "USR-418"
+    store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    now = datetime.now(UTC)
+    reservation = store.reserve_cycle(
+        project_id="darkfac", ticket_id=ticket_id, run_id="current-run", host_id="notebook",
+        now=now, lease_duration_sec=600,
+    )
+
+    def unavailable_lookup(*_args: object, **_kwargs: object) -> None:
+        raise PullRequestLookupError("GitHub PR lookup failed; retry when GitHub is available")
+
+    monkeypatch.setattr(bindings, "find_active_pull_request", unavailable_lookup)
+
+    class DevelopmentStage:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def run(self, *_args: object) -> object:
+            pytest.fail("development must not run when active PR ownership cannot be verified")
+
+    monkeypatch.setattr(bindings.stage_build, "DevelopmentStage", DevelopmentStage)
+    handler = bindings.DevelopmentStageHandler(
+        project_resolver=lambda _project_id: SimpleNamespace(
+            id="darkfac", repo_url="https://github.com/org/repo.git",
+        ),
+        store=store,
+    )
+    context = SimpleNamespace(
+        project_id="darkfac",
+        claim=SimpleNamespace(job_key=SimpleNamespace(ticket_id=ticket_id, run_id=reservation.run_id)),
+    )
+
+    result = handler.handle(context)  # type: ignore[arg-type]
+
+    assert result.outcome == "failed"
+    assert result.cause_code == "active_pr_lookup_failed"
+    assert result.evidence_refs == ["GitHub PR lookup failed; retry when GitHub is available"]
