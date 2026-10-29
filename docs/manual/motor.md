@@ -1,4 +1,4 @@
-<!-- covers: core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
 # Motor da esteira
 
 ## Sequencia canonica de estagios (USR-375 S2)
@@ -65,7 +65,13 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
 
 Os artefatos do ticket ficam fora da worktree (que o merge remove), em
 `<state_root>/artifacts/ticket_runs/<ID>/.darkfac/runs/<ID>/` (`core/line/ticket_engine.py`). Uma execucao
-nova do launcher apaga os artefatos anteriores; a entrega apaga validacao, merge e deploy anteriores.
+nova do launcher normalmente apaga os artefatos anteriores; a entrega apaga validacao, merge e deploy anteriores.
+Excecao de retomada (USR-426): se a worktree preservada estiver limpa, PLAN, RESEARCH, BUILD e VALIDATE
+forem validos, VALIDATE estiver verde e `review_state.json` registrar resposta JSON invalida para o mesmo
+digest de candidato e politica de REVIEW, o launcher preserva esses artefatos e retoma sem reinvocar BUILD.
+A entrega executa a validacao novamente; o runner so reutiliza o veredito do portao quando o hash da arvore,
+a configuracao e as etapas selecionadas ainda correspondem ao cache. Worktree suja, digest/politica diferentes
+ou artefato ausente/invalido seguem pelo fluxo normal de planejamento e desenvolvimento.
 Um `--resume-delivery` digitado pelo operador numa worktree anterior ao S4 (sem nenhum artefato) registra
 plano/build minimos e segue por VALIDATE, REVIEW e MERGE.
 
@@ -79,6 +85,7 @@ o campo `structured_output` do envelope JSON da CLI. Chamadas sem schema mantêm
 do campo `result`. O parser da revisão exige exatamente um objeto JSON compatível (sem prosa, cercas,
 chaves duplicadas ou campos extras); uma resposta inválida retorna `review_invalid_json` e registra
 `review_invalid_response.json` com harness, motivo, tamanho em bytes, SHA-256 e trecho sanitizado limitado.
+O motivo distingue erro de sintaxe JSON, chave duplicada e falha de schema.
 Esse diagnóstico não é um veredito e não cria `review_verdict.json`. A aprovação exige `verdict=approve`
 sem itens bloqueantes e continua vinculada ao digest do candidato e à política de revisão.
 

@@ -257,7 +257,7 @@ def test_claude_invalid_structured_response_records_sanitized_diagnostic_and_ret
     diagnostic_path = ctx / "review_invalid_response.json"
     diagnostic = json.loads(diagnostic_path.read_text(encoding="utf-8"))
     assert diagnostic["harness"] == "claude"
-    assert diagnostic["reason"]
+    assert diagnostic["reason"] == "json_decode_error"
     assert diagnostic["size_bytes"] == len(raw_response.encode("utf-8"))
     assert diagnostic["sha256"] == hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
     assert "[REDACTED]" in diagnostic["sanitized_excerpt"]
@@ -648,6 +648,19 @@ def test_review_verdict_approve_with_blocking_items_fails_to_approve(
     ctx = ws_mod.context_dir(ws)
     state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
     assert state["invalid_response_routes"][0]["harness"] in res.cause_code
+    invalid_response = json.loads((ctx / "review_invalid_response.json").read_text(encoding="utf-8"))
+    assert invalid_response["reason"] == "schema_validation_error"
     assert not (ctx / "review-1.md").exists()
     assert not (ctx / "review_verdict.json").exists()
+
+
+def test_duplicate_json_keys_have_specific_invalid_response_reason() -> None:
+    from core.line.stage_review import _parse_verdict_with_reason
+
+    verdict, reason = _parse_verdict_with_reason(
+        '{"verdict":"approve","verdict":"changes_required","blocking":[]}'
+    )
+
+    assert verdict is None
+    assert reason == "duplicate_key"
 

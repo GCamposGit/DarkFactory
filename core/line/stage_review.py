@@ -265,26 +265,35 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
-def _parse_verdict(text: str) -> Optional[ReviewVerdict]:
-    """Parse exactly one JSON verdict object; prose, fences and duplicate keys fail closed."""
+def _parse_verdict_with_reason(text: str) -> tuple[Optional[ReviewVerdict], str]:
+    """Parse one verdict and return a stable diagnostic reason when it is invalid."""
     try:
         raw = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
-    except (json.JSONDecodeError, ValueError):
-        return None
+    except json.JSONDecodeError:
+        return None, "json_decode_error"
+    except ValueError as exc:
+        if "duplicate JSON key" in str(exc):
+            return None, "duplicate_key"
+        return None, "json_value_error"
     if not isinstance(raw, dict):
-        return None
+        return None, "schema_validation_error"
     try:
-        return ReviewVerdict.model_validate(raw)
+        return ReviewVerdict.model_validate(raw), ""
     except ValidationError:
-        return None
+        return None, "schema_validation_error"
 
 
-def _record_invalid_response(ws: RunWorkspace, *, harness: str, text: str) -> None:
+def _parse_verdict(text: str) -> Optional[ReviewVerdict]:
+    """Parse exactly one JSON verdict object; prose, fences and duplicate keys fail closed."""
+    return _parse_verdict_with_reason(text)[0]
+
+
+def _record_invalid_response(ws: RunWorkspace, *, harness: str, text: str, reason: str) -> None:
     """Persist a bounded, sanitized diagnostic without retaining the raw response."""
     encoded = text.encode("utf-8", errors="replace")
     diagnostic = {
         "harness": harness,
-        "reason": "malformed_or_incompatible_review_verdict",
+        "reason": reason,
         "size_bytes": len(encoded),
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "sanitized_excerpt": redact_secrets(text)[:500],
@@ -329,12 +338,13 @@ class ReviewStage:
         run_id: str,
         harness: str,
         text: str,
+        reason: str,
         candidate_digest: str,
         policy_digest: str,
         implementing_harness: Optional[str],
     ) -> StageResult:
         """Record malformed output and route another independent reviewer."""
-        _record_invalid_response(ws, harness=harness, text=text)
+        _record_invalid_response(ws, harness=harness, text=text, reason=reason)
         invalid_route = {
             "harness": harness,
             "candidate_digest": candidate_digest,
@@ -543,15 +553,15 @@ class ReviewStage:
             state.agent_error_streak = 0
             _write_review_state(ws, state)
 
-        verdict = _parse_verdict(agent_result.text)
+        verdict, invalid_reason = _parse_verdict_with_reason(agent_result.text)
         if verdict is None:
             return self._retry_invalid_response(
                 ws, state, project=project, run_id=run_id, harness=harness,
-                text=agent_result.text, candidate_digest=cur_candidate,
+                text=agent_result.text, reason=invalid_reason, candidate_digest=cur_candidate,
                 policy_digest=cur_policy, implementing_harness=implementing_harness,
             )
 
-        approved = verdict.verdict == "approve" and not bool(verdict.blocking)
+        approved = verdict.verdict == "approve"
         exhausted = round_num > max_rounds and not approved
         content = _render_review_md(round_num, verdict)
         workspace.write_context(ws, f"review-{round_num}.md", content)

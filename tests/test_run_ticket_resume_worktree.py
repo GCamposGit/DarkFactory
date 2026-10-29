@@ -10,6 +10,7 @@ Every repository here is a temporary one under ``tmp_path``; nothing touches the
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -250,6 +251,78 @@ def test_second_invocation_reuses_the_worktree_and_carries_the_continuation_noti
     assert "AVISO DE CONTINUA" in prompt and "impl.py" in prompt and "NÃO recomece a implementação do zero" in prompt
     assert "Reaproveitando a worktree preservada" in capsys.readouterr().err
     assert (first_cwd / "impl.py").read_text(encoding="utf-8") == "partial = True\n"  # the work survived
+
+
+def test_resume_green_candidate_after_invalid_review_skips_development_and_binds_to_digest(
+    repo: SimpleNamespace,
+    launcher: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.line import stage_review
+    from core.line.stages import Stage, require_artifact
+    from core.research.policy import ResearchArtifact
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    ticket = run_ticket.UserTicket(
+        id="USR-423", project_id="darkfac", title="Retomar revisao independente",
+        problem_statement="candidate with green validation and invalid review response",
+    )
+    monkeypatch.setattr(_Store, "get_ticket", lambda _self, ticket_id: ticket if ticket_id == ticket.id else None)
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    (ws.path / "impl.py").write_text("candidate = True\n", encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "validated candidate")
+
+    rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
+    run_ticket.ticket_engine.write_minimal_plan(rws, ticket)
+    run_ticket.ticket_engine.write_research(
+        rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
+    )
+    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    run_ticket.ticket_engine.write_validation(rws, True, "core/harness/runner.py --quick")
+    candidate_ws = rws.model_copy(update={"path": ws.path})
+    digest = stage_review._candidate_digest(candidate_ws, "main")
+    policy_digest = stage_review._policy_digest(run_ticket.load_routing_config())
+    assert digest is not None
+    from core.line import workspace as line_workspace
+
+    context_dir = line_workspace.context_dir(rws)
+    line_workspace.write_context(
+        rws,
+        "review_state.json",
+        json.dumps({"invalid_response_routes": [{
+            "harness": "claude", "candidate_digest": digest, "policy_digest": policy_digest,
+        }]}),
+    )
+    line_workspace.write_context(rws, "review_invalid_response.json", '{"reason":"json_decode_error"}')
+
+    monkeypatch.setattr(
+        run_ticket, "_stage_plan",
+        lambda *_args, **_kwargs: pytest.fail("resumed candidate was replanned/reset"),
+    )
+    monkeypatch.setattr(
+        run_ticket, "_stage_build",
+        lambda *_args, **_kwargs: pytest.fail("development was re-invoked for a validated candidate"),
+    )
+    delivery_calls: list[Path] = []
+
+    def deliver(*args, **kwargs):
+        delivery_calls.append(args[2].path)
+        return 0, {"ok": True, "status": "completed"}
+
+    monkeypatch.setattr(run_ticket, "_stage_deliver", deliver)
+
+    assert run_ticket.main([ticket.id, "--harness", "grok"]) == 0
+    assert launcher.requests == []
+    assert delivery_calls == [ws.path]
+    assert (context_dir / "review_invalid_response.json").is_file()
+    assert require_artifact(Stage.VALIDATE, rws).passed is True
+
+    # Any candidate change invalidates this resume proof; the normal path will revalidate it.
+    (ws.path / "impl.py").write_text("candidate = False\n", encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "candidate changed")
+    assert run_ticket._can_resume_invalid_review(ticket, ws) is False
 
 
 def test_continuation_notice_also_covers_work_that_was_already_committed(
