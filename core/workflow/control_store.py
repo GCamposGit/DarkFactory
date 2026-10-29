@@ -2227,6 +2227,28 @@ class SQLiteControlStore:
             (run_id,),
         )
 
+    @staticmethod
+    def _expire_fleet_reservations(cur: sqlite3.Cursor, now_iso: str) -> None:
+        """Expire stale reservations and return their running work to the queue."""
+        cur.execute(
+            """
+            SELECT run_id FROM fleet_reservations
+            WHERE status IN ('active', 'draining') AND expires_at <= ?
+            """,
+            (now_iso,),
+        )
+        expiring_runs = [str(row["run_id"]) for row in cur.fetchall()]
+        cur.execute(
+            """
+            UPDATE fleet_reservations
+            SET status = 'expired'
+            WHERE status IN ('active', 'draining') AND expires_at <= ?
+            """,
+            (now_iso,),
+        )
+        for run_id in expiring_runs:
+            SQLiteControlStore._requeue_expired_fleet_run(cur, run_id, now_iso)
+
     def reserve_cycle(
         self,
         project_id: str,
@@ -2250,24 +2272,7 @@ class SQLiteControlStore:
                 cur = conn.cursor()
 
                 # 1. Sweep expired active reservations to release slots
-                cur.execute(
-                    """
-                    SELECT run_id FROM fleet_reservations
-                    WHERE status IN ('active', 'draining') AND expires_at <= ?
-                    """,
-                    (now_iso,),
-                )
-                expiring_runs = [str(row["run_id"]) for row in cur.fetchall()]
-                cur.execute(
-                    """
-                    UPDATE fleet_reservations
-                    SET status = 'expired'
-                    WHERE status IN ('active', 'draining') AND expires_at <= ?
-                    """,
-                    (now_iso,),
-                )
-                for expiring_run_id in expiring_runs:
-                    self._requeue_expired_fleet_run(cur, expiring_run_id, now_iso)
+                self._expire_fleet_reservations(cur, now_iso)
 
                 # 2. Check active ticket uniqueness
                 cur.execute(

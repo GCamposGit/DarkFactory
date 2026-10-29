@@ -18,6 +18,19 @@ Layout atual:
 Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
 `SQLiteControlStore` (implementacao); nao e duplicata.
 
+## Exclusao de ciclos da frota (USR-418)
+
+`reserve_cycle` reserva atomicamente um ciclo por ticket/projeto, um por host e respeita o teto da frota. Na
+mesma transacao, antes dessas verificacoes, `SQLiteControlStore` expira reservas vencidas e devolve jobs em
+execucao a fila, invalidando os claims ativos. Colisoes de ticket e host retornam conflitos tipados; a linha e
+o launcher usam essa propriedade persistida para recusar uma segunda execucao. A reserva duravel complementa
+a guarda local do launcher, que nao representa sessoes em outros hosts.
+
+O launcher e o intake do owner tambem consultam PRs abertos do repositorio pelo identificador exato do ticket
+em branch, titulo ou corpo. Encontrar um PR produz recusa com sua URL; indisponibilidade da consulta falha
+fechado. Esse sinal persiste depois que o lease do processo termina e impede que um PR ativo seja confundido
+com ausencia de trabalho.
+
 ## ReadinessGate (USR-385)
 
 `ReadinessGate.evaluate` avalia o handoff com o `VerificationContext` recebido, sem rede e sem arquivo. `require_delivery` e `mark_delivered` passam por ele. USR-385 partiu `evaluate` nos passos abaixo; o `ReadinessReport` (elegibilidade, razoes, evidencia faltante e dependencias bloqueantes) permanece o contrato publico.
