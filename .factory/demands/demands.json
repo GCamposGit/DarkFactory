@@ -9299,6 +9299,37 @@
     "updated_at": "2026-10-26T12:49:10.035042Z"
   },
   {
+    "id": "USR-391",
+    "project_id": "darkfac",
+    "title": "Cota do Claude sem fonte real: CLI nao logada e auth status sem rate_limits (seguimento do USR-382)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #777 mesclado (030d6128)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10 no Notebook: claude 2.1.278 (%APPDATA%\\npm\\claude.cmd e a copia em %USERPROFILE%\\.cache\\codex-runtimes\\...\\claude.ps1, que vem primeiro no PATH) responde 'claude auth status --json' com loggedIn=false e sem rate_limits; o app desktop usa autenticacao propria. Depois do USR-382 o probe le rate_limits da CLI, mas nenhuma fonte os fornece, entao a cota do Claude segue desconhecida (snapshot de 107 h) e o roteador nunca elege o Claude para medium/high. Candidato: o payload JSON do statusline do Claude Code traz rate_limits (five_hour/seven_day used_percentage, resets_at); um script de statusline versionado no repo grava snapshot em state_root()/usage que o ClaudeCodeAccountAdapter le. Criterios de aceite: (1) leitura real da cota do Claude no Notebook com origem documentada (teste com payload simulado + evidencia de uma leitura real no PR); (2) _find_claude prefere %APPDATA%\\npm ao cache do Codex; (3) sem User-Agent falsificado; (4) docs/manual atualizado.",
+    "core_journey": [
+      "Evidencia 25/10 no Notebook: claude 2.1.278 (%APPDATA%\\npm\\claude.cmd e a copia em %USERPROFILE%\\.cache\\codex-runtimes\\...\\claude.ps1, que vem primeiro no PATH) responde 'claude auth status --json' com loggedIn=false e sem rate_limits; o app desktop usa autenticacao propria. Depois do USR-382 o probe le rate_limits da CLI, mas nenhuma fonte os fornece, entao a cota do Claude segue desconhecida (snapshot de 107 h) e o roteador nunca elege o Claude para medium/high. Candidato: o payload JSON do statusline do Claude Code traz rate_limits (five_hour/seven_day used_percentage, resets_at); um script de statusline versionado no repo grava snapshot em state_root()/usage que o ClaudeCodeAccountAdapter le. Criterios de aceite: (1) leitura real da cota do Claude no Notebook com origem documentada (teste com payload simulado + evidencia de uma leitura real no PR); (2) _find_claude prefere %APPDATA%\\npm ao cache do Codex; (3) sem User-Agent falsificado; (4) docs/manual atualizado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste com payload simulado confirma que o statusline grava rate_limits.five_hour e rate_limits.seven_day como janelas de cota; anexar evidência sanitizada de leitura real no Claude Code Desktop do Notebook, com quota_supported=true e ambas as janelas preenchidas.",
+      "_find_claude prefere a instalação em %APPDATA%\\npm à cópia no cache do Codex, com teste cobrindo a precedência.",
+      "O código de probe não falsifica User-Agent.",
+      "O manual de custo descreve a coleta do statusline e o refreshInterval de 30 segundos conforme documentado oficialmente."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T13:39:43.691571Z",
+    "updated_at": "2026-10-28T10:30:00Z"
+  },
+  {
     "id": "USR-42",
     "project_id": "darkfac",
     "title": "DarkHub sempre alinhado a fabrica: gate de cobertura + revisao e fixes imediatos",
@@ -11614,128 +11645,5 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
-  },
-  {
-    "id": "USR-391",
-    "project_id": "darkfac",
-    "title": "Cota do Claude sem fonte real: CLI nao logada e auth status sem rate_limits (seguimento do USR-382)",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "PR #777 mesclado (030d6128)",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Evidencia 25/10 no Notebook: claude 2.1.278 (%APPDATA%\\npm\\claude.cmd e a copia em %USERPROFILE%\\.cache\\codex-runtimes\\...\\claude.ps1, que vem primeiro no PATH) responde 'claude auth status --json' com loggedIn=false e sem rate_limits; o app desktop usa autenticacao propria. Depois do USR-382 o probe le rate_limits da CLI, mas nenhuma fonte os fornece, entao a cota do Claude segue desconhecida (snapshot de 107 h) e o roteador nunca elege o Claude para medium/high. Candidato: o payload JSON do statusline do Claude Code traz rate_limits (five_hour/seven_day used_percentage, resets_at); um script de statusline versionado no repo grava snapshot em state_root()/usage que o ClaudeCodeAccountAdapter le. Criterios de aceite: (1) leitura real da cota do Claude no Notebook com origem documentada (teste com payload simulado + evidencia de uma leitura real no PR); (2) _find_claude prefere %APPDATA%\\npm ao cache do Codex; (3) sem User-Agent falsificado; (4) docs/manual atualizado.",
-    "core_journey": [
-      "Evidencia 25/10 no Notebook: claude 2.1.278 (%APPDATA%\\npm\\claude.cmd e a copia em %USERPROFILE%\\.cache\\codex-runtimes\\...\\claude.ps1, que vem primeiro no PATH) responde 'claude auth status --json' com loggedIn=false e sem rate_limits; o app desktop usa autenticacao propria. Depois do USR-382 o probe le rate_limits da CLI, mas nenhuma fonte os fornece, entao a cota do Claude segue desconhecida (snapshot de 107 h) e o roteador nunca elege o Claude para medium/high. Candidato: o payload JSON do statusline do Claude Code traz rate_limits (five_hour/seven_day used_percentage, resets_at); um script de statusline versionado no repo grava snapshot em state_root()/usage que o ClaudeCodeAccountAdapter le. Criterios de aceite: (1) leitura real da cota do Claude no Notebook com origem documentada (teste com payload simulado + evidencia de uma leitura real no PR); (2) _find_claude prefere %APPDATA%\\npm ao cache do Codex; (3) sem User-Agent falsificado; (4) docs/manual atualizado."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Teste com payload simulado confirma que o statusline grava rate_limits.five_hour e rate_limits.seven_day como janelas de cota; anexar evidência sanitizada de leitura real no Claude Code Desktop do Notebook, com quota_supported=true e ambas as janelas preenchidas.",
-      "_find_claude prefere a instalação em %APPDATA%\\npm à cópia no cache do Codex, com teste cobrindo a precedência.",
-      "O código de probe não falsifica User-Agent.",
-      "O manual de custo descreve a coleta do statusline e o refreshInterval de 30 segundos conforme documentado oficialmente."
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-25T13:39:43.691571Z",
-    "updated_at": "2026-10-28T10:30:00Z"
-  },
-  {
-    "id": "USR-422",
-    "project_id": "darkfac",
-    "title": "Restaurar isolamento dos testes de entrega e reserva apos contratos de estagio",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "efa7133550f2d048bd621981a28506639004d850",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR.",
-    "core_journey": [
-      "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir e corrigir causas reais das falhas em fixtures ou codigo com testes existentes consolidados",
-      "Testes nao invocam agentes reais nem alteram candidato durante o portao",
-      "Portao oficial HARNESS_PASS, revisao cruzada, CI, merge e deploy com evidencias"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T12:28:57.936851Z",
-    "updated_at": "2026-10-28T13:25:19.072765Z"
-  },
-  {
-    "id": "USR-413",
-    "project_id": "darkfac",
-    "title": "Despachante bloqueia ticket isolado por runtime sujo no checkout compartilhado",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "c45af48cb84ce56a8b183d778898a03ee65b53d8",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios.",
-    "core_journey": [
-      "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios."
-    ],
-    "non_goals": [
-      "Nao apagar ou comitar alteracoes de outra sessao; nao desabilitar o guard global; nao criar scheduler concorrente."
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Despacho pelo servico executa ticket em checkout/worktree operacional limpo mesmo com runtime permitido modificado na raiz compartilhada.",
-      "Teste de comportamento reproduz checkout compartilhado sujo e comprova isolamento sem incluir alteracoes alheias.",
-      "Falha real de fonte/controle permanece estruturada e observavel, sem falso sucesso."
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T10:13:00.136868Z",
-    "updated_at": "2026-10-28T16:00:42.502705Z"
-  },
-  {
-    "id": "USR-425",
-    "project_id": "darkfac",
-    "title": "Eliminar reincidencia de isolamento PLAN e gate_dirty_worktree na suite Windows",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "0104875bd9006d8f1edfa049bfe8a8e8fc464562",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada.",
-    "core_journey": [
-      "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir falhas de isolamento com execucao focal limitada e fixtures reais",
-      "Suite nao altera candidato nem compartilha artefatos PLAN entre testes",
-      "Nao desabilitar tree hygiene ou exigir mocks que ignorem contrato real"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T17:21:39.209183Z",
-    "updated_at": "2026-10-28T18:39:26.394308Z"
   }
 ]
