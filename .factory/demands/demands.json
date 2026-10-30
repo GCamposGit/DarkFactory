@@ -11896,5 +11896,37 @@
     "dependencies": [],
     "created_at": "2026-10-29T10:12:50.231859Z",
     "updated_at": "2026-10-29T10:12:50.231859Z"
+  },
+  {
+    "id": "USR-421",
+    "project_id": "darkfac",
+    "title": "Pytest focal do fleet_dispatcher nao encerra apos 100 por cento no Windows",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": "\nAdditional observed validation evidence 2026-10-29T11:21Z: existing agents420 session01a1874a-696a-7f11-b047-dc21e352e0d9 and433 session01a18752-fd91-7141-a7f9-890ac447b2fa reported unexpected xdist node down/worker exits during affected fallback full suite. Focused tests passed before broad run; await final summaries, do not classify baseline or candidate without reproduction. Diagnose process teardown/worker-loss alongside existing hang issue.",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 USR-413 o executor relatou que pytest dos casos de test_fleet_dispatcher chegou a 100 por cento mas permaneceu aberto, exigindo interrupcao sem resumo final. Casos chamados diretamente e py_compile passaram, o que nao prova pytest concluido. Evidencia .factory/test_logs/heartbeat-usr413-20261028.log; processos observados pytest test_fleet_dispatcher e teste isolado. Investigar teardown/threads/subprocessos com reproducer, sem atribuir causa ainda.",
+    "core_journey": [
+      "Em 28/10/2026 USR-413 o executor relatou que pytest dos casos de test_fleet_dispatcher chegou a 100 por cento mas permaneceu aberto, exigindo interrupcao sem resumo final. Casos chamados diretamente e py_compile passaram, o que nao prova pytest concluido. Evidencia .factory/test_logs/heartbeat-usr413-20261028.log; processos observados pytest test_fleet_dispatcher e teste isolado. Investigar teardown/threads/subprocessos com reproducer, sem atribuir causa ainda."
+    ],
+    "non_goals": [
+      "Nao declarar HARNESS_PASS a partir de 100 por cento; nao matar testes de outra sessao nem suprimir falhas."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir e identificar recurso ou hook que mantem a execucao focal aberta, com evidencia de processo/stack sanitizada.",
+      "Execucao focal termina com codigo e resumo pytest sem interrupcao externa, respeitando deadlines configurados.",
+      "Corrigir ou consolidar teste existente de comportamento, sem duplicar suite completa nem relaxar descoberta/veredito."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T11:06:36.976580Z",
+    "updated_at": "2026-10-28T11:06:36.976580Z"
   }
 ]
