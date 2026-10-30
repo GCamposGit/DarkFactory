@@ -44,8 +44,11 @@ explicitamente no subprocesso ou com `monkeypatch` no proprio teste.
 temporário do usuário, fora do checkout. Isso preserva `--lf` entre execuções e permite que
 ambientes isolados escrevam o cache sem depender de `%LOCALAPPDATA%`. O cacheprovider inicializa
 esse diretório durante `pytest_sessionfinish`; um destino inacessível pode deixar o processo parado
-depois de `100%`, antes do resumo e do código de saída. O foco `python -m pytest
-tests/test_fleet_dispatcher.py -q` deve encerrar normalmente e imprimir o resumo.
+depois de `100%`, antes do resumo e do código de saída. `redirect_cache_dir` grava o destino antes
+de o cache plugin ler `cache_dir` e reaplica o mesmo caminho no `Cache` já criado, no início de
+`pytest_sessionfinish`, antes de `Cache.set`.
+
+Contrato de encerramento do foco: `python -m pytest tests/test_fleet_dispatcher.py -q` termina sozinho, com código de saída e uma linha de resumo do pytest no formato `N passed in Xs`, dentro do prazo configurado em `pytest.ini` (`timeout = 120`, `timeout_method = thread`). O cache por worktree fica em `DarkFac/pytest-cache` no diretório temporário do usuário. `redirect_cache_dir` grava esse destino antes de o cache plugin ler `cache_dir` e reaplica o caminho no `Cache` já criado, no início de `pytest_sessionfinish`, antes de `Cache.set`. Um `%LOCALAPPDATA%` não gravável não deixa o processo aberto depois de `100%`.
 
 O laço de autocorrecao classifica `gate_dirty_worktree` somente quando encontra a linha completa `[ERROR]`
 emitida por `core/harness/runner.py`; menções ao texto em tracebacks ou logs de testes não bastam.
