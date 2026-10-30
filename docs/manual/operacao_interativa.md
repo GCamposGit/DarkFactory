@@ -18,7 +18,7 @@ Com `DARKFAC_OPERATING_HARNESS=antigravity`, o roteador pode eleger Antigravity 
 python C:\dev\DarkFac\run_ticket.py USR-XXX
 ```
 
-Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, workers, `--fleet` e pump nao podem usa-lo. Esses caminhos seguem a rota de desenvolvimento do despachante.
+Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, workers, `--fleet` e pump nao podem usa-lo. Esses caminhos seguem a rota de desenvolvimento do despachante. Se harnesses locais de alta capacidade estiverem esgotados para o estagio `planning`, o roteador aciona a contingencia OpenRouter (`planning.openrouter`) de forma autonoma.
 
 ## Cota ausente ou antiga
 

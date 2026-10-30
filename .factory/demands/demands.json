@@ -11864,5 +11864,37 @@
     "dependencies": [],
     "created_at": "2026-10-01T00:00:00Z",
     "updated_at": "2026-10-29T10:08:27.176857Z"
+  },
+  {
+    "id": "USR-434",
+    "project_id": "darkfac",
+    "title": "Snapshot diario do ledger voltou a apagar OAs (regressao do USR-419)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O commit f7e14cae (snapshot diario, 29/10) removeu do owner_actions.json no main as OAs OA-079 (done) e OA-080 (pull do Desktop, aberta, PR #788), mesmo depois do fix do USR-419 (#784). O next-id reaproveitou OA-080 para outra acao (assinatura USR-433), gerando colisao de id.",
+    "core_journey": [
+      "O commit f7e14cae (snapshot diario, 29/10) removeu do owner_actions.json no main as OAs OA-079 (done) e OA-080 (pull do Desktop, aberta, PR #788), mesmo depois do fix do USR-419 (#784). O next-id reaproveitou OA-080 para outra acao (assinatura USR-433), gerando colisao de id."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Snapshot nunca remove OA ou ticket presente no git que nao existe no control store; faz merge por id",
+      "OAs que existem so no git sao importadas para o control store antes do export",
+      "next-id considera ids ja usados no historico do git",
+      "Restaurar a OA do pull do Desktop com id novo e a OA-079",
+      "Teste de comportamento cobrindo o caso real de f7e14cae"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T10:12:50.231859Z",
+    "updated_at": "2026-10-29T10:12:50.231859Z"
   }
 ]

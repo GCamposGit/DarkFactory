@@ -266,6 +266,27 @@ def test_next_id_considers_overlay_and_dynamic_sources(tmp_path: Path) -> None:
     assert cli.run(["next-id"], store=store, out=io.StringIO()) == 0
 
 
+def test_next_id_considers_git_history(tmp_path: Path) -> None:
+    """USR-434: an id recorded anywhere in git history is never handed out again."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=str(repo), check=True, capture_output=True)
+
+    oa_file = repo / "owner_actions.json"
+    oa_file.write_text(json.dumps({"schema_version": 1, "actions": [_draft().build("OA-080").to_record()]}), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add OA-080"], cwd=str(repo), check=True, capture_output=True)
+
+    # Later commit wipes OA-080, leaving only OA-001
+    oa_file.write_text(json.dumps({"schema_version": 1, "actions": [_draft().build("OA-001").to_record()]}), encoding="utf-8")
+    subprocess.run(["git", "commit", "-am", "revert to OA-001"], cwd=str(repo), check=True, capture_output=True)
+
+    store = OwnerActionStore(oa_file, remote_ref=None, control=False)
+    assert store.next_action_id() == "OA-081"
+
+
 def test_renumber_duplicate_owner_actions_after_sync(tmp_path: Path) -> None:
     """A rebase/merge that lands the same OA-NNN twice is repaired before the gate (USR-255).
 

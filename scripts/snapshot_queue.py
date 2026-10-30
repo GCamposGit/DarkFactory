@@ -78,12 +78,19 @@ def _ledger_rows(text: str) -> list[dict[str, Any]]:
 
 
 def _shrunk_ledgers(wt: Path, content: dict[str, str]) -> list[str]:
-    """Ledgers whose id count would drop versus the checked-out origin/main (USR-419)."""
-    return [
-        f"{rel}: {before} -> {after}"
-        for rel, text in content.items()
-        if (after := len(_ledger_rows(text))) < (before := len(_ledger_rows(_read_text(wt / rel))))
-    ]
+    """Ledgers whose id count would drop or lose existing IDs versus origin/main (USR-419, USR-434)."""
+    violations: list[str] = []
+    for rel, text in content.items():
+        before_rows = _ledger_rows(_read_text(wt / rel))
+        after_rows = _ledger_rows(text)
+        before_ids = {str(r.get("id")) for r in before_rows if isinstance(r, dict) and "id" in r}
+        after_ids = {str(r.get("id")) for r in after_rows if isinstance(r, dict) and "id" in r}
+        missing_ids = before_ids - after_ids
+        if missing_ids:
+            violations.append(f"{rel}: lost IDs ({', '.join(sorted(missing_ids)[:5])})")
+        elif len(after_rows) < len(before_rows):
+            violations.append(f"{rel}: {len(before_rows)} -> {len(after_rows)}")
+    return violations
 
 
 def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
@@ -94,6 +101,7 @@ def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
     """
     from core.demands import queue_store
     from core.demands.store import DemandsStore
+    from core.owner_actions import control_queue
     from core.owner_actions.store import SCHEMA_VERSION, OwnerActionStore
 
     if worktree is None:
@@ -103,11 +111,22 @@ def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
             DemandsStore(worktree / DEMANDS_RELATIVE).list_tickets(), queue_store.list_queue_tickets()
         )
     tickets = [json.loads(t.model_dump_json()) for t in sorted(stored, key=lambda t: t.id)]
-    by_id: dict[str, Any] = {}
+
+    file_rows: list[dict[str, Any]] = []
     if worktree is not None:
-        by_id.update({str(r["id"]): r for r in _ledger_rows(_read_text(worktree / OWNER_ACTIONS_RELATIVE)) if "id" in r})
-    by_id.update({a.id: a.to_record() for a in OwnerActionStore(control=True).list_actions()})
-    actions = [by_id[k] for k in sorted(by_id)]
+        file_rows = [r for r in _ledger_rows(_read_text(worktree / OWNER_ACTIONS_RELATIVE)) if isinstance(r, dict) and "id" in r]
+        try:
+            control_actions = OwnerActionStore(control=True).list_actions()
+            control_ids = {a.id for a in control_actions}
+            missing_in_control = [r for r in file_rows if str(r["id"]) not in control_ids]
+            if missing_in_control:
+                control_queue.write_rows(missing_in_control)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not sync git-only owner actions to control store: %s", exc)
+
+    control_records = [a.to_record() for a in OwnerActionStore(control=True).list_actions()]
+    merged_actions = control_queue.merge_rows(file_rows, control_records)
+    actions = sorted(merged_actions, key=lambda a: str(a.get("id", "")))
     return {
         DEMANDS_RELATIVE: json.dumps(tickets, indent=2, ensure_ascii=False) + "\n",
         OWNER_ACTIONS_RELATIVE: json.dumps(
@@ -149,7 +168,7 @@ def run_snapshot(
             from core.git import app_token
 
             token = app_token.get_app_token()
-        fetch = _git(["fetch", "origin", "main"], repo_root, token=token)
+        fetch = _git(["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"], repo_root, token=token)
         if fetch.returncode != 0:
             return SnapshotResult(False, "error", _redact(f"fetch falhou: {fetch.stderr.strip()}", token))
         add = _git(["worktree", "add", "--detach", str(work / "wt"), "origin/main"], repo_root)

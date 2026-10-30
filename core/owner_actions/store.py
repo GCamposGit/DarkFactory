@@ -20,6 +20,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -416,7 +417,21 @@ class OwnerActionStore:
         ids += [str(r.get("id", "")) for r in raw_rows if isinstance(r, dict)]
         ids += [str(key) for key in self._load_resolutions()[0]]
         used = {int(m.group(1)) for m in map(SEQUENTIAL_ID_PATTERN.match, ids) if m}
+        used |= self._git_history_used_numbers()
         return used | (self._remote_reserved_numbers() if remote_reserved is None else remote_reserved)
+
+    def _git_history_used_numbers(self) -> set[int]:
+        """Numeric ids previously recorded in git history (USR-434)."""
+        directory = self.path.parent
+        if not directory.is_dir():
+            return set()
+        result = _run_git_quiet(["log", "-U0", "-S", "id", "--", self.path.name], cwd=directory)
+        if result.returncode != 0:
+            return set()
+        return {
+            int(m.group(1))
+            for m in re.finditer(r'["\']OA-(\d+)["\']', result.stdout)
+        }
 
     def _id_in_other_sources(self, action_id: str) -> bool:
         if self.dynamic_path is not None:

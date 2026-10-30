@@ -36,7 +36,7 @@ Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
   commit, publicado em `main` com o token do GitHub App (`core/git/app_token.py`). E idempotente
   (marcador no diretorio de estado; ledger igual nao gera commit) e roda uma vez por dia dentro do
   laco de `scripts/sync_usage_to_cloud.py`. Le e escreve so numa worktree
-  descartavel de `origin/main`: o checkout de quem chama nunca fica sujo (USR-414). O control store e mesclado sobre os arquivos de `origin/main` (ids so do arquivo permanecem) e, se a contagem de ids de algum ledger cair, o snapshot aborta com erro sem commitar (USR-419).
+  descartavel de `origin/main`: o checkout de quem chama nunca fica sujo (USR-414). O control store e mesclado sobre os arquivos de `origin/main` (ids so do arquivo sao sincronizados de volta ao control store antes do export e permanecem) e, se qualquer id existente for perdido ou a contagem de ids cair, o snapshot aborta com erro sem commitar (USR-419, USR-434). O fetch sincroniza a ref `origin/main` antes do checkout da worktree e `next-id` respeita os ids gravados em todo o historico git para evitar reutilizacao de ids.
 - `core/infra/node_sync.py` trata os dois ledgers como arquivos gerados: antes do pull do Desktop
   (`/system/update`) e na remediacao do Notebook, edicoes locais sao copiadas para
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
