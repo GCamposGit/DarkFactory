@@ -56,6 +56,6 @@ O Antigravity é elegível para o estágio `development` **exclusivamente** quan
 
 ## Fallback OpenRouter para modelos de alta inteligência
 
-Para o uso de modelos de alta inteligência (como no estágio `planning`), quando nenhum harness local estiver disponível (ex.: cotas de Claude e Codex abaixo do piso crítico de 15%), é permitido e correto recorrer ao OpenRouter com um modelo de alta capacidade dentro do teto orçamentário configurado (`run_caps.openrouter_usd`), assegurando a continuidade autônoma do fluxo sem dependência de intervenção humana imediata.
+Para o uso de modelos de alta inteligência (como no estágio `planning`), quando nenhum harness local estiver disponível (ex.: cotas de Claude e Codex abaixo do piso crítico de 15%), é permitido e correto recorrer ao OpenRouter dentro do teto orçamentário configurado (`run_caps.openrouter_usd`), assegurando a continuidade autônoma do fluxo sem dependência de intervenção humana imediata.
 
 

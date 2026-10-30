@@ -178,7 +178,12 @@ def _default_routing_config() -> RoutingConfig:
                 openrouter_model=cheap_model,
             ),
             "planning": StageRoute(
-                cascade=[("claude", "opus"), ("codex", resolve_model("planning.codex")), ("antigravity", None)],
+                cascade=[
+                    ("claude", "opus"),
+                    ("codex", resolve_model("planning.codex")),
+                    ("grok", resolve_model("development.grok")),
+                    ("antigravity", None),
+                ],
                 effort="high",
                 openrouter_ok=True,
                 openrouter_model=cheap_model,
@@ -774,9 +779,14 @@ def is_high_tier_model(model: Optional[str]) -> bool:
     if not model:
         return False
     try:
-        from core.models.registry import get_registry
+        from core.models.registry import get_registry, resolve_known
 
-        low = model.strip().lower()
+        try:
+            resolved = resolve_known(model)
+        except Exception:
+            resolved = model
+
+        low = resolved.strip().lower()
         for entry in get_registry().models:
             names = [entry.id, *entry.aliases, *entry.gateway_ids]
             if low in (n.strip().lower() for n in names):
@@ -790,6 +800,38 @@ def _policy_allows(project_id: str, harness: str) -> bool:
     from core.enterprise.enforcement import provider_allowed
 
     return provider_allowed(project_id, harness)
+
+
+def _planning_high_tier_healthy(
+    stage_cfg: StageRoute,
+    implementing_harness: Optional[str],
+    caps: set[str],
+    excluded_harnesses: set[str],
+    excluded_pairs: set[tuple[str, Optional[str]]],
+    cooldowns: dict[str, Any],
+    lookup: Callable[[str], Optional[float]],
+    critical_threshold: float,
+    project_id: Optional[str],
+) -> bool:
+    """True when Claude or Codex has healthy quota (> critical floor and not cooling) for planning."""
+    for h, m in _resolve_cascade(stage_cfg, implementing_harness):
+        if h not in ("claude", "codex"):
+            continue
+        if f"harness:{h}" not in caps:
+            continue
+        if h in excluded_harnesses or (h, m) in excluded_pairs:
+            continue
+        if h == "codex" and codex_headless_blocked():
+            continue
+        if project_id and not _policy_allows(project_id, h):
+            continue
+        if _in_cooldown(h, cooldowns):
+            continue
+        prov = _HARNESS_TO_PROVIDER.get(h, h)
+        rem = lookup(prov)
+        if rem is not None and rem > critical_threshold:
+            return True
+    return False
 
 
 def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float]]]) -> bool:
@@ -933,6 +975,14 @@ def pick(
     )
     extra_candidate = _extra_operating_candidate(_resolve_cascade(stage_cfg, implementing_harness), operating)
     slack_fn = slack_lookup or (_default_weekly_slack if quota_lookup is None else (lambda _provider: None))
+    claude_or_codex_healthy = (
+        _planning_high_tier_healthy(
+            stage_cfg, implementing_harness, caps, excluded_harnesses, excluded_pairs,
+            cooldowns, lookup, critical_threshold, project_id,
+        )
+        if stage == "planning"
+        else False
+    )
 
     # Candidate evaluation with fail-closed semantics
     # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
@@ -946,7 +996,12 @@ def pick(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
         operating, execution_context,
     ):
-        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model):
+        is_grok_planning_contingency = (
+            stage == "planning"
+            and harness == "grok"
+            and not claude_or_codex_healthy
+        )
+        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model) and not is_grok_planning_contingency:
             logger.info("pick: %s/%s skipped for stage %s (not a high-tier model)", harness, model, stage)
             continue
         cooling = _in_cooldown(harness, cooldowns)
@@ -980,6 +1035,9 @@ def pick(
 
         evaluated.append((harness, model, cooling, is_critical, remaining or 0.0))
 
+        if stage == "planning" and harness == "grok" and claude_or_codex_healthy:
+            continue
+
         if not cooling and not is_critical and remaining is not None:
             eligible.append((harness, model, remaining))
         elif not cooling and remaining is None:
@@ -1003,14 +1061,14 @@ def pick(
                 logger.debug("Failed reserving quota for %s: %s", winner, exc)
         return winner
 
-    all_exhausted = bool(evaluated) and all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
+    no_local_available = not evaluated or all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
     if (
         required_mode == "read"
-        and stage not in HIGH_TIER_ONLY_STAGES  # the OpenRouter fallback model is a cheap one
+        and (stage not in HIGH_TIER_ONLY_STAGES or no_local_available or is_high_tier_model(stage_cfg.openrouter_model))
         and (not project_id or _policy_allows(project_id, "openrouter"))
         and stage_cfg.openrouter_model
         and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
-        and (stage_cfg.openrouter_ok or all_exhausted)
+        and (stage_cfg.openrouter_ok or no_local_available)
         and spent_usd < cfg.run_caps.openrouter_usd
     ):
         has_credits = _openrouter_has_credits(openrouter_balance_lookup)

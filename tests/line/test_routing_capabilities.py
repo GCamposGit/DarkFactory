@@ -182,6 +182,142 @@ def test_read_keeps_the_openrouter_fallback(tmp_path: Path) -> None:
     assert choice == ("openrouter", config.stages["grill"].openrouter_model)
 
 
+def test_planning_can_fallback_to_high_tier_openrouter(tmp_path: Path) -> None:
+    """USR-434: when all harnesses are exhausted, planning can elect a high-tier OpenRouter model."""
+    config = load_routing_config(default_config_path())
+    choice = _pick("planning", [], config, tmp_path, openrouter_balance_lookup=lambda: 10.0)
+    assert choice == ("openrouter", config.stages["planning"].openrouter_model)
+
+
+# --------------------------------------------------------------------------
+# Planning stage routing: Grok contingency and OpenRouter fallback (USR-434)
+# --------------------------------------------------------------------------
+
+
+def test_planning_elects_claude_when_claude_has_healthy_quota(tmp_path: Path) -> None:
+    """Claude healthy -> planning elects Claude; Grok is not elected even with higher headroom."""
+    config = load_routing_config(default_config_path())
+
+    def quota_lookup(provider_id: str) -> float | None:
+        if provider_id == "anthropic":
+            return 80.0
+        if provider_id == "openai":
+            return 50.0
+        if provider_id == "xai":
+            return 95.0  # Grok has highest headroom
+        return 100.0
+
+    choice = _pick("planning", _ALL_CAPS, config, tmp_path, quota_lookup=quota_lookup)
+    assert choice == ("claude", "opus")
+
+
+def test_planning_elects_codex_when_codex_healthy_and_claude_critical(tmp_path: Path) -> None:
+    """Codex healthy, Claude critical -> planning elects Codex; Grok is not elected."""
+    config = load_routing_config(default_config_path())
+
+    def quota_lookup(provider_id: str) -> float | None:
+        if provider_id == "anthropic":
+            return 10.0  # critical <= 15%
+        if provider_id == "openai":
+            return 60.0  # healthy
+        if provider_id == "xai":
+            return 95.0  # Grok has higher headroom
+        return 100.0
+
+    choice = _pick("planning", _ALL_CAPS, config, tmp_path, quota_lookup=quota_lookup)
+    assert choice == ("codex", "gpt-sol")
+
+
+def test_planning_elects_grok_when_claude_and_codex_both_critical(tmp_path: Path) -> None:
+    """Claude and Codex both critical -> Grok is permitted as planning contingency and elected."""
+    config = load_routing_config(default_config_path())
+
+    def quota_lookup(provider_id: str) -> float | None:
+        if provider_id == "anthropic":
+            return 10.0  # critical
+        if provider_id == "openai":
+            return 5.0  # critical
+        if provider_id == "xai":
+            return 70.0  # healthy
+        return 100.0
+
+    choice = _pick("planning", _ALL_CAPS, config, tmp_path, quota_lookup=quota_lookup)
+    assert choice == ("grok", "grok-4.7")
+
+
+def test_planning_elects_grok_when_claude_and_codex_in_cooldown(tmp_path: Path) -> None:
+    """Claude and Codex cooling -> Grok is permitted as planning contingency and elected."""
+    config = load_routing_config(default_config_path())
+    cooldowns_path = tmp_path / "cooldowns.json"
+    cooldowns_path.write_text(
+        json.dumps({
+            "claude": {"until": "2099-01-01T00:00:00Z"},
+            "codex": {"until": "2099-01-01T00:00:00Z"},
+        }),
+        encoding="utf-8",
+    )
+
+    choice = pick(
+        "planning",
+        _ALL_CAPS,
+        config=config,
+        quota_lookup=lambda _p: 80.0,
+        cooldown_path=cooldowns_path,
+    )
+    assert choice == ("grok", "grok-4.7")
+
+
+def test_planning_elects_openrouter_when_claude_codex_grok_all_critical(tmp_path: Path) -> None:
+    """Claude, Codex and Grok all critical -> OpenRouter fallback elected with distill.openrouter."""
+    config = load_routing_config(default_config_path())
+
+    choice = _pick(
+        "planning",
+        _ALL_CAPS,
+        config,
+        tmp_path,
+        quota_lookup=lambda _p: 5.0,  # all critical <= 15%
+        openrouter_balance_lookup=lambda: 10.0,
+    )
+    assert choice == ("openrouter", config.stages["planning"].openrouter_model)
+    assert choice == ("openrouter", "deepseek/deepseek-v4.1-flash")
+
+
+def test_planning_elects_openrouter_when_all_three_cooling_or_absent(tmp_path: Path) -> None:
+    """Claude, Codex and Grok all cooling/absent -> OpenRouter fallback elected."""
+    config = load_routing_config(default_config_path())
+    cooldowns_path = tmp_path / "cooldowns.json"
+    cooldowns_path.write_text(
+        json.dumps({
+            "claude": {"until": "2099-01-01T00:00:00Z"},
+            "codex": {"until": "2099-01-01T00:00:00Z"},
+            "grok": {"until": "2099-01-01T00:00:00Z"},
+        }),
+        encoding="utf-8",
+    )
+
+    choice = pick(
+        "planning",
+        _ALL_CAPS,
+        config=config,
+        quota_lookup=lambda _p: 80.0,
+        cooldown_path=cooldowns_path,
+        openrouter_balance_lookup=lambda: 10.0,
+    )
+    assert choice == ("openrouter", config.stages["planning"].openrouter_model)
+    assert choice == ("openrouter", "deepseek/deepseek-v4.1-flash")
+
+    # Also absent from host_caps
+    choice_absent = _pick(
+        "planning",
+        [],
+        config,
+        tmp_path,
+        openrouter_balance_lookup=lambda: 10.0,
+    )
+    assert choice_absent == ("openrouter", config.stages["planning"].openrouter_model)
+
+
 def test_dropping_a_capable_harness_from_host_caps_still_fails_closed(tmp_path: Path) -> None:
     config = load_routing_config(default_config_path())
 

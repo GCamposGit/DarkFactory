@@ -132,3 +132,72 @@ def test_snapshot_aborts_when_a_ledger_would_lose_ids(
     result = run_snapshot(seed, files={DEMANDS_RELATIVE: '[{"id": "USR-1"}]\n'}, token="", today="2030-10-24")
     assert not result.ok and result.action == "error" and DEMANDS_RELATIVE in result.message
     assert _git(bare, "rev-parse", "main") == before
+
+
+def test_snapshot_aborts_when_an_existing_id_is_missing_even_if_count_did_not_drop(
+    clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-434: dropping an existing id is caught even if replaced by a new id (same count)."""
+    seed, bare = clone
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    (seed / DEMANDS_RELATIVE).write_text('[{"id": "USR-1"}, {"id": "USR-2"}]\n', encoding="utf-8")
+    _git(seed, "commit", "-qam", "two tickets")
+    _git(seed, "push", "-q", "origin", "HEAD:main")
+    before = _git(bare, "rev-parse", "main")
+
+    # Replace USR-2 with USR-3: count is still 2, but USR-2 is lost!
+    result = run_snapshot(
+        seed,
+        files={DEMANDS_RELATIVE: '[{"id": "USR-1"}, {"id": "USR-3"}]\n'},
+        token="",
+        today="2030-10-24",
+    )
+    assert not result.ok and result.action == "error"
+    assert "lost IDs (USR-2)" in result.message
+    assert _git(bare, "rev-parse", "main") == before
+
+
+def test_render_ledgers_imports_git_only_owner_actions_to_control_store(
+    clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-434: OAs present only in the git worktree are synced into the control store before export."""
+    import json
+    from core.owner_actions.store import OwnerActionStore
+
+    seed, _ = clone
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.chdir(seed)
+    wt = tmp_path / "wt"
+    (wt / DEMANDS_RELATIVE).parent.mkdir(parents=True)
+    (wt / DEMANDS_RELATIVE).write_text("[]\n", encoding="utf-8")
+    (wt / OWNER_ACTIONS_RELATIVE).parent.mkdir(parents=True)
+    (wt / OWNER_ACTIONS_RELATIVE).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "actions": [
+                {
+                    "id": "OA-081",
+                    "kind": "action",
+                    "title": "Acao existente somente no git",
+                    "priority": "medium",
+                    "status": "open",
+                    "why": "Teste",
+                    "blocks": [],
+                    "depends_on": [],
+                    "steps": [{"text": "Executar algo"}],
+                    "verify": "ok",
+                    "created_at": "2030-10-30T00:00:00Z",
+                    "created_by": "test",
+                }
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    out = render_ledgers(wt)
+    rendered_actions = json.loads(out[OWNER_ACTIONS_RELATIVE])["actions"]
+    assert any(a["id"] == "OA-081" for a in rendered_actions)
+
+    # Verify that the action was synced into the control store
+    control_actions = OwnerActionStore(control=True).list_actions()
+    assert any(a.id == "OA-081" for a in control_actions)

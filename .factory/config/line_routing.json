@@ -8,7 +8,7 @@
       "openrouter_model": "distill.openrouter"
     },
     "planning": {
-      "cascade": [["claude", "opus"], ["codex", "planning.codex"], ["antigravity", null]],
+      "cascade": [["claude", "opus"], ["codex", "planning.codex"], ["grok", "development.grok"], ["antigravity", null]],
       "effort": "high",
       "harness_pins": {
         "codex": {"model": "planning.codex", "effort": "high"}

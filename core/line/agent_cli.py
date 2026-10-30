@@ -1709,7 +1709,11 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
     from core.execution.providers import OpenRouterModelProvider  # local import: keeps agent_cli import-light
 
-    model = req.model or os.environ.get("DARKFAC_OPENROUTER_CHEAP_MODEL") or _DEFAULT_OPENROUTER_MODEL
+    model_raw = req.model or os.environ.get("DARKFAC_OPENROUTER_CHEAP_MODEL") or _DEFAULT_OPENROUTER_MODEL
+    try:
+        model = resolve_model(model_raw)
+    except Exception:
+        model = model_raw
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     try:
