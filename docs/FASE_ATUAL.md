@@ -55,6 +55,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - `main` verde no CI (Linux em todo PR; Windows em `main` e à noite).
 - PR: testes afetados, contratos de camada (`lint-imports`), ratchet de complexidade e docs-sync do manual.
 - Canário diário de ponta a ponta passando e backup pós-deploy com prova de restauração.
+- Contrato de encerramento do foco: `python -m pytest tests/test_fleet_dispatcher.py -q` termina sozinho, com código de saída e uma linha de resumo do pytest no formato `N passed in Xs`, dentro do prazo configurado em `pytest.ini` (`timeout = 120`, `timeout_method = thread`). O cache por worktree fica em `DarkFac/pytest-cache` no diretório temporário do usuário. `redirect_cache_dir` grava esse destino antes de o cache plugin ler `cache_dir` e reaplica o caminho no `Cache` já criado, no início de `pytest_sessionfinish`, antes de `Cache.set`. Um `%LOCALAPPDATA%` não gravável não deixa o processo aberto depois de `100%`.
 
 ## Histórico
 - 29/10/2026: Antigravity formalizado como interface interativa com briefing compartilhado e handoff versionado; cota atual confirmada pelo snapshot local, com causa estruturada para falhas futuras; execução headless/frota continua excluída.
@@ -65,3 +66,5 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 28/10/2026: retomada após REVIEW com JSON inválido preserva BUILD/VALIDATE apenas para worktree limpa e digests de candidato/política coincidentes; o gate continua vinculado ao hash da árvore.
 - 28/10/2026: limpeza dos checkouts operacionais da frota passa pelo `ticket_workspace.cleanup`; processo vivo com cwd no checkout preserva o registro e os arquivos, com caminho, holder e recuperação posterior registrados no log.
 - 29/10/2026: higiene da suíte ignora só o timestamp `heartbeat_at` das travas operacionais conhecidas, mantendo mudanças nos demais campos e remoções detectáveis.
+- 29/10/2026: cache de pytest por worktree usa o temp do usuário e é reaplicado no início de `pytest_sessionfinish`, antes de `Cache.set`, para o focal concluir quando `%LOCALAPPDATA%` não está gravável.
+- 30/10/2026: o foco `python -m pytest tests/test_fleet_dispatcher.py -q` segue o contrato de encerramento acima (`timeout = 120`, `timeout_method = thread`, resumo `N passed in Xs`).
