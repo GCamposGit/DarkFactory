@@ -9330,6 +9330,38 @@
     "updated_at": "2026-10-28T10:30:00Z"
   },
   {
+    "id": "USR-413",
+    "project_id": "darkfac",
+    "title": "Despachante bloqueia ticket isolado por runtime sujo no checkout compartilhado",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "c45af48cb84ce56a8b183d778898a03ee65b53d8",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios.",
+    "core_journey": [
+      "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios."
+    ],
+    "non_goals": [
+      "Nao apagar ou comitar alteracoes de outra sessao; nao desabilitar o guard global; nao criar scheduler concorrente."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Despacho pelo servico executa ticket em checkout/worktree operacional limpo mesmo com runtime permitido modificado na raiz compartilhada.",
+      "Teste de comportamento reproduz checkout compartilhado sujo e comprova isolamento sem incluir alteracoes alheias.",
+      "Falha real de fonte/controle permanece estruturada e observavel, sem falso sucesso."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:13:00.136868Z",
+    "updated_at": "2026-10-28T16:00:42.502705Z"
+  },
+  {
     "id": "USR-42",
     "project_id": "darkfac",
     "title": "DarkHub sempre alinhado a fabrica: gate de cobertura + revisao e fixes imediatos",
@@ -9367,6 +9399,155 @@
     "dependencies": [],
     "created_at": "2026-09-23T06:26:35.118086Z",
     "updated_at": "2026-09-23T07:11:06.153595Z"
+  },
+  {
+    "id": "USR-422",
+    "project_id": "darkfac",
+    "title": "Restaurar isolamento dos testes de entrega e reserva apos contratos de estagio",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "efa7133550f2d048bd621981a28506639004d850",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR.",
+    "core_journey": [
+      "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir e corrigir causas reais das falhas em fixtures ou codigo com testes existentes consolidados",
+      "Testes nao invocam agentes reais nem alteram candidato durante o portao",
+      "Portao oficial HARNESS_PASS, revisao cruzada, CI, merge e deploy com evidencias"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T12:28:57.936851Z",
+    "updated_at": "2026-10-28T13:25:19.072765Z"
+  },
+  {
+    "id": "USR-423",
+    "project_id": "darkfac",
+    "title": "Preservar checkout operacional ativo na limpeza pos-merge",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "40ea2d0a552d8536bf87c64cab60abcb54777a78",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Entrega USR-422 PR789 removeu registro e arquivos da worktree heartbeat-ops-20261028 usada pelo launcher pai16488 e pwsh17192; logs10:30:34-10:31:33 mostram tentativa de remocao, falhas WinError32 e limpeza global. Launcher terminou0 sem resumo final nem evidencia de deploy. Preservar checkouts usados por processos vivos e limitar limpeza ao escopo seguro, mantendo recuperacao.",
+    "core_journey": [
+      "Entrega USR-422 PR789 removeu registro e arquivos da worktree heartbeat-ops-20261028 usada pelo launcher pai16488 e pwsh17192; logs10:30:34-10:31:33 mostram tentativa de remocao, falhas WinError32 e limpeza global. Launcher terminou0 sem resumo final nem evidencia de deploy. Preservar checkouts usados por processos vivos e limitar limpeza ao escopo seguro, mantendo recuperacao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Limpeza identifica processos com cwd no checkout antes de remover registro ou arquivos",
+      "Entrega nao remove checkout do launcher pai e registra resultado pos-merge completo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T13:36:37.709581Z",
+    "updated_at": "2026-10-29T03:51:14.718523Z"
+  },
+  {
+    "id": "USR-425",
+    "project_id": "darkfac",
+    "title": "Eliminar reincidencia de isolamento PLAN e gate_dirty_worktree na suite Windows",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "0104875bd9006d8f1edfa049bfe8a8e8fc464562",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada.",
+    "core_journey": [
+      "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir falhas de isolamento com execucao focal limitada e fixtures reais",
+      "Suite nao altera candidato nem compartilha artefatos PLAN entre testes",
+      "Nao desabilitar tree hygiene ou exigir mocks que ignorem contrato real"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T17:21:39.209183Z",
+    "updated_at": "2026-10-28T18:39:26.394308Z"
+  },
+  {
+    "id": "USR-426",
+    "project_id": "darkfac",
+    "title": "Recuperar revisao independente com resposta JSON invalida apos retries",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "3f9ec7d250c355fdf35db8073b794736ee867ca8",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-423 candidatoded8022b passou portao tree3c449640, mas quatro rodadasClaude entre18:44 e19:10 terminaram stage_artifact_missing:REVIEW review_retry:review_invalid_json. Evidencia .factory/reports/heartbeat-20261028.md e worktree C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z. Diagnosticar saida bruta sanitizada, parser/schema e CLI; corrigir resposta estruturada ou failover elegivel sem aprovar sem revisao, sem familiaigual e sem relaxarpiso15.",
+    "core_journey": [
+      "USR-423 candidatoded8022b passou portao tree3c449640, mas quatro rodadasClaude entre18:44 e19:10 terminaram stage_artifact_missing:REVIEW review_retry:review_invalid_json. Evidencia .factory/reports/heartbeat-20261028.md e worktree C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z. Diagnosticar saida bruta sanitizada, parser/schema e CLI; corrigir resposta estruturada ou failover elegivel sem aprovar sem revisao, sem familiaigual e sem relaxarpiso15."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir causa com saida sanitizada e corrigir geracao ou parsing",
+      "Revisao valida continua obrigatoria e familia distinta preservada",
+      "Retomar423preservadosemreimplementarougateinalteradorepetido"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T22:11:35.537039Z",
+    "updated_at": "2026-10-29T00:55:47.279157Z"
+  },
+  {
+    "id": "USR-427",
+    "project_id": "darkfac",
+    "title": "Diagnosticar base_red_suspected na retencao de contextos do CloudWorker",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "11accffd04c9a58ef6a2e5881c20e7043ec0143d",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-423 aposrebase902b32b9 falhou gate3d256f08 em2testes tests/line/test_context_retention.py: sweeperinjetadonaochamado(len0esperado2), warningesperadoausente. 4608passed22skipped, terminalbase_red_suspected. Log C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z/.factory/test_logs/step-failures/20261029T013148Z-1793237508124432600-unit_and_integration_tests_parallel.log. Compararbaselineeambienteantesdeatribuir423; corrigircontratorelogio/flag/fixturessemremoverretencaoouasserts. 423preservado5c6c86e2, semPR.",
+    "core_journey": [
+      "USR-423 aposrebase902b32b9 falhou gate3d256f08 em2testes tests/line/test_context_retention.py: sweeperinjetadonaochamado(len0esperado2), warningesperadoausente. 4608passed22skipped, terminalbase_red_suspected. Log C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z/.factory/test_logs/step-failures/20261029T013148Z-1793237508124432600-unit_and_integration_tests_parallel.log. Compararbaselineeambienteantesdeatribuir423; corrigircontratorelogio/flag/fixturessemremoverretencaoouasserts. 423preservado5c6c86e2, semPR."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir focalmente os dois testes na baseline e candidato com ambiente registrado sem segredos",
+      "Corrigir causa real mantendo varredura periodica, protecao de ativos e fallback de erro",
+      "Liberar retomada423 pelo ciclo canonico sem bypassbase_red"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T01:36:53.758881Z",
+    "updated_at": "2026-10-29T02:42:38.368549Z"
   },
   {
     "id": "USR-43",
@@ -11645,218 +11826,5 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
-  },
-  {
-    "id": "USR-422",
-    "project_id": "darkfac",
-    "title": "Restaurar isolamento dos testes de entrega e reserva apos contratos de estagio",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "efa7133550f2d048bd621981a28506639004d850",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR.",
-    "core_journey": [
-      "Portao oficial do candidato USR-413 9ac0d2d0 terminou com 28 falhas, 4553 passes e 22 skips. Log: C:/dev/DarkFac/.worktrees/usr-413-20261028T104913Z/.factory/test_logs/step-failures/20261028T122227Z-1793190147317868300-unit_and_integration_tests_parallel.log. Testes de entrega esperam gate/merge mas param em stage_artifact_missing:PLAN (SPEC.md ausente); worker gw3 caiu e testes de reserva tambem falharam. Diagnosticar em baseline atual antes de atribuir a USR-413; restaurar fixtures e isolamento sem enfraquecer verificacao real dos artefatos. USR-413 preservado e sem PR."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir e corrigir causas reais das falhas em fixtures ou codigo com testes existentes consolidados",
-      "Testes nao invocam agentes reais nem alteram candidato durante o portao",
-      "Portao oficial HARNESS_PASS, revisao cruzada, CI, merge e deploy com evidencias"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T12:28:57.936851Z",
-    "updated_at": "2026-10-28T13:25:19.072765Z"
-  },
-  {
-    "id": "USR-413",
-    "project_id": "darkfac",
-    "title": "Despachante bloqueia ticket isolado por runtime sujo no checkout compartilhado",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "c45af48cb84ce56a8b183d778898a03ee65b53d8",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios.",
-    "core_journey": [
-      "Em 28/10/2026 07:10 BRT o servico fleet_dispatcher encerrou USR-386 rc3: run_ticket recusou .factory/demands/demands.json e .factory/queue_snapshot.json modificados no checkout compartilhado. Processo ficou ocioso com recurso livre e ticket em cooldown_infra. Evidencia .factory/runs/fleet_dispatcher_logs/USR-386-notebook.log. Preservar alteracoes de outras sessoes, sem afrouxar guards nem limpar arquivos alheios."
-    ],
-    "non_goals": [
-      "Nao apagar ou comitar alteracoes de outra sessao; nao desabilitar o guard global; nao criar scheduler concorrente."
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Despacho pelo servico executa ticket em checkout/worktree operacional limpo mesmo com runtime permitido modificado na raiz compartilhada.",
-      "Teste de comportamento reproduz checkout compartilhado sujo e comprova isolamento sem incluir alteracoes alheias.",
-      "Falha real de fonte/controle permanece estruturada e observavel, sem falso sucesso."
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T10:13:00.136868Z",
-    "updated_at": "2026-10-28T16:00:42.502705Z"
-  },
-  {
-    "id": "USR-425",
-    "project_id": "darkfac",
-    "title": "Eliminar reincidencia de isolamento PLAN e gate_dirty_worktree na suite Windows",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "0104875bd9006d8f1edfa049bfe8a8e8fc464562",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada.",
-    "core_journey": [
-      "USR-417 candidato2a68c5e4 basePR790 falhou portao28failed4571passed22skipped, gate_dirty_worktree apesargitstatuslimpo aposfinal. Falhas PLAN SPEC ausente emtestsdelivery/selfcorrection/reservas reincidem aposUSR-422. Log C:/dev/DarkFac/.worktrees/usr-417-20261028T161706Z/.factory/test_logs/step-failures/20261028T171904Z-1793207944200072400-unit_and_integration_tests_parallel.log. Investigar causa real com ambiente e state roots herdados/fixtures e corrigir sem suprimir contratos. Tambem clock_bomb_guard falhou em testes novos417: diagnosticar e corrigir exemplos temporais no candidato417 preservado ou tornar independente com baseline comprovada."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir falhas de isolamento com execucao focal limitada e fixtures reais",
-      "Suite nao altera candidato nem compartilha artefatos PLAN entre testes",
-      "Nao desabilitar tree hygiene ou exigir mocks que ignorem contrato real"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T17:21:39.209183Z",
-    "updated_at": "2026-10-28T18:39:26.394308Z"
-  },
-  {
-    "id": "USR-426",
-    "project_id": "darkfac",
-    "title": "Recuperar revisao independente com resposta JSON invalida apos retries",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "3f9ec7d250c355fdf35db8073b794736ee867ca8",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "USR-423 candidatoded8022b passou portao tree3c449640, mas quatro rodadasClaude entre18:44 e19:10 terminaram stage_artifact_missing:REVIEW review_retry:review_invalid_json. Evidencia .factory/reports/heartbeat-20261028.md e worktree C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z. Diagnosticar saida bruta sanitizada, parser/schema e CLI; corrigir resposta estruturada ou failover elegivel sem aprovar sem revisao, sem familiaigual e sem relaxarpiso15.",
-    "core_journey": [
-      "USR-423 candidatoded8022b passou portao tree3c449640, mas quatro rodadasClaude entre18:44 e19:10 terminaram stage_artifact_missing:REVIEW review_retry:review_invalid_json. Evidencia .factory/reports/heartbeat-20261028.md e worktree C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z. Diagnosticar saida bruta sanitizada, parser/schema e CLI; corrigir resposta estruturada ou failover elegivel sem aprovar sem revisao, sem familiaigual e sem relaxarpiso15."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir causa com saida sanitizada e corrigir geracao ou parsing",
-      "Revisao valida continua obrigatoria e familia distinta preservada",
-      "Retomar423preservadosemreimplementarougateinalteradorepetido"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T22:11:35.537039Z",
-    "updated_at": "2026-10-29T00:55:47.279157Z"
-  },
-  {
-    "id": "USR-427",
-    "project_id": "darkfac",
-    "title": "Diagnosticar base_red_suspected na retencao de contextos do CloudWorker",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "11accffd04c9a58ef6a2e5881c20e7043ec0143d",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "USR-423 aposrebase902b32b9 falhou gate3d256f08 em2testes tests/line/test_context_retention.py: sweeperinjetadonaochamado(len0esperado2), warningesperadoausente. 4608passed22skipped, terminalbase_red_suspected. Log C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z/.factory/test_logs/step-failures/20261029T013148Z-1793237508124432600-unit_and_integration_tests_parallel.log. Compararbaselineeambienteantesdeatribuir423; corrigircontratorelogio/flag/fixturessemremoverretencaoouasserts. 423preservado5c6c86e2, semPR.",
-    "core_journey": [
-      "USR-423 aposrebase902b32b9 falhou gate3d256f08 em2testes tests/line/test_context_retention.py: sweeperinjetadonaochamado(len0esperado2), warningesperadoausente. 4608passed22skipped, terminalbase_red_suspected. Log C:/dev/DarkFac/.worktrees/usr-423-20261028T190215Z/.factory/test_logs/step-failures/20261029T013148Z-1793237508124432600-unit_and_integration_tests_parallel.log. Compararbaselineeambienteantesdeatribuir423; corrigircontratorelogio/flag/fixturessemremoverretencaoouasserts. 423preservado5c6c86e2, semPR."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir focalmente os dois testes na baseline e candidato com ambiente registrado sem segredos",
-      "Corrigir causa real mantendo varredura periodica, protecao de ativos e fallback de erro",
-      "Liberar retomada423 pelo ciclo canonico sem bypassbase_red"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-29T01:36:53.758881Z",
-    "updated_at": "2026-10-29T02:42:38.368549Z"
-  },
-  {
-    "id": "USR-423",
-    "project_id": "darkfac",
-    "title": "Preservar checkout operacional ativo na limpeza pos-merge",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "40ea2d0a552d8536bf87c64cab60abcb54777a78",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Entrega USR-422 PR789 removeu registro e arquivos da worktree heartbeat-ops-20261028 usada pelo launcher pai16488 e pwsh17192; logs10:30:34-10:31:33 mostram tentativa de remocao, falhas WinError32 e limpeza global. Launcher terminou0 sem resumo final nem evidencia de deploy. Preservar checkouts usados por processos vivos e limitar limpeza ao escopo seguro, mantendo recuperacao.",
-    "core_journey": [
-      "Entrega USR-422 PR789 removeu registro e arquivos da worktree heartbeat-ops-20261028 usada pelo launcher pai16488 e pwsh17192; logs10:30:34-10:31:33 mostram tentativa de remocao, falhas WinError32 e limpeza global. Launcher terminou0 sem resumo final nem evidencia de deploy. Preservar checkouts usados por processos vivos e limitar limpeza ao escopo seguro, mantendo recuperacao."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Limpeza identifica processos com cwd no checkout antes de remover registro ou arquivos",
-      "Entrega nao remove checkout do launcher pai e registra resultado pos-merge completo"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T13:36:37.709581Z",
-    "updated_at": "2026-10-29T03:51:14.718523Z"
-  },
-  {
-    "id": "USR-418",
-    "project_id": "darkfac",
-    "title": "Evitar nova implementacao quando ja existe PR ativo do mesmo ticket",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "f695a610f1c2a89d993a2012fd9b88a95a29b88a",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Em 28/10/2026 launcher USR-386 PID4356 criou WT usr-386-20261028T101330Z e iniciou T1 enquanto outra sessao abriu PR779 head35dc99f ticket/usr-386. Estado fleet dizia in_flight vazio. Launcher proprio foi encerrado com arvore; WT e alteracoes preservadas. Evidencias heartbeat-usr386-20261028.log e PR779. Nao presumir ausencia de trabalho a partir de uma unica projecao.",
-    "core_journey": [
-      "Em 28/10/2026 launcher USR-386 PID4356 criou WT usr-386-20261028T101330Z e iniciou T1 enquanto outra sessao abriu PR779 head35dc99f ticket/usr-386. Estado fleet dizia in_flight vazio. Launcher proprio foi encerrado com arvore; WT e alteracoes preservadas. Evidencias heartbeat-usr386-20261028.log e PR779. Nao presumir ausencia de trabalho a partir de uma unica projecao."
-    ],
-    "non_goals": [
-      "Nao matar processos de outra sessao nem apagar trabalho preservado; nao criar scheduler concorrente."
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Dois canais concorrentes para mesmo projeto/ticket compartilham exclusao canonica e nao criam segunda implementacao.",
-      "PR ativo ou ownership canonico vigente produz recusa estruturada e aponta execucao existente.",
-      "Teste de comportamento cobre concorrencia e liberacao apos encerramento, sem bloquear tickets distintos."
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T10:21:58.064069Z",
-    "updated_at": "2026-10-29T10:09:21.668352Z"
   }
 ]
