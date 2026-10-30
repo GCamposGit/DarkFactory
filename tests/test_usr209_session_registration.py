@@ -91,7 +91,7 @@ def test_hook_is_fast_and_never_fails(tmp_path, monkeypatch):
 
 def test_wrapper_registers_start_heartbeat_finish_and_keeps_exit_code(tmp_path, monkeypatch):
     log = _env(tmp_path, monkeypatch)
-    code = "import time,sys; time.sleep(0.8); sys.exit(3)"
+    code = "import time,sys; time.sleep(1.5); sys.exit(3)"
     proc = subprocess.run(
         [sys.executable, str(WRAPPER), "codex", "--", sys.executable, "-c", code],
         capture_output=True,
