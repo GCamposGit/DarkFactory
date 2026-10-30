@@ -1,6 +1,7 @@
 """Quota interpretation and evidence regressions."""
 
 import json
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -501,3 +502,80 @@ def test_google_invalid_summary_bucket_is_unknown(tmp_path, monkeypatch, caplog,
     assert usage.status == AccountConnectionStatus.DEGRADED
     assert _quota_headroom(usage) is None
     assert "received fields" in caplog.text
+
+
+def test_antigravity_live_probe_persists_timestamped_sample(tmp_path, monkeypatch):
+    from core.usage.adapters import GeminiAccountAdapter
+
+    adapter = GeminiAccountAdapter(ProviderSpec("google", "Gemini", ProviderFamily.FRONTIER,
+        "https://one.google.com/"), tmp_path)
+    monkeypatch.setattr(GeminiAccountAdapter, "_find_live_ls_credentials",
+                        lambda self: ("fixture-csrf", [12345]))
+    payload = {"response": {"groups": [{"displayName": "Gemini", "buckets": [
+        {"bucketId": "gemini-5h", "remainingFraction": 0.75, "resetTime": "2026-10-30T00:00:00Z"}
+    ]}]}}
+    class SummaryResponse(Response):
+        status = 200
+    monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", lambda *a, **k: SummaryResponse(payload))
+
+    usage = adapter.inspect(force=True)
+
+    assert usage.adapter == "antigravity_rpc"
+    assert usage.checked_at
+    assert usage.windows[0].remaining_percent == 75
+    assert (tmp_path / "google.json").is_file()
+    saved = json.loads((tmp_path / "google.json").read_text(encoding="utf-8"))
+    assert saved["checked_at"] == usage.checked_at
+    assert usage.age_seconds is not None
+    assert usage.age_seconds <= 5
+
+
+def test_antigravity_transport_failure_is_structured_and_preserves_last_sample(tmp_path, monkeypatch, caplog):
+    from datetime import timedelta
+    from core.usage.adapters import GeminiAccountAdapter
+
+    directory = tmp_path / "providers"
+    directory.mkdir()
+    checked = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+    path = directory / "google.json"
+    path.write_text(json.dumps({
+        "provider_id": "google", "provider_name": "Gemini", "family": "frontier",
+        "status": "connected", "adapter": "antigravity_rpc", "checked_at": checked,
+        "windows": [{"quota_id": "antigravity:gemini-5h", "label": "5h",
+                     "used_percent": 25, "remaining_percent": 75, "window_duration_minutes": 300}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(GeminiAccountAdapter, "_find_live_ls_credentials",
+                        lambda self: ("fixture-csrf", [12345]))
+    monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen",
+                        lambda *a, **k: (_ for _ in ()).throw(TimeoutError("secret token must not leak")))
+
+    usage = GeminiAccountAdapter(ProviderSpec("google", "Gemini", ProviderFamily.FRONTIER,
+        "https://one.google.com/"), directory).inspect(force=True)
+
+    assert usage.status == AccountConnectionStatus.DEGRADED
+    assert usage.checked_at == checked
+    assert usage.age_seconds is not None and usage.stale
+    assert usage.probe_failure is not None
+    assert usage.probe_failure.category == "transport"
+    assert usage.probe_failure.code == "rpc_transport_failed"
+    assert "secret token" not in usage.model_dump_json()
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["checked_at"] == checked
+    assert saved["probe_failure"]["code"] == "rpc_transport_failed"
+    assert "cause=rpc_transport_failed" in caplog.text
+
+
+@pytest.mark.parametrize("error,category,code", [
+    (TimeoutError("token=do-not-leak"), "transport", "rpc_transport_failed"),
+    (json.JSONDecodeError("secret", "credential-value", 0), "protocol", "rpc_invalid_json"),
+    (urllib.error.HTTPError("https://127.0.0.1", 403, "csrf-secret", {}, None),
+     "authentication", "rpc_unauthorized"),
+])
+def test_antigravity_rpc_failure_classification_is_sanitized(error, category, code):
+    from core.usage.adapters import GeminiAccountAdapter
+
+    failure = GeminiAccountAdapter._failure_for_exception(error)
+
+    assert failure.category == category
+    assert failure.code == code
+    assert str(error) not in failure.model_dump_json()

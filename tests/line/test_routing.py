@@ -638,13 +638,6 @@ def test_grok_is_electable_in_development_when_it_has_the_most_headroom():
     assert _dev_pick({"anthropic": 5.0, "openai": 5.0, "xai": 50.0}, complexity="medium")[0] == "grok"
 
 
-def test_operating_harness_preference_applies_only_to_high_complexity():
-    table = {"anthropic": 30.0, "openai": 90.0, "xai": 60.0}
-    assert _dev_pick(table, complexity="high", operating_harness="claude")[0] == "claude"
-    assert _dev_pick(table, complexity="medium", operating_harness="claude")[0] == "codex"
-    assert _dev_pick(table, complexity="low", operating_harness="claude")[0] == "codex"
-
-
 def test_development_ranks_by_weekly_slack_and_falls_back_to_headroom():
     table = {"anthropic": 80.0, "openai": 60.0, "xai": 50.0}
     slack = {"anthropic": 0.2, "openai": 0.9, "xai": 0.5}

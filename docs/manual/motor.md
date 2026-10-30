@@ -143,3 +143,8 @@ o trata: conflito so em ledger (`demands.json`, `owner_actions.json`) fica com a
 continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_invoke_fix_agent`, estagio
 `rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket vai a `waiting_human` e o run sai com rc 1
 (causa `rebase_conflict`), sem rc 2 e sem redespacho do despachante.
+
+## Harness de Operacao Interativo e Restricao Headless (USR-433)
+
+`run_ticket.py` detecta o harness de operacao ativo (`DARKFAC_OPERATING_HARNESS` ou contexto do terminal). Se for passado `--fleet` com `--harness antigravity`, a execucao e recusada na inicializacao (`_stage_check_harness`) antes de qualquer efeito colateral (`[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.`). O briefing agnostico de sessao `python -m core.ops.briefing` e o handoff versionado `docs/operacao/HANDOFF.md` sincronizam o estado entre sessoes.
+

@@ -32,6 +32,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.models.registry import id_of, resolve_known
 from core.usage.models import (
     AccountConnectionStatus,
+    ProbeFailure,
     ProviderAccountUsage,
     ProviderFamily,
     QuotaWindow,
@@ -278,6 +279,7 @@ class AccountUsageAdapter(ABC):
             period_start=payload.get("period_start"),
             plausibility_flags=payload.get("plausibility_flags") or [],
             source_node=str(payload["source_node"]) if payload.get("source_node") else None,
+            probe_failure=payload.get("probe_failure"),
         ).with_freshness(now)
 
 
@@ -1031,6 +1033,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
     )
 
     def inspect(self, force: bool = False) -> ProviderAccountUsage:
+        self._probe_failure: Optional[ProbeFailure] = None
         snapshot = self._snapshot_payload()
         if snapshot and not force and self._is_snapshot_fresh(snapshot):
             return self._from_snapshot(snapshot)
@@ -1039,16 +1042,37 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         try:
             live_usage = self._probe_language_server()
             if live_usage:
-                return live_usage
+                if live_usage.windows and live_usage.probe_failure is None:
+                    return live_usage
+                self._probe_failure = live_usage.probe_failure or ProbeFailure(
+                    category="invalid_response", code="quota_reading_unusable",
+                    message="A leitura RPC não contém uma quota utilizável.",
+                )
         except Exception as exc:
-            logger.debug("Antigravity Language Server probe failed: %s", exc)
+            self._probe_failure = self._failure_for_exception(exc)
+            logger.warning("Antigravity quota probe failed (%s): %s", self._probe_failure.code, self._probe_failure.message)
 
         if snapshot:
-            return self._from_snapshot(snapshot)
+            previous = self._from_snapshot(snapshot)
+            failure = self._probe_failure or ProbeFailure(
+                category="unavailable", code="rpc_no_sample", message="Language Server não retornou uma amostra de quota."
+            )
+            age = previous.age_seconds
+            age_label = f"{age // 3600}h {age % 3600 // 60}m" if age is not None else "idade desconhecida"
+            logger.warning("Antigravity quota sample stale; age_seconds=%s cause=%s", age, failure.code)
+            degraded = previous.model_copy(update={
+                "status": AccountConnectionStatus.DEGRADED,
+                "probe_failure": failure,
+                "message": f"Última amostra conhecida em {previous.checked_at} (idade {age_label}); atualização indisponível: {failure.code} ({failure.message}).",
+            })
+            self._save_snapshot(degraded)
+            return degraded
 
         installation = self._find_antigravity()
         if installation is None and not any(os.environ.get(key) for key in self.spec.env_keys):
-            return self.disconnected("Gemini/Antigravity não detectado e nenhuma API key configurada.", "antigravity_local")
+            failure = ProbeFailure(category="configuration", code="antigravity_not_configured",
+                                   message="Antigravity não detectado e nenhuma API key configurada.")
+            return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
         log_path = self._antigravity_log()
         exhausted = self._latest_exhaustion(log_path) if log_path else None
         if exhausted and exhausted > datetime.now().astimezone():
@@ -1064,19 +1088,40 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                 dashboard_url=self.spec.dashboard_url,
             )
         if installation is not None and log_path is not None and log_path.exists():
+            failure = self._probe_failure or ProbeFailure(category="unavailable", code="quota_not_published",
+                                                          message="Sessão local detectada, mas o RPC não publicou quota.")
             return ProviderAccountUsage(
                 provider_id=self.spec.provider_id, provider_name=self.spec.provider_name,
                 family=self.spec.family, status=AccountConnectionStatus.CONNECTED, adapter="antigravity_local",
                 quota_supported=False,
-                message="Sessão Antigravity detectada; o percentual atual não é publicado localmente. Configure snapshot para exibi-lo.",
+                message=f"Sessão Antigravity detectada; quota indisponível: {failure.code} ({failure.message}).",
                 dashboard_url=self.spec.dashboard_url,
+                probe_failure=failure,
             )
+        failure = self._probe_failure or ProbeFailure(category="configuration", code="quota_source_unavailable",
+                                                      message="Nenhuma fonte de quota Antigravity configurada.")
         return ProviderAccountUsage(
             provider_id=self.spec.provider_id, provider_name=self.spec.provider_name,
             family=self.spec.family, status=AccountConnectionStatus.CONNECTED, adapter="gemini_api_key",
-            quota_supported=False, message="Gemini API configurada; quotas detalhadas ficam no AI Studio/Cloud Monitoring.",
+            quota_supported=False, message=f"Gemini API configurada; quota de assinatura indisponível: {failure.code} ({failure.message}).",
             dashboard_url=self.spec.dashboard_url,
+            probe_failure=failure,
         )
+
+    @staticmethod
+    def _failure_for_exception(exc: Exception) -> ProbeFailure:
+        """Classify failures without retaining exception text, which may contain secrets."""
+        if isinstance(exc, urllib.error.HTTPError):
+            category = "authentication" if exc.code in (401, 403) else "protocol"
+            code = "rpc_unauthorized" if category == "authentication" else f"rpc_http_{exc.code}"
+            message = "Language Server recusou autenticação." if category == "authentication" else "Language Server retornou erro HTTP."
+        elif isinstance(exc, (TimeoutError, urllib.error.URLError, OSError)):
+            category, code, message = "transport", "rpc_transport_failed", "Falha ou timeout de transporte para o Language Server local."
+        elif isinstance(exc, json.JSONDecodeError):
+            category, code, message = "protocol", "rpc_invalid_json", "Language Server retornou JSON inválido."
+        else:
+            category, code, message = "protocol", "rpc_protocol_error", "Resposta ou protocolo do Language Server inválido."
+        return ProbeFailure(category=category, code=code, message=message)
 
     @staticmethod
     def _find_live_ls_credentials() -> tuple[Optional[str], List[int]]:
@@ -1147,9 +1192,86 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
         return csrf_token, ports
 
+    def _probe_available_models_fallback(
+        self, ports: list[int], csrf_token: str, ctx: ssl.SSLContext
+    ) -> tuple[list[QuotaWindow], dict[str, Any], Optional[int], Optional[ProviderAccountUsage]]:
+        windows: list[QuotaWindow] = []
+        raw_quota: dict[str, Any] = {}
+        active_port: Optional[int] = None
+        for port in ports:
+            req = urllib.request.Request(
+                f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
+                data=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-codeium-csrf-token": csrf_token,
+                    "Connect-Protocol-Version": "1",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ctx, timeout=1.0) as res:
+                    models_payload = json.loads(res.read().decode("utf-8"))
+                if not isinstance(models_payload, dict):
+                    self._probe_failure = ProbeFailure(category="invalid_response", code="models_not_object",
+                                                       message="Resposta de modelos não é um objeto JSON.")
+                    continue
+                models = models_payload.get("response", {}).get("models", {})
+                if not isinstance(models, dict):
+                    self._probe_failure = ProbeFailure(category="invalid_response", code="models_missing",
+                                                       message="Lista de modelos ausente ou inválida.")
+                    continue
+                target_model = (
+                    models.get(f"{_ANTIGRAVITY_MODEL}-high")
+                    or models.get(f"{_ANTIGRAVITY_MODEL}-medium")
+                    or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
+                )
+                if target_model and isinstance(target_model.get("quotaInfo"), dict):
+                    quota_info = target_model["quotaInfo"]
+                    remaining_fraction = quota_info.get("remainingFraction")
+                    if remaining_fraction is None:
+                        logger.warning("Invalid Google quotaInfo; received fields: %s", list(quota_info))
+                        failure = ProbeFailure(category="invalid_response", code="remaining_fraction_missing",
+                                               message="Campo remainingFraction ausente no quotaInfo.")
+                        self._probe_failure = failure
+                        return [], {}, None, self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
+                    if remaining_fraction is not None:
+                        if type(remaining_fraction) not in (int, float) or not 0 <= remaining_fraction <= 1:
+                            logger.warning("Invalid Google quotaInfo; received fields: %s", list(quota_info))
+                            failure = ProbeFailure(category="invalid_response", code="remaining_fraction_invalid",
+                                                   message="Campo remainingFraction fora do intervalo válido.")
+                            self._probe_failure = failure
+                            return [], {}, None, self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
+                        raw_quota = sanitize_raw("google", quota_info)
+                        remaining_percent = _clamp_percent(remaining_fraction * 100.0)
+                        used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
+                        resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
+                        windows.append(
+                            QuotaWindow(
+                                quota_id=f"antigravity:{_ANTIGRAVITY_MODEL}",
+                                label="Janela Móvel (5h)",
+                                used_percent=used_percent,
+                                remaining_percent=remaining_percent,
+                                window_duration_minutes=300,
+                                resets_at=resets_at,
+                                metric="subscription",
+                            )
+                        )
+                        active_port = port
+                        break
+            except Exception as exc:
+                self._probe_failure = self._failure_for_exception(exc)
+        return windows, raw_quota, active_port, None
+
     def _probe_language_server(self) -> Optional[ProviderAccountUsage]:
         csrf_token, candidate_ports = self._find_live_ls_credentials()
         if not csrf_token or not candidate_ports:
+            if os.environ.get("DARKFAC_OFFLINE") == "1":
+                self._probe_failure = ProbeFailure(category="configuration", code="offline_mode",
+                                                   message="A coleta RPC foi desativada por DARKFAC_OFFLINE.")
+            else:
+                self._probe_failure = ProbeFailure(category="unavailable", code="language_server_not_found",
+                                                   message="Language Server ativo ou credenciais locais não encontrados.")
             return None
 
         ctx = ssl.create_default_context()
@@ -1177,9 +1299,16 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                 with urllib.request.urlopen(summary_req, context=ctx, timeout=1.0) as res:
                     if res.status == 200:
                         summary_payload = json.loads(res.read().decode("utf-8"))
+                        if not isinstance(summary_payload, dict):
+                            self._probe_failure = ProbeFailure(category="invalid_response", code="summary_not_object",
+                                                               message="Resumo de quota não é um objeto JSON.")
+                            continue
                         active_port = port
                         break
-            except Exception:
+                    self._probe_failure = ProbeFailure(category="protocol", code=f"summary_http_{res.status}",
+                                                       message="Language Server retornou status HTTP inesperado.")
+            except Exception as exc:
+                self._probe_failure = self._failure_for_exception(exc)
                 continue
 
         if active_port and summary_payload:
@@ -1188,7 +1317,10 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             if not isinstance(groups, list):
                 logger.warning("Invalid Google quota summary; received fields: %s",
                                list(summary_payload) if isinstance(summary_payload, dict) else [])
-                return self.degraded("Sem medidor: resumo Google inválido.", "antigravity_rpc")
+                failure = ProbeFailure(category="invalid_response", code="summary_groups_missing",
+                                       message="Campo groups ausente ou inválido no resumo de quota.")
+                self._probe_failure = failure
+                return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
             for group in groups:
                 if not isinstance(group, dict):
                     continue
@@ -1202,10 +1334,16 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                     rem_frac = b.get("remainingFraction")
                     if rem_frac is None:
                         logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
-                        return self.degraded("Sem medidor: remainingFraction ausente.", "antigravity_rpc")
+                        failure = ProbeFailure(category="invalid_response", code="remaining_fraction_missing",
+                                               message="Campo remainingFraction ausente no bucket de quota.")
+                        self._probe_failure = failure
+                        return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
                     if type(rem_frac) not in (float, int) or not 0 <= rem_frac <= 1:
                         logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
-                        return self.degraded("Sem medidor: remainingFraction inválido.", "antigravity_rpc")
+                        failure = ProbeFailure(category="invalid_response", code="remaining_fraction_invalid",
+                                               message="Campo remainingFraction fora do intervalo válido.")
+                        self._probe_failure = failure
+                        return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
                     raw_quota = sanitize_raw("google", b)
                     rem_pct = _clamp_percent(rem_frac * 100.0)
                     used_pct = round(100.0 - rem_pct, 2) if rem_pct is not None else None
@@ -1233,57 +1371,16 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         # 2. Fallback to GetAvailableModels if RetrieveUserQuotaSummary did not return windows
         if not windows:
             ports_to_try = [active_port] if active_port else candidate_ports[:2]
-            for port in ports_to_try:
-                req = urllib.request.Request(
-                    f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
-                    data=b"{}",
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-codeium-csrf-token": csrf_token,
-                        "Connect-Protocol-Version": "1",
-                    },
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(req, context=ctx, timeout=1.0) as res:
-                        models_payload = json.loads(res.read().decode("utf-8"))
-                    models = models_payload.get("response", {}).get("models", {})
-                    target_model = (
-                        models.get(f"{_ANTIGRAVITY_MODEL}-high")
-                        or models.get(f"{_ANTIGRAVITY_MODEL}-medium")
-                        or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
-                    )
-                    if target_model and isinstance(target_model.get("quotaInfo"), dict):
-                        quota_info = target_model["quotaInfo"]
-                        remaining_fraction = quota_info.get("remainingFraction")
-                        if remaining_fraction is None:
-                            logger.warning("Invalid Google quotaInfo; received fields: %s", list(quota_info))
-                            return self.degraded("Sem medidor: remainingFraction ausente.", "antigravity_rpc")
-                        if remaining_fraction is not None:
-                            if type(remaining_fraction) not in (int, float) or not 0 <= remaining_fraction <= 1:
-                                logger.warning("Invalid Google quotaInfo; received fields: %s", list(quota_info))
-                                return self.degraded("Sem medidor: remainingFraction inválido.", "antigravity_rpc")
-                            raw_quota = sanitize_raw("google", quota_info)
-                            remaining_percent = _clamp_percent(remaining_fraction * 100.0)
-                            used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
-                            resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
-                            windows.append(
-                                QuotaWindow(
-                                    quota_id=f"antigravity:{_ANTIGRAVITY_MODEL}",
-                                    label="Janela Móvel (5h)",
-                                    used_percent=used_percent,
-                                    remaining_percent=remaining_percent,
-                                    window_duration_minutes=300,
-                                    resets_at=resets_at,
-                                    metric="subscription",
-                                )
-                            )
-                            active_port = port
-                            break
-                except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
-                    pass
+            windows, raw_quota, fallback_port, early_exit = self._probe_available_models_fallback(ports_to_try, csrf_token, ctx)
+            if early_exit is not None:
+                return early_exit
+            if fallback_port is not None:
+                active_port = fallback_port
 
         if not windows:
+            if self._probe_failure is None:
+                self._probe_failure = ProbeFailure(category="invalid_response", code="quota_windows_missing",
+                                                   message="RPC respondeu sem buckets de quota utilizáveis.")
             return None
 
         # Sort windows: longest duration first (weekly, then 5h)
@@ -1326,7 +1423,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             dashboard_url=self.spec.dashboard_url,
             raw_fields=raw_quota,
         )
-        usage = record_probe(usage, self.snapshot_dir)
+        usage = record_probe(usage, self.snapshot_dir).with_freshness()
         self._save_snapshot(usage)
         return usage
 

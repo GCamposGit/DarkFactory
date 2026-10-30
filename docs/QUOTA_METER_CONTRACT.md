@@ -45,3 +45,17 @@ Para confirmar uma leitura Grok suspeita após comparar o painel, executar
 `scripts/quota_audit.py --provider xai --expect xai=VALOR --confirm`. O comando
 só grava a confirmação local se a leitura bruta estiver a até 5 pontos do
 valor informado; a confirmação vale apenas para o mesmo período e percentual.
+
+## Tentativas sem amostra e frescor
+
+`checked_at` continua sendo o horário da última amostra válida; uma tentativa
+falha nunca o renova. A idade e a condição `stale` são calculadas a partir desse
+horário. Quando uma tentativa falha, `probe_failure` contém `category`, `code`,
+`occurred_at` e uma mensagem segura, sem texto bruto de exceção ou credenciais.
+As categorias do Language Server Antigravity são `configuration`, `transport`,
+`authentication`, `protocol`, `invalid_response` e `unavailable`. Se houver uma
+amostra anterior, ela permanece no snapshot com seu timestamp e janelas, enquanto
+o status passa a `degraded` e a causa da última tentativa fica persistida. O
+roteador pode rejeitar a quota vencida sem confundir dado velho com leitura atual.
+O briefing mostra idade, janelas disponíveis e causa estruturada a partir do
+mesmo snapshot.

@@ -32,3 +32,8 @@ snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
 ## Probe headless do Claude (USR-416)
 
 `ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova).
+
+## Medidor Antigravity RPC (USR-433)
+
+`GeminiAccountAdapter` coleta quotas locais via Language Server local (`antigravity_rpc`). Quando a coleta remota ou as credenciais falham, o adaptador persiste um `ProbeFailure` estruturado com categoria (`unavailable`, `invalid_response`, `protocol`, etc.) e código do erro, mantendo o estado rastreável no relatório sem expor segredos.
+

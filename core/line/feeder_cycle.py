@@ -79,7 +79,11 @@ def default_quota_gate() -> tuple[bool, str]:
     try:
         from core.line.routing import pick
 
-        chosen = pick("development", ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"])
+        chosen = pick(
+            "development",
+            ["harness:claude", "harness:codex", "harness:grok"],
+            execution_context="headless",
+        )
     except Exception as exc:
         return False, f"quota_floor: probe failed ({exc})"
     if chosen is None:

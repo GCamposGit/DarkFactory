@@ -49,3 +49,13 @@ não estende a validade da quota antiga.
 ## Cota do Claude entre sessoes (USR-416)
 
 O snapshot `anthropic` so e gravado pelo statusline enquanto ha sessao do Claude Code aberta. Sem leitura nova, `accounts --refresh` tenta uma chamada minima `claude -p` (stream-json, modelo haiku, diretorio vazio) e le o `rate_limit_event`. Se nao houver leitura, o roteador mantem o ultimo snapshot valido ate o `resets_at` da janela de 5h, somando 10 pontos ao uso (so anthropic; piso de 15 0nalterado). Depois do reset a cota volta a ser desconhecida.
+
+## Operador Interativo Antigravity (USR-433)
+
+O Antigravity é elegível para o estágio `development` **exclusivamente** quando atua como harness de operação interativo (`DARKFAC_OPERATING_HARNESS=antigravity` ou autodetectado). Em modo headless ou na frota (`--fleet`, `fleet_dispatcher`), Antigravity é estritamente somente-leitura e nunca é selecionado para escrita. Se sua quota for desconhecida ou `STALE`, permanece elegível na interface de chat interativa em modo degradado com aviso explícito e causa estruturada, respeitando o piso de 15% para cotas conhecidas.
+
+## Fallback OpenRouter para modelos de alta inteligência
+
+Para o uso de modelos de alta inteligência (como no estágio `planning`), quando nenhum harness local estiver disponível (ex.: cotas de Claude e Codex abaixo do piso crítico de 15%), é permitido e correto recorrer ao OpenRouter com um modelo de alta capacidade dentro do teto orçamentário configurado (`run_caps.openrouter_usd`), assegurando a continuidade autônoma do fluxo sem dependência de intervenção humana imediata.
+
+

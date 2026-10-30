@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -78,6 +78,15 @@ class QuotaWindow(BaseModel):
     metric: str = "subscription"
 
 
+class ProbeFailure(BaseModel):
+    """Sanitized reason the latest quota probe did not update a sample."""
+
+    category: Literal["configuration", "transport", "authentication", "protocol", "invalid_response", "unavailable"]
+    code: str
+    occurred_at: str = Field(default_factory=utc_now_iso)
+    message: str
+
+
 class ProviderAccountUsage(BaseModel):
     provider_id: str
     provider_name: str
@@ -98,6 +107,7 @@ class ProviderAccountUsage(BaseModel):
     source_node: Optional[str] = None
     age_seconds: Optional[int] = None
     stale: bool = False
+    probe_failure: Optional[ProbeFailure] = None
 
     def with_freshness(self, now: Optional[datetime] = None) -> "ProviderAccountUsage":
         """Fill ``age_seconds``/``stale`` from ``checked_at`` (status and windows stay untouched)."""

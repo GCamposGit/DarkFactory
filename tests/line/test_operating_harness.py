@@ -71,7 +71,7 @@ def _config(development: Optional[list[tuple[str, Optional[str]]]] = None) -> Ro
 
 def _pick(
     tmp_path: Path,
-    lookup: Lookup,
+    lookup: Optional[Lookup],
     *,
     stage: str = "development",
     caps: Optional[list[str]] = None,
@@ -79,11 +79,12 @@ def _pick(
     **kwargs,
 ):
     kwargs.setdefault("complexity", "high")  # USR-378: the operating harness is preferred for high tickets only
+    if lookup is not None:
+        kwargs["quota_lookup"] = lookup
     return pick(
         stage,
         _ALL_CAPS if caps is None else caps,
         config=config or _config(),
-        quota_lookup=lookup,
         cooldown_path=tmp_path / "cooldowns.json",
         **kwargs,
     )
@@ -289,7 +290,9 @@ def test_a_harness_listed_twice_keeps_the_ranking_among_its_own_entries(tmp_path
     config = _config([("claude", "sonnet"), ("claude", "opus"), ("codex", None)])
     lookup = _lookup(claude=40.0, codex=95.0)
 
-    assert _pick(tmp_path, lookup, config=config, operating_harness="claude", complexity="medium") == ("codex", None)
+    assert _pick(tmp_path, lookup, config=config, operating_harness="claude", complexity="medium") == (
+        "claude", "sonnet",
+    )
     assert _pick(tmp_path, lookup, config=config, operating_harness="claude", complexity="high") == (
         "claude",
         "opus",
@@ -327,10 +330,10 @@ def test_the_operating_harness_beats_the_high_complexity_opus_preference(
     assert _pick(tmp_path, lookup, config=config, complexity="high") == ("claude", "opus")  # control
     assert _pick(tmp_path, lookup, config=config, complexity="high", operating_harness="codex") == ("codex", None)
     assert _pick(tmp_path, lookup, config=config, complexity="high", operating_harness="grok") == ("grok", None)
-    # USR-378: "critical" is not "high", so the chat preference does not apply
+    # Complexity no longer gates the interactive operator preference.
     assert _pick(tmp_path, lookup, config=config, complexity="critical", operating_harness="antigravity") == (
-        "claude",
-        "opus",
+        "antigravity",
+        None,
     )
 
 
@@ -341,9 +344,8 @@ def test_the_operating_harness_does_not_beat_the_low_complexity_luna_preference(
     lookup = _lookup(claude=30.0, codex=90.0, grok=25.0)
 
     assert _pick(tmp_path, lookup, config=config, complexity="low") == ("codex", "luna")  # control
-    # USR-378: the chat preference is for high-complexity tickets only
-    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="claude") == ("codex", "luna")
-    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="grok") == ("codex", "luna")
+    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="claude") == ("claude", "sonnet")
+    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="grok") == ("grok", None)
 
 
 # --------------------------------------------------------------------------
@@ -353,7 +355,7 @@ def test_the_operating_harness_does_not_beat_the_low_complexity_luna_preference(
 # For a cascade member (claude) and for an extra candidate (grok): the rule that applies when it is out.
 
 
-@pytest.mark.parametrize("quota", [15.0, 14.9, 3.0, 0.0, None], ids=lambda q: f"quota-{q}")
+@pytest.mark.parametrize("quota", [15.0, 14.9, 3.0, 0.0], ids=lambda q: f"quota-{q}")
 def test_a_critical_or_unknown_operating_harness_falls_back_to_headroom(
     quota: Optional[float], tmp_path: Path, grok_and_antigravity_write: None
 ) -> None:
@@ -361,6 +363,51 @@ def test_a_critical_or_unknown_operating_harness_falls_back_to_headroom(
 
     assert _pick(tmp_path, lookup, operating_harness="claude") == ("codex", None)
     assert _pick(tmp_path, lookup, operating_harness="grok") == ("codex", None)
+
+
+def test_unknown_operating_quota_is_allowed_with_structured_warning(
+    tmp_path: Path, grok_and_antigravity_write: None, caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="core.line.routing"):
+        assert _pick(tmp_path, _lookup(claude=None, codex=90.0), operating_harness="claude") == (
+            "claude", "sonnet",
+        )
+    assert any(
+        "operating_harness_quota_degraded harness=claude state=unknown reason=unknown" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_stale_operating_quota_is_allowed_with_stale_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grok_and_antigravity_write: None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from core.line import routing
+
+    monkeypatch.setattr(routing, "_quota_headroom_diagnosis", lambda provider: (None, "stale_snapshot"))
+    monkeypatch.setattr(routing, "_default_weekly_slack", lambda _provider: None)
+    with caplog.at_level(logging.WARNING, logger="core.line.routing"):
+        assert _pick(tmp_path, None, operating_harness="antigravity") == ("antigravity", None)
+    assert any(
+        "operating_harness_quota_degraded harness=antigravity state=unknown reason=stale_snapshot" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+@pytest.mark.parametrize("signal", ["explicit", "autodetect"])
+def test_antigravity_operator_is_preferred_interactively_but_excluded_headless(
+    signal: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grok_and_antigravity_write: None,
+) -> None:
+    levels = _lookup(claude=90.0, codex=80.0, grok=70.0, antigravity=30.0)
+    monkeypatch.delenv(OPERATING_HARNESS_ENV, raising=False)
+    monkeypatch.delenv("ANTIGRAVITY_AGENT", raising=False)
+    if signal == "explicit":
+        monkeypatch.setenv(OPERATING_HARNESS_ENV, "antigravity")
+    else:
+        monkeypatch.setenv("ANTIGRAVITY_AGENT", "1")
+
+    assert _pick(tmp_path, levels) == ("antigravity", None)
+    assert _pick(tmp_path, levels, execution_context="headless") == ("claude", "sonnet")
 
 
 def test_a_cooling_operating_harness_falls_back_to_headroom(
@@ -421,13 +468,12 @@ def test_an_operating_harness_with_a_forbidden_model_falls_back_to_headroom(tmp_
 def test_the_unknown_operating_harness_is_not_elected_by_the_unknown_quota_bootstrap(
     tmp_path: Path, grok_and_antigravity_write: None
 ) -> None:
-    # Cascade members all critical, the extra operating harness unknown: last_resort may only bootstrap
-    # cascade members, never the extra candidate.
+    # Interactive operator unknown quota is its own policy, independent of the generic bootstrap.
     lookup = _lookup(claude=5.0, codex=5.0, grok=None)
 
     choice = _pick(tmp_path, lookup, operating_harness="grok", unknown_quota_last_resort_ok=True)
 
-    assert choice is None
+    assert choice == ("grok", None)
 
 
 # --------------------------------------------------------------------------
