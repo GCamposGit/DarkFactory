@@ -1,6 +1,6 @@
 # Handoff operacional
 
-Versao: 4
+Versao: 5
 Atualizado em: 2026-10-30
 
 ## Estado
@@ -8,7 +8,7 @@ Atualizado em: 2026-10-30
 - Fase: V0 da Dark Factory.
 - Canais: Telegram, DarkHub e interfaces de chat; demandas seguem por `run_ticket.py` e pelo registro compartilhado no control store.
 - Operacao: Antigravity como interface interativa de operacao (`DARKFAC_OPERATING_HARNESS=antigravity`); tarefas headless/frota sao executadas pelo harness eleito pelo roteador (Grokbox e Notebook). Antigravity nunca e usado por workers, `--fleet` ou pump.
-- USR-421: o foco `python -m pytest tests/test_fleet_dispatcher.py -q` encerra sozinho no Windows depois de 100%, com cache de pytest por worktree. O contrato esta em `docs/manual/testes.md` e `docs/FASE_ATUAL.md`.
+- USR-421: o foco `python -m pytest tests/test_fleet_dispatcher.py -q` encerra sozinho no Windows depois de 100%, com cache de pytest por worktree. O contrato esta em `docs/manual/testes.md` e `docs/FASE_ATUAL.md`. PR #801 mesclado e implantado.
 
 ## Decisoes
 
@@ -23,14 +23,14 @@ Atualizado em: 2026-10-30
 
 - **USR-433**: Briefing de sessao agnostico de harness (`core.ops.briefing`), `docs/operacao/HANDOFF.md`, eleicao do Antigravity como operador no roteador, estabilizacao do medidor RPC de cota Antigravity. PR #798 mesclado e implantado.
 - **USR-434**: Prevencao de regressao no snapshot diario do ledger; importacao de OAs git-only para a control store antes da exportacao do snapshot; unificacao e protecao de IDs no `core/owner_actions/store.py`; restauracao da acao do Desktop como `OA-081` e correcao do item #82 de decision sem opcoes para action. PR #799 mesclado (commit `3b655f03949eeb1cc945c6107d73d68d64ef4d96`); deploy Dokploy com DarkHub blue-green no slot blue.
-- **USR-421**: redirecionamento do cache do pytest por worktree, reaplicado no inicio de `pytest_sessionfinish`, para o foco do `fleet_dispatcher` terminar com codigo de saida e resumo `N passed in Xs` mesmo quando `%LOCALAPPDATA%` nao e gravavel.
+- **USR-421**: redirecionamento do cache do pytest por worktree, reaplicado no inicio de `pytest_sessionfinish`, para o foco do `fleet_dispatcher` terminar com codigo de saida e resumo `N passed in Xs` mesmo quando `%LOCALAPPDATA%` nao e gravavel. PR #801 mesclado no `main` (commit `58b4b2aaa41d39b05c22ea9be07f80793300113e`), CI no `main` verde, deploy Dokploy concluido e ticket marcado `completed` no PostgreSQL e ledger.
+- **USR-435**: CI no `main` verificado e 100% verde apos o merge do USR-421 (run 41130641330), ticket marcado `completed`.
 - **Estabilidade de testes**: ajuste de margem no heartbeat do wrapper Claude (`tests/test_usr209_session_registration.py`) eliminando flake sob alta carga sustentada de CPU.
 - **Destravamento da frota**: cancelamento da reserva `fres-2c869b3d2606` que mantinha Grokbox preso em retry de canary sem rota, liberando Grokbox para o `DarkFac-Fleet-Dispatcher`.
-- **Handoff**: a versao 3 removeu o titulo `## Decisoes` e gravou um id literal de modelo. A versao 4 devolve as secoes do contrato e cita so o alias.
 
 ## O que esta em voo
 
-- **Fila da frota**: tickets planejados no control store: USR-420 (sendo puxado pelo Grokbox), USR-424, USR-428, USR-429, USR-430, USR-431. USR-421 esta neste candidato, ainda sem merge.
+- **Fila da frota**: tickets planejados no control store: USR-420 (sendo executado pelo Grokbox e Notebook), USR-424, USR-428, USR-429, USR-430, USR-431.
 - **Monitoramento em background**: tarefa `task-506` ativa a cada 30 min para vigiar a saude da sessao e notificar o Owner via Telegram em caso de deadlock.
 
 ## Pendencias
@@ -46,6 +46,8 @@ Atualizado em: 2026-10-30
 3. **Buffering de subprocessos Python no Windows**: streams redirecionadas para pipes seguram saida ate preencher buffer de 4/8 KB; para ver logs em tempo real em tarefas background, use `PYTHONUNBUFFERED=1` ou `python -u`.
 4. **Reservas de frota zumbis**: se um canary ou run retentar planning sem rota disponivel, ele pode reter uma reserva `fres-...` no PostgreSQL. Ao diagnosticar fila ociosa com Grokbox saudavel, verifique a tabela `fleet_reservations`.
 5. **Id literal no handoff**: o censo de modelos conta `claude-`, `gpt-`, `grok-`, `gemini-` e `deepseek-` fora da allowlist. Este arquivo tem baseline 0. Use alias ou marque id de fio com `census: wire-id` na mesma linha.
+6. **Materializacao de tickets em worktree antiga**: worktrees criadas antes da adocao/sincronizacao de um ticket na control store podem falhar no `complete_ticket` com "Ticket not found in demands store" (escopo do USR-424). A resolucao imediata e materializar o ticket da raiz/control store no `demands.json` da worktree.
+7. **Corrida de CI do merge anterior no check-main**: ao disparar `dokploy_redeploy.py` imediatamente apos o merge, `check_main` pode inspecionar o ultimo run *concluido* do commit anterior enquanto o run do novo commit ainda esta `in_progress`. Aguarde a conclusao do run do commit atual antes de redeploy se o anterior estava vermelho.
 
 ## Proximo passo
 
