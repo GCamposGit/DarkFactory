@@ -82,6 +82,7 @@ STAGE_MODES: dict[str, str] = {
     "development": "write",
     "integration": "write",
 }
+ExecutionContext = Literal["interactive", "headless"]
 _DEFAULT_STAGE_MODE = "read"
 
 
@@ -641,6 +642,7 @@ def _routable_candidates(
     excluded_pairs: set[tuple[str, Optional[str]]],
     implementing_harness: Optional[str],
     operating_harness: Optional[str] = None,
+    execution_context: ExecutionContext = "interactive",
 ) -> list[tuple[str, Optional[str]]]:
     """Cascade candidates that could serve `stage` on this host, before cooldown/quota (pick() steps 0-1).
 
@@ -657,6 +659,9 @@ def _routable_candidates(
     cascade = _resolve_cascade(stage_cfg, implementing_harness)
     extra = _extra_operating_candidate(cascade, operating_harness)
     for harness, model in cascade + ([extra] if extra is not None else []):
+        if stage == "development" and execution_context == "headless" and harness == "antigravity":
+            logger.info("Skipping harness antigravity for stage development (headless_context)")
+            continue
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
             logger.info("Skipping harness %s for stage %s (excluded by caller)", harness, stage)
             continue
@@ -802,6 +807,55 @@ def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float
         return False
 
 
+def _pick_winner(
+    stage: str,
+    complexity: Optional[str],
+    operating: Optional[str],
+    eligible: list[tuple[str, Optional[str], float]],
+    extra_eligible: list[tuple[str, Optional[str], float]],
+    preferred_unknown: list[tuple[str, Optional[str]]],
+    unknown_quota: list[tuple[str, Optional[str]]],
+    slack_fn: Callable[[str], Optional[float]],
+    execution_context: ExecutionContext,
+    unknown_quota_last_resort_ok: Optional[bool],
+    quota_lookup: Optional[Callable[[str], Optional[float]]],
+) -> Optional[tuple[str, Optional[str]]]:
+    preferred = ([cand for cand in eligible if cand[0] == operating] or extra_eligible) if operating else []
+    if preferred:
+        winner = _rank_eligible(stage, complexity, preferred)
+        logger.info(
+            "operating_harness_preferred harness=%s remaining=%.1f stage=%s",
+            winner[0], next(item[2] for item in preferred if (item[0], item[1]) == winner), stage,
+        )
+        return winner
+    if preferred_unknown:
+        winner = preferred_unknown[0]
+        provider_id = _HARNESS_TO_PROVIDER.get(winner[0], winner[0])
+        reason: QuotaDiagnosisReason = "unknown"
+        if quota_lookup is None:
+            reason = _quota_headroom_diagnosis(provider_id)[1]
+        logger.warning(
+            "operating_harness_quota_degraded harness=%s state=unknown reason=%s policy=allow_interactive",
+            winner[0], reason,
+        )
+        return winner
+    if eligible:
+        return _rank_eligible(stage, complexity, eligible, _slack_by_candidate(stage, eligible, slack_fn))
+
+    if stage == "development":
+        allow_unknown = (complexity or "").lower().strip() == "low"
+    else:
+        allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
+    if allow_unknown and unknown_quota:
+        winner = unknown_quota[0]
+        logger.warning(
+            "No harness with known healthy quota for stage %s; electing %s with UNKNOWN quota as last resort",
+            stage, winner[0],
+        )
+        return winner
+    return None
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -821,26 +875,26 @@ def pick(
     operating_harness: Optional[str] = None,
     project_id: Optional[str] = None,
     slack_lookup: Optional[Callable[[str], Optional[float]]] = None,
+    execution_context: ExecutionContext = "interactive",
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
     `mode` is the agent mode the caller will request (`read`/`write`); when None it is derived from
     the stage (`STAGE_MODES`).
 
-    `operating_harness` is the harness the owner is operating the factory through (USR-109); when None it
-    comes from `DARKFAC_OPERATING_HARNESS` or autodetection (`core.line.operating_harness`), and with no
-    signal there is none. It only matters for the `development` stage.
+    `execution_context` is `interactive` for an owner-operated chat and `headless` for fleet/worker
+    routing. Headless development excludes Antigravity, even if present in host capabilities.
+    `operating_harness` is the owner-operated harness; when None it comes from
+    `DARKFAC_OPERATING_HARNESS` or autodetection. It only matters in interactive development.
 
     Enforces:
     0. Filter out harnesses that do not declare `mode` (before any headroom ranking).
     1. Filter out accounts in cooldown, missing from host_caps, forbidden models,
-       and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed except unknown quota
-       for low-complexity development tickets).
-    1b. Operating-harness preference (`development`, `complexity == "high"` only, USR-378): when the operating harness survived every
-       filter above with known quota above the critical floor and no cooldown, it is elected before any
-       headroom or complexity ranking. A harness outside the stage cascade takes part as an extra
-       candidate that only this step can elect. If it did not survive, nothing changes (the 15% floor is
-       never relaxed).
+       and accounts with unknown or CRITICAL quota (<= 15.0%, except for the explicitly logged
+       interactive operating-harness degraded route).
+    1b. Interactive operating-harness preference in development: an operator with known quota above
+       the critical floor is elected ahead of ranking. Unknown/stale quota remains eligible with a
+       structured warning; known quota at/below the floor, cooldown and other filters still exclude it.
     2. Dynamic Headroom prioritization:
        - High complexity / planning: prefers Claude Opus / GPT Sol if eligible,
          falling back to highest headroom.
@@ -870,10 +924,13 @@ def pick(
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
-    # The operating-harness preference is a development-only rule; other stages never even look it up.
-    # USR-378: it applies to high-complexity tickets only; the rest is ranked by weekly slack.
-    is_high = (complexity or "").lower().strip() == "high"
-    operating = resolve_operating_harness(operating_harness) if stage == "development" and is_high else None
+    if execution_context not in ("interactive", "headless"):
+        raise ValueError(f"Unknown execution_context: {execution_context}")
+    operating = (
+        resolve_operating_harness(operating_harness)
+        if stage == "development" and execution_context == "interactive"
+        else None
+    )
     extra_candidate = _extra_operating_candidate(_resolve_cascade(stage_cfg, implementing_harness), operating)
     slack_fn = slack_lookup or (_default_weekly_slack if quota_lookup is None else (lambda _provider: None))
 
@@ -882,11 +939,12 @@ def pick(
     evaluated: list[tuple[str, Optional[str], bool, bool, float]] = []
     eligible: list[tuple[str, Optional[str], float]] = []
     extra_eligible: list[tuple[str, Optional[str], float]] = []
+    preferred_unknown: list[tuple[str, Optional[str]]] = []
     unknown_quota: list[tuple[str, Optional[str]]] = []
 
     for harness, model in _routable_candidates(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
-        operating,
+        operating, execution_context,
     ):
         if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model):
             logger.info("pick: %s/%s skipped for stage %s (not a high-tier model)", harness, model, stage)
@@ -916,6 +974,8 @@ def pick(
             # part in the headroom ranking, the unknown-quota bootstrap or the "all exhausted" fallback.
             if not cooling and not is_critical and remaining is not None:
                 extra_eligible.append((harness, model, remaining))
+            elif not cooling and remaining is None and harness == operating:
+                preferred_unknown.append((harness, model))
             continue
 
         evaluated.append((harness, model, cooling, is_critical, remaining or 0.0))
@@ -924,33 +984,13 @@ def pick(
             eligible.append((harness, model, remaining))
         elif not cooling and remaining is None:
             unknown_quota.append((harness, model))
+            if harness == operating:
+                preferred_unknown.append((harness, model))
 
-    winner: Optional[tuple[str, Optional[str]]] = None
-
-    preferred = ([cand for cand in eligible if cand[0] == operating] or extra_eligible) if operating else []
-    if preferred:
-        # Same ranking as below, restricted to the operating harness (picks among its own cascade models).
-        winner = _rank_eligible(stage, complexity, preferred)
-        logger.info(
-            "operating_harness_preferred harness=%s remaining=%.1f stage=%s",
-            winner[0], next(item[2] for item in preferred if (item[0], item[1]) == winner), stage,
-        )
-    elif eligible:
-        winner = _rank_eligible(stage, complexity, eligible, _slack_by_candidate(stage, eligible, slack_fn))
-
-    # USR-382: unknown subscription quota is a degraded route for small development tickets only.
-    # Keep the explicit last-resort bootstrap for non-development/read stages, but never let it
-    # authorize medium/high development work whose quota cannot be measured.
-    if stage == "development":
-        allow_unknown = (complexity or "").lower().strip() == "low"
-    else:
-        allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
-    if winner is None and allow_unknown and unknown_quota:
-        winner = unknown_quota[0]
-        logger.warning(
-            "No harness with known healthy quota for stage %s; electing %s with UNKNOWN quota as last resort",
-            stage, winner[0],
-        )
+    winner = _pick_winner(
+        stage, complexity, operating, eligible, extra_eligible, preferred_unknown,
+        unknown_quota, slack_fn, execution_context, unknown_quota_last_resort_ok, quota_lookup,
+    )
 
     if winner is not None:
         if reserve_quota:

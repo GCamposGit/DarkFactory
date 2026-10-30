@@ -1,0 +1,13 @@
+diff --git a/.agents/rules/GEMINI.md b/.agents/rules/GEMINI.md
+--- a/.agents/rules/GEMINI.md
++++ b/.agents/rules/GEMINI.md
+@@ -3,6 +3,13 @@
+ 
+ @../../AGENTS.md
++
++## Operacao da fabrica
++
++- No inicio de cada sessao, rode `python -m core.ops.briefing` para ler fila, acoes do owner, nos, PRs, cotas e o handoff compartilhado. O briefing e somente leitura; se uma secao falhar, use o fallback e a causa que ele imprimir.
++- Configure o harness de operacao com `$env:DARKFAC_OPERATING_HARNESS = 'antigravity'` nesta sessao. Quando o roteador eleger Antigravity para `development` em uma interface interativa, implemente no proprio chat. Cota desconhecida ou `STALE` permanece elegivel somente nessa rota interativa, com aviso e registro da causa; nao trate snapshot antigo como percentual confirmado.
++- Quando o roteador eleger outro harness, despache o ticket por `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`. Antigravity nunca executa em modo headless, frota, worker, `--fleet` ou pump.
++- Ao encerrar, atualize `docs/operacao/HANDOFF.md` com a versao seguinte, data, decisoes, estado e pendencias relevantes para a proxima sessao.

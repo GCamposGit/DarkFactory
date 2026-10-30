@@ -528,6 +528,9 @@
     },
     "intake": {
       "internal": "Roteamento de demanda por projeto e registro de pedidos de onboarding do Telegram (USR-278); sem superficie propria no Hub."
+    },
+    "ops": {
+      "internal": "Briefing agnostico de sessao da fabrica para interfaces de chat (USR-433); CLI local sem superficie no Hub."
     }
   }
 }

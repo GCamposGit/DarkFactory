@@ -567,6 +567,7 @@ def test_ok_agent_without_implementation_is_rejected_before_delivery(
 
 def _real_router_with(monkeypatch: pytest.MonkeyPatch, **by_provider: float) -> None:
     monkeypatch.setattr(routing, "_default_quota_headroom", lambda provider: by_provider.get(provider, 50.0))
+    monkeypatch.setattr(routing, "_default_weekly_slack", lambda _provider: None)
     monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "1")  # USR-336: codex is blocked by default on Windows
 
 
@@ -579,15 +580,14 @@ def test_dry_run_json_reports_the_operating_harness_and_why_it_was_elected(
     assert main(["USR-99", "--dry-run", "--json"]) == 0
 
     payload = json.loads(capsys.readouterr().out)
-    # USR-378: the chat preference only applies to high-complexity tickets; run_ticket passes none here.
-    assert payload["selected_harness"] == "claude"
-    assert payload["operating_harness"] == "codex" and payload["route_reason"] == "headroom"
+    assert payload["selected_harness"] == "codex"
+    assert payload["operating_harness"] == "codex" and payload["route_reason"] == "operating_harness_preferred"
 
 
-def test_ticket_complexity_reaches_the_router_high_elects_the_operating_harness(
+def test_ticket_complexity_does_not_gate_the_interactive_operating_harness(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """USR-399: high prefers the operating harness (quota > 15%); medium keeps the headroom winner."""
+    """The operating chat is preferred for development at every ticket complexity."""
     _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
     monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
     selected = {}
@@ -595,7 +595,7 @@ def test_ticket_complexity_reaches_the_router_high_elects_the_operating_harness(
         monkeypatch.setattr(_TICKET, "estimated_complexity", complexity, raising=False)
         assert main(["USR-99", "--dry-run", "--json"]) == 0
         selected[complexity] = json.loads(capsys.readouterr().out)["selected_harness"]
-    assert selected == {"high": "codex", "medium": "claude"}
+    assert selected == {"high": "codex", "medium": "codex"}
 
 
 def test_dry_run_without_any_signal_reports_no_operating_harness_and_the_headroom_reason(
@@ -620,7 +620,27 @@ def test_dry_run_shows_the_detected_harness_and_the_preference_in_the_selection_
 
     out = capsys.readouterr().out
     assert "[+] Harness de operacao detectado: codex" in out
-    assert "CLAUDE (Modelo: sonnet, modo: write)" in out and "preferencia" not in out  # USR-378: high only
+    assert "CODEX (Modelo:" in out and "preferencia: harness de operacao" in out
+
+
+def test_fleet_dry_run_never_routes_to_antigravity_operator(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _real_router_with(monkeypatch, anthropic=90.0, openai=80.0, xai=70.0, google=30.0)
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+
+    assert main(["USR-99", "--fleet", "--host-id", "desktop", "--dry-run", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_harness"] == "claude"
+    assert payload["operating_harness"] == "antigravity" and payload["route_reason"] == "headroom"
+
+
+def test_fleet_rejects_explicit_antigravity(
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["USR-99", "--fleet", "--host-id", "desktop", "--harness", "antigravity", "--dry-run"]) == 2
+    assert "nao e elegivel para desenvolvimento headless/frota" in capsys.readouterr().err
 
 
 def test_a_critical_operating_harness_is_reported_but_not_preferred(

@@ -1,0 +1,9 @@
+diff --git a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -101,4 +101,4 @@
+ ## 10. Harnesses
+ 
+ - Claude Code: `CLAUDE.md` importa este arquivo; skills em `.claude/skills/`.
+-- Antigravity: `.agents/rules/GEMINI.md` importa este arquivo; skills em `.agents/skills/`; somente leitura no roteamento.
++- Antigravity: `.agents/rules/GEMINI.md` importa este arquivo; skills em `.agents/skills/`; somente leitura no headless, com escrita quando atua como interface interativa.

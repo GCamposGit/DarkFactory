@@ -4,11 +4,12 @@ Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
 
-Última revisão: 25/10/2026 (owner).
+Última revisão: 29/10/2026 (fábrica; operação interativa Antigravity).
 
 ## Canais de entrada
-- Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build).
+- Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
 - Os três devem funcionar sem erro e levar a demanda pelo mesmo motor (`run_ticket.py` / despachante).
+- Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
 
 ## Ambiente e máquinas
 - Windows é o ambiente principal; Linux roda no CI e na VM do Grok.
@@ -21,6 +22,8 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - OpenRouter: perto de US$ 10/mês; pode subir se aumentar a vazão. Hoje o código aplica só um teto por execução de US$ 2 (`run_caps.openrouter_usd` em `.factory/config/line_routing.json`); o teto mensal em código é parte do bloco USR-378.
 - Dentro desses tetos a fábrica decide sozinha; acima deles, pergunta ao owner (MISSION, princípio 2).
 - Piso de cota: nenhuma assinatura é usada para escrever código com 15% ou menos de cota restante (`core/line/routing.py`).
+- Cota Antigravity: o briefing de 29/10/2026 leu snapshot local atual, com 98,91% restante semanal e 96,0% na janela móvel de 5h; essa amostra estava atual (menos de 1 minuto). Snapshot ausente, inválido ou `STALE` não é percentual confirmado: a preferência do operador Antigravity segue elegível apenas no chat interativo, com aviso e causa estruturada; qualquer execução headless exclui Antigravity.
+- Briefing operacional: `python -m core.ops.briefing` reúne fila, OAs abertas de todas as fontes, nós sem atualização, PRs com fallback quando `gh` falha, snapshots de cota e `docs/operacao/HANDOFF.md`. Em 29/10, o control store PostgreSQL estava inacessível e a leitura da fila usou o fallback em memória; `gh` não estava disponível.
 - Claude Code: coletor versionado do statusLine e leitura de snapshots sanitizados estão disponíveis no código; a validação ponta a ponta no Notebook ainda está pendente. Em 26/10/2026, o preflight local com Claude Code 2.1.278 retornou Anthropic conectada via credenciais, sem quota (`quota_supported=false`) e sem janelas 5h/7d. Portanto, a fonte real do Desktop ainda não foi confirmada e o roteador deve tratar a quota como desconhecida até uma sessão autenticada acionar o statusLine. Evidência sanitizada: [`docs/evidence/USR-391-notebook-statusline.md`](evidence/USR-391-notebook-statusline.md).
 
 ## Tempo e participação do owner
@@ -53,6 +56,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - Canário diário de ponta a ponta passando e backup pós-deploy com prova de restauração.
 
 ## Histórico
+- 29/10/2026: Antigravity formalizado como interface interativa com briefing compartilhado e handoff versionado; cota atual confirmada pelo snapshot local, com causa estruturada para falhas futuras; execução headless/frota continua excluída.
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
 - 26/10/2026: Desktop fora da frota por `DARKFAC_FLEET_DISABLED_HOSTS=desktop` (pedido do owner).
 - 27/10/2026: OA-066 encerrada (Google dispensou o developer token; acesso via Google Cloud); OA-067 cancelada (sem Instagram/Facebook), redes sociais fora do piloto por ora.

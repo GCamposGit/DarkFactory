@@ -319,6 +319,7 @@ class IntegrationStageHandler:
             config=self.routing_config,
             quota_lookup=self.quota_lookup,
             cooldown_path=self.cooldown_path,
+            execution_context="headless",
         )
         if choice is None:
             return self.route_waiter.no_route_result(

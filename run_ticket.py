@@ -832,8 +832,9 @@ def _invoke_fix_agent(
     fails again for the same reason, which the caller already treats as an (eventually final) failure.
     """
     route = pick(
-        "development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
-        complexity=_routing_complexity(ticket),
+        "development", [cap for cap in _DEV_HOST_CAPS if cap != "harness:antigravity"],
+        mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
+        complexity=_routing_complexity(ticket), execution_context="headless",
     )
     if route is None:
         logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
@@ -2639,6 +2640,11 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
 
 
 def _stage_check_harness(args: argparse.Namespace) -> Optional[int]:
+    if args.harness:
+        requested = args.harness.lower().strip()
+        if getattr(args, "fleet", False) and requested == "antigravity":
+            print("[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.", file=sys.stderr)
+            return 2
     # Fail before any side effect (quota probe, ticket creation, agent call) when the requested harness
     # cannot do what development needs: capabilities are declared, never assumed.
     if args.harness and not (args.create and args.queue_only) and not supports(args.harness, DEVELOPMENT_MODE):
@@ -2703,9 +2709,14 @@ def _stage_route(
     operating_harness: Optional[str],
 ) -> Any:
     """Routing decision. Returns (harness, model, reason) or an int exit code."""
-    caps = _DEV_CAPS
+    execution_context = "headless" if getattr(args, "fleet", False) else "interactive"
+    caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
     if args.harness:
         target_harness = args.harness.lower().strip()
+        if execution_context == "headless" and target_harness == "antigravity":
+            print("[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.", file=sys.stderr)
+            progress.phase("preflight", "failed", "antigravity indisponivel em contexto headless", cause="headless_context")
+            return 2
         harness_info = quotas.get(target_harness)
         if harness_info and harness_info["is_critical"] and not override_granted:
             quota_reason = ("sem medidor verificável" if harness_info["headroom"] is None
@@ -2723,7 +2734,7 @@ def _stage_route(
             # Find recommended healthy harness
             rec_route = pick(
                 "development", caps, mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
-                complexity=_routing_complexity(ticket),
+                complexity=_routing_complexity(ticket), execution_context=execution_context,
             )
             if rec_route:
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
@@ -2742,6 +2753,7 @@ def _stage_route(
     route = pick(
         "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
         project_id=ticket.project_id, complexity=_routing_complexity(ticket),
+        execution_context=execution_context,
     )
     if route is None:
         progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
