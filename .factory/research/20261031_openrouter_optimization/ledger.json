@@ -1,0 +1,41 @@
+{
+  "slug": "20261031_openrouter_optimization",
+  "topic": "Otimizacao e Melhores Praticas de OpenRouter vs. Subscricoes na Dark Factory",
+  "created_at": "2026-10-31T22:37:00Z",
+  "sources": [
+    {
+      "title": "FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance",
+      "authors": ["Lingjiao Chen", "Matei Zaharia", "James Zou"],
+      "url": "https://arxiv.org/abs/2305.05176",
+      "doi": "10.48550/arXiv.2305.05176",
+      "type": "canonical_paper",
+      "key_takeaway": "Framework de cascata LLM que reduz custos em ate 98% usando modelos menores e mais baratos como primeiro filtro e escalando para modelos de fronteira apenas quando necessario."
+    },
+    {
+      "title": "RouteLLM: Learning to Route LLMs with Preference Data",
+      "authors": ["LMSYS Org", "UC Berkeley"],
+      "url": "https://github.com/lm-sys/RouteLLM",
+      "type": "canonical_paper",
+      "key_takeaway": "Roteamento treinado com matriz de preferencia que desvia 70-85% do trafego para modelos mais baratos preservando >95% da qualidade dos modelos de fronteira."
+    },
+    {
+      "title": "OpenRouter API Pricing & Credits Specification",
+      "authors": ["OpenRouter"],
+      "url": "https://openrouter.ai/docs/api-reference",
+      "type": "official_doc",
+      "key_takeaway": "Acesso unificado a centenas de modelos com telemetria precisa de custo em USD, creditos pre-pagos e roteamento por latencia/preco."
+    },
+    {
+      "title": "Artificial Analysis Intelligence & Price Index",
+      "authors": ["Artificial Analysis"],
+      "url": "https://artificialanalysis.ai/",
+      "type": "benchmark_data",
+      "key_takeaway": "Fronteira de Pareto empirica relacionando capacidade de codigo (eval score) com preco por 1M tokens e velocidade (TPS)."
+    }
+  ],
+  "pareto_summary": {
+    "flash_leader": "deepseek/deepseek-v4.1-flash ($0.045/M in, $0.50/M out, coding 87.2) census: wire-id",
+    "mid_leader": "openai/gpt-4o-mini ($0.15/M in, $0.60/M out, coding 82.0) census: wire-id",
+    "frontier_reasoner": "anthropic/claude-3.5-sonnet ($3.00/M in, $15.00/M out, coding 93.7) census: wire-id"
+  }
+}

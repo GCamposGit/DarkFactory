@@ -134,6 +134,8 @@ class RunCaps(BaseModel):
     review_rounds: int = 2
     wall_clock_hours: float = 6.0
     openrouter_usd: float = 2.0
+    openrouter_monthly_cap_usd: float = 10.0
+    openrouter_alert_threshold: float = 0.80
 
 
 class RoutingConfig(BaseModel):
@@ -186,12 +188,12 @@ def _default_routing_config() -> RoutingConfig:
                 ],
                 effort="high",
                 openrouter_ok=True,
-                openrouter_model=cheap_model,
+                openrouter_model=resolve_model("planning.openrouter"),
             ),
             "development": StageRoute(
                 cascade=[("claude", "sonnet"), ("codex", None), ("grok", resolve_model("development.grok"))],
-                openrouter_ok=False,  # write stage: OpenRouter is read-only, never a fallback here
-                openrouter_model=cheap_model,
+                openrouter_ok=False,
+                openrouter_model=resolve_model("development.openrouter"),
                 harness_pins={
                     "claude": HarnessPin(model="sonnet"),
                     "codex": HarnessPin(model=resolve_model("development.codex"), effort="high"),
@@ -217,9 +219,8 @@ def _default_routing_config() -> RoutingConfig:
 def validate_routing_config(config: RoutingConfig) -> list[str]:
     """Violations of the capability contract: a cascade candidate that cannot run its stage's mode.
 
-    Empty list means consistent. Only subscription harnesses are checked; the OpenRouter fallback is
-    structurally read-only and `pick()` never offers it to a write stage; `openrouter_ok: true` on a
-    write stage is reported as a violation because it can never take effect.
+    Empty list means consistent. Checks that every candidate declares its stage's mode. OpenRouter
+    declares both read and write capabilities.
     """
     violations: list[str] = []
     for stage, stage_cfg in config.stages.items():
@@ -839,6 +840,34 @@ def _planning_high_tier_healthy(
     return False
 
 
+def _check_openrouter_monthly_budget(cfg: RoutingConfig) -> None:
+    """Verifica teto mensal e dispara alerta critico se spend atingir threshold."""
+    try:
+        from core.usage.api_credits import ApiCreditsMonitor
+
+        card = ApiCreditsMonitor().inspect_openrouter()
+        if card and card.current_month_spend_usd is not None:
+            monthly_cap = getattr(cfg.run_caps, "openrouter_monthly_cap_usd", 10.0)
+            threshold = getattr(cfg.run_caps, "openrouter_alert_threshold", 0.80)
+            if card.current_month_spend_usd >= monthly_cap * threshold:
+                from core.notifications.models import AlertCategory, AlertSeverity
+                from core.notifications.service import NotificationService
+
+                svc = NotificationService(cooldown_minutes=60)
+                svc.dispatch(
+                    title="Alerta de Orcamento OpenRouter",
+                    message=(
+                        f"O consumo mensal do OpenRouter atingiu US$ {card.current_month_spend_usd:.2f} "
+                        f"(teto aprovado: US$ {monthly_cap:.2f}, {threshold * 100:.0f}% atingido).\n"
+                        f"Credito disponivel: US$ {card.available_credit_usd or 0:.2f}."
+                    ),
+                    category=AlertCategory.EXECUTION_BUDGET,
+                    severity=AlertSeverity.CRITICAL,
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Falha ao checar alerta de orcamento OpenRouter: %s", exc)
+
+
 def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float]]]) -> bool:
     """OpenRouter fallback requires a verified positive credit balance."""
     if balance_lookup is not None:
@@ -1038,7 +1067,7 @@ def pick(
                 preferred_unknown.append((harness, model))
             continue
 
-        evaluated.append((harness, model, cooling, is_critical, remaining or 0.0))
+        evaluated.append((harness, model, cooling, is_critical, remaining))
 
         if stage == "planning" and harness == "grok" and claude_or_codex_healthy:
             continue
@@ -1066,18 +1095,22 @@ def pick(
                 logger.debug("Failed reserving quota for %s: %s", winner, exc)
         return winner
 
-    no_local_available = not evaluated or all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
+    all_exhausted = bool(evaluated) and all(
+        cooling or (rem is not None and rem <= critical_threshold) for _, _, cooling, _, rem in evaluated
+    )
+    no_local_available = not evaluated or all_exhausted
+    allow_openrouter = stage_cfg.openrouter_ok or all_exhausted
     if (
-        required_mode == "read"
+        supports("openrouter", required_mode)
         and (stage not in HIGH_TIER_ONLY_STAGES or no_local_available or is_high_tier_model(stage_cfg.openrouter_model))
         and (not project_id or _policy_allows(project_id, "openrouter"))
         and stage_cfg.openrouter_model
         and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
-        and (stage_cfg.openrouter_ok or no_local_available)
+        and allow_openrouter
         and spent_usd < cfg.run_caps.openrouter_usd
     ):
-        has_credits = _openrouter_has_credits(openrouter_balance_lookup)
-        if has_credits:
+        if _openrouter_has_credits(openrouter_balance_lookup):
+            _check_openrouter_monthly_budget(cfg)
             return "openrouter", stage_cfg.openrouter_model
         logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
 

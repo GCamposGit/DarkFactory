@@ -107,7 +107,7 @@ HARNESS_CAPABILITIES: dict[str, frozenset[str]] = {
     "codex": frozenset({"read", "write"}),
     "grok": frozenset({"read", "write"}),
     "antigravity": frozenset({"read"}),
-    "openrouter": frozenset({"read"}),
+    "openrouter": frozenset({"read", "write"}),
 }
 
 
@@ -1727,8 +1727,88 @@ def _openrouter_reasoning_enabled() -> bool:
     return os.environ.get("DARKFAC_OPENROUTER_REASONING", "").strip().lower() in {"on", "true", "1"}
 
 
+_OPENROUTER_WRITE_PROMPT_APPENDIX = (
+    "\n\n====================================================================\n"
+    "INSTRUCAO DE MODIFICACAO DE CODIGO (OPENROUTER WRITE MODE):\n"
+    "Para criar ou modificar arquivos no workspace (req.cwd), produza as alteracoes usando\n"
+    "blocos de codigo markdown com o caminho relativo do arquivo no formato:\n"
+    "```file:caminho/do/arquivo.ext\n"
+    "<conteudo completo do arquivo>\n"
+    "```\n"
+    "ou para substituicao cirurgica:\n"
+    "```patch:caminho/do/arquivo.ext\n"
+    "<<<<<<< SEARCH\n"
+    "<conteudo original exato>\n"
+    "=======\n"
+    "<novo conteudo>\n"
+    ">>>>>>> REPLACE\n"
+    "```\n"
+    "Voce pode criar ou editar multiplos arquivos. Nao produza codigo fora desses blocos.\n"
+    "====================================================================\n"
+)
+
+
+def _apply_openrouter_write_blocks(text: str, cwd: Path) -> list[str]:
+    """Parse and apply ```file:path and ```patch:path blocks from model text to cwd."""
+    modified_paths: list[str] = []
+    # 1. Match ```file:path\ncontent```
+    file_pattern = re.compile(r"```file:([^\n\r]+)[\r\n]+(.*?)```", re.DOTALL)
+    for match in file_pattern.finditer(text):
+        rel_path = match.group(1).strip()
+        content = match.group(2)
+        if content.startswith("\n"):
+            content = content[1:]
+        target = (cwd / rel_path).resolve()
+        if not str(target).startswith(str(cwd.resolve())):
+            logger.warning("Refusing path outside workspace: %s", rel_path)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        modified_paths.append(rel_path)
+
+    # 2. Match ```patch:path\n<<<<<<< SEARCH...=======...>>>>>>> REPLACE```
+    patch_pattern = re.compile(r"```patch:([^\n\r]+)[\r\n]+(.*?)```", re.DOTALL)
+    for match in patch_pattern.finditer(text):
+        rel_path = match.group(1).strip()
+        body = match.group(2)
+        target = (cwd / rel_path).resolve()
+        if not str(target).startswith(str(cwd.resolve())) or not target.exists():
+            continue
+        search_part, _, replace_part = body.partition("=======")
+        if "<<<<<<< SEARCH" in search_part and ">>>>>>> REPLACE" in replace_part:
+            search_str = search_part.split("<<<<<<< SEARCH", 1)[1]
+            if search_str.startswith("\r\n"):
+                search_str = search_str[2:]
+            elif search_str.startswith("\n"):
+                search_str = search_str[1:]
+            if search_str.endswith("\r\n"):
+                search_str = search_str[:-2]
+            elif search_str.endswith("\n"):
+                search_str = search_str[:-1]
+
+            replace_str = replace_part.split(">>>>>>> REPLACE", 1)[0]
+            if replace_str.startswith("\r\n"):
+                replace_str = replace_str[2:]
+            elif replace_str.startswith("\n"):
+                replace_str = replace_str[1:]
+            if replace_str.endswith("\r\n"):
+                replace_str = replace_str[:-2]
+            elif replace_str.endswith("\n"):
+                replace_str = replace_str[:-1]
+
+            try:
+                original = target.read_text(encoding="utf-8")
+                if search_str in original:
+                    target.write_text(original.replace(search_str, replace_str, 1), encoding="utf-8")
+                    modified_paths.append(rel_path)
+            except Exception as exc:
+                logger.warning("Failed applying patch to %s: %s", rel_path, exc)
+
+    return modified_paths
+
+
 def _run_openrouter(req: AgentRequest) -> AgentResult:
-    # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
+    # OpenRouter gateway runner supporting read and write (via patch application) modes
     from core.execution.providers import OpenRouterModelProvider  # local import: keeps agent_cli import-light
 
     model_raw = req.model or os.environ.get("DARKFAC_OPENROUTER_CHEAP_MODEL") or _DEFAULT_OPENROUTER_MODEL
@@ -1738,13 +1818,14 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
         model = model_raw
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
+    prompt = req.prompt + _OPENROUTER_WRITE_PROMPT_APPENDIX if req.mode == "write" else req.prompt
     try:
         # Reasoning models (deepseek-v4.1-flash) can spend the whole completion
         # budget thinking and return `content: null` (finish_reason=length), even
         # at 16384 tokens. Disabling reasoning fixes it (1.5k tokens, valid JSON),
         # so 4096 is ample; raising max_tokens does not help.
         response = provider.generate(
-            req.prompt,
+            prompt,
             model=model,
             max_tokens=_OPENROUTER_MAX_TOKENS,
             reasoning=None if _openrouter_reasoning_enabled() else {"enabled": False},
@@ -1770,6 +1851,11 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             model, response.tokens_completion, _OPENROUTER_MAX_TOKENS,
             " (likely finish_reason=length: reasoning consumed the budget)" if truncated else "",
         )
+    if req.mode == "write":
+        modified_files = _apply_openrouter_write_blocks(response.text or "", req.cwd)
+        logger.info("OpenRouter write mode applied edits to %d files: %s", len(modified_files), modified_files)
+        if not modified_files and not (response.text or "").strip():
+            logger.warning("OpenRouter write mode produced no file edits and empty text")
     return AgentResult(
         ok=True, text=response.text or "", harness="openrouter", model=response.model,
         duration_s=duration, usage=usage, cost_usd=cost_usd,

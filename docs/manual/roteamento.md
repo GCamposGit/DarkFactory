@@ -54,8 +54,13 @@ O snapshot `anthropic` so e gravado pelo statusline enquanto ha sessao do Claude
 
 O Antigravity é elegível para o estágio `development` **exclusivamente** quando atua como harness de operação interativo (`DARKFAC_OPERATING_HARNESS=antigravity` ou autodetectado). Em modo headless ou na frota (`--fleet`, `fleet_dispatcher`), Antigravity é estritamente somente-leitura e nunca é selecionado para escrita. Se sua quota for desconhecida ou `STALE`, permanece elegível na interface de chat interativa em modo degradado com aviso explícito e causa estruturada, respeitando o piso de 15% para cotas conhecidas. A capacidade de escrita (`write`) é declarada dinamicamente via `agent_cli.supports()` quando `operating_harness == 'antigravity'` em contexto interativo (fora do modo headless), viabilizando sua eleição direta antes do ranking de folga.
 
-## Fallback OpenRouter para modelos de alta inteligência
+## Fallback e Otimizacao OpenRouter (USR-440)
 
-Para o uso de modelos de alta inteligência (como no estágio `planning`), quando nenhum harness local estiver disponível (ex.: cotas de Claude e Codex abaixo do piso crítico de 15%), é permitido e correto recorrer ao OpenRouter dentro do teto orçamentário configurado (`run_caps.openrouter_usd`), assegurando a continuidade autônoma do fluxo sem dependência de intervenção humana imediata.
+O OpenRouter atua na fabrica com duplo papel: **otimizacao continua de custo-beneficio (Fronteira de Pareto)** e **garantia de operacao continua (fallback zero-touch)** quando as cotas de assinatura estiverem no piso critico (<= 15%) ou zeradas:
+
+1. **Planejamento com Alta Inteligencia**: O estagio `planning` usa o papel `planning.openrouter` apontando para modelos de fronteira de alta capacidade (`tier: high`), garantindo que o fatiamento e especificacao mantenham qualidade Staff+ mesmo sem Claude Opus ou Codex Sol.
+2. **Desenvolvimento com Escrita Autonoma**: OpenRouter declara suporte a `write` (`agent_cli.supports("openrouter", "write") is True`) atraves do motor de aplicacao cirurgica de patches e criacao de arquivos (`_apply_openrouter_write_blocks`). No estagio `development`, quando todas as assinaturas locais estao esgotadas ou em cooldown, o OpenRouter e eleito com o papel `development.openrouter`, permitindo que a esteira continue implementando e validando sem depender de recargas manuais.
+3. **Avaliacao por Fronteira de Pareto**: Modelos de micro-custo (papel `distill.openrouter` a $0.002/tarefa) sao avaliados para estagios de menor complexidade (`distill`, `review`, fatias mecanicas), poupando as janelas de assinatura para tarefas arquiteturais densas.
+4. **Enforcement de Orcamento e Alertas no Telegram**: O roteador e a telemetria de creditos (`ApiCreditsMonitor`) respeitam o teto por execucao (`run_caps.openrouter_usd`, default US$ 2.00) e o teto mensal (`run_caps.openrouter_monthly_cap_usd`, default US$ 10.00). Ao atingir o limiar de alerta (`openrouter_alert_threshold`, default 80% ou US$ 8.00), uma notificacao critica com categoria `AlertCategory.EXECUTION_BUDGET` e enviada via Telegram ao Owner.
 
 

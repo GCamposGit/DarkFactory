@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from core.line import diagnostics
-from core.line.agent_cli import _classify_error, _extract_reset_at
+from core.line.agent_cli import HARNESS_CAPABILITIES, _classify_error, _extract_reset_at
 from core.line.routing import (
     RoutingConfig,
     StageRoute,
@@ -86,14 +86,18 @@ def test_repo_config_has_no_openrouter_for_development_and_is_consistent() -> No
     assert validate_routing_config(cfg) == []
 
 
-def test_validate_flags_openrouter_ok_on_a_write_stage() -> None:
+def test_validate_flags_openrouter_ok_on_a_write_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(HARNESS_CAPABILITIES, "openrouter", frozenset({"read"}))
     cfg = RoutingConfig(
         stages={"development": StageRoute(cascade=[("claude", "sonnet")], openrouter_ok=True, openrouter_model="x/y")}
     )
     assert any("openrouter_ok" in v for v in validate_routing_config(cfg))
 
 
-def test_development_with_claude_cooling_and_codex_unknown_gets_no_route_not_openrouter(tmp_path: Path) -> None:
+def test_development_with_claude_cooling_and_codex_unknown_gets_no_route_not_openrouter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(HARNESS_CAPABILITIES, "openrouter", frozenset({"read"}))
     cooldowns = tmp_path / "cooldowns.json"
     cooldowns.write_text(
         json.dumps({"claude": {"until": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}}),

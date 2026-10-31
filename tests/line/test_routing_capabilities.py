@@ -55,7 +55,7 @@ def _write_config(tmp_path: Path, development_cascade: list[list[str | None]], *
 
 @pytest.mark.parametrize(
     ("harness", "write"),
-    [("claude", True), ("codex", True), ("grok", True), ("antigravity", False), ("openrouter", False)],
+    [("claude", True), ("codex", True), ("grok", True), ("antigravity", False), ("openrouter", True)],
 )
 def test_write_is_declared_only_for_harnesses_whose_runner_implements_it(harness: str, write: bool) -> None:
     assert supports(harness, "write") is write
@@ -143,7 +143,18 @@ def test_write_can_elect_grok_now_that_it_declares_write(tmp_path: Path) -> None
     assert choice == ("grok", None)
 
 
-def test_write_with_only_read_only_harnesses_available_returns_none_not_openrouter(tmp_path: Path) -> None:
+def test_write_with_openrouter_disabled_returns_none(tmp_path: Path) -> None:
+    config = _write_config(tmp_path, [["antigravity", None]], openrouter_ok=False, openrouter_model="deepseek/x")
+
+    choice = _pick(
+        "development", ["harness:antigravity"], config, tmp_path,
+        mode="write", openrouter_balance_lookup=lambda: 50.0,
+    )
+
+    assert choice is None
+
+
+def test_write_with_only_read_only_harnesses_can_fallback_to_openrouter_write(tmp_path: Path) -> None:
     config = _write_config(tmp_path, [["antigravity", None]], openrouter_ok=True, openrouter_model="deepseek/x")
 
     choice = _pick(
@@ -151,7 +162,7 @@ def test_write_with_only_read_only_harnesses_available_returns_none_not_openrout
         mode="write", openrouter_balance_lookup=lambda: 50.0,
     )
 
-    assert choice is None  # the OpenRouter fallback is read-only, so it never serves a write stage
+    assert choice == ("openrouter", "deepseek/x")
 
 
 def test_mode_defaults_to_the_stage_mode_when_omitted(tmp_path: Path) -> None:
@@ -280,7 +291,7 @@ def test_planning_elects_openrouter_when_claude_codex_grok_all_critical(tmp_path
         openrouter_balance_lookup=lambda: 10.0,
     )
     assert choice == ("openrouter", config.stages["planning"].openrouter_model)
-    assert choice == ("openrouter", "deepseek/deepseek-v4.1-flash")
+    assert choice == ("openrouter", "openai/gpt-4o")
 
 
 def test_planning_elects_openrouter_when_all_three_cooling_or_absent(tmp_path: Path) -> None:
@@ -305,7 +316,7 @@ def test_planning_elects_openrouter_when_all_three_cooling_or_absent(tmp_path: P
         openrouter_balance_lookup=lambda: 10.0,
     )
     assert choice == ("openrouter", config.stages["planning"].openrouter_model)
-    assert choice == ("openrouter", "deepseek/deepseek-v4.1-flash")
+    assert choice == ("openrouter", "openai/gpt-4o")
 
     # Also absent from host_caps
     choice_absent = _pick(
@@ -354,7 +365,7 @@ def test_the_default_routing_config_is_consistent_with_the_capabilities() -> Non
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("harness", ["antigravity", "openrouter"])
+@pytest.mark.parametrize("harness", ["antigravity"])
 def test_run_agent_refuses_write_on_a_read_only_harness_as_unsupported_mode(
     harness: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
