@@ -79,3 +79,7 @@ retencao de contextos) é descartado antes de rodar, sem nenhuma excecao — fal
 ```
 
 O fingerprint de higiene inclui os arquivos ignorados de `.factory/`, mas normaliza `heartbeat_at` apenas nas travas `line_lock` conhecidas. Assim, o heartbeat legítimo do launcher pode avançar durante o portão sem reprovar a suíte; mudanças nos demais campos ou remoção da trava continuam visíveis.
+
+## Despacho remoto de testes e hosts desabilitados (USR-430)
+
+`core/harness/remote_dispatch.py` gerencia o envio do portão de testes para workers remotos (como a VM Grokbox via Tailscale). Quando um host está temporariamente fora da frota ou com outra carga (configurado em `DARKFAC_FLEET_DISABLED_HOSTS`, ex.: `desktop`), o despachante remoto filtra proativamente qualquer URL ou IP associado a esse host e nunca envia requisições nem sondas `/health`. Se um worker remoto com endereço arbitrário responder a sonda identificando-se com um `node_id` ou `hostname` desabilitado, o runner descarta o candidato imediatamente e cai para o próximo worker ou execução local. A rotação de workers em falha (`_rotate_gate_workers` no `run_ticket.py`) também respeita essa lista e nunca reintroduz hosts desabilitados na suíte de tentativas.

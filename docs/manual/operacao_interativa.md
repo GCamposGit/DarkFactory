@@ -29,3 +29,7 @@ Para solicitar uma leitura atualizada fora do briefing, use o comando de contas 
 ## Encerramento e continuidade
 
 Antes de encerrar uma sessao, atualize `docs/operacao/HANDOFF.md`: incremente a versao, atualize a data e registre estado, decisoes, pendencias e o proximo passo para o operador seguinte. Nao inclua segredos, prompts ou dados pessoais. Mantenha `docs/FASE_ATUAL.md` alinhado quando mudar um fato operacional persistente.
+
+## Respeito a hosts desabilitados (USR-430)
+
+O operador interativo e os scripts de esteira (`run_ticket.py`) honram `DARKFAC_FLEET_DISABLED_HOSTS` tanto na frota de execucao quanto no despacho de workers remotos para teste oficial, prevenindo envio de jobs ou sondas a maquinas dedicadas a outras tarefas (ex.: Desktop indexando o Segundo Cerebro).

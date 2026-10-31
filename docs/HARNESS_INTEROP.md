@@ -342,6 +342,7 @@ Tailscale (o que já é verdade para qualquer host no tailnet).
 | Variável | Efeito | Default |
 | --- | --- | --- |
 | `DARKFAC_TEST_WORKERS` | Lista ordenada (vírgula) de base URLs de workers; o primeiro alcançável, não-ocupado e que não seja a própria máquina vence | `http://100.78.181.90:8080` (padrao no codigo; grokbox primeiro no deploy da VPS e, apos o patch `docs/proposals/GROKBOX-default-workers.md`, tambem no codigo) |
+| `DARKFAC_FLEET_DISABLED_HOSTS` | Lista ordenada (vírgula) de hosts desabilitados (ex.: desktop). O remote dispatch filtra automaticamente workers associados a esses hosts e nunca envia jobs nem sondas a eles (USR-430) | — |
 | `DARKFAC_WORKER_HEALTH_TIMEOUT_SEC` | Timeout da sonda `/health` de cada worker (segundos) | `2` no codigo hoje; `10` no deploy da VPS e apos o patch GROKBOX |
 | `DARKFAC_REMOTE_HARNESS` | `auto` (tenta remoto, cai para local), `off` (nunca despacha), `required` (exige remoto; falha em vez de cair para local) | `auto` |
 | `DARKFAC_WORKER_TOKEN` | Bearer token opcional (cliente e worker) | — |

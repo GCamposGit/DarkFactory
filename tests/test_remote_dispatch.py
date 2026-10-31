@@ -195,11 +195,89 @@ def _noop_emit_cache_hit(record: dict, *, config_path: Path) -> bool:  # pragma:
 
 def test_worker_urls_defaults_to_grokbox_then_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
     expected = [u.strip() for u in remote_dispatch.DEFAULT_WORKERS.split(",") if u.strip()]
     urls = remote_dispatch.worker_urls()
     assert urls == expected
     assert urls[0] == "http://100.77.130.5:8080"  # grokbox first
     assert urls[1] == "http://100.78.181.90:8080"  # Desktop second
+
+
+def test_worker_urls_filters_disabled_desktop_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    urls = remote_dispatch.worker_urls()
+    assert "http://100.78.181.90:8080" not in urls
+    assert urls == ["http://100.77.130.5:8080"]
+
+
+def test_worker_urls_filters_disabled_desktop_by_ip_and_custom_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080,http://100.78.181.90:8080,http://other:8080")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    urls = remote_dispatch.worker_urls()
+    assert urls == ["http://100.77.130.5:8080", "http://other:8080"]
+
+
+def test_maybe_dispatch_remote_proves_absence_of_sending_to_disabled_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
+    # USR-430: Prove that Desktop is never probed or sent jobs when disabled
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.78.181.90:8080")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+
+    probed_urls = []
+    def _probe(url, *args, **kwargs):
+        probed_urls.append(url)
+        return {"status": "ok", "node_id": "desktop"}
+
+    monkeypatch.setattr(remote_dispatch, "probe_health", _probe)
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(),
+        config_hash="a" * 64,
+        quick=True,
+        include_holdout=False,
+        config_path=Path("harness.config.json"),
+        project_root=REPO_ROOT,
+        cache_lookup_enabled=False,
+        local_only=False,
+        remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit,
+        notify_hub_on_pass=lambda: None,
+    )
+    assert result is None
+    assert probed_urls == [], "Disabled desktop must never be probed"
+
+
+def test_maybe_dispatch_remote_filters_worker_reporting_disabled_node_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    # URL is generic, but probe returns node_id='desktop'
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://custom-runner:8080")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+
+    submitted = []
+    def _probe(url, *args, **kwargs):
+        return {"status": "ok", "node_id": "desktop", "hostname": "desktop-g45ipem", "busy": False}
+
+    def _submit(*args, **kwargs):
+        submitted.append(args)
+        return {"status_code": 200, "body": {}}
+
+    monkeypatch.setattr(remote_dispatch, "probe_health", _probe)
+    monkeypatch.setattr(remote_dispatch, "_submit_job", _submit)
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(),
+        config_hash="a" * 64,
+        quick=True,
+        include_holdout=False,
+        config_path=Path("harness.config.json"),
+        project_root=REPO_ROOT,
+        cache_lookup_enabled=False,
+        local_only=False,
+        remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit,
+        notify_hub_on_pass=lambda: None,
+    )
+    assert result is None
+    assert submitted == [], "Must never submit job to worker reporting disabled node_id"
 
 
 def test_worker_urls_parses_comma_separated_list(monkeypatch: pytest.MonkeyPatch) -> None:
