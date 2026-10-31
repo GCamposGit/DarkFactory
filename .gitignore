@@ -122,3 +122,4 @@ hub/data/owner_actions/
 .factory/runs/fleet_dispatcher_logs/
 .factory/runs/fleet_dispatcher_state.json
 .factory/daily_digest_state.json
+.factory/queue_snapshot.json

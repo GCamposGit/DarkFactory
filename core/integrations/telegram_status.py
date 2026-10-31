@@ -46,8 +46,26 @@ def _enum_value(value: object) -> str:
     return str(getattr(value, "value", value) or "").lower()
 
 
+def safe_public_hub_url(url: str | None = None) -> str:
+    """Return a functional public URL, preventing non-functional 127.0.0.1 or localhost links."""
+    candidate = (
+        url
+        or os.getenv("DARKHUB_PUBLIC_URL")
+        or os.getenv("DARKHUB_BASE_URL")
+        or DEFAULT_HUB_URL
+    ).strip().rstrip("/")
+    if (
+        not candidate
+        or "127.0.0.1" in candidate
+        or "localhost" in candidate
+        or not candidate.startswith("http")
+    ):
+        return DEFAULT_HUB_URL
+    return candidate
+
+
 def _hub_link(hub_url: str | None) -> str:
-    base = (hub_url or os.getenv("DARKHUB_BASE_URL") or DEFAULT_HUB_URL).rstrip("/")
+    base = safe_public_hub_url(hub_url)
     return f"{base}/#owner-actions"
 
 

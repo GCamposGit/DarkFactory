@@ -539,6 +539,53 @@ def default_telegram_sender() -> Optional[TelegramSender]:
     return _send
 
 
+DEFAULT_PUBLIC_HUB_URL = "https://darkhub.ggcampos.com"
+
+
+def safe_public_hub_url(url: Optional[str] = None) -> str:
+    """Return a functional public URL for Telegram messages, never 127.0.0.1 or localhost."""
+    candidate = (
+        url
+        or os.environ.get("DARKHUB_PUBLIC_URL")
+        or os.environ.get("DARKHUB_BASE_URL")
+        or DEFAULT_PUBLIC_HUB_URL
+    ).strip().rstrip("/")
+    if (
+        not candidate
+        or "127.0.0.1" in candidate
+        or "localhost" in candidate
+        or not candidate.startswith("http")
+    ):
+        return DEFAULT_PUBLIC_HUB_URL
+    return candidate
+
+
+def _clean_option_text(text: str) -> str:
+    """Strip redundant prefixes like 'Opção 1:', '1.' or bullets from option text."""
+    cleaned = text.strip()
+    cleaned = re.sub(r"^(?:opcao|opção)\s*[0-9]*[\s:\.\-]+", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^[0-9]+[\.\)\-:\s]+", "", cleaned).strip()
+    cleaned = re.sub(r"^[\*\-_•]\s*", "", cleaned).strip()
+    return cleaned or text.strip()
+
+
+def _summarize_option(text: str, max_words: int = 3, max_chars: int = 24) -> str:
+    """Extract a concise 2-3 word summary suitable for Telegram buttons on mobile.
+
+    Prevents button text truncation while preserving key intent.
+    """
+    cleaned = _clean_option_text(text)
+    words = [w for w in cleaned.split() if w]
+    if not words:
+        return "Escolher"
+    for count in range(min(len(words), max_words), 0, -1):
+        candidate = " ".join(words[:count])
+        candidate = re.sub(r"[,;:\.\-]+$", "", candidate).strip()
+        if len(candidate) <= max_chars:
+            return candidate
+    return words[0][:max_chars]
+
+
 def resolve_callback_choice(question: _PendingQuestion, choice: str) -> str:
     """Map a callback `<choice>` (option index) back to the option text."""
     if choice.isdigit() and int(choice) < len(question.options):
@@ -556,8 +603,9 @@ def one_tap_recommended_button(run_id: str, question: _PendingQuestion) -> Optio
     if not question.recommended or question.recommended not in question.options:
         return None
     index = question.options.index(question.recommended)
+    rec_summary = _summarize_option(question.recommended, max_words=3, max_chars=20)
     return {
-        "text": f"Aceitar recomendada ({question.id})"[:64],
+        "text": f"⭐ Opção {index + 1}: {rec_summary}"[:64],
         "callback_data": f"cb:grill:{run_id}#{question.id}:{index}",
     }
 
@@ -565,30 +613,40 @@ def one_tap_recommended_button(run_id: str, question: _PendingQuestion) -> Optio
 def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str, list[list[dict[str, str]]]]:
     # The gateway sends with parse_mode=HTML, so agent text must be escaped.
     # Buttons carry the option *index*: Telegram caps callback_data at 64 bytes.
-    hub_url = os.environ.get("DARKHUB_PUBLIC_URL") or os.environ.get("DARKHUB_BASE_URL", "http://127.0.0.1:8888")
+    hub_url = safe_public_hub_url()
     lines = [
-        f"Grill pendente para o run {html.escape(run_id)} "
-        f"(uma rodada, prazo de {GRILL_DEADLINE_HOURS}h):",
+        f"🤔 <b>Alinhamento necessário para a tarefa: {html.escape(run_id)}</b>",
+        "A fábrica precisa do seu direcionamento para avançar:",
         "",
     ]
     buttons: list[list[dict[str, str]]] = []
-    for question in questions:
-        lines.append(f"- [{question.kind}] {html.escape(question.text)}")
-        if question.recommended:
-            lines.append(f"  recomendado: {html.escape(question.recommended)}")
-        row = [
-            {"text": option[:64], "callback_data": f"cb:grill:{run_id}#{question.id}:{index}"}
-            for index, option in enumerate(question.options)
-        ]
-        if row:
-            buttons.append(row)
+    for q_idx, question in enumerate(questions, start=1):
+        q_title = f"Pergunta {q_idx}: " if len(questions) > 1 else ""
+        lines.append(f"❓ <b>{q_title}{html.escape(question.text)}</b>")
+        if question.why:
+            lines.append(f"<i>Contexto:</i> {html.escape(question.why)}")
+
+        lines.append("\n<b>Opções disponíveis:</b>")
+        for index, option in enumerate(question.options):
+            is_rec = bool(question.recommended and option.strip() == question.recommended.strip())
+            star = "⭐ " if is_rec else ""
+            rec_tag = " <i>(Recomendada)</i>" if is_rec else ""
+            lines.append(f"  {star}<b>Opção {index + 1}:</b> {html.escape(_clean_option_text(option))}{rec_tag}")
+
+            # Button for this option: number + 2-3 word summary
+            opt_summary = _summarize_option(option, max_words=3, max_chars=24)
+            btn_text = f"{index + 1}. {opt_summary}"
+            buttons.append([
+                {"text": btn_text, "callback_data": f"cb:grill:{run_id}#{question.id}:{index}"}
+            ])
+
         one_tap = one_tap_recommended_button(run_id, question)
         if one_tap is not None:
             buttons.append([one_tap])
 
     lines.append("")
-    lines.append(f'🎙️ <b>Voz/Áudio:</b> Grave uma nota de voz nesta conversa ou <a href="{hub_url}">abra no DarkHub</a>.')
-    buttons.append([{"text": "🎙️ Abrir DarkHub (Voz/Grill)", "url": f"{hub_url}"}])
+    lines.append(f'🎙️ <b>Voz ou Detalhes:</b> Responda por áudio aqui no chat ou no <a href="{hub_url}">DarkHub</a>.')
+    buttons.append([{"text": "🎙️ Abrir DarkHub", "url": f"{hub_url}"}])
     return "\n".join(lines), buttons
 
 

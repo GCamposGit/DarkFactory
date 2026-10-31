@@ -329,7 +329,7 @@ def _demand_failure_response(exc: Exception) -> str:
         return "❌ Falha ao registrar demanda: Git não foi encontrado. Instale o Git ou configure o PATH do orquestrador."
     if "git não foi encontrado" in detail.lower():
         return f"❌ Falha ao registrar demanda: {detail}"
-    return f"❌ Failed to register demand: {exc}"
+    return f"❌ Falha ao registrar demanda: {exc}"
 
 
 
@@ -828,20 +828,20 @@ class TelegramGateway:
                 "👑 <b>Dark Factory Owner Governance Bot (@darkfac_bot)</b>\n\n"
                 "Canal oficial para governança estratégica, decisões humanas e aprovações do Owner.\n\n"
                 "Comandos disponíveis:\n"
-                "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento e desbloquear WAITING_HUMAN\n"
-                "• <code>/approve [project_id] [digest]</code> - Aprovar release para deploy em produção\n"
-                "• <code>/alerts</code> - Consultar alertas de segurança, orçamento e cotas\n"
-                "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
-                "• <code>/demand [texto da demanda]</code> - Registrar demanda prioritária do Owner\n"
-                "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
-                "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
-                "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n\n"
+                "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento e continuar o desenvolvimento\n"
+                "• <code>/approve [project_id] [digest]</code> - Aprovar publicação de versão em produção\n"
+                "• <code>/alerts</code> - Consultar avisos do sistema\n"
+                "• <code>/status [ticket_id]</code> - Consultar andamento das tarefas e etapas\n"
+                "• <code>/demand [texto ou áudio]</code> - Registrar demanda prioritária do Owner\n"
+                "• <code>/tickets</code> - Listar tarefas abertas\n"
+                "• <code>/linha [ticket_id]</code> - Enviar tarefa para desenvolvimento na linha autônoma\n"
+                "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar tarefa da linha autônoma\n\n"
                 "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
             )
         elif self.config.role == "ops":
             result.response_text = (
                 "⚙️ <b>Dark Factory Autonomous Orchestrator Bot (@darkfac_ops_bot)</b>\n\n"
-                "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
+                "Canal oficial de operações autônomas, fila de demandas e andamento da fábrica.\n\n"
                 "Comandos disponíveis:\n"
                 "• <code>/demand [texto da demanda]</code> - Ingerir nova demanda no backlog autônomo\n"
                 "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
@@ -1105,7 +1105,7 @@ class TelegramGateway:
         result.action = TelegramActionType.GRILL
         subparts = arg_str.split(maxsplit=1)
         if len(subparts) < 2:
-            result.response_text = "⚠️ Usage: /grill <ticket_id> <your answer / choice>"
+            result.response_text = "⚠️ Como usar: /grill <id_do_ticket> <sua resposta ou escolha>"
         else:
             t_id, answer = subparts[0].strip(), subparts[1].strip()
             result.target_id = t_id
@@ -1113,20 +1113,20 @@ class TelegramGateway:
                 try:
                     res = self.grill_handler(t_id, answer, user_id or 0)
                     result.resumed = res.get("resumed", True)
-                    result.response_text = f"✅ Grill answer recorded for <b>{t_id}</b>. Workflow resumed."
+                    result.response_text = f"✅ Resposta registrada para <b>{t_id}</b>. Desenvolvimento retomado."
                 except Exception as exc:
                     result.error = str(exc)
-                    result.response_text = f"❌ Failed to record grill answer: {exc}"
+                    result.response_text = f"❌ Não foi possível registrar a resposta: {exc}"
             else:
                 result.resumed = True
-                result.response_text = f"✅ Grill answer received for {t_id}."
+                result.response_text = f"✅ Resposta recebida para {t_id}."
         return result
 
     def _handle_approve(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
         result.action = TelegramActionType.APPROVE
         subparts = arg_str.split(maxsplit=1)
         if len(subparts) < 2:
-            result.response_text = "⚠️ Usage: /approve <project_id> <artifact_digest>"
+            result.response_text = "⚠️ Como usar: /approve <projeto> <versão>"
         else:
             p_id, digest = subparts[0].strip(), subparts[1].strip()
             result.target_id = f"{p_id}:{digest}"
@@ -1136,17 +1136,17 @@ class TelegramGateway:
                     result.resumed = True
                     receipt_id = res.get("receipt_id", "RCPT-OK")
                     result.response_text = (
-                        f"🚀 Release Approved for <b>{p_id}</b>!\n"
-                        f"Digest: <code>{digest[:12]}...</code>\n"
-                        f"Receipt: <b>{receipt_id}</b>\n"
-                        f"Production promotion authorized."
+                        f"🚀 Versão aprovada para <b>{p_id}</b>!\n"
+                        f"Código: <code>{digest[:12]}...</code>\n"
+                        f"Recibo: <b>{receipt_id}</b>\n"
+                        f"Publicação em produção autorizada."
                     )
                 except Exception as exc:
                     result.error = str(exc)
-                    result.response_text = f"❌ Release approval rejected: {exc}"
+                    result.response_text = f"❌ Não foi possível aprovar a versão: {exc}"
             else:
                 result.resumed = True
-                result.response_text = f"🚀 Release approved for {p_id} ({digest[:8]})."
+                result.response_text = f"🚀 Versão aprovada para {p_id} ({digest[:8]})."
         return result
 
     def _handle_alerts(self, result, msg, user_id, chat_id, arg_str, raw_text, is_voice_demand, voice_transcription) -> TelegramDispatchResult:
@@ -1259,12 +1259,12 @@ class TelegramGateway:
                     result.response_text = f"✅ Resposta registrada para {run_id} (pergunta {question_id})."
                 except Exception as exc:
                     result.error = str(exc)
-                    result.response_text = f"❌ Failed to submit grill answer: {exc}"
+                    result.response_text = f"❌ Não foi possível enviar a resposta: {exc}"
             else:
                 # No handler wired: this is not a success, never claim resumed.
                 result.resumed = False
                 result.error = "line_grill_handler not configured"
-                result.response_text = "❌ Nenhum handler de grill da linha configurado; resposta NAO foi aplicada."
+                result.response_text = "❌ Nenhum gravador de alinhamento configurado; a resposta não foi aplicada."
 
         elif len(parts) >= 4 and parts[1] == "grill":
             # cb:grill:<ticket_id>:<choice>
@@ -1275,13 +1275,13 @@ class TelegramGateway:
                 try:
                     res = self.grill_handler(ticket_id, choice, user_id)
                     result.resumed = res.get("resumed", True)
-                    result.response_text = f"✅ Decision '{choice}' selected for {ticket_id}. Run resumed."
+                    result.response_text = f"✅ Opção '{choice}' selecionada para {ticket_id}. Desenvolvimento retomado."
                 except Exception as exc:
                     result.error = str(exc)
-                    result.response_text = f"❌ Failed to submit grill choice: {exc}"
+                    result.response_text = f"❌ Não foi possível registrar a escolha: {exc}"
             else:
                 result.resumed = True
-                result.response_text = f"Choice '{choice}' recorded for {ticket_id}."
+                result.response_text = f"Opção '{choice}' registrada para {ticket_id}."
 
         elif len(parts) >= 3 and parts[1] == "accept":
             # HF-27-08 D-g/F: cb:accept:<run_id> -- commercial acceptance.
@@ -1293,15 +1293,15 @@ class TelegramGateway:
                     res = self.commercial_acceptance_handler(run_id, user_id)
                     result.resumed = res.get("resumed", True)
                     sha = res.get("sha", "")
-                    result.response_text = f"✅ Aceite comercial registrado para {run_id} ({sha[:12]}). Deploy liberado."
+                    result.response_text = f"✅ Aceite registrado para {run_id} ({sha[:12]}). Publicação liberada."
                 except Exception as exc:
                     result.error = str(exc)
-                    result.response_text = f"❌ Failed to record commercial acceptance: {exc}"
+                    result.response_text = f"❌ Não foi possível registrar o aceite: {exc}"
             else:
                 # No handler wired: this is not a success, never claim resumed.
                 result.resumed = False
                 result.error = "commercial_acceptance_handler not configured"
-                result.response_text = "❌ Nenhum handler de aceite comercial configurado; NAO foi registrado."
+                result.response_text = "❌ Nenhum gravador de aceite configurado; nada foi registrado."
 
         elif len(parts) >= 4 and parts[1] == "release":
             # cb:release:<project_id>:<digest>:<choice>
@@ -1314,18 +1314,18 @@ class TelegramGateway:
                         res = self.approval_handler(project_id, digest, user_id)
                         result.resumed = True
                         receipt = res.get("receipt_id", "RCPT-OK")
-                        result.response_text = f"🚀 Release approved ({receipt}). Deploying to production."
+                        result.response_text = f"🚀 Versão aprovada ({receipt}). Publicando em produção."
                     except Exception as exc:
                         result.error = str(exc)
-                        result.response_text = f"❌ Approval failed: {exc}"
+                        result.response_text = f"❌ Não foi possível aprovar a versão: {exc}"
                 else:
                     result.resumed = True
-                    result.response_text = f"Release approved for {project_id}."
+                    result.response_text = f"Publicação aprovada para {project_id}."
             else:
-                result.response_text = f"Release deferred/rejected for {project_id}."
+                result.response_text = f"Publicação adiada/rejeitada para {project_id}."
 
         else:
-            result.response_text = f"Action received: {data_str}"
+            result.response_text = f"Ação recebida: {data_str}"
 
         self.processed_callback_ids.add(cb.id)
         return result

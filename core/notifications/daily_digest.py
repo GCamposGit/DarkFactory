@@ -54,7 +54,10 @@ def _tz() -> Any:
 
 
 def hub_url() -> str:
-    return (os.getenv("DARKHUB_BASE_URL") or DEFAULT_HUB_URL).rstrip("/")
+    candidate = (os.getenv("DARKHUB_PUBLIC_URL") or os.getenv("DARKHUB_BASE_URL") or DEFAULT_HUB_URL).rstrip("/")
+    if "127.0.0.1" in candidate or "localhost" in candidate or not candidate.startswith("http"):
+        return DEFAULT_HUB_URL
+    return candidate
 
 
 @dataclass
