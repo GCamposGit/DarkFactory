@@ -178,3 +178,7 @@ Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) recon
 ## Falhas registradas
 
 Quando um `run_ticket` da frota termina com código diferente de zero, ou o checkout operacional não pode ser preparado, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra`, `lock` ou `launch`) e o motivo (últimas linhas do log do ticket ou erro de lançamento, sem segredos; nunca vazio). O histórico guarda as 20 últimas. Erros de lançamento mantêm o ticket em cooldown e não aparecem como despacho concluído.
+
+## Gancho do sentinela da linha (USR-439)
+
+O despachante contínuo integra o gancho do sentinela (`sentinel_hook`) executado em `self.run_sentinel_hook()` a cada ciclo de 30 segundos, delegando a `maybe_run_sentinel()` com janela de silêncio determinística de 45 minutos (2700s). Isso assegura vigilância contínua da saúde da frota e disparo de alertas ao Telegram caso a linha seja paralisada por esgotamento de cotas de IA ou jobs estagnados.

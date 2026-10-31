@@ -47,6 +47,10 @@ NOT_A_ROUTE_PARK: dict[str, str] = {
         "USR-346: standalone health probe asks whether normal routing can currently elect a route so the cloud-worker "
         "sweeper can resume an already parked infra request; it never runs or parks a stage."
     ),
+    "sentinel.py": (
+        "USR-439: autonomous sentinel inspects whether normal routing can currently elect routes for "
+        "development and planning to alert on stalls; it is a read-only probe and never runs or parks a stage."
+    ),
 }
 
 

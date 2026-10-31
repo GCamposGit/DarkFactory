@@ -46,6 +46,15 @@ Abra a raiz clonada como workspace e injete `AGENTS.md` como instrução de proj
 
 Abra a raiz clonada como workspace. Não há `CLAUDE.md` próprio neste repositório: `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md` funcionam como o contrato equivalente. O catálogo `.claude/skills/` é o espelho sincronizado de `.agents/skills/` (via `scripts/sync_skills.py`) e é carregado automaticamente. Use o subagente declarativo `.claude/agents/test-runner.md` para delegar execução de testes conforme a skill `17-specialized-test-subagent`.
 
+## Sentinela da Linha Compartilhado (USR-439)
+
+O monitoramento da integridade da esteira roda de forma agnóstica entre harnesses via `core/line/sentinel.py` a cada 45 minutos (2700s via delta de timestamp determinístico):
+- Funciona de forma perene no despachante da frota (`fleet_dispatcher.py` via `sentinel_hook`).
+- É consultado e acionado no início de sessão de qualquer harness via `python -m core.ops.briefing` (seção `## Sentinela da Linha`).
+- É executado de forma não-bloqueante no fechamento de turnos via `python -m core.ops.turn_guard`.
+- Pode ser invocado diretamente pelo sistema operacional através do script `scripts/run_sentinel.ps1`.
+- Emite alertas urgentes formatados para leigos (padrão USR-438) no Telegram quando todas as cotas de desenvolvimento estão esgotadas (<= 15%) ou quando um job está estagnado em voo há mais de 45 minutos.
+
 ## DarkHub
 
 ```bash

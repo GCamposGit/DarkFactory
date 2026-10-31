@@ -56,6 +56,18 @@ Antes de encerrar uma sessao, atualize `docs/operacao/HANDOFF.md`: incremente a 
 
 O operador interativo e os scripts de esteira (`run_ticket.py`) honram `DARKFAC_FLEET_DISABLED_HOSTS` tanto na frota de execucao quanto no despacho de workers remotos para teste oficial, prevenindo envio de jobs ou sondas a maquinas dedicadas a outras tarefas (ex.: Desktop indexando o Segundo Cerebro).
 
+## Sentinela da Linha e monitoramento autonomo a cada 45m (USR-439)
+
+O monitoramento da fabrica opera de forma agnostica e centralizada em `core/line/sentinel.py`, garantindo deteccao perene de deadlocks e estagnacoes sem depender exclusivamente da sessao interativa do chat:
+
+- **Intervalo deterministico de 45 minutos (2700s)**: calculado por delta de timestamp (`last_run_epoch`), eliminando a assimetria do cron standard 5-campos (`*/45` que dispararia aos :00 e :45, gerando intervalo de 15m).
+- **Cobertura multi-harness**:
+  - `fleet_dispatcher.py`: executa `sentinel_hook` a cada ciclo (com guarda temporal de 45m) na frota headless contínua 24/7.
+  - `core/ops/briefing.py`: exibe a secao `## Sentinela da Linha` e dispara verificacao automatica no inicio de sessao para Claude Code, Codex, Antigravity e Grok.
+  - `core/ops/turn_guard.py`: executa checagem nao-bloqueante nos encerramentos de turno.
+  - `scripts/run_sentinel.ps1`: script PowerShell para execucao direta ou agendamento no Task Scheduler do Windows.
+- **Alertas claros no Telegram**: em caso de parada por falta de rota (todas as contas <= 15%) ou jobs travados em voo sem escrita em log ha mais de 45m, dispara notificacao clara em linguagem para leigo conforme padrao USR-438 via `NotificationService`.
+
 ## Capacidade de escrita interativa no roteador (USR-436)
 
 O roteador valida as capacidades com `agent_cli.supports(harness, mode)` antes de ranquear candidatos para o estagio `development`. Com `operating_harness=antigravity` em sessao interativa (fora do modo headless), o Antigravity declara capacidade de escrita para desenvolvimento no chat, viabilizando sua eleicao quando a cota estiver saudavel acima do piso de 15%. Em execucao headless, na frota ou com outro operador, Antigravity permanece estritamente somente-leitura.

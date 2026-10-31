@@ -161,6 +161,15 @@ def verify_turn(
             except OSError:
                 pass
 
+    # 4. Sentinel check idempotente (USR-439): executa a cada 45m de forma nao-bloqueante fora de testes
+    if "pytest" not in sys.modules:
+        try:
+            from core.line.sentinel import maybe_run_sentinel
+
+            maybe_run_sentinel()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Sentinela no turn_guard ignorado: %s", exc)
+
     return TurnGuardReport(
         ok=len(violations) == 0,
         ticket_id=ticket,

@@ -4,7 +4,7 @@ Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
 
-Última revisão: 31/10/2026 (fábrica; pick fresco de development em contexto headless na frota, USR-428; resume preserva o portão e a revisão do mesmo candidato, USR-424).
+Última revisão: 31/10/2026 (fábrica; sentinela autônomo da linha a cada 45m multi-harness, USR-439; pick fresco de development em contexto headless na frota, USR-428).
 
 ## Canais de entrada
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
@@ -67,6 +67,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 30/10/2026: `--resume-delivery` materializa o id da fila no ledger da worktree e segue para o PR sem o ledger compartilhado; validação e revisão já vigentes para o mesmo candidato não rodam de novo; ausência real devolve `cause=ticket_absent` (USR-424).
 - 30/10/2026: USR-420 — convergência e backup usam o SHA da execução; host em DARKFAC_FLEET_DISABLED_HOSTS sai excluded sem git nem health. Candidato ausente no objeto local não é converged e não dispara fetch. Contrato em docs/manual/fila.md.
 - 30/10/2026: o estado temporário do harness em /.tmp/ sai do índice (git rm --cached, a cópia local permanece) e fica ignorado pelo .gitignore ancorado e pelo exclude local, para não voltar ao staging.
+- 31/10/2026: Sentinela autônomo da linha (core/line/sentinel.py) opera com intervalo determinístico de 45m (2700s via timestamp delta, eliminando a assimetria do cron standard */45), integrado no despachante de frota, briefing, turn_guard e Telegram (USR-439).
 - 30/10/2026: commit_ticket, commit, commit_paths e o snapshot do portão (build_snapshot_commit) deixam .tmp/ fora da árvore publicada mesmo sem ignore e mesmo já staged. Os arquivos permanecem no disco. O snapshot mexe só no índice descartável; new.txt entra e o ignorado continua de fora.
 - 31/10/2026: sem rota de development o ticket volta a `planned` e a worktree fica; um `--harness` acima do piso usa o modelo declarado para esse harness (USR-428).
 - 31/10/2026: sem rota na primeira fatia de development o launcher espera (código 75), não chama o agente nem a entrega, e deixa no disco a worktree com o arquivo gravado no PLAN (USR-428).

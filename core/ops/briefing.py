@@ -152,8 +152,33 @@ def _handoff() -> list[str]:
     return content.splitlines() if content else ["Handoff vazio."]
 
 
+def _sentinel() -> list[str]:
+    """Status do sentinela autonomo da linha (USR-439)."""
+    from core.line.sentinel import load_last_report, maybe_run_sentinel
+
+    try:
+        report = load_last_report() if "pytest" in sys.modules else (maybe_run_sentinel() or load_last_report())
+    except Exception as exc:  # noqa: BLE001
+        return [f"Indisponivel ({type(exc).__name__})."]
+
+    if report is None:
+        return ["Nenhum registro previo do sentinela."]
+
+    status_tag = f"[{report.status.value.upper()}]"
+    lines = [
+        f"Status: {status_tag} {report.reason}",
+        f"Rotas: Dev={report.route_development or 'NENHUMA'} (Frota={report.fleet_route_development or 'NENHUMA'}) | Plan={report.route_planning or 'NENHUMA'}",
+        f"Fila: {len(report.pending_tickets)} pendente(s) | {len(report.in_flight_tickets)} em voo",
+    ]
+    if report.quotas:
+        q_str = ", ".join(f"{h}: {q}%" for h, q in report.quotas.items() if q is not None)
+        lines.append(f"Cotas telemetria: {q_str}")
+    return lines
+
+
 def render_briefing() -> str:
     sections: list[tuple[str, Callable[[], list[str]]]] = [
+        ("Sentinela da Linha (USR-439)", _sentinel),
         ("Fila do control store", _queue),
         ("Acoes abertas do owner", _owner_actions),
         ("Nos (somente leitura)", _nodes),

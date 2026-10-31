@@ -1,6 +1,6 @@
 # Handoff operacional
 
-Versao: 10
+Versao: 11
 Atualizado em: 2026-10-31
 
 ## Estado
@@ -9,8 +9,7 @@ Atualizado em: 2026-10-31
 - Canais: Telegram, DarkHub e interfaces de chat; demandas seguem por `run_ticket.py` e pelo registro compartilhado no control store.
 - Operacao: Antigravity como interface interativa de operacao (`DARKFAC_OPERATING_HARNESS=antigravity`); tarefas headless/frota sao executadas pelo harness eleito pelo roteador (Grokbox e Notebook). Antigravity nunca e usado por workers, `--fleet` ou pump.
 - Fila totalmente desbloqueada: tag `planning-only` removida de todos os tickets.
-- Blocos do Plano V0 concluidos e sincronizados no PostgreSQL e git ledger: USR-343 (Atrito zero), USR-375 (Motor unico), USR-369 (Capacidade/rede), USR-376 (Pesquisa/learning pack), USR-377 (Enxugar codigo/testes), USR-378 (Roteamento enxuto) e USR-379 (Governanca e manual), alem de USR-428, USR-429, USR-433 e USR-434.
-- USR-431: Concluido e entregue no `main` (PR #811, merge commit `b25b5fc5`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no `/health`, marcado `completed` no demands store.
+- Blocos do Plano V0 concluidos e sincronizados no PostgreSQL e git ledger: USR-343 (Atrito zero), USR-375 (Motor unico), USR-369 (Capacidade/rede), USR-376 (Pesquisa/learning pack), USR-377 (Enxugar codigo/testes), USR-378 (Roteamento enxuto) e USR-379 (Governanca e manual), alem de USR-428, USR-429, USR-433, USR-434, USR-438 e USR-439.
 - Proximo na esteira: USR-279 (Prova da V0 com o piloto M1 do gestor de SEO e redes sociais da mansaodolago.com). Dependencias 100% satisfeitas, elegivel imediatamente no despachante da frota.
 
 ## Decisoes
@@ -24,6 +23,8 @@ Atualizado em: 2026-10-31
 
 ## O que foi entregue nesta sessao
 
+- **USR-439**: Sentinela de linha autonomo com intervalo deterministico de 45m (2700s via timestamp delta, eliminando a assimetria do cron standard 5-campos minute % 45 == 0) e execucao multi-harness (`core/line/sentinel.py`). Integrado de forma perene no despachante de frota (`core/line/fleet_dispatcher.py` via `sentinel_hook`), no briefing operacional (`core/ops/briefing.py`), nos guardas de fim de turno (`core/ops/turn_guard.py`) e no runner agendado (`scripts/run_sentinel.ps1`). Emite alertas urgentes e amigaveis ao Owner via Telegram em caso de parada por falta de rotas de desenvolvimento (todas as contas <= 15%) ou jobs travados ha mais de 45m.
+- **USR-438**: Mensagens do Telegram e Grill simplificadas para leigos em celular: corpo de mensagem com texto integral das alternativas, botoes enxutos de 2-3 palavras e URLs publicas de producao (`https://darkhub.ggcampos.com`). PR #814 mesclado no `main` (commit `33cba722`), deploy Dokploy com health verificado ao vivo (`b18360dd`), ticket marcado `completed`.
 - **USR-431**: Paridade do harness de operacao para Codex e Antigravity: implementado `core/ops/turn_guard.py` centralizando guardas agnosticas (learning pack obrigatorio para alteracoes de codigo, rastreamento de ciclo de vida de sessao no registro unificado de execucoes e handoff); `scripts/stop_hook_artifacts.py` unificado para delegar ao turn_guard. Portao oficial aprovado [HARNESS_PASS] em `60f17473` (4.805 testes, 0 falhas). PR #811 mesclado no `main` (commit `b25b5fc5`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no DarkHub (`https://darkhub.ggcampos.com/health` retornando `b25b5fc5`), ticket marcado `completed` no demands store.
 - **USR-424**: Resolvido desacoplamento entre fila duravel (control store) e ledger local durante entrega autonoma. Portao oficial aprovado com [HARNESS_PASS] em `9c58d863` (4.796 testes, 0 falhas). PR #809 mesclado no `main` (commit `9842a697`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no DarkHub (`https://darkhub.ggcampos.com/health` retornando `9842a697`), ticket marcado `completed` no demands store.
 - **USR-420**: Convergencia pos-deploy usa candidato fixo e respeita hosts desabilitados (`DARKFAC_FLEET_DISABLED_HOSTS=desktop`), isolando o ambiente em `tests/conftest.py`. Portao oficial aprovado [HARNESS_PASS] remotamente. PR #808 mesclado no `main` (commit `d2092f0e`), deploy Dokploy com health verificado ao vivo e ticket marcado `completed`.
@@ -38,7 +39,7 @@ Atualizado em: 2026-10-31
 ## O que esta em voo
 
 - **Fila da frota**: USR-279 (Prova da V0 / Piloto M1) elegivel imediatamente na esteira; blocos V0 anteriores concluidos.
-- **Monitoramento em background**: tarefa `task-506` ativa a cada 30 min para vigiar a saude da sessao e notificar o Owner via Telegram em caso de deadlock.
+- **Monitoramento em background**: sentinela ativo a cada 45 min com verificacao multi-harness deterministica e alerta Telegram.
 
 ## Pendencias
 
