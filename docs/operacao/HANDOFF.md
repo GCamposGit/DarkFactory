@@ -1,14 +1,19 @@
 # Handoff operacional
 
-Versao: 5
-Atualizado em: 2026-10-30
+Versao: 7
+Atualizado em: 2026-10-31
 
 ## Estado
 
 - Fase: V0 da Dark Factory.
 - Canais: Telegram, DarkHub e interfaces de chat; demandas seguem por `run_ticket.py` e pelo registro compartilhado no control store.
 - Operacao: Antigravity como interface interativa de operacao (`DARKFAC_OPERATING_HARNESS=antigravity`); tarefas headless/frota sao executadas pelo harness eleito pelo roteador (Grokbox e Notebook). Antigravity nunca e usado por workers, `--fleet` ou pump.
-- USR-421: o foco `python -m pytest tests/test_fleet_dispatcher.py -q` encerra sozinho no Windows depois de 100%, com cache de pytest por worktree. O contrato esta em `docs/manual/testes.md` e `docs/FASE_ATUAL.md`. PR #801 mesclado e implantado.
+- USR-430: Concluido e entregue no `main` (PR #803, merge commit `ed6cf52d`), imagem GHCR publicada, deploy Dokploy concluido, marcado `completed` no PostgreSQL e demands store.
+- USR-420: Portao oficial aprovado com `[HARNESS_PASS]` no grokbox (`ef8c3c02`), em entrega aguardando suite lock local.
+- USR-424: Portao oficial aprovado com `[HARNESS_PASS]` (`26142cde`), veredicto persistido em cache (`verdicts.json`), aguardando liberacao da reserva para finalizacao canonica.
+- USR-428: Validacao com 17 testes direcionados aprovados, `docs-sync`, `complexity_ratchet` e `lint-imports` verdes (`0e6082f4`).
+- USR-429: Validacao e consolidacao pelo Grok em execucao na worktree `usr-429-20261031T014033Z` (`PID 55884`).
+- USR-436: Defeito aberto na fila de desenvolvimento: Roteador rejeita Antigravity em `development` interativo por `agent_cli.supports("antigravity", "write")` retornar False.
 
 ## Decisoes
 
@@ -21,16 +26,18 @@ Atualizado em: 2026-10-30
 
 ## O que foi entregue nesta sessao
 
+- **USR-430**: Implementado filtro de hosts desabilitados (`DARKFAC_FLEET_DISABLED_HOSTS`) no despachante remoto (`core/harness/remote_dispatch.py`) e na rotacao de retentativas (`run_ticket.py`). Portao oficial rodado remotamente com 100% de sucesso (`[HARNESS_PASS]`, 4646 passed, 30 skipped, 0 failed). PR #803 mesclado no `main` (commit `ed6cf52d300cbf204d45abef2217acb8aa30748b`), CI no `main` verde, deploy Dokploy concluido (darkfac-cloud e Darkhub blue-green no slot blue), ticket marcado `completed` no PostgreSQL e demands store com zero toque humano.
+- **USR-436**: Defeito registrado na fila de desenvolvimento duravel (control store / Postgres) cobrindo a rejeicao do Antigravity em modo interativo pelo roteador quando `agent_cli.supports("antigravity", "write")` consulta capabilities estaticas read-only.
 - **USR-433**: Briefing de sessao agnostico de harness (`core.ops.briefing`), `docs/operacao/HANDOFF.md`, eleicao do Antigravity como operador no roteador, estabilizacao do medidor RPC de cota Antigravity. PR #798 mesclado e implantado.
 - **USR-434**: Prevencao de regressao no snapshot diario do ledger; importacao de OAs git-only para a control store antes da exportacao do snapshot; unificacao e protecao de IDs no `core/owner_actions/store.py`; restauracao da acao do Desktop como `OA-081` e correcao do item #82 de decision sem opcoes para action. PR #799 mesclado (commit `3b655f03949eeb1cc945c6107d73d68d64ef4d96`); deploy Dokploy com DarkHub blue-green no slot blue.
-- **USR-421**: redirecionamento do cache do pytest por worktree, reaplicado no inicio de `pytest_sessionfinish`, para o foco do `fleet_dispatcher` terminar com codigo de saida e resumo `N passed in Xs` mesmo quando `%LOCALAPPDATA%` nao e gravavel. PR #801 mesclado no `main` (commit `58b4b2aaa41d39b05c22ea9be07f80793300113e`), CI no `main` verde, deploy Dokploy concluido e ticket marcado `completed` no PostgreSQL e ledger.
+- **USR-421**: Redirecionamento do cache do pytest por worktree, reaplicado no inicio de `pytest_sessionfinish`, para o foco do `fleet_dispatcher` terminar com codigo de saida e resumo `N passed in Xs` mesmo quando `%LOCALAPPDATA%` nao e gravavel. PR #801 mesclado no `main` (commit `58b4b2aaa41d39b05c22ea9be07f80793300113e`), CI no `main` verde, deploy Dokploy concluido e ticket marcado `completed` no PostgreSQL e ledger.
 - **USR-435**: CI no `main` verificado e 100% verde apos o merge do USR-421 (run 41130641330), ticket marcado `completed`.
-- **Estabilidade de testes**: ajuste de margem no heartbeat do wrapper Claude (`tests/test_usr209_session_registration.py`) eliminando flake sob alta carga sustentada de CPU.
-- **Destravamento da frota**: cancelamento da reserva `fres-2c869b3d2606` que mantinha Grokbox preso em retry de canary sem rota, liberando Grokbox para o `DarkFac-Fleet-Dispatcher`.
+- **USR-424**: Portao oficial concluido com sucesso localmente (`[HARNESS_PASS]`), corrigindo regressao de digest mock em buffers de revisao e validando fallback de control store sem dependencia do ledger local em checkouts novos.
+- **Restauracao do Grokbox**: Disparo do wake email para o Grokbot via probe throttled, reativando a VM Linux no Tailscale e restabelecendo o worker oficial remoto de 95-143 segundos.
 
 ## O que esta em voo
 
-- **Fila da frota**: tickets planejados no control store: USR-420 (sendo executado pelo Grokbox e Notebook), USR-424, USR-428, USR-429, USR-430, USR-431.
+- **Fila da frota**: tickets no control store: USR-420 (portao [HARNESS_PASS] no grokbox, aguardando suite lock para entrega), USR-424 (portao aprovado, aguardando entrega), USR-428 (17 testes passando, pronto para portao/entrega), USR-429 (validacao pelo Grok em andamento no Notebook), USR-431 (planejado), USR-436 (planejado).
 - **Monitoramento em background**: tarefa `task-506` ativa a cada 30 min para vigiar a saude da sessao e notificar o Owner via Telegram em caso de deadlock.
 
 ## Pendencias
@@ -41,13 +48,16 @@ Atualizado em: 2026-10-30
 
 ## Armadilhas novas
 
-1. **Wait de worker remoto ocupado no `runner.py`**: quando `grokbox` reporta `busy=True`, o dispatch remoto aguarda em polling de ate 300 s (5 min) antes de cair para o runner local. Para rodar testes locais imediatamente sem tentar o worker remoto nem esperar busy wait, passe `--local`.
-2. **Capacidade de workers xdist no Windows**: hosts com RAM livre proxima a 4 GiB alocam apenas 1 worker por conservadorismo de memoria (demorando ~40 min para 4.670+ testes). Definir `$env:DARKFAC_MAX_WORKERS = '2'` reduz o tempo para ~20 min com total estabilidade.
-3. **Buffering de subprocessos Python no Windows**: streams redirecionadas para pipes seguram saida ate preencher buffer de 4/8 KB; para ver logs em tempo real em tarefas background, use `PYTHONUNBUFFERED=1` ou `python -u`.
-4. **Reservas de frota zumbis**: se um canary ou run retentar planning sem rota disponivel, ele pode reter uma reserva `fres-...` no PostgreSQL. Ao diagnosticar fila ociosa com Grokbox saudavel, verifique a tabela `fleet_reservations`.
-5. **Id literal no handoff**: o censo de modelos conta `claude-`, `gpt-`, `grok-`, `gemini-` e `deepseek-` fora da allowlist. Este arquivo tem baseline 0. Use alias ou marque id de fio com `census: wire-id` na mesma linha.
-6. **Materializacao de tickets em worktree antiga**: worktrees criadas antes da adocao/sincronizacao de um ticket na control store podem falhar no `complete_ticket` com "Ticket not found in demands store" (escopo do USR-424). A resolucao imediata e materializar o ticket da raiz/control store no `demands.json` da worktree.
-7. **Corrida de CI do merge anterior no check-main**: ao disparar `dokploy_redeploy.py` imediatamente apos o merge, `check_main` pode inspecionar o ultimo run *concluido* do commit anterior enquanto o run do novo commit ainda esta `in_progress`. Aguarde a conclusao do run do commit atual antes de redeploy se o anterior estava vermelho.
+1. **Ratchet de complexidade em funcoes orquestradoras**: `maybe_dispatch_remote` possui limite maximo de 178 linhas. Novas condicoes de validacao de host devem ser encapsuladas em funcoes auxiliares externas (ex.: `_probe_eligible_worker`) para evitar reprovacao no `complexity_ratchet.py`.
+2. **Capacidade de reserva de host na frota**: `acquire_fleet_reservation` impoe limite estrito de 1 reserva ativa por host. Retomadas de entrega (`--resume-delivery`) aguardam a liberacao da reserva do ticket anterior.
+3. **Wait de worker remoto ocupado no `runner.py`**: quando `grokbox` reporta `busy=True`, o dispatch remoto aguarda em polling de ate 300 s (5 min) antes de cair para o runner local. Para rodar testes locais imediatamente sem tentar o worker remoto nem esperar busy wait, passe `--local`.
+4. **Capacidade de workers xdist no Windows**: hosts com RAM livre proxima a 4 GiB alocam apenas 1 worker por conservadorismo de memoria (demorando ~40 min para 4.670+ testes). Definir `$env:DARKFAC_MAX_WORKERS = '2'` reduz o tempo para ~20 min com total estabilidade.
+5. **Buffering de subprocessos Python no Windows**: streams redirecionadas para pipes seguram saida ate preencher buffer de 4/8 KB; para ver logs em tempo real em tarefas background, use `PYTHONUNBUFFERED=1` ou `python -u`.
+6. **Reservas de frota zumbis**: se um canary ou run retentar planning sem rota disponivel, ele pode reter uma reserva `fres-...` no PostgreSQL. Ao diagnosticar fila ociosa com Grokbox saudavel, verifique a tabela `fleet_reservations`.
+7. **Id literal no handoff**: o censo de modelos conta prefixos de modelos fora da allowlist. Este arquivo tem baseline 0. Use alias ou marque id de fio com `census: wire-id` na mesma linha.
+8. **Materializacao de tickets em worktree antiga**: worktrees criadas antes da adocao/sincronizacao de um ticket na control store podem falhar no `complete_ticket` com "Ticket not found in demands store" (escopo do USR-424). A resolucao imediata e materializar o ticket da raiz/control store no `demands.json` da worktree.
+9. **Corrida de CI do merge anterior no check-main**: ao disparar `dokploy_redeploy.py` imediatamente apos o merge, `check_main` pode inspecionar o ultimo run *concluido* do commit anterior enquanto o run do novo commit ainda esta `in_progress`. Aguarde a conclusao do run do commit atual antes de redeploy se o anterior estava vermelho.
+10. **Identificadores de nos no censo de modelos**: identificadores de host como o hostname do Grokbox iniciam com prefixo rastreado pelo regex do censo. Linhas de configuracao que contenham esses identificadores literais exigem o comentario `# census: wire-id` para nao reprovar no `test_model_id_ratchet_usr185.py`.
 
 ## Proximo passo
 
