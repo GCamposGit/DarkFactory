@@ -38,6 +38,13 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    valido o ticket nao chega ao BUILD nem a entrega (`_require_plan_and_build` exige PLAN, RESEARCH e BUILD).
 4. **BUILD** roda o agente de desenvolvimento uma vez por sub-ticket do plano, em sequencia, na mesma
    worktree, e grava `progress.json` (`harness` = familia do implementador).
+   Antes de cada fatia, o launcher relê a cota e chama `pick` de novo (`development`, modo `write`),
+   sem override e sem a tupla do preflight (USR-428). Um plano de uma fatia faz esse pick uma vez.
+   `--harness` só segue naquela fatia se a leitura nova tiver headroom conhecido acima de 15%; 15.0, abaixo
+   ou desconhecido descarta o pin e usa o pick fresco. `--force` e a autorização no prompt não iniciam um
+   harness que esse pick recusa. Se o pick de uma fatia devolve `None`, essa fatia não chama o agente, a
+   entrega não começa, o processo sai com 75 (`EXIT_ROUTE_WAIT`) e o diretório da worktree permanece, com
+   o que as fatias anteriores já gravaram.
 5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD; **VALIDATE** grava `validation.json`
    depois do portao; **REVIEW** roda `stage_review.ReviewStage` com familia diferente do implementador e grava
    `review_verdict.json` so na aprovacao (`changes_required` reinvoca o agente, comita e repete o portao);

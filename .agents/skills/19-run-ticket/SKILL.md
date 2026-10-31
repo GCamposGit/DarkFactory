@@ -29,6 +29,7 @@ Esta skill governa o ciclo de vida ponta a ponta de desenvolvimento de tickets n
 3. **Exceção de Override Explícito pelo Usuário**:
    - **A implementação em um harness com cota $\le 15.0\%$ SÓ É PERMITIDA se o usuário exigir explicitamente no prompt** (ex.: *"forçar execução neste harness"*, *"ignorar limite de cota"*, *"estou ciente da cota crítica, prossiga"* ou via flag `--force`).
    - Sem essa instrução textual inequívoca, o agente deve falhar fechado (*fail-closed*).
+   - Esse override vale no preflight do harness explícito. Depois do PLAN, cada fatia do plano pede um `pick` fresco (estágio `development`, modo `write`, cota daquele momento) antes do seu agente, sem override e sem a rota antiga. Um plano de uma fatia faz esse pick uma vez. Headroom $\le 15.0\%$ ou desconhecido não inicia aquela fatia; `--force` não recupera essa recusa. `--harness` explícito só segue na fatia se a leitura nova for conhecida e $> 15\%$. Sem rota, o launcher espera (`EXIT_ROUTE_WAIT`), não chama o agente da fatia, não começa a entrega e preserva a worktree, inclusive o trabalho das fatias anteriores.
 
 
 ---

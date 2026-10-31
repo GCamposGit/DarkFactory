@@ -20,6 +20,8 @@ python C:\dev\DarkFac\run_ticket.py USR-XXX
 
 Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, workers, `--fleet` e pump nao podem usa-lo. Esses caminhos seguem a rota de desenvolvimento do despachante. Se harnesses locais de alta capacidade estiverem esgotados para o estagio `planning`, o roteador aciona a contingencia OpenRouter (`planning.openrouter`) de forma autonoma.
 
+O `run_ticket.py` revalida a cota de `development` antes de cada fatia do plano, com um `pick` fresco sobre a leitura daquele momento. Um plano de uma fatia faz esse pick uma vez. O pin `--harness` e o `--force` do preflight nao iniciam, numa fatia, um harness com headroom conhecido de 15% ou menos, ou sem leitura. Sem rota elegivel o processo espera (codigo 75), nao chama o agente da fatia, nao comeca a entrega e a worktree permanece, inclusive o trabalho das fatias anteriores.
+
 ## Cota ausente ou antiga
 
 O briefing le apenas snapshots locais e mostra idade e causa estruturada quando disponiveis. Snapshot ausente, invalido ou `STALE` nao confirma percentual. Na rota interativa, o harness de operacao Antigravity continua elegivel com aviso explicito de cota desconhecida/antiga enquanto a telemetria e reparada; esse fail-open e restrito a preferencia do operador no chat e nao muda o piso para qualquer snapshot atual conhecido. A causa da falha fica registrada pelo medidor `antigravity_rpc`. Execucao headless continua excluida mesmo que a cota esteja atual.
