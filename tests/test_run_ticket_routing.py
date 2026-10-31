@@ -237,7 +237,11 @@ def test_run_ticket_executes_the_agent_through_the_shared_run_with_retry(
     shared.assert_called_once()
     kwargs = shared.call_args.kwargs
     assert kwargs["mode"] == "write" and kwargs["stage"] == "development" and kwargs["pinned"] is True
-    assert shared.call_args.args[1] == ("codex", None)
+    # USR-428: a --harness that stays above the floor stays pinned, and the route
+    # carries the model declared for that harness (Codex pin), not an empty model.
+    declared = run_ticket._development_harness_model("codex")
+    assert declared not in (None, "sonnet")
+    assert shared.call_args.args[1] == ("codex", declared)
     env["agent"].assert_not_called()  # the launcher never calls the agent outside the shared loop
 
 
