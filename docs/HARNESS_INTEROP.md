@@ -28,7 +28,15 @@ python -m pip install -r requirements-audio.txt
 
 ## Antigravity
 
-Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte canônica das 17 skills do projeto.
+Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte canônica das 17 skills do projeto. Atua como harness de operacao interativo via chat (`DARKFAC_OPERATING_HARNESS=antigravity`), iniciando com `python -m core.ops.briefing`.
+
+## Codex
+
+Abra a raiz clonada como workspace. O Codex le `AGENTS.md` diretamente e opera com paridade completa (USR-431):
+- Inicio de sessao: `python -m core.ops.briefing` e `$env:DARKFAC_OPERATING_HARNESS = 'codex'`.
+- Medidor de cotas: `core/usage/adapters.py` lê buckets da sessao local via app-server do Codex (`openai.json`).
+- Guardas de fim de turno: `python -m core.ops.turn_guard --check` valida learning packs, handoff e ciclo de sessao.
+- Skills disponiveis em `.agents/skills/`.
 
 ## Grok
 
