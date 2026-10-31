@@ -4,7 +4,7 @@ Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
 
-Última revisão: 30/10/2026 (fábrica; revalidação de cota por fatia de development, USR-428).
+Última revisão: 31/10/2026 (fábrica; pick fresco de development em contexto headless na frota, USR-428).
 
 ## Canais de entrada
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
@@ -21,7 +21,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - Assinaturas básicas: Claude Pro, ChatGPT Plus (Codex), SuperGrok e Gemini Pro, consideradas 20 USD/mês cada no custo por ticket (`.factory/config/subscription_prices.json`).
 - OpenRouter: perto de US$ 10/mês; pode subir se aumentar a vazão. Hoje o código aplica só um teto por execução de US$ 2 (`run_caps.openrouter_usd` em `.factory/config/line_routing.json`); o teto mensal em código é parte do bloco USR-378.
 - Dentro desses tetos a fábrica decide sozinha; acima deles, pergunta ao owner (MISSION, princípio 2).
-- Piso de cota: nenhuma assinatura é usada para escrever código com 15% ou menos de cota restante (`core/line/routing.py`). Depois do PLAN, cada fatia de development pede um `pick` fresco antes do agente; a rota do preflight e o `--force` não iniciam harness nesse piso nem com cota desconhecida. Sem rota a fatia espera, a entrega não começa e a worktree fica (USR-428).
+- Piso de cota: nenhuma assinatura é usada para escrever código com 15% ou menos de cota restante (`core/line/routing.py`). Depois do PLAN, cada fatia de development pede um `pick` fresco antes do agente; a leitura pode eleger outro harness write que a fatia anterior. A rota do preflight e o `--force` não iniciam harness nesse piso nem com cota desconhecida. Com `--fleet` esse pick é headless e não elege Antigravity. Sem rota a fatia espera (código 75, JSON `route_wait` / `BUILD` / caminho da worktree), a entrega não começa e a worktree fica, inclusive o arquivo gravado no PLAN e o que as fatias anteriores já gravaram (USR-428).
 - Contingência OpenRouter para alta inteligência: quando nenhum harness local de alta inteligência estiver disponível para estágios que exigem alta capacidade (ex.: planejamento/high-tier com Claude e Codex abaixo do piso crítico de 15%), é permitido e correto utilizar o OpenRouter com modelo de alta inteligência dentro do teto por execução (`run_caps.openrouter_usd`), garantindo que a fábrica nunca trave por falta de rota viável.
 - Cota Antigravity: o briefing de 29/10/2026 leu snapshot local atual, com 98,91% restante semanal e 96,0% na janela móvel de 5h; essa amostra estava atual (menos de 1 minuto). Snapshot ausente, inválido ou `STALE` não é percentual confirmado: a preferência do operador Antigravity segue elegível apenas no chat interativo, com aviso e causa estruturada; qualquer execução headless exclui Antigravity.
 - Briefing operacional: `python -m core.ops.briefing` reúne fila, OAs abertas de todas as fontes, nós sem atualização, PRs com fallback quando `gh` falha, snapshots de cota e `docs/operacao/HANDOFF.md`. Em 29/10, o control store PostgreSQL estava inacessível e a leitura da fila usou o fallback em memória; `gh` não estava disponível.
@@ -58,8 +58,10 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - Contrato de encerramento do foco: `python -m pytest tests/test_fleet_dispatcher.py -q` termina sozinho, com código de saída e uma linha de resumo do pytest no formato `N passed in Xs`, dentro do prazo configurado em `pytest.ini` (`timeout = 120`, `timeout_method = thread`). O cache por worktree fica em `DarkFac/pytest-cache` no diretório temporário do usuário. `redirect_cache_dir` grava esse destino antes de o cache plugin ler `cache_dir` e reaplica o caminho no `Cache` já criado, no início de `pytest_sessionfinish`, antes de `Cache.set`. Um `%LOCALAPPDATA%` não gravável não deixa o processo aberto depois de `100%`.
 
 ## Histórico
+- 31/10/2026: sem rota na primeira fatia de development o launcher espera (código 75), não chama o agente nem a entrega, e deixa no disco a worktree com o arquivo gravado no PLAN (USR-428).
+- 31/10/2026: o pick fresco de cada fatia com `--fleet` usa contexto headless e não inicia Antigravity, mesmo como harness de operação (USR-428).
 - 30/10/2026: o primeiro development depois do PLAN revalida a cota com um pick fresco; headroom de 15% ou cota desconhecida não herda a rota do preflight nem o override (USR-428).
-- 30/10/2026: cada fatia do plano repete esse pick antes do agente; se a fatia seguinte não tem rota, o agente não inicia, a entrega não começa e a worktree com o trabalho anterior permanece (USR-428).
+- 30/10/2026: cada fatia do plano repete esse pick antes do agente; a leitura pode trocar o harness entre fatias. Uma fatia posterior sem rota não inicia o agente dela, a entrega não começa e a worktree com o trabalho anterior permanece (USR-428).
 - 29/10/2026: Antigravity formalizado como interface interativa com briefing compartilhado e handoff versionado; cota atual confirmada pelo snapshot local, com causa estruturada para falhas futuras; execução headless/frota continua excluída.
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
 - 26/10/2026: Desktop fora da frota por `DARKFAC_FLEET_DISABLED_HOSTS=desktop` (pedido do owner).

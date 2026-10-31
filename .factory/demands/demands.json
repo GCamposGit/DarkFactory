@@ -11928,5 +11928,34 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-428",
+    "project_id": "darkfac",
+    "title": "Revalidar quota de development apos planejamento antes de iniciar agente",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-427 selecionouCodex17%no preflight22:37, mas planejamento22:42:28 detectouCodex13%critico; aindaassim inicioudevelopmentCodex22:44:37 comrotaantiga. Canceladocanonicamente22:46:24, worktreepreservada. Routerfresco22:46:38 Codex12%,Grok7.97%,elegeClaudeSonnet. Exigirnovapickantesdecadafatia/development, semoverridenemselecaostale.",
+    "core_journey": [
+      "USR-427 selecionouCodex17%no preflight22:37, mas planejamento22:42:28 detectouCodex13%critico; aindaassim inicioudevelopmentCodex22:44:37 comrotaantiga. Canceladocanonicamente22:46:24, worktreepreservada. Routerfresco22:46:38 Codex12%,Grok7.97%,elegeClaudeSonnet. Exigirnovapickantesdecadafatia/development, semoverridenemselecaostale."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Mudanca de quota no PLAN impede dev em harness abaixo ou igual15%",
+      "Reeleger harnesswrite elegivel ou falharfechado preservandoworktree"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T01:47:10.905536Z",
+    "updated_at": "2026-10-29T01:47:10.905536Z"
   }
 ]

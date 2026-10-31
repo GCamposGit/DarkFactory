@@ -31,9 +31,12 @@ _TICKET = run_ticket.UserTicket(
 )
 
 _PREFLIGHT = {"openai": 20.0, "anthropic": 10.0, "xai": 8.0, "google": 90.0}
-_AFTER_CLAUDE = {"openai": 13.0, "anthropic": 40.0, "xai": 8.0, "google": 90.0}
+# Incident USR-427/428: after PLAN, OpenAI is at 12% and xAI at 7.97%.
+_AFTER_CLAUDE = {"openai": 12.0, "anthropic": 40.0, "xai": 7.97, "google": 90.0}
 _SLICE_CODEX = {"openai": 40.0, "anthropic": 16.0, "xai": 8.0, "google": 90.0}
-_TWO_SLICES = [("USR-428-A", "fatia 1"), ("USR-428-B", "fatia 2")]
+_SLICE_CLAUDE = {"openai": 15.0, "anthropic": 40.0, "xai": 8.0, "google": 90.0}
+_SLICE_NONE = {"openai": 10.0, "anthropic": 15.0, "xai": 8.0, "google": 90.0}
+_THREE_SLICES = [("USR-428-A", "fatia 1"), ("USR-428-B", "fatia 2"), ("USR-428-C", "fatia 3")]
 
 
 def _quotas_from(by_provider: dict[str, Optional[float]]) -> dict[str, dict[str, Any]]:
@@ -81,7 +84,7 @@ def launcher(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace
     state = SimpleNamespace(
         table=dict(_PREFLIGHT),
         after=dict(_AFTER_CLAUDE),
-        after_slice=None,
+        after_slices=None,
         slices=None,
         harnesses=[],
         picks=[],
@@ -119,16 +122,21 @@ def launcher(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace
     def spy(stage: str, host_caps: Any, exclude: Any = (), **kwargs: Any) -> Any:
         result = original_pick(stage, host_caps, exclude, **kwargs)
         if stage == "development":
-            state.picks.append({"kwargs": kwargs, "result": result})
+            state.picks.append({
+                "stage": stage, "exclude": exclude, "kwargs": kwargs, "result": result,
+            })
         return result
 
     monkeypatch.setattr(run_ticket, "pick", spy)
 
     def agent(req: Any) -> AgentResult:
         state.harnesses.append(req.harness)
+        done = len(state.harnesses)
+        (workspace_dir / f"slice-{done}.txt").write_text(req.harness + "\n", encoding="utf-8")
         (workspace_dir / "slice-work.txt").write_text("ok\n", encoding="utf-8")
-        if state.after_slice is not None and len(state.harnesses) == 1:
-            state.table = dict(state.after_slice)
+        schedule = state.after_slices
+        if schedule and done <= len(schedule):
+            state.table = dict(schedule[done - 1])
         return AgentResult(ok=True, text="feito", harness=req.harness, duration_s=0.1, exit_code=0)
 
     monkeypatch.setattr(run_ticket, "run_agent", agent)
@@ -172,13 +180,16 @@ def test_first_development_uses_the_fresh_pick_not_the_preflight_tuple(
     requota = _requota_calls(launcher)
     assert len(requota) == 1
     kwargs = requota[0]["kwargs"]
+    assert requota[0]["stage"] == "development"
     assert kwargs["mode"] == "write"
     assert "override_granted" not in kwargs
     assert kwargs.get("implementing_harness") is None
-    assert ("codex", None) not in kwargs.values()
+    preflight_route = launcher.picks[0]["result"]
+    assert preflight_route not in kwargs.values()
+    assert preflight_route not in (requota[0]["exclude"] or ())
     lookup = kwargs["quota_lookup"]
-    assert lookup("openai") <= 15.0
-    assert lookup("xai") <= 15.0
+    assert lookup("openai") == 12.0
+    assert lookup("xai") == 7.97
     assert lookup("anthropic") > 15.0
     assert requota[0]["result"][0] == "claude"
     assert launcher.harnesses[0] == "claude"
@@ -241,70 +252,108 @@ def test_explicit_harness_follows_only_a_known_headroom_above_the_floor(
 def test_no_fresh_route_waits_without_agent_delivery_or_deleting_the_worktree(
     launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """First slice with pick None waits: exit 75, no agent, no delivery, PLAN file stays."""
     launcher.after = {"openai": 10.0, "anthropic": 15.0, "xai": 8.0, "google": 90.0}
+    plan_note = launcher.workspace.path / "from-plan.txt"
+    original_plan = run_ticket._plan_with_agent
+
+    def plan(ticket: Any, workspace: Any, rws: Any) -> None:
+        (workspace.path / "from-plan.txt").write_text("escrito no PLAN\n", encoding="utf-8")
+        return original_plan(ticket, workspace, rws)
+
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", plan)
 
     def preserve(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("a rota ausente nao descarta a worktree")
 
     monkeypatch.setattr(run_ticket, "_report_workspace_fate", preserve)
     monkeypatch.setattr(run_ticket, "_discard_untouched_workspace", preserve)
-    called = {"delivery": False}
+    called = {"agent": False, "delivery": False}
+
+    def agent(_req: Any) -> AgentResult:
+        called["agent"] = True
+        raise AssertionError("run_agent nao deve ser chamado")
 
     def resume(**_kwargs: Any) -> dict[str, Any]:
         called["delivery"] = True
         return {"exit_code": 0, "ok": True}
 
+    monkeypatch.setattr(run_ticket, "run_agent", agent)
     monkeypatch.setattr(run_ticket, "resume_delivery", resume)
 
     code = main(["USR-428", "--skip-validation", "--no-commit", "--json"])
 
     assert code == EXIT_ROUTE_WAIT
+    assert called["agent"] is False
     assert launcher.harnesses == []
     assert called["delivery"] is False
     assert launcher.workspace.path.is_dir()
+    assert plan_note.is_file()
+    assert plan_note.read_text(encoding="utf-8") == "escrito no PLAN\n"
     requota = _requota_calls(launcher)
     assert len(requota) == 1 and requota[0]["result"] is None
-    assert "route_wait" in capsys.readouterr().out
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cause"] == "route_wait"
+    assert payload["stage"] == "BUILD"
+    assert payload["workspace"] == str(launcher.workspace.path)
 
 
-def test_each_slice_picks_development_again_before_its_agent(launcher: SimpleNamespace) -> None:
-    launcher.slices = list(_TWO_SLICES)
-    launcher.after = dict(_SLICE_CODEX)
-    launcher.after_slice = {"openai": 15.0, "anthropic": 40.0, "xai": 8.0, "google": 90.0}
+def test_minimal_one_slice_plan_rereads_quota_before_the_agent(
+    launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A small ticket writes the one-slice plan without a planning agent and still picks fresh."""
+    monkeypatch.setattr(run_ticket, "estimate_ticket_size", lambda _ticket: ("small", []))
+    calls = {"n": 0}
+    current = run_ticket.inspect_quotas
+
+    def inspect() -> dict[str, dict[str, Any]]:
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            launcher.table = dict(_AFTER_CLAUDE)
+        return current()
+
+    monkeypatch.setattr(run_ticket, "inspect_quotas", inspect)
 
     assert main(["USR-428", "--skip-validation", "--no-commit", "--json"]) == 0
 
-    assert launcher.harnesses == ["codex", "claude"]
+    assert launcher.picks[0]["result"][0] == "codex"
     requota = _requota_calls(launcher)
-    assert len(requota) == 2
-    assert requota[0]["result"][0] == "codex"
-    assert requota[0]["kwargs"]["quota_lookup"]("openai") > 15.0
-    assert requota[1]["kwargs"]["mode"] == "write"
-    assert "override_granted" not in requota[1]["kwargs"]
-    assert requota[1]["kwargs"]["quota_lookup"]("openai") <= 15.0
-    assert requota[1]["kwargs"]["quota_lookup"]("anthropic") > 15.0
-    assert requota[1]["result"][0] == "claude"
+    assert len(requota) == 1
+    assert requota[0]["stage"] == "development"
+    assert requota[0]["kwargs"]["mode"] == "write"
+    assert requota[0]["kwargs"]["quota_lookup"]("openai") == 12.0
+    assert requota[0]["kwargs"]["quota_lookup"]("xai") == 7.97
+    assert requota[0]["result"][0] == "claude"
+    assert launcher.harnesses == ["claude"]
 
 
-def test_a_pin_that_stays_above_the_floor_is_kept_on_every_slice(launcher: SimpleNamespace) -> None:
-    launcher.slices = list(_TWO_SLICES)
-    launcher.after = {"openai": 20.0, "anthropic": 40.0, "xai": 8.0, "google": 90.0}
-    launcher.after_slice = {"openai": 30.0, "anthropic": 90.0, "xai": 8.0, "google": 90.0}
+def test_fleet_slice_pick_is_headless_and_does_not_start_antigravity(
+    launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--fleet re-picks in headless context, so the operating Antigravity harness does not start."""
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    launcher.after = {"openai": 12.0, "anthropic": 15.0, "xai": 7.97, "google": 90.0}
 
-    assert main(["USR-428", "--harness", "codex", "--skip-validation", "--no-commit", "--json"]) == 0
+    code = main(["USR-428", "--fleet", "--skip-validation", "--no-commit", "--json"])
 
-    assert launcher.harnesses == ["codex", "codex"]
+    assert code == EXIT_ROUTE_WAIT
+    assert launcher.harnesses == []
     requota = _requota_calls(launcher)
-    assert len(requota) == 2
-    assert all(call["kwargs"]["mode"] == "write" and "override_granted" not in call["kwargs"] for call in requota)
+    assert len(requota) == 1
+    assert requota[0]["stage"] == "development"
+    assert requota[0]["kwargs"]["execution_context"] == "headless"
+    assert requota[0]["kwargs"]["mode"] == "write"
+    assert "override_granted" not in requota[0]["kwargs"]
+    assert requota[0]["result"] is None
 
 
-def test_second_slice_without_a_route_does_not_start_the_agent_or_delivery(
+def test_three_slices_pick_before_each_agent_and_the_third_without_a_route_waits(
     launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    launcher.slices = list(_TWO_SLICES)
+    """Three slices, three development picks. The third with no writable headroom waits."""
+    launcher.slices = list(_THREE_SLICES)
     launcher.after = dict(_SLICE_CODEX)
-    launcher.after_slice = {"openai": 10.0, "anthropic": 15.0, "xai": 8.0, "google": 90.0}
+    launcher.after_slices = [dict(_SLICE_CLAUDE), dict(_SLICE_NONE)]
 
     def preserve(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("uma fatia sem rota nao descarta a worktree")
@@ -322,12 +371,54 @@ def test_second_slice_without_a_route_does_not_start_the_agent_or_delivery(
     code = main(["USR-428", "--skip-validation", "--no-commit", "--json"])
 
     assert code == EXIT_ROUTE_WAIT
-    assert launcher.harnesses == ["codex"]
+    assert launcher.harnesses == ["codex", "claude"]
     assert called["delivery"] is False
     assert launcher.workspace.path.is_dir()
-    assert (launcher.workspace.path / "slice-work.txt").is_file()
+    assert (launcher.workspace.path / "slice-1.txt").read_text(encoding="utf-8") == "codex\n"
+    assert (launcher.workspace.path / "slice-2.txt").read_text(encoding="utf-8") == "claude\n"
+    assert not (launcher.workspace.path / "slice-3.txt").exists()
     requota = _requota_calls(launcher)
-    assert len(requota) == 2
+    assert len(requota) == 3
+    assert all(
+        call["stage"] == "development"
+        and call["kwargs"]["mode"] == "write"
+        and call["kwargs"].get("quota_lookup") is not None
+        and "override_granted" not in call["kwargs"]
+        for call in requota
+    )
     assert requota[0]["result"][0] == "codex"
-    assert requota[1]["result"] is None
-    assert "route_wait" in capsys.readouterr().out
+    assert requota[0]["kwargs"]["quota_lookup"]("openai") > 15.0
+    assert requota[1]["kwargs"]["quota_lookup"]("openai") <= 15.0
+    assert requota[1]["kwargs"]["quota_lookup"]("anthropic") > 15.0
+    assert requota[1]["result"][0] == "claude"
+    assert requota[2]["kwargs"]["quota_lookup"]("openai") <= 15.0
+    assert requota[2]["kwargs"]["quota_lookup"]("anthropic") <= 15.0
+    assert requota[2]["kwargs"]["quota_lookup"]("xai") <= 15.0
+    assert requota[2]["result"] is None
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cause"] == "route_wait"
+    assert payload["stage"] == "BUILD"
+    assert payload["workspace"] == str(launcher.workspace.path)
+
+
+def test_a_pin_that_stays_above_the_floor_is_kept_on_every_slice(launcher: SimpleNamespace) -> None:
+    launcher.slices = list(_THREE_SLICES)
+    launcher.after = {"openai": 20.0, "anthropic": 40.0, "xai": 8.0, "google": 90.0}
+    launcher.after_slices = [
+        {"openai": 30.0, "anthropic": 90.0, "xai": 8.0, "google": 90.0},
+        {"openai": 16.0, "anthropic": 80.0, "xai": 8.0, "google": 90.0},
+    ]
+
+    assert main(["USR-428", "--harness", "codex", "--skip-validation", "--no-commit", "--json"]) == 0
+
+    assert launcher.harnesses == ["codex", "codex", "codex"]
+    requota = _requota_calls(launcher)
+    assert len(requota) == 3
+    assert all(
+        call["stage"] == "development"
+        and call["kwargs"]["mode"] == "write"
+        and call["kwargs"].get("quota_lookup") is not None
+        and call["kwargs"]["quota_lookup"]("openai") > 15.0
+        and "override_granted" not in call["kwargs"]
+        for call in requota
+    )
