@@ -244,6 +244,54 @@ def test_snapshot_run_propagates_the_runner_exit_code_and_still_cleans_up(
     assert _git_out(root, "worktree", "list", "--porcelain").count("worktree ") == 1
 
 
+def test_snapshot_omits_harness_scratch_from_the_disposable_index(line_validate, tmp_path: Path) -> None:
+    root = _snapshot_repo(tmp_path)
+    blank = tmp_path / "blank-exclude"
+    blank.write_text("", encoding="utf-8")
+    _git(root, "config", "core.excludesFile", str(blank))
+    scratch = root / ".tmp" / "harness-state-usr-423"
+    scratch.mkdir(parents=True)
+    timings = scratch / "run_timings.jsonl"
+    lock = scratch / "suite-0.lock"
+    timings.write_bytes(b'{"ticket":"USR-423","phase":"gate"}\n')
+    lock.write_bytes(b"suite-0\n")
+    ignored = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--", ".tmp/harness-state-usr-423/run_timings.jsonl"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ignored.returncode == 1, ignored.stdout
+    subprocess.run(
+        ["git", "add", "--", ".tmp/harness-state-usr-423/run_timings.jsonl"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    head = _git_out(root, "rev-parse", "HEAD")
+    branch = _git_out(root, "rev-parse", "--abbrev-ref", "HEAD")
+    status = _git_out(root, "status", "--porcelain=v1", "--untracked-files=all")
+    index_before = _git_out(root, "ls-files")
+    timings_bytes, lock_bytes = timings.read_bytes(), lock.read_bytes()
+
+    sha = line_validate.build_snapshot_commit(root)
+
+    names = _git_out(root, "ls-tree", "-r", "--name-only", sha).splitlines()
+    assert ".tmp/harness-state-usr-423/run_timings.jsonl" not in names
+    assert ".tmp/harness-state-usr-423/suite-0.lock" not in names
+    assert "new.txt" in names
+    assert "ignored.log" not in names
+    assert _git_out(root, "show", f"{sha}:new.txt") == "brand new"
+    assert _git_out(root, "rev-parse", "HEAD") == head
+    assert _git_out(root, "rev-parse", "--abbrev-ref", "HEAD") == branch
+    assert _git_out(root, "status", "--porcelain=v1", "--untracked-files=all") == status
+    assert _git_out(root, "ls-files") == index_before
+    assert ".tmp/harness-state-usr-423/run_timings.jsonl" in index_before.splitlines()
+    assert timings.read_bytes() == timings_bytes
+    assert lock.read_bytes() == lock_bytes
+
+
 def test_snapshot_commit_is_parented_on_head_and_leaves_the_real_index_alone(line_validate, tmp_path: Path) -> None:
     root = _snapshot_repo(tmp_path)
     head = _git_out(root, "rev-parse", "HEAD")

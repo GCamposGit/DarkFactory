@@ -421,6 +421,10 @@ class GitAutonomyManager:
             if ignored.returncode != 1:
                 raise RuntimeError(f"Cannot check ignore rules for staged path: {path}")
 
+    def _drop_delivery_scratch(self, cwd: Path) -> None:
+        """Take repository-root ``.tmp`` paths out of the index. Worktree bytes stay."""
+        ticket_workspace.apply_drop_delivery_scratch(lambda args: _run_git(list(args), cwd=cwd))
+
     def get_current_sha(self, cwd: Optional[Path] = None) -> str:
         """Return the current HEAD commit SHA."""
         target_dir = cwd or self.root
@@ -474,25 +478,34 @@ class GitAutonomyManager:
 
         Without ``paths`` only the paths changed IN ``cwd`` are staged (see
         :meth:`changed_paths`); a bare ``git add -A`` is never issued (USR-69).
+        Repository-root ``.tmp`` delivery scratch is never staged. Paths already
+        in the index are removed from it and left on disk with the same bytes
+        (USR-429). When that scratch is the only change, the current HEAD is
+        returned.
 
         Returns the new commit SHA, or the current HEAD if working tree is clean.
         """
         target_dir = cwd or self.root
 
-        # 1. Stage changes
+        # 1. Stage product changes. Drop harness scratch before the ignore check so a
+        # force-added ``.tmp`` file cannot block the product commit, and again after
+        # add in case a directory pathspec swept it back in.
+        self._drop_delivery_scratch(target_dir)
         self._check_ignored_staged_additions(target_dir)
         if paths:
-            stage_args = ["add", "--"] + [str(p) for p in paths]
-            add = _run_git(stage_args, cwd=target_dir)
-            if add.returncode != 0:
-                raise RuntimeError(f"Git add failed: {add.stderr.strip()}")
+            stageable = ticket_workspace.without_delivery_scratch(str(p) for p in paths)
+            if stageable:
+                add = _run_git(["add", "--", *stageable], cwd=target_dir)
+                if add.returncode != 0:
+                    raise RuntimeError(f"Git add failed: {add.stderr.strip()}")
         else:
-            changed = self.changed_paths(target_dir)
+            changed = ticket_workspace.without_delivery_scratch(self.changed_paths(target_dir))
             for start in range(0, len(changed), _ADD_CHUNK):
                 chunk = changed[start : start + _ADD_CHUNK]
                 add = _run_git(["--literal-pathspecs", "add", "-A", "--", *chunk], cwd=target_dir)
                 if add.returncode != 0:
                     raise RuntimeError(f"Git add failed for {chunk[:3]}: {add.stderr.strip()}")
+        self._drop_delivery_scratch(target_dir)
 
         # 2. Check if anything is staged
         staged_check = _run_git(["diff", "--cached", "--quiet"], cwd=target_dir)

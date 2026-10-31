@@ -146,10 +146,53 @@ def test_queue_labels_get_a_timestamped_branch(repo: SimpleNamespace) -> None:
 
 def test_creation_keeps_worktrees_out_of_git_even_without_a_gitignore(repo: SimpleNamespace) -> None:
     create_workspace("USR-204", cwd=repo.local)
-    assert _git(repo.local, "status", "--porcelain") == ""  # `.worktrees/` is excluded locally
+    scratch = repo.local / ".tmp" / "harness-state-usr-423"
+    scratch.mkdir(parents=True)
+    timings = scratch / "run_timings.jsonl"
+    lock = scratch / "suite-0.lock"
+    timings.write_text('{"run":1}\n', encoding="utf-8")
+    lock.write_bytes(b"")
+    before = (timings.read_bytes(), lock.read_bytes())
+    # The fixture has no .gitignore: info/exclude alone must hide harness scratch.
+    assert _git(repo.local, "status", "--porcelain") == ""
+    _git(repo.local, "add", "-A")
+    assert _git(repo.local, "diff", "--cached", "--name-only") == ""
+    assert (timings.read_bytes(), lock.read_bytes()) == before
+    ignored = _git(
+        repo.local,
+        "check-ignore",
+        "--no-index",
+        "--",
+        ".tmp/harness-state-usr-423/run_timings.jsonl",
+        ".tmp/harness-state-usr-423/suite-0.lock",
+    )
+    assert ignored.splitlines() == [
+        ".tmp/harness-state-usr-423/run_timings.jsonl",
+        ".tmp/harness-state-usr-423/suite-0.lock",
+    ]
+    nested = repo.local / "src" / ".tmp" / "keep.txt"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("keep\n", encoding="utf-8")
+    nested_before = nested.read_bytes()
+    visible = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--", "src/.tmp/keep.txt"],
+        cwd=repo.local,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert visible.returncode == 1, visible.stdout
+    _git(repo.local, "add", "-A")
+    assert _git(repo.local, "diff", "--cached", "--name-only") == "src/.tmp/keep.txt"
+    assert (timings.read_bytes(), lock.read_bytes()) == before
+    assert nested.read_bytes() == nested_before
     ensure_local_excludes(repo.local)  # idempotent
     exclude = (repo.local / ".git" / "info" / "exclude").read_text(encoding="utf-8")
     assert exclude.count("/.worktrees/") == 1
+    assert exclude.count("/.factory/backups/") == 1
+    assert exclude.count("/.tmp/") == 1
 
 
 def test_creation_works_from_inside_another_worktree(repo: SimpleNamespace) -> None:

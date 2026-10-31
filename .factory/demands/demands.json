@@ -11957,5 +11957,33 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-429",
+    "project_id": "darkfac",
+    "title": "Excluir estado temporario do harness dos commits de entrega",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "PR794 incluiu .tmp/harness-state-usr-423/run_timings.jsonl e suite-0.lock. Evidencia: merge8b8f5f11, git show --stat. Estado de execucao temporario foi versionado durante autocorrecao.",
+    "core_journey": [
+      "PR794 incluiu .tmp/harness-state-usr-423/run_timings.jsonl e suite-0.lock. Evidencia: merge8b8f5f11, git show --stat. Estado de execucao temporario foi versionado durante autocorrecao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Remover artefatos temporarios versionados sem apagar estado em uso; prevenir reincidencia no staging de entrega; validar com testes comportamentais existentes e portao oficial."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T03:56:57.550029Z",
+    "updated_at": "2026-10-29T03:56:57.550029Z"
   }
 ]

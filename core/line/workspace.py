@@ -47,6 +47,7 @@ from pydantic import BaseModel
 
 from core.git.safe_show import safe_show
 from core.git.state_guard import check_staged_state_files
+from core.git.ticket_workspace import apply_drop_delivery_scratch, without_delivery_scratch
 from core.line import cancellation
 from core.projects.models import ProjectDescriptor
 from core.projects.registry import normalize_repo_url
@@ -410,16 +411,27 @@ def _guard_not_cancelled(ws: RunWorkspace) -> None:
         raise cancellation.RunCancelledError(ws.run_id)
 
 
+def _drop_delivery_scratch(cwd: Path) -> None:
+    """Take repository-root ``.tmp`` paths out of the index. Worktree bytes stay."""
+    try:
+        apply_drop_delivery_scratch(lambda args: _run_git(list(args), cwd=cwd, check=False))
+    except RuntimeError as exc:
+        raise WorkspaceError(str(exc)) from exc
+
+
 def commit(ws: RunWorkspace, message: str, job_key: str) -> str:
     """Stage everything and commit with a `DarkFac-Job: <job_key>` trailer.
 
     A no-op (nothing staged) returns the current HEAD SHA without creating a
     new commit, which makes retrying a step with the same `job_key` safe.
+    Repository-root ``.tmp`` harness scratch is left out of the commit and out
+    of the index; the files stay on disk (USR-429).
     """
     if not job_key or not job_key.strip():
         raise WorkspaceError("job_key must be non-empty")
     _guard_not_cancelled(ws)
     _run_git(["add", "-A"], cwd=ws.path)
+    _drop_delivery_scratch(ws.path)
     diff_check = _run_git(["diff", "--cached", "--quiet"], cwd=ws.path, check=False)
     if diff_check.returncode == 0:
         return _rev_parse(ws.path, "HEAD")
@@ -439,17 +451,25 @@ def commit(ws: RunWorkspace, message: str, job_key: str) -> str:
 
 
 def commit_paths(ws: RunWorkspace, message: str, job_key: str, paths: list[Path]) -> Optional[str]:
-    """Commit ONLY `paths` (files or directories), leaving every other working-tree change alone.
+    """Commit ONLY the product paths in `paths`, leaving every other working-tree change alone.
 
     Used to publish diagnostics from a failing iteration without committing the agent's
     half-made edits. Returns the new commit SHA, or `None` when `paths` have nothing to commit.
+
+    Repository-root ``.tmp`` harness scratch is not published. Those paths leave the
+    index and stay on disk; when they are the only requested paths the result is `None`.
     """
     if not job_key or not job_key.strip():
         raise WorkspaceError("job_key must be non-empty")
     _guard_not_cancelled(ws)
     relative = [str(Path(p).resolve().relative_to(ws.path.resolve())) for p in paths]
-    _run_git(["add", "--", *relative], cwd=ws.path)
-    diff_check = _run_git(["diff", "--cached", "--quiet", "--", *relative], cwd=ws.path, check=False)
+    product = without_delivery_scratch(relative)
+    if product:
+        _run_git(["add", "--", *product], cwd=ws.path)
+    _drop_delivery_scratch(ws.path)
+    if not product:
+        return None
+    diff_check = _run_git(["diff", "--cached", "--quiet", "--", *product], cwd=ws.path, check=False)
     if diff_check.returncode == 0:
         return None
     if diff_check.returncode != 1:
@@ -461,7 +481,7 @@ def commit_paths(ws: RunWorkspace, message: str, job_key: str, paths: list[Path]
     except RuntimeError as exc:
         raise WorkspaceError(str(exc)) from exc
     trailer = f"{_JOB_TRAILER}: {job_key.strip()}"
-    argv = [*_identity_args(ws.path), "commit", "-m", f"{message.rstrip()}\n\n{trailer}\n", "--", *relative]
+    argv = [*_identity_args(ws.path), "commit", "-m", f"{message.rstrip()}\n\n{trailer}\n", "--", *product]
     _run_git(argv, cwd=ws.path)
     return _rev_parse(ws.path, "HEAD")
 

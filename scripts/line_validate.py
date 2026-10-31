@@ -41,6 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.git.ticket_workspace import drop_delivery_scratch_commands  # noqa: E402
 from core.harness import runner  # noqa: E402
 
 # The cloud worker that runs this script carries production credentials
@@ -143,12 +144,25 @@ def _git(root: Path, *args: str, env: dict[str, str] | None = None) -> str:
     return proc.stdout.strip()
 
 
+def _omit_delivery_scratch(root: Path, env: dict[str, str]) -> None:
+    """Drop repository-root ``.tmp`` paths from the index selected by ``env``.
+
+    ``GIT_INDEX_FILE`` in ``env`` keeps the real index untouched. Worktree bytes stay.
+    """
+    listed = _git(root, "ls-files", "-z", "--", ".tmp", env=env)
+    for command in drop_delivery_scratch_commands(listed):
+        _git(root, *command, env=env)
+
+
 def build_snapshot_commit(root: Path) -> str:
     """Commit the working tree (tracked changes + untracked, non-ignored files); return the SHA.
 
     Uses a throwaway copy of the index (`GIT_INDEX_FILE`), so the real index,
     HEAD, branch and reflogs are untouched; the new commit is parented on HEAD
     and stays unreferenced (garbage) once the temporary checkout is gone.
+    Repository-root ``.tmp`` harness scratch is removed from that disposable
+    index before ``write-tree``, even when it is not ignored and already staged
+    (USR-429). ``new.txt``-style product files still enter; ignored files stay out.
     """
     head = _git(root, "rev-parse", "--verify", "HEAD")
     real_index = Path(_git(root, "rev-parse", "--git-path", "index"))
@@ -168,6 +182,7 @@ def build_snapshot_commit(root: Path) -> str:
             GIT_COMMITTER_EMAIL="line-validate@darkfac.invalid",
         )
         _git(root, "add", "-A", env=env)
+        _omit_delivery_scratch(root, env)
         tree = _git(root, "write-tree", env=env)
         return _git(root, "commit-tree", tree, "-p", head, "-m", "line_validate snapshot of the working tree", env=env)
     finally:

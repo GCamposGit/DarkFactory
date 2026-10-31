@@ -39,7 +39,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 from core.paths import state_root
 from core.common.time import utc_now
@@ -57,9 +57,13 @@ RESERVED_DIR_NAMES = frozenset({"harness_state"})
 # A directory touched more recently than this is never classified as an orphan:
 # it may be a worktree being created right now.
 ORPHAN_MIN_AGE_S = 3600.0
-# `.worktrees/` is already in the repository .gitignore; temporary or foreign
-# clones may not have it, so the local exclude file is kept in sync too.
-LOCAL_EXCLUDE_ENTRIES: tuple[str, ...] = ("/.worktrees/", "/.factory/backups/")
+# `.worktrees/`, `/.factory/backups/` and `/.tmp/` are already in the repository
+# .gitignore; a temporary or foreign clone may not have those rules yet, so the
+# local exclude file is kept in sync too. `/.tmp/` is harness scratch (locks,
+# timings) and must stay out of `git status` and `git add` (USR-429).
+LOCAL_EXCLUDE_ENTRIES: tuple[str, ...] = ("/.worktrees/", "/.factory/backups/", "/.tmp/")
+# How many scratch paths one `git update-index` removes (Windows command-line length).
+_SCRATCH_INDEX_CHUNK = 50
 
 DEFAULT_CLEANUP_RETRIES = 4
 DEFAULT_BACKOFF_S: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0)
@@ -69,9 +73,62 @@ _STAMP_PATTERN = re.compile(r"-(\d{8}T\d{6}Z)(?:-\d+)?$")
 _GIT_TIMEOUT_S = 120.0
 
 GitRunner = Callable[[Sequence[str], Path], "subprocess.CompletedProcess[str]"]
+GitArgRunner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
 SleepFn = Callable[[float], None]
 NowFn = Callable[[], datetime]
 RmtreeFn = Callable[[Path], None]
+
+
+def is_delivery_scratch(path: str) -> bool:
+    """True only for the relative POSIX path ``.tmp`` or a path prefixed by ``.tmp/``.
+
+    Backslashes are separators, so a Windows relative path is judged in POSIX
+    form. Absolute paths, any other prefix (``src/.tmp``, ``.tmpfile``) and any
+    ``..`` segment are product content.
+    """
+    text = str(path).replace("\\", "/")
+    if not text or text.startswith("/") or (len(text) >= 2 and text[1] == ":"):
+        return False
+    if ".." in text.split("/"):
+        return False
+    return text == ".tmp" or text.startswith(".tmp/")
+
+
+def without_delivery_scratch(paths: Iterable[str]) -> list[str]:
+    """``paths`` minus delivery scratch, preserving order and the original spelling."""
+    return [path for path in paths if not is_delivery_scratch(str(path))]
+
+
+def drop_delivery_scratch_commands(ls_files_z: str, *, chunk: int = _SCRATCH_INDEX_CHUNK) -> list[list[str]]:
+    """``git update-index --force-remove`` argv lists for scratch paths in ``ls_files_z``.
+
+    ``ls_files_z`` is the NUL-separated output of ``git ls-files -z -- .tmp``.
+    The commands take those paths out of the index and do not delete worktree bytes.
+    """
+    paths = [token.strip("\r\n") for token in ls_files_z.split("\0")]
+    scratch = [path for path in paths if path and is_delivery_scratch(path)]
+    commands: list[list[str]] = []
+    for start in range(0, len(scratch), chunk):
+        part = scratch[start : start + chunk]
+        commands.append(["update-index", "--force-remove", "--", *part])
+    return commands
+
+
+def apply_drop_delivery_scratch(run: GitArgRunner) -> None:
+    """Remove delivery scratch from the index ``run`` addresses. Worktree bytes stay.
+
+    ``run`` executes one git argv list in the target repository and index.
+    A non-zero exit raises ``RuntimeError``.
+    """
+    listed = run(["ls-files", "-z", "--", ".tmp"])
+    if listed.returncode != 0:
+        detail = (listed.stderr or listed.stdout or "").strip()
+        raise RuntimeError(f"Cannot list delivery scratch: {detail}")
+    for command in drop_delivery_scratch_commands(listed.stdout or ""):
+        removed = run(command)
+        if removed.returncode != 0:
+            detail = (removed.stderr or removed.stdout or "").strip()
+            raise RuntimeError(f"Cannot drop delivery scratch from the index: {detail}")
 
 
 class WorkspaceError(RuntimeError):
@@ -193,10 +250,11 @@ def is_secondary_worktree(cwd: Path, run_git: Optional[GitRunner] = None) -> boo
 
 
 def ensure_local_excludes(main_root: Path, run_git: Optional[GitRunner] = None) -> None:
-    """Append the worktree/trash directories to ``<common-git-dir>/info/exclude`` if missing.
+    """Append the scratch directories to ``<common-git-dir>/info/exclude`` if missing.
 
-    Local to the machine (never tracked): keeps ``.worktrees/`` out of
-    ``git status`` / ``git add`` even in a clone whose ``.gitignore`` lacks it.
+    Local to the machine (never tracked): keeps ``.worktrees/`` and ``.tmp/``
+    out of ``git status`` / ``git add`` even in a clone whose ``.gitignore``
+    does not have those rules yet.
     """
     runner = run_git or _git
     res = runner(["rev-parse", "--path-format=absolute", "--git-common-dir"], main_root)
