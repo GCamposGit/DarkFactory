@@ -2983,13 +2983,13 @@
           "command": "cd C:\\dev\\DarkFac; Copy-Item .factory\\owner_actions\\owner_actions.json $env:TEMP\\owner_actions_backup.json; git checkout -- .factory/owner_actions/owner_actions.json; git pull --ff-only"
         },
         {
-          "text": "Reinicie o Desktop (Iniciar > Energia > Reiniciar) para o worker subir com o codigo novo. Se o Segundo Cerebro estiver indexando, pode deixar para quando terminar.",
-          "command": null
+          "text": "Reinicie o Desktop (Iniciar > Energia > Reiniciar) para o worker subir com o codigo novo. Se o Segundo Cerebro estiver indexando, pode deixar para quando terminar."
         }
       ],
       "verify": "No Notebook: cd C:\\dev\\DarkFac; python -m core.infra.node_sync retry -> Desktop converged",
       "created_at": "2026-10-28T11:10:00Z",
-      "created_by": "claude"
+      "created_by": "claude",
+      "resolved_at": null
     }
   ]
 }

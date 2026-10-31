@@ -9401,6 +9401,38 @@
     "updated_at": "2026-09-23T07:11:06.153595Z"
   },
   {
+    "id": "USR-421",
+    "project_id": "darkfac",
+    "title": "Pytest focal do fleet_dispatcher nao encerra apos 100 por cento no Windows",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "1f10fa5478d9955d5f1e26f9b173a6c73d1a741d",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 USR-413 o executor relatou que pytest dos casos de test_fleet_dispatcher chegou a 100 por cento mas permaneceu aberto, exigindo interrupcao sem resumo final. Casos chamados diretamente e py_compile passaram, o que nao prova pytest concluido. Evidencia .factory/test_logs/heartbeat-usr413-20261028.log; processos observados pytest test_fleet_dispatcher e teste isolado. Investigar teardown/threads/subprocessos com reproducer, sem atribuir causa ainda.",
+    "core_journey": [
+      "Em 28/10/2026 USR-413 o executor relatou que pytest dos casos de test_fleet_dispatcher chegou a 100 por cento mas permaneceu aberto, exigindo interrupcao sem resumo final. Casos chamados diretamente e py_compile passaram, o que nao prova pytest concluido. Evidencia .factory/test_logs/heartbeat-usr413-20261028.log; processos observados pytest test_fleet_dispatcher e teste isolado. Investigar teardown/threads/subprocessos com reproducer, sem atribuir causa ainda."
+    ],
+    "non_goals": [
+      "Nao declarar HARNESS_PASS a partir de 100 por cento; nao matar testes de outra sessao nem suprimir falhas."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir e identificar recurso ou hook que mantem a execucao focal aberta, com evidencia de processo/stack sanitizada.",
+      "Execucao focal termina com codigo e resumo pytest sem interrupcao externa, respeitando deadlines configurados.",
+      "Corrigir ou consolidar teste existente de comportamento, sem duplicar suite completa nem relaxar descoberta/veredito."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T11:06:36.976580Z",
+    "updated_at": "2026-10-30T21:17:40.029224Z"
+  },
+  {
     "id": "USR-422",
     "project_id": "darkfac",
     "title": "Restaurar isolamento dos testes de entrega e reserva apos contratos de estagio",
@@ -9588,6 +9620,76 @@
     "dependencies": [],
     "created_at": "2026-09-23T07:55:36.782130Z",
     "updated_at": "2026-09-23T14:42:43.774998Z"
+  },
+  {
+    "id": "USR-433",
+    "project_id": "darkfac",
+    "title": "Antigravity como interface de operacao: briefing de sessao agnostico de harness",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Antigravity nao roda headless, mas deve coordenar a fabrica como interface de chat. Hoje o contexto de operacao (handoffs) vive na memoria privada do Claude Code, entao outro harness comeca cego. O roteamento ja delega development ao Codex quando o operador e antigravity (verificado). Tambem: medidor de cota antigravity_rpc parado desde 18/10 (STALE 276h). Substitui o USR-432 que nao chegou a ser registrado.",
+    "core_journey": [
+      "Antigravity nao roda headless, mas deve coordenar a fabrica como interface de chat. Hoje o contexto de operacao (handoffs) vive na memoria privada do Claude Code, entao outro harness comeca cego. O roteamento ja delega development ao Codex quando o operador e antigravity (verificado). Tambem: medidor de cota antigravity_rpc parado desde 18/10 (STALE 276h). Substitui o USR-432 que nao chegou a ser registrado."
+    ],
+    "non_goals": [
+      "Antigravity rodando headless ou na frota"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Novo CLI python -m core.ops.briefing (UTF-8, sem emoji) imprime em <30s: fila do control store, OAs abertas (todas as fontes), estado dos nos sem disparar update, PRs abertos (gh com fallback), cotas por harness e handoff versionado",
+      "Handoff de operacao versionado em docs/operacao/HANDOFF.md, lido pelo briefing",
+      "Medidor antigravity_rpc volta a ler ou registra causa estruturada",
+      "Manual e docs/FASE_ATUAL.md atualizados",
+      "Regra explicita no roteador e no despachante: antigravity e elegivel para development SOMENTE como harness de operacao interativo (DARKFAC_OPERATING_HARNESS=antigravity ou autodeteccao, cota acima do piso); nunca em modo headless/frota (fleet_dispatcher, workers, --fleet, pump). Hoje pick devolve codex com operador antigravity: corrigir",
+      "Cota antigravity desconhecida/STALE nao pode excluir silenciosamente o operador: comportamento definido e logado (proposta: elegivel com aviso enquanto o medidor nao for corrigido)",
+      "Testes de comportamento consolidados: operador antigravity -> development=antigravity; mesmo cenario no despachante/headless -> nunca antigravity",
+      ".agents/rules/GEMINI.md instrui: rodar o briefing no inicio, DARKFAC_OPERATING_HARNESS=antigravity, implementar no proprio chat quando eleito, despachar via run_ticket.py quando o roteador eleger outro, atualizar HANDOFF.md ao encerrar",
+      "AGENTS.md (protegido) diz Antigravity somente leitura: preparar patch e registro de autorizacao para assinatura do owner (OA), texto: somente leitura no headless, escrita quando interface"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T00:00:00Z",
+    "updated_at": "2026-10-29T10:08:27.176857Z"
+  },
+  {
+    "id": "USR-434",
+    "project_id": "darkfac",
+    "title": "Snapshot diario do ledger voltou a apagar OAs (regressao do USR-419)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O commit f7e14cae (snapshot diario, 29/10) removeu do owner_actions.json no main as OAs OA-079 (done) e OA-080 (pull do Desktop, aberta, PR #788), mesmo depois do fix do USR-419 (#784). O next-id reaproveitou OA-080 para outra acao (assinatura USR-433), gerando colisao de id.",
+    "core_journey": [
+      "O commit f7e14cae (snapshot diario, 29/10) removeu do owner_actions.json no main as OAs OA-079 (done) e OA-080 (pull do Desktop, aberta, PR #788), mesmo depois do fix do USR-419 (#784). O next-id reaproveitou OA-080 para outra acao (assinatura USR-433), gerando colisao de id."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Snapshot nunca remove OA ou ticket presente no git que nao existe no control store; faz merge por id",
+      "OAs que existem so no git sao importadas para o control store antes do export",
+      "next-id considera ids ja usados no historico do git",
+      "Restaurar a OA do pull do Desktop com id novo e a OA-079",
+      "Teste de comportamento cobrindo o caso real de f7e14cae"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T10:12:50.231859Z",
+    "updated_at": "2026-10-29T10:12:50.231859Z"
   },
   {
     "id": "USR-44",
@@ -11826,107 +11928,5 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
-  },
-  {
-    "id": "USR-433",
-    "project_id": "darkfac",
-    "title": "Antigravity como interface de operacao: briefing de sessao agnostico de harness",
-    "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Antigravity nao roda headless, mas deve coordenar a fabrica como interface de chat. Hoje o contexto de operacao (handoffs) vive na memoria privada do Claude Code, entao outro harness comeca cego. O roteamento ja delega development ao Codex quando o operador e antigravity (verificado). Tambem: medidor de cota antigravity_rpc parado desde 18/10 (STALE 276h). Substitui o USR-432 que nao chegou a ser registrado.",
-    "core_journey": [
-      "Antigravity nao roda headless, mas deve coordenar a fabrica como interface de chat. Hoje o contexto de operacao (handoffs) vive na memoria privada do Claude Code, entao outro harness comeca cego. O roteamento ja delega development ao Codex quando o operador e antigravity (verificado). Tambem: medidor de cota antigravity_rpc parado desde 18/10 (STALE 276h). Substitui o USR-432 que nao chegou a ser registrado."
-    ],
-    "non_goals": [
-      "Antigravity rodando headless ou na frota"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Novo CLI python -m core.ops.briefing (UTF-8, sem emoji) imprime em <30s: fila do control store, OAs abertas (todas as fontes), estado dos nos sem disparar update, PRs abertos (gh com fallback), cotas por harness e handoff versionado",
-      "Handoff de operacao versionado em docs/operacao/HANDOFF.md, lido pelo briefing",
-      "Medidor antigravity_rpc volta a ler ou registra causa estruturada",
-      "Manual e docs/FASE_ATUAL.md atualizados",
-      "Regra explicita no roteador e no despachante: antigravity e elegivel para development SOMENTE como harness de operacao interativo (DARKFAC_OPERATING_HARNESS=antigravity ou autodeteccao, cota acima do piso); nunca em modo headless/frota (fleet_dispatcher, workers, --fleet, pump). Hoje pick devolve codex com operador antigravity: corrigir",
-      "Cota antigravity desconhecida/STALE nao pode excluir silenciosamente o operador: comportamento definido e logado (proposta: elegivel com aviso enquanto o medidor nao for corrigido)",
-      "Testes de comportamento consolidados: operador antigravity -> development=antigravity; mesmo cenario no despachante/headless -> nunca antigravity",
-      ".agents/rules/GEMINI.md instrui: rodar o briefing no inicio, DARKFAC_OPERATING_HARNESS=antigravity, implementar no proprio chat quando eleito, despachar via run_ticket.py quando o roteador eleger outro, atualizar HANDOFF.md ao encerrar",
-      "AGENTS.md (protegido) diz Antigravity somente leitura: preparar patch e registro de autorizacao para assinatura do owner (OA), texto: somente leitura no headless, escrita quando interface"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-01T00:00:00Z",
-    "updated_at": "2026-10-29T10:08:27.176857Z"
-  },
-  {
-    "id": "USR-434",
-    "project_id": "darkfac",
-    "title": "Snapshot diario do ledger voltou a apagar OAs (regressao do USR-419)",
-    "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "O commit f7e14cae (snapshot diario, 29/10) removeu do owner_actions.json no main as OAs OA-079 (done) e OA-080 (pull do Desktop, aberta, PR #788), mesmo depois do fix do USR-419 (#784). O next-id reaproveitou OA-080 para outra acao (assinatura USR-433), gerando colisao de id.",
-    "core_journey": [
-      "O commit f7e14cae (snapshot diario, 29/10) removeu do owner_actions.json no main as OAs OA-079 (done) e OA-080 (pull do Desktop, aberta, PR #788), mesmo depois do fix do USR-419 (#784). O next-id reaproveitou OA-080 para outra acao (assinatura USR-433), gerando colisao de id."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Snapshot nunca remove OA ou ticket presente no git que nao existe no control store; faz merge por id",
-      "OAs que existem so no git sao importadas para o control store antes do export",
-      "next-id considera ids ja usados no historico do git",
-      "Restaurar a OA do pull do Desktop com id novo e a OA-079",
-      "Teste de comportamento cobrindo o caso real de f7e14cae"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-29T10:12:50.231859Z",
-    "updated_at": "2026-10-29T10:12:50.231859Z"
-  },
-  {
-    "id": "USR-421",
-    "project_id": "darkfac",
-    "title": "Pytest focal do fleet_dispatcher nao encerra apos 100 por cento no Windows",
-    "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "1f10fa5478d9955d5f1e26f9b173a6c73d1a741d",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Em 28/10/2026 USR-413 o executor relatou que pytest dos casos de test_fleet_dispatcher chegou a 100 por cento mas permaneceu aberto, exigindo interrupcao sem resumo final. Casos chamados diretamente e py_compile passaram, o que nao prova pytest concluido. Evidencia .factory/test_logs/heartbeat-usr413-20261028.log; processos observados pytest test_fleet_dispatcher e teste isolado. Investigar teardown/threads/subprocessos com reproducer, sem atribuir causa ainda.",
-    "core_journey": [
-      "Em 28/10/2026 USR-413 o executor relatou que pytest dos casos de test_fleet_dispatcher chegou a 100 por cento mas permaneceu aberto, exigindo interrupcao sem resumo final. Casos chamados diretamente e py_compile passaram, o que nao prova pytest concluido. Evidencia .factory/test_logs/heartbeat-usr413-20261028.log; processos observados pytest test_fleet_dispatcher e teste isolado. Investigar teardown/threads/subprocessos com reproducer, sem atribuir causa ainda."
-    ],
-    "non_goals": [
-      "Nao declarar HARNESS_PASS a partir de 100 por cento; nao matar testes de outra sessao nem suprimir falhas."
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Reproduzir e identificar recurso ou hook que mantem a execucao focal aberta, com evidencia de processo/stack sanitizada.",
-      "Execucao focal termina com codigo e resumo pytest sem interrupcao externa, respeitando deadlines configurados.",
-      "Corrigir ou consolidar teste existente de comportamento, sem duplicar suite completa nem relaxar descoberta/veredito."
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-28T11:06:36.976580Z",
-    "updated_at": "2026-10-30T21:17:40.029224Z"
   }
 ]
