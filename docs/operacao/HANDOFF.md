@@ -1,6 +1,6 @@
 # Handoff operacional
 
-Versao: 9
+Versao: 10
 Atualizado em: 2026-10-31
 
 ## Estado
@@ -8,14 +8,10 @@ Atualizado em: 2026-10-31
 - Fase: V0 da Dark Factory.
 - Canais: Telegram, DarkHub e interfaces de chat; demandas seguem por `run_ticket.py` e pelo registro compartilhado no control store.
 - Operacao: Antigravity como interface interativa de operacao (`DARKFAC_OPERATING_HARNESS=antigravity`); tarefas headless/frota sao executadas pelo harness eleito pelo roteador (Grokbox e Notebook). Antigravity nunca e usado por workers, `--fleet` ou pump.
+- Fila totalmente desbloqueada: tag `planning-only` removida de todos os tickets.
+- Blocos do Plano V0 concluidos e sincronizados no PostgreSQL e git ledger: USR-343 (Atrito zero), USR-375 (Motor unico), USR-369 (Capacidade/rede), USR-376 (Pesquisa/learning pack), USR-377 (Enxugar codigo/testes), USR-378 (Roteamento enxuto) e USR-379 (Governanca e manual), alem de USR-428, USR-429, USR-433 e USR-434.
 - USR-431: Concluido e entregue no `main` (PR #811, merge commit `b25b5fc5`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no `/health`, marcado `completed` no demands store.
-- USR-424: Concluido e entregue no `main` (PR #809, merge commit `9842a697`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no `/health`, marcado `completed` no demands store.
-- USR-420: Concluido e entregue no `main` (PR #808, merge commit `d2092f0e`), convergencia pos-deploy com candidato fixo e isolamento de ambiente no conftest, marcado `completed`.
-- USR-428: Concluido e entregue no `main` (PR #806, merge commit `c7c0fb70`).
-- USR-429: Concluido e entregue no `main` (PR #807, merge commit `dccb44a6`).
-- USR-436: Concluido e entregue no `main` (PR #805, merge commit `90390014`).
-- USR-430: Concluido e entregue no `main` (PR #803, merge commit `ed6cf52d`).
-- Proximos: Marcos estruturais do Plano V0 (USR-343 e USR-375 em implementing; USR-369, USR-376, USR-377, USR-378, USR-379 e USR-279 em planned).
+- Proximo na esteira: USR-279 (Prova da V0 com o piloto M1 do gestor de SEO e redes sociais da mansaodolago.com). Dependencias 100% satisfeitas, elegivel imediatamente no despachante da frota.
 
 ## Decisoes
 
@@ -41,7 +37,7 @@ Atualizado em: 2026-10-31
 
 ## O que esta em voo
 
-- **Fila da frota**: tickets no control store: USR-343 e USR-375 em implementing (marcos estruturais V0); USR-369, USR-376, USR-377, USR-378, USR-379 e USR-279 em planned.
+- **Fila da frota**: USR-279 (Prova da V0 / Piloto M1) elegivel imediatamente na esteira; blocos V0 anteriores concluidos.
 - **Monitoramento em background**: tarefa `task-506` ativa a cada 30 min para vigiar a saude da sessao e notificar o Owner via Telegram em caso de deadlock.
 
 ## Pendencias
@@ -67,4 +63,4 @@ Atualizado em: 2026-10-31
 
 ## Proximo passo
 
-- Executar USR-431 em worktree dedicada: paridade do harness de operacao (Codex e Antigravity como interface de chat).
+- Executar USR-279: Prova da V0 com o piloto M1 do gestor de SEO e redes sociais da mansaodolago.com.
