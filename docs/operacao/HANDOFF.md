@@ -1,6 +1,6 @@
 # Handoff operacional
 
-Versao: 8
+Versao: 9
 Atualizado em: 2026-10-31
 
 ## Estado
@@ -8,13 +8,14 @@ Atualizado em: 2026-10-31
 - Fase: V0 da Dark Factory.
 - Canais: Telegram, DarkHub e interfaces de chat; demandas seguem por `run_ticket.py` e pelo registro compartilhado no control store.
 - Operacao: Antigravity como interface interativa de operacao (`DARKFAC_OPERATING_HARNESS=antigravity`); tarefas headless/frota sao executadas pelo harness eleito pelo roteador (Grokbox e Notebook). Antigravity nunca e usado por workers, `--fleet` ou pump.
+- USR-431: Concluido e entregue no `main` (PR #811, merge commit `b25b5fc5`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no `/health`, marcado `completed` no demands store.
 - USR-424: Concluido e entregue no `main` (PR #809, merge commit `9842a697`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no `/health`, marcado `completed` no demands store.
 - USR-420: Concluido e entregue no `main` (PR #808, merge commit `d2092f0e`), convergencia pos-deploy com candidato fixo e isolamento de ambiente no conftest, marcado `completed`.
 - USR-428: Concluido e entregue no `main` (PR #806, merge commit `c7c0fb70`).
 - USR-429: Concluido e entregue no `main` (PR #807, merge commit `dccb44a6`).
 - USR-436: Concluido e entregue no `main` (PR #805, merge commit `90390014`).
 - USR-430: Concluido e entregue no `main` (PR #803, merge commit `ed6cf52d`).
-- USR-431: Proximo ticket em desenvolvimento na esteira: paridade do harness de operacao (Codex e Antigravity como interface de chat).
+- Proximos: Marcos estruturais do Plano V0 (USR-343 e USR-375 em implementing; USR-369, USR-376, USR-377, USR-378, USR-379 e USR-279 em planned).
 
 ## Decisoes
 
@@ -27,6 +28,7 @@ Atualizado em: 2026-10-31
 
 ## O que foi entregue nesta sessao
 
+- **USR-431**: Paridade do harness de operacao para Codex e Antigravity: implementado `core/ops/turn_guard.py` centralizando guardas agnosticas (learning pack obrigatorio para alteracoes de codigo, rastreamento de ciclo de vida de sessao no registro unificado de execucoes e handoff); `scripts/stop_hook_artifacts.py` unificado para delegar ao turn_guard. Portao oficial aprovado [HARNESS_PASS] em `60f17473` (4.805 testes, 0 falhas). PR #811 mesclado no `main` (commit `b25b5fc5`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no DarkHub (`https://darkhub.ggcampos.com/health` retornando `b25b5fc5`), ticket marcado `completed` no demands store.
 - **USR-424**: Resolvido desacoplamento entre fila duravel (control store) e ledger local durante entrega autonoma. Portao oficial aprovado com [HARNESS_PASS] em `9c58d863` (4.796 testes, 0 falhas). PR #809 mesclado no `main` (commit `9842a697`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no DarkHub (`https://darkhub.ggcampos.com/health` retornando `9842a697`), ticket marcado `completed` no demands store.
 - **USR-420**: Convergencia pos-deploy usa candidato fixo e respeita hosts desabilitados (`DARKFAC_FLEET_DISABLED_HOSTS=desktop`), isolando o ambiente em `tests/conftest.py`. Portao oficial aprovado [HARNESS_PASS] remotamente. PR #808 mesclado no `main` (commit `d2092f0e`), deploy Dokploy com health verificado ao vivo e ticket marcado `completed`.
 - **USR-430**: Implementado filtro de hosts desabilitados (`DARKFAC_FLEET_DISABLED_HOSTS`) no despachante remoto (`core/harness/remote_dispatch.py`) e na rotacao de retentativas (`run_ticket.py`). Portao oficial rodado remotamente com 100% de sucesso (`[HARNESS_PASS]`, 4646 passed, 30 skipped, 0 failed). PR #803 mesclado no `main` (commit `ed6cf52d`), CI no `main` verde, deploy Dokploy concluido (darkfac-cloud e Darkhub blue-green no slot blue), ticket marcado `completed` no PostgreSQL e demands store com zero toque humano.
@@ -39,7 +41,7 @@ Atualizado em: 2026-10-31
 
 ## O que esta em voo
 
-- **Fila da frota**: tickets no control store: USR-431 (em desenvolvimento: paridade de harness Codex/Antigravity), USR-279 (planejado), USR-369 (planejado), USR-376 (planejado), USR-377 (planejado), USR-378 (planejado), USR-379 (planejado).
+- **Fila da frota**: tickets no control store: USR-343 e USR-375 em implementing (marcos estruturais V0); USR-369, USR-376, USR-377, USR-378, USR-379 e USR-279 em planned.
 - **Monitoramento em background**: tarefa `task-506` ativa a cada 30 min para vigiar a saude da sessao e notificar o Owner via Telegram em caso de deadlock.
 
 ## Pendencias
