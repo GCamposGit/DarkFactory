@@ -19,7 +19,9 @@ from pydantic import BaseModel, Field
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MAIN_CHECKOUT = REPO_ROOT.parents[1] if REPO_ROOT.parent.name == ".worktrees" else REPO_ROOT
+# The process always operates on the checkout containing this module. In a ticket worktree,
+# reaching across to the primary checkout would cross session ownership boundaries.
+MAIN_CHECKOUT = REPO_ROOT
 DESKTOP_URL = "http://100.78.181.90:8080"
 VPS_URL = "https://darkhub.ggcampos.com/health"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -27,7 +29,7 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 class NodeStatus(BaseModel):
     name: str
-    state: Literal["converged", "divergent", "offline", "unknown"]
+    state: Literal["converged", "divergent", "offline", "unknown", "excluded"]
     git_sha: str | None = None
     commit_date: str | None = None
     last_contact: datetime | None = None
@@ -40,6 +42,10 @@ class NodeStatus(BaseModel):
     local_commits: list[str] = Field(default_factory=list)
     dirty_files: dict[str, list[str]] = Field(default_factory=dict)
     backup_branch: str | None = None
+    target_sha: str | None = None
+    # Whether this node's status is evidence that the deployed VPS cannot be
+    # safely backed up. Parallel Notebook work is diagnostic only.
+    blocks_backup: bool = True
 
 
 
@@ -48,10 +54,59 @@ class SyncReport(BaseModel):
     nodes: list[NodeStatus] = Field(default_factory=list)
 
     @property
+    def excluded_hosts(self) -> list[str]:
+        return [node.name for node in self.nodes if node.state == "excluded"]
+
+    @property
+    def vps_excluded(self) -> bool:
+        """Whether policy excluded the VPS, so this report cannot authorize a backup."""
+        return any(node.name == "VPS" and node.state == "excluded" for node in self.nodes)
+
+    @property
     def ok(self) -> bool:
-        return bool(self.expected_sha) and len(self.nodes) == 3 and all(
-            node.state == "converged" for node in self.nodes
+        included = [node for node in self.nodes if node.state != "excluded"]
+        return bool(self.expected_sha) and any(node.name == "VPS" for node in included) and all(
+            node.state == "converged" for node in included
         )
+
+
+def _disabled_hosts(hosts: set[str] | None = None) -> set[str]:
+    """Parse the disabled-host policy once per call.
+
+    Commas separate ids. Surrounding whitespace and case are ignored. Callers
+    that already hold a snapshot pass it in, so a later environment change is
+    not observed.
+    """
+    if hosts is None:
+        raw = os.environ.get("DARKFAC_FLEET_DISABLED_HOSTS", "")
+        configured: set[str] | list[str] = raw.split(",")
+    else:
+        configured = hosts
+    return {host.strip().casefold() for host in configured if host.strip()}
+
+
+def _excluded_node(name: str, target_sha: str) -> NodeStatus:
+    # Only an excluded VPS withholds backup. Desktop/Notebook exclusion is not VPS drift.
+    return NodeStatus(
+        name=name, state="excluded", reason="disabled_by_policy", target_sha=target_sha,
+        blocks_backup=name == "VPS",
+    )
+
+
+def _immutable_sha(value: Any) -> str | None:
+    """Accept only a caller SHA that already matches ``^[0-9a-f]{40}$``.
+
+    Case is not folded and no ref is consulted. Anything else is missing, so
+    convergence cannot fall through to ``origin/main`` (USR-420).
+    """
+    if not isinstance(value, str) or SHA_PATTERN.fullmatch(value) is None:
+        return None
+    return value
+
+
+def _target_sha(expected_sha: str | None) -> str | None:
+    """Validate the immutable caller-provided candidate; never infer one from a moving ref."""
+    return _immutable_sha(expected_sha)
 
 
 GitRunner = Callable[[Path, list[str]], str]
@@ -85,15 +140,21 @@ def request_json(method: str, url: str, payload: dict[str, Any] | None, token: s
     return result
 
 
-def redeploy_vps() -> bool:
-    """Use the existing Dokploy workflow for VPS convergence."""
-    result = subprocess.run(
-        [
-            sys.executable, str(REPO_ROOT / "scripts" / "dokploy_redeploy.py"),
-            "--skip-backup", "--skip-node-sync",  # never re-enter node verification (no loop)
-        ],
-        cwd=REPO_ROOT, check=False, timeout=3600,
-    )
+def redeploy_vps(expected_sha: str | None = None) -> bool:
+    """Redeploy the VPS through Dokploy, pinned to the caller's candidate.
+
+    ``--skip-node-sync`` keeps the child from starting another convergence pass.
+    A missing or invalid SHA is a refusal: the child would otherwise read the
+    moving ``origin/main`` ref (USR-420).
+    """
+    candidate = _immutable_sha(expected_sha)
+    if candidate is None:
+        return False
+    command = [
+        sys.executable, str(REPO_ROOT / "scripts" / "dokploy_redeploy.py"),
+        "--skip-backup", "--skip-node-sync", "--expected-sha", candidate,
+    ]
+    result = subprocess.run(command, cwd=REPO_ROOT, check=False, timeout=3600)
     return result.returncode == 0
 
 
@@ -313,11 +374,17 @@ def classify_checkout(
     dict[str, list[str]],
     str | None,
 ]:
-    """Classify the git state of a checkout relative to origin/main (USR-78, USR-119)."""
+    """Classify a checkout against the immutable candidate SHA (USR-78, USR-119, USR-420)."""
+    candidate = _immutable_sha(expected_sha)
     dirty_files: dict[str, list[str]] = {"tracked_modified": [], "untracked": [], "ignored": []}
+    if candidate is None:
+        # No usable target: do not inspect a checkout another session may own.
+        return None, [], dirty_files, None
     status_porcelain = ""
+    status_ok = False
     try:
         status_porcelain = git(root, ["status", "--porcelain"])
+        status_ok = True
     except Exception:
         status_porcelain = ""
 
@@ -345,38 +412,52 @@ def classify_checkout(
     local_commits: list[str] = []
     ahead_count = 0
     behind_count = 0
-    if expected_sha:
-        try:
-            rev_list_ahead = git(root, ["rev-list", "origin/main..HEAD"]).strip()
-            if rev_list_ahead:
-                local_commits = [c.strip() for c in rev_list_ahead.splitlines() if c.strip()]
-                ahead_count = len(local_commits)
-        except Exception:
-            pass
-        try:
-            rev_list_behind = git(root, ["rev-list", "HEAD..origin/main"]).strip()
-            if rev_list_behind:
-                behind_count = len([c.strip() for c in rev_list_behind.splitlines() if c.strip()])
-        except Exception:
-            pass
+    ahead_ok = False
+    behind_ok = False
+    try:
+        rev_list_ahead = git(root, ["rev-list", f"{candidate}..HEAD"]).strip()
+        ahead_ok = True
+        if rev_list_ahead:
+            local_commits = [c.strip() for c in rev_list_ahead.splitlines() if c.strip()]
+            ahead_count = len(local_commits)
+    except Exception:
+        pass
+    try:
+        rev_list_behind = git(root, ["rev-list", f"HEAD..{candidate}"]).strip()
+        behind_ok = True
+        if rev_list_behind:
+            behind_count = len([c.strip() for c in rev_list_behind.splitlines() if c.strip()])
+    except Exception:
+        pass
 
     if has_tracked_or_untracked:
         tracked_summary = f"{len(dirty_files['tracked_modified'])} tracked modified ({', '.join(dirty_files['tracked_modified'][:3])})" if dirty_files["tracked_modified"] else "0 tracked"
         untracked_summary = f"{len(dirty_files['untracked'])} untracked ({', '.join(dirty_files['untracked'][:3])})" if dirty_files["untracked"] else "0 untracked"
         reason = f"dirty worktree: {tracked_summary}, {untracked_summary}; no git operation attempted"
         return "dirty", local_commits, dirty_files, reason
-    elif ahead_count > 0 and behind_count > 0:
+    if ahead_ok and behind_ok and ahead_count > 0 and behind_count > 0:
         reason = f"diverged: ahead {ahead_count} commits ({', '.join(local_commits[:3])}), behind {behind_count} commits"
         return "diverged", local_commits, dirty_files, reason
-    elif ahead_count > 0:
+    if ahead_ok and behind_ok and ahead_count > 0:
         reason = f"ahead: {ahead_count} local unpushed commits ({', '.join(local_commits[:3])})"
         return "ahead", local_commits, dirty_files, reason
-    elif behind_count > 0:
-        reason = f"behind: {behind_count} commits behind origin/main"
+    if ahead_ok and behind_ok and behind_count > 0:
+        reason = f"behind: {behind_count} commits behind fixed candidate {candidate}"
         return "behind", local_commits, dirty_files, reason
-    elif expected_sha:
+    if ahead_ok and behind_ok:
         return "converged", [], dirty_files, None
-    return None, [], dirty_files, None
+    # Both ranges failed, so an empty count is not "HEAD is the candidate".
+    # Claiming converged here skipped the fast-forward and could pass a checkout
+    # that never reached the SHA. HEAD itself is still conclusive when it matches.
+    if status_ok:
+        try:
+            if _sha(git(root, ["rev-parse", "HEAD"])) == candidate:
+                return "converged", [], dirty_files, None
+        except Exception:
+            pass
+    return None, local_commits, dirty_files, (
+        "candidate commit is not available locally; no git operation attempted"
+    )
 
 
 from core.paths import state_root
@@ -553,7 +634,10 @@ def safe_repair_divergent_checkout(
     notifier: Callable[[str], bool] | None = None,
     store: Any = None,
 ) -> str | None:
-    """Safely back up unpushed local commits to a remote branch before hard reset (USR-78)."""
+    """Back up unpushed commits before resetting to the immutable convergence candidate (USR-78)."""
+    candidate = _target_sha(expected_sha)
+    if candidate is None:
+        return None
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     backup_branch = f"backup/{node_name.lower()}-{timestamp}"
     try:
@@ -562,7 +646,7 @@ def safe_repair_divergent_checkout(
     except Exception:
         return None
     try:
-        git(root, ["reset", "--hard", "origin/main"])
+        git(root, ["reset", "--hard", candidate])
     except Exception:
         return None
     if store is not None:
@@ -588,7 +672,7 @@ def safe_repair_divergent_checkout(
         except Exception:
             pass
     if notifier:
-        notifier(f"Node {node_name} was divergent. Backed up to {backup_branch} and reset to origin/main.")
+        notifier(f"Node {node_name} was divergent. Backed up to {backup_branch} and reset to {candidate}.")
     return backup_branch
 
 
@@ -597,7 +681,7 @@ def _notebook_worktree_blocker(root: Path, git: GitRunner) -> str | None:
     that case must never run any git operation against it, since another ticket's own worktree
     session owns it. A shared main checkout parked on a non-``main`` branch is *not* blocked here
     (USR-222): see ``_local_main_ref_sha`` / the branch handling in ``verify``/``sync`` below, which
-    judge and advance convergence via the local ``main`` ref without touching HEAD or the working
+    judge the local ``main`` ref and do not advance it (USR-420) without touching HEAD or the working
     tree of whatever branch is currently checked out there."""
     git_dir = git(root, ["rev-parse", "--git-dir"])
     common_dir = git(root, ["rev-parse", "--git-common-dir"])
@@ -609,13 +693,57 @@ def _notebook_worktree_blocker(root: Path, git: GitRunner) -> str | None:
 def _local_main_ref_sha(root: Path, git: GitRunner) -> str | None:
     """SHA the local ``main`` branch ref points at, independent of what is currently checked out.
 
-    Reading/advancing this ref (see the fetch-with-refspec call in ``sync``) never touches HEAD,
+    Reading this ref does not fetch or advance it (USR-420). It never touches HEAD,
     the index or the working tree, so it is safe to use even while the shared checkout is parked on
     a different branch for an unrelated session (USR-222)."""
     try:
         return _sha(git(root, ["rev-parse", "refs/heads/main"]))
     except Exception:
         return None
+
+
+def _notebook_against_candidate(root: Path, git: GitRunner, expected: str) -> NodeStatus:
+    """Classify the Notebook checkout against the immutable candidate. Never raises."""
+    try:
+        local = _sha(git(root, ["rev-parse", "HEAD"]))
+        worktree_blocker = _notebook_worktree_blocker(root, git)
+        if worktree_blocker:
+            return NodeStatus(name="Notebook", state="divergent", git_sha=local, reason=worktree_blocker)
+        branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+        if branch != "main":
+            # Shared checkout is mid-work on another branch (USR-222). Judge the local
+            # `main` ref and do not fast-forward it (USR-420).
+            local_main = _local_main_ref_sha(root, git)
+            state: Literal["converged", "divergent"] = "converged" if local_main == expected else "divergent"
+            reason = None
+            if state != "converged":
+                reason = (
+                    f"main checkout is on branch {branch!r} (parallel session); local main ref "
+                    + ("unknown" if local_main is None else f"behind fixed candidate {expected}")
+                )
+            try:
+                notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local_main]) if local_main else None
+            except Exception:
+                notebook_commit_date = None
+            return NodeStatus(
+                name="Notebook", state=state, git_sha=local_main, reason=reason,
+                commit_date=notebook_commit_date,
+                sync_classification="converged" if state == "converged" else "other_branch",
+                blocks_backup=False,
+            )
+        classification, local_commits, dirty_files, classification_reason = classify_checkout(root, git, expected)
+        on_candidate = local == expected and classification == "converged"
+        try:
+            notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local]) if local else None
+        except Exception:
+            notebook_commit_date = None
+        return NodeStatus(
+            name="Notebook", state="converged" if on_candidate else "divergent", git_sha=local,
+            reason=classification_reason, commit_date=notebook_commit_date,
+            sync_classification=classification, local_commits=local_commits, dirty_files=dirty_files,
+        )
+    except Exception:
+        return NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
 
 
 def verify(
@@ -626,61 +754,25 @@ def verify(
     sleep: Callable[[float], None] = time.sleep,
     notifier: Callable[[str], bool] | None = None,
     track_divergence: bool = False,
+    expected_sha: str | None = None,
+    disabled_hosts: set[str] | None = None,
 ) -> SyncReport:
-    try:
-        expected = _sha(git(root, ["rev-parse", "origin/main"]))
-    except Exception:
-        expected = None
+    expected = _target_sha(expected_sha)
     if expected is None:
-        return SyncReport(nodes=[NodeStatus(name=n, state="unknown", reason="origin/main unavailable") for n in ("Notebook", "Desktop", "VPS")])
-    try:
-        local = _sha(git(root, ["rev-parse", "HEAD"]))
-        worktree_blocker = _notebook_worktree_blocker(root, git)
-        if worktree_blocker:
-            notebook = NodeStatus(name="Notebook", state="divergent", git_sha=local, reason=worktree_blocker)
-        else:
-            branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
-            if branch != "main":
-                # Shared checkout is mid-work on another branch for a parallel session (USR-222):
-                # never read/touch its working tree. Judge convergence from the local `main` ref
-                # instead, which `sync()` can fast-forward with a ref-only fetch regardless of what
-                # is checked out here.
-                local_main = _local_main_ref_sha(root, git)
-                state = "converged" if local_main == expected else "divergent"
-                reason = None
-                if state != "converged":
-                    reason = (
-                        f"main checkout is on branch {branch!r} (parallel session); local main ref "
-                        + ("unknown" if local_main is None else "behind origin/main")
-                    )
-                try:
-                    notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local_main]) if local_main else None
-                except Exception:
-                    notebook_commit_date = None
-                notebook = NodeStatus(
-                    name="Notebook", state=state, git_sha=local_main, reason=reason,
-                    commit_date=notebook_commit_date,
-                    sync_classification="converged" if state == "converged" else "other_branch",
-                )
-            else:
-                classification, local_commits, dirty_files, classification_reason = classify_checkout(root, git, expected)
-                reason = classification_reason
-                state = "converged" if local == expected and classification == "converged" else "divergent"
-                try:
-                    notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local]) if local else None
-                except Exception:
-                    notebook_commit_date = None
-                notebook = NodeStatus(
-                    name="Notebook", state=state, git_sha=local, reason=reason, commit_date=notebook_commit_date,
-                    sync_classification=classification, local_commits=local_commits, dirty_files=dirty_files,
-                )
-    except Exception:
-        notebook = NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
-    desktop = _probe(
+        return SyncReport(nodes=[NodeStatus(
+            name=n, state="unknown", reason="missing or invalid immutable expected_sha",
+        ) for n in ("Notebook", "Desktop", "VPS")])
+    disabled = _disabled_hosts(disabled_hosts)
+    if "notebook" in disabled:
+        # Policy already removed this host. Do not rev-parse, classify, or touch its checkout.
+        notebook = _excluded_node("Notebook", expected)
+    else:
+        notebook = _notebook_against_candidate(root, git, expected)
+    desktop = _excluded_node("Desktop", expected) if "desktop" in disabled else _probe(
         "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
         retries=retries, retry_delay=retry_delay, sleep=sleep,
     )
-    vps = _probe(
+    vps = _excluded_node("VPS", expected) if "vps" in disabled else _probe(
         "VPS", vps_url, expected, http, unknown_without_sha=True,
         retries=retries, retry_delay=retry_delay, sleep=sleep,
     )
@@ -713,84 +805,57 @@ def sync(
     retries: int = 3, retry_delay: float = 0.5,
     notifier: Callable[[str], bool] | None = None,
     track_divergence: bool = False,
+    expected_sha: str | None = None,
+    disabled_hosts: set[str] | None = None,
 ) -> SyncReport:
     if task_recovery is None:
         task_recovery = recover_scheduled_task
+    # Keep one policy snapshot for the whole convergence attempt. The environment
+    # may change while polling nodes, but that must not change this run's scope.
+    disabled = _disabled_hosts(disabled_hosts)
     initial = verify(
         root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
         retries=retries, retry_delay=retry_delay, sleep=sleep, notifier=notifier,
-        track_divergence=track_divergence,
+        track_divergence=track_divergence, expected_sha=expected_sha, disabled_hosts=disabled,
     )
     expected = initial.expected_sha
     if expected is None:
         return initial
     notebook = initial.nodes[0]
-    if notebook.state != "converged":
+    if "notebook" in disabled:
+        # The frozen policy, not the probed state, decides whether this run may touch the checkout.
+        notebook = _excluded_node("Notebook", expected)
+        initial.nodes[0] = notebook
+    if notebook.state not in ("converged", "excluded"):
         try:
             worktree_blocker = _notebook_worktree_blocker(root, git)
             if worktree_blocker:
                 notebook.reason = worktree_blocker
             elif notebook.sync_classification == "other_branch":
-                # Shared checkout parked on another branch for a parallel session (USR-222): fast-
-                # forward only the local `main` ref via a ref-only fetch. This never touches HEAD,
-                # the index or the working tree of whatever branch is checked out there, so it is
-                # safe regardless of that other session's state (dirty, mid-commit, etc.).
-                try:
-                    git(root, ["fetch", "origin", "main:refs/heads/main"])
-                    refreshed = _local_main_ref_sha(root, git)
-                except Exception as exc:
-                    refreshed = None
-                    notebook.reason = f"{notebook.reason}; failed to fast-forward local main ref: {exc}"
-                if refreshed is not None:
-                    notebook.git_sha = refreshed
-                    if refreshed == expected:
-                        notebook.state = "converged"
-                        notebook.sync_classification = "converged"
-                        notebook.reason = None
-                    else:
-                        notebook.reason = (
-                            f"{notebook.reason}; local main ref still behind origin/main after fetch"
-                        )
-            elif notebook.sync_classification == "dirty":
-                remediated = remediate_dirty_checkout(root, git, notebook.dirty_files, notifier=notifier)
-                if remediated:
-                    git(root, ["fetch", "origin", "main"])
-                    expected = _sha(git(root, ["rev-parse", "origin/main"]))
-                    if expected is None:
-                        raise RuntimeError("origin/main SHA invalid")
-                    git(root, ["merge", "--ff-only", "origin/main"])
-                    notebook.state = "converged"
-                    notebook.sync_classification = "converged"
-                    notebook.reason = None
-                else:
-                    notebook.reason = notebook.reason or "dirty worktree; no git operation attempted"
-            elif notebook.sync_classification in ("ahead", "diverged"):
-                backup_branch = safe_repair_divergent_checkout(root, "Notebook", git, expected, notifier=notifier)
-                if backup_branch:
-                    notebook.backup_branch = backup_branch
-                    notebook.state = "converged"
-                    notebook.sync_classification = "converged"
-                    notebook.git_sha = expected
-                    notebook.reason = f"converged after backing up local commits to remote branch {backup_branch}"
-                else:
-                    notebook.reason = "divergent: failed to push backup branch; reset aborted for safety"
+                # A different session owns the checked out branch; do not mutate even the main ref.
+                notebook.reason = f"{notebook.reason}; no ref update attempted during fixed-target sync"
+            elif notebook.sync_classification != "behind":
+                # Ahead, diverged, dirty, or unclassified: never chase a moving ref.
+                notebook.reason = notebook.reason or (
+                    "checkout is not behind the fixed candidate; no git operation attempted"
+                )
             elif git(root, ["status", "--porcelain"]):
                 notebook.reason = "dirty worktree; no git operation attempted"
             else:
-                git(root, ["fetch", "origin", "main"])
-                expected = _sha(git(root, ["rev-parse", "origin/main"]))
-                if expected is None:
-                    raise RuntimeError("origin/main SHA invalid")
-                git(root, ["merge", "--ff-only", "origin/main"])
-                notebook.state = "converged"
-                notebook.sync_classification = "converged"
-                notebook.reason = None
+                # Fast-forward only when classification compared HEAD with the immutable candidate.
+                git(root, ["fetch", "origin", expected])
+                git(root, ["merge", "--ff-only", expected])
+                notebook.state = "converged" if _sha(git(root, ["rev-parse", "HEAD"])) == expected else "divergent"
+                notebook.sync_classification = "converged" if notebook.state == "converged" else "behind"
+                notebook.reason = None if notebook.state == "converged" else "checkout did not reach fixed candidate"
         except Exception as exc:
             notebook.reason = str(exc)
 
     desktop = initial.nodes[1]
+    if "desktop" in disabled:
+        desktop = _excluded_node("Desktop", expected)
     observed_divergent_sha = desktop.git_sha if desktop.state == "divergent" else None
-    if desktop.state != "converged":
+    if desktop.state != "converged" and desktop.state != "excluded":
         deadline = clock() + timeout
         while desktop.state != "converged" and clock() < deadline:
             sleep(min(interval, max(0.0, deadline - clock())))
@@ -801,7 +866,7 @@ def sync(
             if desktop.state == "divergent":
                 observed_divergent_sha = desktop.git_sha
 
-    if desktop.state != "converged":
+    if desktop.state not in ("converged", "excluded"):
         if observed_divergent_sha is None and not desktop.is_legacy:
             # Nunca observou SHA divergente nem legado (nó permaneceu offline após retries e polling);
             # não dispara update nem restart para nó inacessível (USR-117)
@@ -895,21 +960,34 @@ def sync(
     else:
         initial.nodes[1] = desktop
 
-    if initial.nodes[2].state in ("divergent", "offline"):
+    if "vps" in disabled:
+        initial.nodes[2] = _excluded_node("VPS", expected)
+    elif initial.nodes[2].state in ("divergent", "offline"):
         try:
-            if not vps_redeploy():
+            # Default entrypoint redeploys the same candidate. Injected callables
+            # stay zero-arg: the parent deploy already shipped this SHA and must
+            # not grow a second signature.
+            redeployed = redeploy_vps(expected) if vps_redeploy is redeploy_vps else vps_redeploy()
+            if not redeployed:
                 initial.nodes[2].reason = "Dokploy redeploy failed"
         except Exception as exc:
             initial.nodes[2].reason = f"Dokploy redeploy failed: {type(exc).__name__}"
     final = verify(
         root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
         retries=retries, retry_delay=retry_delay, sleep=sleep, notifier=notifier,
-        track_divergence=track_divergence,
+        track_divergence=track_divergence, expected_sha=expected, disabled_hosts=disabled,
     )
     for old, new in zip(initial.nodes, final.nodes):
         if new.state != "converged":
             if old.reason and (
-                not new.reason or "busy" in old.reason or "offline" in old.reason or "failed to fast-forward" in old.reason
+                not new.reason
+                or any(
+                    token in old.reason
+                    for token in (
+                        "busy", "offline", "failed to fast-forward",
+                        "no ref update", "no git operation",
+                    )
+                )
             ):
                 new.reason = old.reason
     if final.nodes[1].state == "converged":
@@ -922,6 +1000,10 @@ def sync(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("verify", "sync", "retry"))
+    parser.add_argument(
+        "--expected-sha", default=os.environ.get("DARKFAC_EXPECTED_SHA"),
+        help="immutable deploy candidate SHA (defaults to DARKFAC_EXPECTED_SHA)",
+    )
     args = parser.parse_args(argv)
     kwargs = {
         "desktop_url": os.environ.get("DARKFAC_DESKTOP_URL", DESKTOP_URL),
@@ -932,11 +1014,26 @@ def main(argv: list[str] | None = None) -> int:
         if not pending:
             print(json.dumps({"message": "No pending convergence found", "ok": True}))
             return 0
-        report = sync(**kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"))
-    elif args.action == "verify":
-        report = verify(**kwargs)
+        candidate = _immutable_sha(pending.get("expected_sha"))
+        if candidate is None:
+            print(
+                "Cannot retry node convergence: pending record has no valid immutable candidate SHA",
+                file=sys.stderr,
+            )
+            return 2
+        report = sync(**kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"), expected_sha=candidate)
     else:
-        report = sync(**kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"))
+        candidate = _immutable_sha(args.expected_sha)
+        if candidate is None:
+            print(
+                "Cannot converge nodes without an immutable candidate SHA; pass --expected-sha or set DARKFAC_EXPECTED_SHA",
+                file=sys.stderr,
+            )
+            return 2
+        if args.action == "verify":
+            report = verify(**kwargs, expected_sha=candidate)
+        else:
+            report = sync(**kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"), expected_sha=candidate)
     print(report.model_dump_json())
     return 0 if report.ok else 1
 

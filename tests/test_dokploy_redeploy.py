@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pytest
 
 from core.infra import deploy_classifier
+from core.infra.node_sync import sync as _REAL_NODE_SYNC
 from core.orchestrator import compose_render as _cr
 
 from scripts import dokploy_redeploy as mod
@@ -54,7 +55,7 @@ def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep Dokploy transport tests isolated from real node health probes."""
     from core.infra import node_sync
 
-    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: None)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: None)
     monkeypatch.setattr(
         mod, "default_disk_hygiene_runner", lambda transport, stage, **kw: {"action": "skipped", "reason": "test"}
     )
@@ -979,10 +980,10 @@ def test_resolve_services_no_matching_project_raises_usage_error() -> None:
 def test_main_title_match_uses_commit_subject_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """Dokploy titles git deployments with the full commit message (subject +
     body); comparing it whole against origin/main's subject printed a false
-    '[does not match local origin/main]' on a correct deploy."""
+    '[does not match deploy candidate]' on a correct deploy."""
     subject = "fix(harness): subject line"
     full_title = subject + "\n\nBody paragraph.\n\nCo-Authored-By: X <x@example.com>"
-    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: subject)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: subject)
     transport = _make_transport_with_full_project()
     _program_status(
         transport,
@@ -1006,7 +1007,7 @@ def test_main_title_match_uses_commit_subject_only(monkeypatch: pytest.MonkeyPat
     )
     report = out.getvalue()
     assert exit_code == mod.EXIT_OK
-    assert "[matches local origin/main]" in report
+    assert "[matches deploy candidate]" in report
     assert "does not match" not in report
     assert "Body paragraph" not in report
 
@@ -1122,7 +1123,7 @@ _ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SE
 
 
 def _run_main(argv: List[str], transport: QueueTransport, monkeypatch: pytest.MonkeyPatch, subject: Optional[str]):
-    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: subject)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: subject)
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
         argv, env=_ENV, registry_reader=_no_registry,
@@ -1147,7 +1148,7 @@ def test_manual_deployment_title_only_informational_for_non_code_services(monkey
         transport, monkeypatch, "feat: algo",
     )
     assert code == mod.EXIT_OK, err
-    assert "does not match local origin/main" not in err
+    assert "does not match deploy candidate" not in err
     assert "not code-bearing" in out
 
 
@@ -1159,7 +1160,7 @@ def test_cloud_service_title_mismatch_still_fails(monkeypatch: pytest.MonkeyPatc
     _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
     code, _out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], transport, monkeypatch, "feat: algo")
     assert code == mod.EXIT_DEPLOY_FAILED
-    assert "darkfac-cloud: does not match local origin/main" in err
+    assert "darkfac-cloud: does not match deploy candidate" in err
 
 
 def _cloud_transport() -> QueueTransport:
@@ -1510,7 +1511,7 @@ def test_disk_hygiene_runs_before_and_after_deploy_and_can_be_skipped(monkeypatc
         return {"action": "skipped", "reason": "test"}
 
     def run(extra: List[str]) -> Tuple[int, str]:
-        monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+        monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: "feat: algo")
         out, err = io.StringIO(), io.StringIO()
         code = mod.main(
             ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"] + extra,
@@ -1577,7 +1578,7 @@ def test_prune_read_timeout_does_not_leak_the_api_key(monkeypatch: pytest.Monkey
 
 def test_transient_image_hygiene_keeps_deploy_and_backup(monkeypatch: pytest.MonkeyPatch) -> None:
     """USR-180: a cleanUnusedImages read timeout is recorded and does not skip backup."""
-    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: "feat: algo")
     base = _cloud_transport()
     prune_calls: List[str] = []
 
@@ -1629,7 +1630,7 @@ def test_disk_hygiene_failure_never_changes_the_exit_code(monkeypatch: pytest.Mo
     def runner(transport: Any, stage: str, **kwargs: Any) -> Dict[str, Any]:
         raise RuntimeError("dokploy prune exploded")
 
-    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: "feat: algo")
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
         ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"],
@@ -1662,7 +1663,11 @@ def _run_with_sync_report(monkeypatch: pytest.MonkeyPatch, report: Any) -> Tuple
     from core.infra import node_sync
 
     monkeypatch.setattr(node_sync, "sync", lambda **kwargs: report)
-    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+    # A cloud deploy needs a candidate. A prior scenario in the same test may
+    # have replaced the autouse reader with one that raises; that abort never
+    # reaches the backup decision this helper is here to exercise.
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: "a" * 40)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: "feat: algo")
     backups: List[str] = []
 
     def backup(project_id: str = "darkfac") -> Dict[str, Any]:
@@ -1731,6 +1736,7 @@ def test_notebook_other_branch_does_not_skip_backup_and_is_reported_as_pending(m
 
     notebook = node_sync.NodeStatus(
         name="Notebook", state="divergent", sync_classification="other_branch",
+        blocks_backup=False,
         reason="main checkout is on branch 'fix/demand-id-allocator-no-git' (parallel session); local main ref behind origin/main",
     )
     desktop = node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40)
@@ -1765,6 +1771,266 @@ def test_all_converged_runs_backup_without_pending_line(monkeypatch: pytest.Monk
     assert backups == ["darkfac"]
     assert "[PENDING]" not in err
 
+
+def _refuse_origin(*_a: object, **_k: object) -> str:
+    raise AssertionError("explicit candidate must not read origin/main")
+
+
+def _converged(sha: str) -> Any:
+    from core.infra import node_sync
+    return node_sync.SyncReport(expected_sha=sha, nodes=[
+        node_sync.NodeStatus(name=name, state="converged", git_sha=sha) for name in ("Notebook", "Desktop", "VPS")
+    ])
+
+
+def _cloud(monkeypatch: pytest.MonkeyPatch, argv: List[str], env: Dict[str, str], sync: Any):
+    from core.infra import node_sync
+    monkeypatch.setattr(node_sync, "sync", sync)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "feat: algo" if len(sha) == 40 else "other")
+    transport, backups, out, err = _cloud_transport(), [], io.StringIO(), io.StringIO()
+    code = mod.main(
+        argv, env=env, registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {"snapshot_id": "pinned"},
+        stdout=out, stderr=err, sleep_fn=lambda _s: None,
+    )
+    return code, out.getvalue(), err.getvalue(), backups, transport
+
+
+def test_candidate_pins_backup_and_does_not_chase_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flag vence o env; sem flag, origin/main e lido uma vez e o alvo nao acompanha a ref."""
+    candidate, newer = "c" * 40, "e" * 40
+    monkeypatch.setattr(mod, "get_origin_main_sha", _refuse_origin)
+    seen: List[Dict[str, Any]] = []
+    code, out, err, backups, transport = _cloud(
+        monkeypatch, ["--only", "darkfac-cloud", "--skip-check-main", "--expected-sha", candidate],
+        {**_ENV, "DARKFAC_EXPECTED_SHA": "d" * 40, "DARKFAC_FLEET_DISABLED_HOSTS": "Desktop"},
+        lambda **kw: seen.append(kw) or _converged(kw["expected_sha"]),
+    )
+    assert code == mod.EXIT_OK, err
+    assert seen[0]["expected_sha"] == candidate and seen[0]["disabled_hosts"] == {"desktop"}
+    assert f"DARKFAC_GIT_SHA={candidate}" in transport.post_calls[0][2]["env"] and backups == ["darkfac"]
+    assert f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:{candidate}" in out
+    reads = {"n": 0}
+
+    def read_origin(*_a: object, **_k: object) -> str:
+        reads["n"] += 1
+        return candidate if reads["n"] == 1 else newer
+
+    monkeypatch.setattr(mod, "get_origin_main_sha", read_origin)
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", _refuse_origin)
+    seen.clear()
+    code, out, err, backups, _transport = _cloud(
+        monkeypatch, ["--only", "darkfac-cloud", "--skip-disk-hygiene"], _ENV,
+        lambda **kw: seen.append(kw) or _converged(kw["expected_sha"]),
+    )
+    assert code == mod.EXIT_OK and reads["n"] == 1 and seen[0]["expected_sha"] == candidate and backups == ["darkfac"]
+    assert newer not in out + err
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: "abc")
+    refused_transport, out_b, err_b = _cloud_transport(), io.StringIO(), io.StringIO()
+    refused = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda url, key: refused_transport, stdout=out_b, stderr=err_b,
+    )
+    assert refused == mod.EXIT_DEPLOY_FAILED and "Cannot determine full origin/main SHA" in err_b.getvalue()
+    assert refused_transport.post_calls == []
+
+
+@pytest.mark.parametrize(("argv", "env_sha"), [(["--expected-sha", "not-a-sha"], "c" * 40), ([], "zz")])
+def test_invalid_explicit_sha_refuses_without_reading_origin(
+    monkeypatch: pytest.MonkeyPatch, argv: List[str], env_sha: str,
+) -> None:
+    monkeypatch.setattr(mod, "get_origin_main_sha", _refuse_origin)
+    transport, _out, err = _cloud_transport(), io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", *argv], env={**_ENV, "DARKFAC_EXPECTED_SHA": env_sha},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport, stdout=_out, stderr=err,
+    )
+    assert code == mod.EXIT_USAGE_ERROR and "code deploy refused" in err.getvalue() and transport.post_calls == []
+
+
+def test_non_code_and_excluded_vps_do_not_authorize_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+    monkeypatch.setattr(mod, "get_origin_main_sha", _refuse_origin)
+    monkeypatch.setattr(node_sync, "sync", lambda **_k: (_ for _ in ()).throw(AssertionError("sync")))
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "manual", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_n8n_darkfac", [[old], [new]])
+    backups: List[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-n8n", "--skip-check-main"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {},
+        stdout=out, stderr=err, sleep_fn=lambda _s: None,
+    )
+    assert code == mod.EXIT_OK and backups == [] and "no immutable candidate SHA" in out.getvalue(), err.getvalue()
+    excluded = node_sync.NodeStatus(name="VPS", state="excluded", reason="disabled_by_policy", target_sha="a" * 40, blocks_backup=True)
+    desktop = node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40)
+    code, out, _err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop, vps=excluded))
+    assert code == mod.EXIT_DEPLOY_FAILED and backups == [] and "[BACKUP] skipped" in out
+    assert f"state=excluded reason=disabled_by_policy target_sha={'a' * 40}" in out
+
+
+def test_darkhub_expected_sha_skips_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate = "c" * 40
+    monkeypatch.setattr(mod, "get_origin_main_sha", _refuse_origin)
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_hub", [[old], [new]])
+    seen: List[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--skip-node-sync", "--expected-sha", candidate],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"}, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport, health_client=lambda: {"git_sha": candidate},
+        ghcr_probe=lambda _repo, tag: seen.append(tag) or 200, stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert seen == [candidate] and f"ghcr.io/gcamposgit/darkhub:{candidate}" in transport.post_calls[0][2]["composeFile"]
+    assert f"converged sha={candidate}" in out.getvalue()
+
+
+def test_main_advances_disabled_desktop_preserves_foreign_file_and_backs_up_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+) -> None:
+    """origin/main anda, Desktop desabilitado, owner_actions.json intacto, backup no candidato."""
+    import subprocess
+    from pathlib import Path
+
+    from core.infra import node_sync
+
+    checkout = Path(tmp_path) / "checkout"
+    checkout.mkdir()
+
+    def git_setup(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=checkout, check=True, capture_output=True, text=True, encoding="utf-8",
+        ).stdout.strip()
+
+    git_setup("init", "-q", "-b", "main")
+    for key, value in (("user.email", "t@t"), ("user.name", "t"), ("core.autocrlf", "false")):
+        git_setup("config", key, value)
+    ledger = checkout / ".factory" / "owner_actions" / "owner_actions.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_bytes(b'{"items":[]}\n')
+    (checkout / "README").write_text("base\n", encoding="utf-8")
+    git_setup("add", "-A")
+    git_setup("commit", "-qm", "candidate")
+    candidate = git_setup("rev-parse", "HEAD")
+    shas = [candidate]
+    for label, text in (("origin moved", "advanced\n"), ("origin moved again", "advanced-again\n")):
+        (checkout / "README").write_text(text, encoding="utf-8")
+        git_setup("add", "-A")
+        git_setup("commit", "-qm", label)
+        shas.append(git_setup("rev-parse", "HEAD"))
+    newer, newer_again = shas[1], shas[2]
+    git_setup("branch", "session/other", candidate)
+    git_setup("update-ref", "refs/remotes/origin/main", newer)
+    git_setup("checkout", "-q", "session/other")
+    git_setup("update-ref", "refs/heads/main", candidate)
+    foreign = b'{"source":"session-10431","keep":true}\n'
+    ledger.write_bytes(foreign)
+    calls: List[List[str]] = []
+    advanced = {"done": False}
+
+    def git(root: Path, args: List[str]) -> str:
+        calls.append(list(args))
+        if not advanced["done"]:
+            advanced["done"] = True
+            subprocess.run(["git", "update-ref", "refs/remotes/origin/main", newer_again], cwd=checkout, check=True, capture_output=True)
+        return node_sync.run_git(root, args)
+
+    def http(method: str, url: str, payload: object, token: object) -> Dict[str, Any]:
+        if "desktop.test" in url:
+            raise AssertionError(url)
+        if "vps.test" in url and method == "GET":
+            return {"git_sha": candidate}
+        raise OSError(url)
+
+    def wrapped(**kwargs: Any) -> Any:
+        kwargs.update(root=checkout, git=git, http=http, retries=1, retry_delay=0, timeout=0, interval=1)
+        kwargs.setdefault("task_recovery", lambda name: (_ for _ in ()).throw(AssertionError(name)))
+        return _REAL_NODE_SYNC(**kwargs)
+
+    monkeypatch.setattr(node_sync, "sync", wrapped)
+    monkeypatch.setattr(node_sync, "load_pending_convergence", lambda path=None: None)
+    monkeypatch.setattr(node_sync, "clear_pending_convergence", lambda path=None: None)
+    monkeypatch.setattr(node_sync, "record_pending_convergence", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "get_origin_main_sha", _refuse_origin)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "feat: algo" if sha == candidate else "moved")
+    backups: List[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-check-main", "--skip-disk-hygiene", "--expected-sha", candidate],
+        env={**_ENV, "DARKFAC_FLEET_DISABLED_HOSTS": "desktop", "DARKFAC_DESKTOP_URL": "http://desktop.test:8080", "DARKFAC_VPS_HEALTH_URL": "http://vps.test/health"},
+        registry_reader=_no_registry, transport_factory=lambda url, key: _cloud_transport(),
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {"snapshot_id": "pinned"},
+        stdout=out, stderr=err, sleep_fn=lambda _s: None,
+    )
+    text = out.getvalue() + err.getvalue()
+    assert code == mod.EXIT_OK, text
+    assert ledger.read_bytes() == foreign
+    assert git_setup("rev-parse", "--abbrev-ref", "HEAD") == "session/other"
+    assert git_setup("rev-parse", "refs/heads/main") == candidate
+    assert git_setup("rev-parse", "origin/main") == newer_again
+    assert not any(call and call[0] in {"fetch", "merge", "reset", "checkout", "clean", "restore"} for call in calls)
+    assert backups == ["darkfac"]
+    assert f"state=excluded reason=disabled_by_policy target_sha={candidate}" in out.getvalue()
+    assert "[PENDING]" not in text
+    assert candidate in out.getvalue() and newer not in text and newer_again not in text
+
+
+def test_check_main_does_not_replace_candidate_or_cancel_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """check-main pode ver outro SHA e falhar; pin, sync e backup ficam no candidato da VPS."""
+    from core.infra import node_sync
+
+    candidate, reported = "c" * 40, "e" * 40
+    monkeypatch.setattr(mod, "get_origin_main_sha", _refuse_origin)
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "feat: algo" if sha == candidate else "moved")
+    seen: List[Dict[str, Any]] = []
+
+    def sync(**kwargs: Any) -> node_sync.SyncReport:
+        seen.append(kwargs)
+        sha = kwargs["expected_sha"]
+        return node_sync.SyncReport(expected_sha=sha, nodes=[
+            node_sync.NodeStatus(name="Notebook", state="converged", git_sha=sha),
+            node_sync.NodeStatus(
+                name="Desktop", state="excluded", reason="disabled_by_policy", target_sha=sha,
+            ),
+            node_sync.NodeStatus(name="VPS", state="converged", git_sha=sha),
+        ])
+
+    monkeypatch.setattr(node_sync, "sync", sync)
+    calls: List[Tuple[int, str]] = []
+
+    def check_main() -> Tuple[int, Dict[str, Any]]:
+        calls.append((1, reported))
+        return 1, {"state": "red", "sha": reported}
+
+    transport = _cloud_transport()
+    backups: List[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-disk-hygiene", "--expected-sha", candidate],
+        env={**_ENV, "DARKFAC_EXPECTED_SHA": "d" * 40, "DARKFAC_FLEET_DISABLED_HOSTS": " Desktop "},
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        check_main_runner=check_main,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {"snapshot_id": "pinned"},
+        stdout=out, stderr=err, sleep_fn=lambda _s: None,
+    )
+    text = out.getvalue() + err.getvalue()
+    assert code == mod.EXIT_OK, text
+    assert calls == [(1, reported)] and seen[0]["expected_sha"] == candidate
+    assert seen[0]["disabled_hosts"] == {"desktop"}
+    pinned = transport.post_calls[0][2]["env"]
+    assert f"DARKFAC_GIT_SHA={candidate}" in pinned and reported not in pinned
+    assert backups == ["darkfac"] and "[BACKUP] skipped" not in text and "[PENDING]" not in text
+    assert f"state=excluded reason=disabled_by_policy target_sha={candidate}" in out.getvalue()
+    assert "[CHECK-MAIN] state=red code=1" in out.getvalue()
+    outside_check_main = "\n".join(line for line in text.splitlines() if not line.startswith("[CHECK-MAIN]"))
+    assert reported not in outside_check_main
 
 # --- USR-242: alerta de ops quando um no diverge por 2 ciclos consecutivos --------------------------
 

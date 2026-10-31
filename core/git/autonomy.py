@@ -1726,7 +1726,7 @@ class GitAutonomyManager:
     def _default_live_verify(target_sha: str, target_dir: Path) -> Any:
         try:
             from core.infra import node_sync
-            return node_sync.verify(root=target_dir)
+            return node_sync.verify(root=target_dir, expected_sha=target_sha)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

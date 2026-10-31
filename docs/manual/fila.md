@@ -42,6 +42,20 @@ Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
   USR-394: no `/system/update` a edicao local e guardada e reaplicada apos o pull se o arquivo nao mudou no
   upstream; se mudou, vale o upstream e a copia local vai para `.factory/runs/node_sync_conflicts/`.
+- USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
+  O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
+  `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou
+  depois nao substitui o alvo. Sem SHA valido, `node_sync` nao sonda e nao le `origin/main`.
+  Se `rev-list` nao resolve o candidato, a classe nao e `converged` e nao ha `fetch`, salvo quando
+  `HEAD` ja e esse SHA. So `main` limpa e `behind` faz
+  `git fetch origin <sha>` e `git merge --ff-only <sha>`; worktree, outra branch, sujo, adiantado
+  ou divergente nao recebem `fetch`, `merge`, `reset`, `checkout`, `clean` nem `restore`.
+  `DARKFAC_FLEET_DISABLED_HOSTS` e lida uma vez por `verify`/`sync` (virgula, borda e caixa ignoradas).
+  Host sai `excluded` (`disabled_by_policy`, `target_sha`) sem git, health, update, restart ou redeploy.
+  `ok` exige a VPS incluida e os nos incluidos convergidos. VPS excluida deixa `ok` falso; Desktop
+  excluido nao esconde VPS divergente. No redeploy, a flag vence o env e vale para pin, GHCR,
+  `/health`, sync e backup; SHA explicito invalido recusa sem POST. Sem os dois, `origin/main` e
+  lido uma vez. Backup so com a VPS `converged` nesse SHA. `check-main` nao troca o candidato.
 
 # Fila de demandas (entrada)
 

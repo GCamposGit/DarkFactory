@@ -140,17 +140,21 @@ Uma saida assim, terminando sem nenhuma linha `FAILED to trigger deploy` ou
 `status=error`/`status=timeout`:
 
 ```
-Local origin/main HEAD subject: fix(hub): ...
+Deploy candidate subject: fix(hub): ...
 Triggering redeploy for 4 service(s) in darkfac-core/production...
 [darkfac-n8n] deploy triggered (compose, id=...)
 [darkfac-cloud] deploy triggered (compose, id=...)
 [Darkhub] deploy triggered (compose, id=...)
 [darkfac-canary] deploy triggered (application, id=...)
 [darkfac-n8n] status=done title='...' elapsed=32.1s
-[darkfac-cloud] status=done title='...' elapsed=45.7s [matches local origin/main]
+[darkfac-cloud] status=done title='...' elapsed=45.7s [matches deploy candidate]
 [Darkhub] status=done title='...' elapsed=28.4s
 [darkfac-canary] status=done title='...' elapsed=51.2s
 ```
+
+### Alvo imutavel (USR-420)
+
+`--expected-sha` vence `DARKFAC_EXPECTED_SHA` e vale para pin, GHCR, `/health`, sync e backup. Sem os dois, `origin/main` e lido uma vez. Contrato em `docs/manual/fila.md`.
 
 O comando termina com codigo de saida `0` nesse caso (`echo $LASTEXITCODE`
 no PowerShell logo depois confirma). Se algum servico aparecer com
