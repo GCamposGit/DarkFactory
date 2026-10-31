@@ -49,4 +49,4 @@ A fabrica faz push e merge com um token de curta duracao de uma GitHub App, sem 
 1. `_inspect_completion_changes` exige, contra `origin/main`, algum arquivo alem de `.factory/demands/demands.json`.
 2. `_commit_completion` grava a conclusao e commita quando `auto_commit` esta ligado. Sem esse commit a conclusao e recusada.
 3. `_deliver_completion` chama `deliver_branch` com `merge` desligado quando o projeto tem `requires_commercial_acceptance`. Sem `gh` autenticado, cai em push direto para a base.
-4. `_verify_live_completion` roda so com `is_live_deploy`. Falha de convergencia reabre o ticket (`requeue_ticket`) e abre um defeito `planned` dependente dele.
+4. `_verify_live_completion` roda so com `is_live_deploy` (USR-420). O SHA fica fixo e `node_sync.verify` recebe esse `expected_sha`. Host `excluded` nao conta como convergido; VPS excluida deixa `ok` falso. Falha reabre o ticket e abre um defeito `planned`.

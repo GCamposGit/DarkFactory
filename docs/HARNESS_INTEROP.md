@@ -455,24 +455,24 @@ convergido:
 - Se o checkout principal estiver em qualquer branch diferente de `main`
   (sessão paralela de outro ticket, inclusive com a árvore de trabalho
   suja), a convergência é julgada pelo ref local `refs/heads/main` — nunca
-  por `HEAD` nem pela árvore de trabalho da branch em uso. Esse ref pode ser
-  avançado com `git fetch origin main:refs/heads/main`, que só atualiza um
-  ponteiro de branch (sem `checkout`, `merge` nem tocar a árvore de
-  trabalho), logo é seguro mesmo com outra sessão no meio do trabalho ali.
-- Se o checkout principal já estiver em `main` e limpo mas atrás de
-  `origin/main`, o comportamento antigo continua: `git fetch` + `git merge
-  --ff-only origin/main`.
+  por `HEAD` nem pela árvore de trabalho da branch em uso. Esse ref não é
+  avançado (USR-420): nenhum `fetch`, `merge`, `reset`, `checkout`, `clean`
+  ou `restore`.
+- Se o checkout principal já estiver em `main`, limpo e atrás do SHA fixo da
+  execução, `git fetch origin <sha>` e `git merge --ff-only <sha>`. Sem esse
+  SHA não há sonda e `origin/main` não vira o alvo.
 - Uma árvore de trabalho suja **na própria `main`** (não numa branch de
   ticket) continua bloqueando o backup pós-deploy como antes — isso é sinal
   de um problema real, não de uma sessão paralela legítima.
 - Um checkout que é ele mesmo uma worktree vinculada (`git-dir` ≠
-  `git-common-dir`) nunca é tocado, pelo mesmo motivo.
+  `git-common-dir`) nunca é tocado, pelo mesmo motivo. Host em
+  `DARKFAC_FLEET_DISABLED_HOSTS` sai `excluded` e não conta como convergido.
 
 Consequência prática: o backup pós-deploy (3 camadas) não é mais pulado só
 porque o checkout do Notebook estava em outra branch — ele depende apenas da
 convergência da VPS (como já valia para o Desktop desde o USR-196). Uma
-divergência do Notebook (sujo em `main`, ou ref `main` que não avançou
-mesmo após o fetch) ainda aparece como `[PENDING] Notebook divergent` na
+divergência do Notebook (sujo em `main`, ou ref `main` que não é o SHA da
+execução) ainda aparece como `[PENDING] Notebook divergent` na
 saída e mantém o código de saída diferente de zero, mas nunca mais bloqueia
 sozinha o backup de rodar quando a causa é só "outra sessão estava usando o
 checkout compartilhado".

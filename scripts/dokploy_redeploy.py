@@ -94,7 +94,7 @@ DARKHUB_HEALTH_DISK_URL = DARKHUB_HEALTH_URL + "?disk=true"
 # adds another project this tool should be allowed to touch.
 ALLOWED_PROJECTS = frozenset({"darkfac-core"})
 
-# Only these services have Dokploy deploy titles comparable with origin/main.
+# Only these services have Dokploy deploy titles comparable with the deploy candidate.
 # Darkhub's raw compose instead proves its commit through /health.
 CODE_BEARING_SERVICES = frozenset({"darkfac-cloud"})
 
@@ -594,7 +594,7 @@ def wait_for_service(
 
 def get_local_origin_main_subject(repo_root: Path = REPO_ROOT) -> Optional[str]:
     """Best-effort `git log -1 --format=%s origin/main` subject, for the
-    informational "matches local origin/main" note. Returns None on any
+    compatibility helper for a checkout's current origin/main subject. Returns None on any
     failure (git missing, no such ref, not a repo, etc.)."""
     try:
         result = subprocess.run(
@@ -613,6 +613,21 @@ def get_local_origin_main_subject(repo_root: Path = REPO_ROOT) -> Optional[str]:
     return subject or None
 
 
+def get_commit_subject(sha: str, repo_root: Path = REPO_ROOT) -> Optional[str]:
+    """Best-effort subject for the immutable commit selected by this deploy."""
+    if not SHA_PATTERN.fullmatch(sha):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%s", sha], cwd=repo_root,
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except Exception:
+        return None
+    subject = result.stdout.strip()
+    return subject if result.returncode == 0 and subject else None
+
+
 def get_origin_main_sha(repo_root: Path = REPO_ROOT) -> Optional[str]:
     """Read the exact full commit that a DarkHub deployment must expose."""
     try:
@@ -624,6 +639,39 @@ def get_origin_main_sha(repo_root: Path = REPO_ROOT) -> Optional[str]:
         return None
     sha = result.stdout.strip().lower()
     return sha if result.returncode == 0 and SHA_PATTERN.fullmatch(sha) else None
+
+
+def resolve_deploy_candidate(
+    explicit: Optional[str],
+    env_value: Optional[str],
+    *,
+    read_origin: Optional[Callable[[], Optional[str]]] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return ``(sha, error)`` for one code deploy.
+
+    A non-empty ``--expected-sha`` wins over ``DARKFAC_EXPECTED_SHA``. Either
+    explicit value is validated and ``read_origin`` is not called. An invalid
+    explicit value is an error. With no explicit value, ``read_origin`` runs
+    at most once; ``None`` means this deploy has no code candidate to read.
+    """
+    flag = (explicit or "").strip()
+    if flag:
+        sha = flag.lower()
+        if SHA_PATTERN.fullmatch(sha):
+            return sha, None
+        return None, f"Invalid --expected-sha {flag!r}; code deploy refused"
+    raw_env = (env_value or "").strip()
+    if raw_env:
+        sha = raw_env.lower()
+        if SHA_PATTERN.fullmatch(sha):
+            return sha, None
+        return None, f"Invalid DARKFAC_EXPECTED_SHA {raw_env!r}; code deploy refused"
+    if read_origin is None:
+        return None, None
+    found = (read_origin() or "").strip().lower()
+    if SHA_PATTERN.fullmatch(found):
+        return found, None
+    return None, None
 
 
 def get_origin_main_compose(sha: str, repo_root: Path = REPO_ROOT) -> str:
@@ -690,6 +738,7 @@ def set_compose_git_sha(
 
 
 CLOUD_SHA_ENV = "DARKFAC_GIT_SHA"
+EXPECTED_SHA_ENV = "DARKFAC_EXPECTED_SHA"
 CLOUD_IMAGE_REPOSITORY = "gcamposgit/darkfac-cloud"
 
 
@@ -927,6 +976,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skip-node-sync",
         action="store_true",
         help="Skip the post-deploy 3-node verification/sync (used by node_sync itself to avoid re-entry).",
+    )
+    parser.add_argument(
+        "--expected-sha",
+        default=None,
+        help=(
+            "Immutable SHA for a code deploy (pin, GHCR, health, node sync and backup). "
+            "Overrides DARKFAC_EXPECTED_SHA. Without either, origin/main is read once. "
+            "An invalid explicit value refuses the deploy."
+        ),
     )
     parser.add_argument(
         "--skip-check-main",
@@ -1168,14 +1226,26 @@ def _run_main(
             print(f"  - {svc.name} ({svc.kind}, id={svc.service_id})", file=out, flush=True)
         return EXIT_OK
 
-    local_subject = get_local_origin_main_subject()
     darkhub_selected = any(svc.name.lower() == "darkhub" and svc.kind == "compose" for svc in selected)
-    expected_sha = get_origin_main_sha() if darkhub_selected else None
-    if darkhub_selected and expected_sha is None:
-        print("Cannot determine full origin/main SHA; Darkhub deploy refused", file=err, flush=True)
+    code_selected = any(svc.name.lower() in CODE_BEARING_SERVICES for svc in selected)
+    candidate_required = darkhub_selected or code_selected
+    # One immutable candidate for pin, GHCR, health, node_sync and backup.
+    # An explicit SHA never falls through to origin/main, even when main moves.
+    resolved_sha, candidate_error = resolve_deploy_candidate(
+        getattr(args, "expected_sha", None),
+        env.get(EXPECTED_SHA_ENV),
+        read_origin=get_origin_main_sha if candidate_required else None,
+    )
+    if candidate_error:
+        print(candidate_error, file=err, flush=True)
+        return EXIT_USAGE_ERROR
+    expected_sha = resolved_sha if candidate_required else None
+    local_subject = get_commit_subject(expected_sha) if expected_sha else None
+    if candidate_required and expected_sha is None:
+        print("Cannot determine full origin/main SHA; code deploy refused", file=err, flush=True)
         return EXIT_DEPLOY_FAILED
     if darkhub_selected and not args.wait:
-        print("Darkhub deploy requires --wait so /health can prove the origin/main SHA", file=err, flush=True)
+        print("Darkhub deploy requires --wait so /health can prove the fixed candidate SHA", file=err, flush=True)
         return EXIT_USAGE_ERROR
     darkhub_compose = None
     image_source = IMAGE_SOURCE_GHCR
@@ -1198,7 +1268,7 @@ def _run_main(
             print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
     if local_subject:
-        print(f"Local origin/main HEAD subject: {local_subject}", file=out, flush=True)
+        print(f"Deploy candidate subject: {local_subject}", file=out, flush=True)
 
     print(
         f"Triggering redeploy for {len(selected)} service(s) in {args.project}/{args.environment}...",
@@ -1305,7 +1375,7 @@ def _run_main(
                     continue
             else:
                 if svc.name.lower() == "darkfac-cloud":
-                    cloud_sha = expected_sha or get_origin_main_sha()
+                    cloud_sha = expected_sha
                     # USR-397: never move DARKFAC_GIT_SHA (nor deploy) before the image exists;
                     # on timeout the previous sha keeps running.
                     print(f"Waiting for ghcr.io/{CLOUD_IMAGE_REPOSITORY}:{cloud_sha} on GHCR...", file=out, flush=True)
@@ -1344,9 +1414,9 @@ def _run_main(
         match_note = ""
         if local_subject and result.deployment and result.deployment.title:
             match_note = (
-                " [matches local origin/main]"
+                " [matches deploy candidate]"
                 if title.strip() == local_subject.strip()
-                else " [does not match local origin/main]"
+                else " [does not match deploy candidate]"
             )
         print(
             f"[{svc.name}] status={result.outcome} title={title!r} elapsed={result.elapsed_seconds:.1f}s{match_note}",
@@ -1398,7 +1468,7 @@ def _run_main(
             if recovered:
                 print(f"[NODE SYNC] VPS: converged sha={expected_sha} (after recovery)", file=out, flush=True)
             else:
-                print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
+                print(f"[NODE SYNC] VPS: divergent; /health did not report candidate sha={expected_sha}", file=err, flush=True)
                 all_ok = False
                 other_failure = True
         try:
@@ -1428,6 +1498,12 @@ def _run_main(
     notebook_pending: Optional[str] = None
     if getattr(args, "skip_node_sync", False):
         print("[NODE SYNC] skipped (--skip-node-sync)", file=out, flush=True)
+    elif expected_sha is None:
+        # Non-code services have no deploy candidate to prove convergence against.
+        # Do not let node_sync infer one from the moving origin/main ref, and do not
+        # authorize a post-deploy VPS backup without candidate-bound evidence.
+        print("[NODE SYNC] skipped: no immutable candidate SHA for this deployment", file=out, flush=True)
+        backup_ok = False
     else:
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
@@ -1441,6 +1517,12 @@ def _run_main(
             "clock": clock_fn,
             "sleep": sleep_fn,
             "notifier": make_safe_ops_notifier(ops_notifier),
+            "expected_sha": expected_sha,
+            "disabled_hosts": {
+                host.strip().casefold()
+                for host in env.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(",")
+                if host.strip()
+            },
         }
         node_sync_dirty = False
         sync_report = node_sync.sync(**sync_kwargs)
@@ -1450,11 +1532,20 @@ def _run_main(
         for node in sync_report.nodes:
             if node.state == "converged":
                 continue
+            if node.state == "excluded":
+                print(
+                    f"[NODE SYNC] {node.name}: expected_sha={sync_report.expected_sha or '(unknown)'} "
+                    f"state={node.state} reason={node.reason or 'disabled_by_policy'} "
+                    f"target_sha={node.target_sha or sync_report.expected_sha or '(unknown)'}",
+                    file=out,
+                    flush=True,
+                )
+                continue
             all_ok = False
             if node.name == "Desktop":
                 # USR-196: o backup da VPS nao depende do Desktop; a divergencia vira pendencia explicita.
                 desktop_pending = node.reason or "(none)"
-            elif node.name == "Notebook" and getattr(node, "sync_classification", None) == "other_branch":
+            elif node.name == "Notebook" and not getattr(node, "blocks_backup", True):
                 # USR-222: o checkout compartilhado do Notebook esta em outra branch por uma sessao
                 # paralela de outro ticket (nao uma arvore suja na propria main); isso nao e evidencia
                 # de que o deploy em si divergiu, so vira pendencia explicita, sem derrubar o backup da
@@ -1474,6 +1565,13 @@ def _run_main(
                 file=err,
                 flush=True,
             )
+        # A backup is evidence about the deployed VPS. Excluded VPS policy is not
+        # convergence and cannot satisfy that prerequisite.
+        vps_status = next((node for node in sync_report.nodes if node.name == "VPS"), None)
+        if vps_status is None or vps_status.state != "converged":
+            # Divergent, unknown, offline or policy-excluded VPS is not convergence.
+            backup_ok = False
+            all_ok = False
     if local_subject:
         for svc in triggered:
             result = next((r for r in completed if r.service.name == svc.name), None)
@@ -1487,7 +1585,7 @@ def _run_main(
                     all_ok = False
                     backup_ok = False
                     other_failure = True
-                    print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err, flush=True)
+                    print(f"[NODE SYNC] VPS service {svc.name}: does not match deploy candidate", file=err, flush=True)
             elif not matches:
                 print(f"[{svc.name}] info: deploy title {title!r} is not a commit subject (not code-bearing; ignored)", file=out, flush=True)
 

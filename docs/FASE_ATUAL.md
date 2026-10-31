@@ -58,9 +58,9 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - Contrato de encerramento do foco: `python -m pytest tests/test_fleet_dispatcher.py -q` termina sozinho, com código de saída e uma linha de resumo do pytest no formato `N passed in Xs`, dentro do prazo configurado em `pytest.ini` (`timeout = 120`, `timeout_method = thread`). O cache por worktree fica em `DarkFac/pytest-cache` no diretório temporário do usuário. `redirect_cache_dir` grava esse destino antes de o cache plugin ler `cache_dir` e reaplica o caminho no `Cache` já criado, no início de `pytest_sessionfinish`, antes de `Cache.set`. Um `%LOCALAPPDATA%` não gravável não deixa o processo aberto depois de `100%`.
 
 ## Histórico
+- 30/10/2026: USR-420 — convergência e backup usam o SHA da execução; host em DARKFAC_FLEET_DISABLED_HOSTS sai excluded sem git nem health. Candidato ausente no objeto local não é converged e não dispara fetch. Contrato em docs/manual/fila.md.
 - 30/10/2026: o estado temporário do harness em /.tmp/ sai do índice (git rm --cached, a cópia local permanece) e fica ignorado pelo .gitignore ancorado e pelo exclude local, para não voltar ao staging.
-- 30/10/2026: commit_ticket, commit, commit_paths e o snapshot do portão (uild_snapshot_commit) deixam .tmp/ fora da árvore publicada mesmo sem ignore e mesmo já staged. Os arquivos permanecem no disco. O snapshot mexe só no índice descartável; 
-ew.txt entra e o ignorado continua de fora.
+- 30/10/2026: commit_ticket, commit, commit_paths e o snapshot do portão (build_snapshot_commit) deixam .tmp/ fora da árvore publicada mesmo sem ignore e mesmo já staged. Os arquivos permanecem no disco. O snapshot mexe só no índice descartável; new.txt entra e o ignorado continua de fora.
 - 31/10/2026: sem rota de development o ticket volta a `planned` e a worktree fica; um `--harness` acima do piso usa o modelo declarado para esse harness (USR-428).
 - 31/10/2026: sem rota na primeira fatia de development o launcher espera (código 75), não chama o agente nem a entrega, e deixa no disco a worktree com o arquivo gravado no PLAN (USR-428).
 - 31/10/2026: o pick fresco de cada fatia com `--fleet` usa contexto headless e não inicia Antigravity, mesmo como harness de operação (USR-428).

@@ -49,6 +49,22 @@ class FakeSyncReport:
         return f"FakeSyncReport(ok={self.ok}, reason={self.reason})"
 
 
+def test_default_live_verify_passes_the_execution_sha(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """USR-420: the default live proof asks node_sync for the SHA of this execution."""
+    seen: dict[str, Any] = {}
+    sha = "ab" * 20
+
+    def verify(*, root: Path, expected_sha: str) -> FakeSyncReport:
+        seen["root"] = root
+        seen["expected_sha"] = expected_sha
+        return FakeSyncReport(ok=True, expected_sha=expected_sha)
+
+    monkeypatch.setattr("core.infra.node_sync.verify", verify)
+    result = GitAutonomyManager._default_live_verify(sha, tmp_path)
+    assert seen == {"root": tmp_path, "expected_sha": sha}
+    assert result.ok is True and result.expected_sha == sha
+
+
 def test_deploy_live_ticket_completed_when_live_verifier_succeeds(test_remote_pair: tuple[Path, Path]) -> None:
     local, _ = test_remote_pair
     store_file = local / ".factory" / "demands" / "demands.json"

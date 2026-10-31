@@ -173,7 +173,7 @@ def test_safe_repair_divergent_checkout_remote_backup(tmp_path: Path) -> None:
     branches_remote = node_sync.run_git(clone_repo, ["branch", "-r"])
     assert f"origin/{backup_branch}" in branches_remote
 
-    # Verify local checkout is now reset to origin/main
+    # Verify reset to origin/main
     current_sha = node_sync.run_git(clone_repo, ["rev-parse", "HEAD"])
     assert current_sha == base_sha
     assert not (clone_repo / "divergent.txt").exists()
