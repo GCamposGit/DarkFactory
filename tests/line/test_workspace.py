@@ -22,6 +22,7 @@ from core.line.workspace import (
     checkout,
     cleanup,
     commit,
+    commit_paths,
     context_dir,
     find_commit_by_job,
     push,
@@ -250,6 +251,129 @@ def test_commit_is_noop_without_diff_and_findable_by_job_key(
     # seed commit + exactly one spec commit, never two.
     assert log_count == "2"
     assert find_commit_by_job(ws, "job-spec") == sha1
+
+
+_SCRATCH = (
+    ".tmp/harness-state-usr-423/run_timings.jsonl",
+    ".tmp/harness-state-usr-423/suite-0.lock",
+)
+_TIMINGS = b'{"ticket":"USR-423","phase":"gate"}\n'
+_LOCK = b"suite-0\n"
+
+
+def _plant_scratch(repo: Path) -> tuple[Path, Path]:
+    blank = repo.parent / "blank-exclude"
+    blank.write_text("", encoding="utf-8")
+    _git(["config", "core.excludesFile", str(blank)], cwd=repo)
+    root = repo / ".tmp" / "harness-state-usr-423"
+    root.mkdir(parents=True)
+    timings = root / "run_timings.jsonl"
+    lock = root / "suite-0.lock"
+    timings.write_bytes(_TIMINGS)
+    lock.write_bytes(_LOCK)
+    ignored = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--", *_SCRATCH],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert ignored.returncode == 1, ignored.stdout
+    return timings, lock
+
+
+def _committed_names(repo: Path) -> list[str]:
+    shown = _git(["show", "--name-only", "--format=", "HEAD"], cwd=repo)
+    return [line for line in shown.stdout.splitlines() if line.strip()]
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_commit_publishes_product_and_drops_harness_scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staged: bool
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = checkout(project, "run-429")
+    timings, lock = _plant_scratch(ws.path)
+    (ws.path / "product.txt").write_text("product\n", encoding="utf-8")
+    if staged:
+        _git(["add", "--", "product.txt", *_SCRATCH], cwd=ws.path)
+    head = _head_sha(ws.path)
+
+    sha = commit(ws, "produto", job_key="usr-429")
+
+    assert sha != head
+    assert _committed_names(ws.path) == ["product.txt"]
+    assert timings.read_bytes() == _TIMINGS and lock.read_bytes() == _LOCK
+    assert _git(["ls-files", "--", ".tmp"], cwd=ws.path).stdout.strip() == ""
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_commit_scratch_only_returns_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staged: bool
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = checkout(project, "run-429-scratch")
+    timings, lock = _plant_scratch(ws.path)
+    if staged:
+        _git(["add", "--", *_SCRATCH], cwd=ws.path)
+    head = _head_sha(ws.path)
+
+    assert commit(ws, "scratch", job_key="usr-429-scratch") == head
+
+    assert _head_sha(ws.path) == head
+    assert _git(["rev-list", "--count", "HEAD"], cwd=ws.path).stdout.strip() == "1"
+    assert timings.read_bytes() == _TIMINGS and lock.read_bytes() == _LOCK
+    assert _git(["ls-files", "--", ".tmp"], cwd=ws.path).stdout.strip() == ""
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_commit_paths_scratch_only_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staged: bool
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = checkout(project, "run-429-paths")
+    timings, lock = _plant_scratch(ws.path)
+    paths = [ws.path / rel for rel in _SCRATCH]
+    if staged:
+        _git(["add", "--", *_SCRATCH], cwd=ws.path)
+    head = _head_sha(ws.path)
+
+    assert commit_paths(ws, "scratch", "usr-429-paths", paths) is None
+
+    assert _head_sha(ws.path) == head
+    assert timings.read_bytes() == _TIMINGS and lock.read_bytes() == _LOCK
+    assert _git(["ls-files", "--", ".tmp"], cwd=ws.path).stdout.strip() == ""
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_commit_paths_publishes_product_and_drops_harness_scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staged: bool
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = checkout(project, "run-429-mixed")
+    timings, lock = _plant_scratch(ws.path)
+    product = ws.path / "product.txt"
+    product.write_text("product\n", encoding="utf-8")
+    if staged:
+        _git(["add", "--", "product.txt", *_SCRATCH], cwd=ws.path)
+    head = _head_sha(ws.path)
+
+    sha = commit_paths(ws, "produto", "usr-429-mixed", [product, *[ws.path / rel for rel in _SCRATCH]])
+
+    assert sha and sha != head
+    assert _committed_names(ws.path) == ["product.txt"]
+    assert timings.read_bytes() == _TIMINGS and lock.read_bytes() == _LOCK
+    assert _git(["ls-files", "--", ".tmp"], cwd=ws.path).stdout.strip() == ""
 
 
 def test_find_commit_by_job_returns_none_when_missing(

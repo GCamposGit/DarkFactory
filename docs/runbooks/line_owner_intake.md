@@ -75,7 +75,8 @@ falharia e o run terminaria em `validate_exhausted`. Por isso o projeto declara
   do Desktop via `DARKFAC_TEST_WORKERS`, que o compose agora injeta, com fallback
   local). Em arvore suja (loop de desenvolvimento) monta um *snapshot* da
   arvore de trabalho sem tocar no indice, no HEAD nem na branch reais (indice temporario via
-  `GIT_INDEX_FILE` + `git add -A` + `write-tree` + `commit-tree -p HEAD`), faz checkout desse commit
+  `GIT_INDEX_FILE` + `git add -A`, depois remove o scratch `.tmp` desse indice descartavel,
+  + `write-tree` + `commit-tree -p HEAD`), faz checkout desse commit
   em um worktree destacado temporario (`--detach`) e roda o runner oficial la
   (`runner.py --quick`, com `sanitized_env()`): o candidato e um commit limpo, com o mesmo cache e o
   mesmo despacho para o worker de testes do Desktop (ambiente de teste do gate oficial, nao o do

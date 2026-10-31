@@ -92,6 +92,10 @@ Thumbs.db
 # Isolated worktrees
 .worktrees/
 
+# Harness execution scratch at the repository root (locks, timings). Anchored
+# so a nested directory named .tmp elsewhere stays visible (USR-429).
+/.tmp/
+
 # Recoverable worktree backups
 .factory/backups/
 

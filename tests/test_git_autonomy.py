@@ -121,6 +121,100 @@ def test_commit_ticket_rejects_secret_in_pre_staged_index_blob(test_git_repo: Pa
     assert _git(test_git_repo, "log", "-1", "--format=%s").stdout.strip() == "chore: initial commit"
 
 
+_SCRATCH = (
+    ".tmp/harness-state-usr-423/run_timings.jsonl",
+    ".tmp/harness-state-usr-423/suite-0.lock",
+)
+_TIMINGS = b'{"ticket":"USR-423","phase":"gate"}\n'
+_LOCK = b"suite-0\n"
+
+
+def _no_global_exclude(repo: Path) -> None:
+    """The fixture must not ignore ``.tmp`` via a machine-wide excludes file."""
+    blank = repo.parent / "blank-exclude"
+    blank.write_text("", encoding="utf-8")
+    _git(repo, "config", "core.excludesFile", str(blank))
+
+
+def _plant_scratch(repo: Path) -> tuple[Path, Path]:
+    root = repo / ".tmp" / "harness-state-usr-423"
+    root.mkdir(parents=True)
+    timings = root / "run_timings.jsonl"
+    lock = root / "suite-0.lock"
+    timings.write_bytes(_TIMINGS)
+    lock.write_bytes(_LOCK)
+    return timings, lock
+
+
+def _assert_not_ignored(repo: Path, *paths: str) -> None:
+    ignored = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--", *paths],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert ignored.returncode == 1, ignored.stdout
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_commit_ticket_publishes_product_and_drops_harness_scratch(test_git_repo: Path, staged: bool) -> None:
+    _no_global_exclude(test_git_repo)
+    timings, lock = _plant_scratch(test_git_repo)
+    (test_git_repo / "product.txt").write_text("product\n", encoding="utf-8")
+    _assert_not_ignored(test_git_repo, *_SCRATCH)
+    if staged:
+        _git(test_git_repo, "add", "--", "product.txt", *_SCRATCH)
+    head = GitAutonomyManager(test_git_repo).get_current_sha()
+
+    sha = GitAutonomyManager(test_git_repo).commit_ticket("USR-429", "Produto")
+
+    assert sha and sha != head
+    names = _git(test_git_repo, "show", "--name-only", "--format=", "HEAD").stdout.strip().splitlines()
+    assert names == ["product.txt"]
+    assert timings.read_bytes() == _TIMINGS
+    assert lock.read_bytes() == _LOCK
+    assert _git(test_git_repo, "ls-files", "--", ".tmp").stdout.strip() == ""
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_commit_ticket_scratch_only_returns_head(test_git_repo: Path, staged: bool) -> None:
+    _no_global_exclude(test_git_repo)
+    timings, lock = _plant_scratch(test_git_repo)
+    _assert_not_ignored(test_git_repo, *_SCRATCH)
+    if staged:
+        _git(test_git_repo, "add", "--", *_SCRATCH)
+    manager = GitAutonomyManager(test_git_repo)
+    head = manager.get_current_sha()
+
+    assert manager.commit_ticket("USR-429", "So scratch") == head
+
+    assert _git(test_git_repo, "rev-parse", "HEAD").stdout.strip() == head
+    assert _git(test_git_repo, "log", "-1", "--format=%s").stdout.strip() == "chore: initial commit"
+    assert timings.read_bytes() == _TIMINGS
+    assert lock.read_bytes() == _LOCK
+    assert _git(test_git_repo, "ls-files", "--", ".tmp").stdout.strip() == ""
+
+
+def test_commit_ticket_keeps_nested_tmp_outside_the_scratch_root(test_git_repo: Path) -> None:
+    _no_global_exclude(test_git_repo)
+    timings, lock = _plant_scratch(test_git_repo)
+    nested = test_git_repo / "src" / ".tmp" / "keep.txt"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("keep\n", encoding="utf-8")
+
+    GitAutonomyManager(test_git_repo).commit_ticket("USR-429", "Aninhado")
+
+    names = _git(test_git_repo, "show", "--name-only", "--format=", "HEAD").stdout.strip().splitlines()
+    assert names == ["src/.tmp/keep.txt"]
+    assert timings.read_bytes() == _TIMINGS
+    assert lock.read_bytes() == _LOCK
+    assert _git(test_git_repo, "ls-files", "--", ".tmp").stdout.strip() == ""
+    assert _git(test_git_repo, "ls-files", "--", "src/.tmp/keep.txt").stdout.strip() == "src/.tmp/keep.txt"
+
+
 def test_commit_ticket_rejects_force_added_ignored_path(test_git_repo: Path) -> None:
     manager = GitAutonomyManager(test_git_repo)
     (test_git_repo / ".gitignore").write_text("private/\n", encoding="utf-8")
