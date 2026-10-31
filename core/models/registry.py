@@ -201,6 +201,8 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         _fb("deepseek/deepseek-r1", "deepseek", "deepseek", "high", ["deepseek-r1"], "deprecated"),
         _fb("gemini-2.0-flash-001", "google", "gemini", "low", ["gemini-legacy-flash"], "deprecated", gateway_ids=["google/gemini-2.0-flash-001"]),
         _fb("deepseek-coder", "deepseek", "deepseek", "low", ["coder-legacy"], "deprecated"),
+        _fb("openai/gpt-4o", "openai", "openai", "high", ["gpt-4o"]),
+        _fb("qwen/qwen-2.5-coder-32b-instruct", "qwen", "qwen", "high", ["qwen-coder"]),
     ],
     "roles": {
         "subagent.haiku": "claude-haiku-5-5",
@@ -211,6 +213,8 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         "development.grok": "grok-4.7",
         "planning.claude": "claude-opus-5-5",
         "planning.codex": "gpt-sol",
+        "planning.openrouter": "openai/gpt-4o",
+        "development.openrouter": "qwen/qwen-2.5-coder-32b-instruct",
         "review.codex": "gpt-6-luna",
         "review.grok": "grok-4.6",
         "distill.openrouter": "deepseek/deepseek-v4.1-flash",

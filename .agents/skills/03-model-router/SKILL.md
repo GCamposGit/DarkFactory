@@ -82,7 +82,7 @@ Tabela gerada de `.factory/config/model_registry.json` por `python scripts/gener
 
 Pares implementador -> revisor (familias distintas): `development.claude` -> `review.codex`; `development.codex` -> `review.grok`; `development.grok` -> `review.codex`
 
-1 papel(is) de gateway omitido(s); lista completa em `docs/MODEL_SELECTION_GUIDE.md`.
+3 papel(is) de gateway omitido(s); lista completa em `docs/MODEL_SELECTION_GUIDE.md`.
 
 Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fable`, `astra`, `gpt-6-astra`.
 <!-- END model-registry:roles_skill -->

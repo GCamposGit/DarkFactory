@@ -172,7 +172,7 @@ def test_the_recommendation_for_a_blocked_critical_harness_is_also_write_capable
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("harness", ["antigravity", "Antigravity", "openrouter", "mystery"])
+@pytest.mark.parametrize("harness", ["antigravity", "Antigravity", "mystery"])
 def test_an_explicit_harness_without_write_fails_early_with_exit_2_and_consumes_nothing(
     harness: str, env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

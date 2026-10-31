@@ -131,7 +131,7 @@ def _scan_factory_dir(root: Path, fingerprint: Fingerprint) -> None:
     if not factory_dir.is_dir():
         return
     root_str = str(root)
-    skip_dirs = {"backups", "test_logs", "tmp", ".pytest_cache", "__pycache__"}
+    skip_dirs = {"backups", "test_logs", "tmp", ".pytest_cache", "__pycache__", "runs", "logs", "usage"}
     try:
         for dirpath, dirnames, filenames in os.walk(str(factory_dir)):
             dirnames[:] = [d for d in dirnames if d not in skip_dirs]

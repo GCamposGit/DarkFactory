@@ -67,9 +67,11 @@ Gerado de `.factory/config/model_registry.json` por `python scripts/generate_mod
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
+| `development.openrouter` | `qwen/qwen-2.5-coder-32b-instruct` | active |
 | `distill.openrouter` | `deepseek/deepseek-v4.1-flash` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
 | `planning.codex` | `gpt-sol` | active |
+| `planning.openrouter` | `openai/gpt-4o` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |
@@ -104,6 +106,8 @@ Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fabl
 | `gpt-6-luna` | openai | openai | mid | `luna` | active | 0.2 | 1.2 | 1050000 |
 | `gpt-image-2` | openai | openai | high | `gpt-image` | candidate | - | - | - |
 | `gpt-sol` | openai | openai | high | `sol` | active | 2.5 | 10.0 | 500000 |
+| `openai/gpt-4o` | openai | openai | high | `gpt-4o` | active | 2.5 | 10.0 | 128000 |
+| `qwen/qwen-2.5-coder-32b-instruct` | qwen | qwen | high | `qwen-coder` | active | 0.07 | 0.16 | 128000 |
 | `grok-4.6` | xai | grok | mid | `grok-review` | active | 2.0 | 8.0 | 524288 |
 | `grok-4.7` | xai | grok | mid | `grok-dev` | active | - | - | - |
 <!-- END model-registry:catalog -->

@@ -516,6 +516,57 @@
       "forbidden_autonomous": false,
       "release_date": null,
       "retirement_date": null
+    },
+    {
+      "id": "openai/gpt-4o",
+      "provider": "openai",
+      "family": "openai",
+      "tier": "high",
+      "aliases": [
+        "gpt-4o"
+      ],
+      "gateway_ids": [],
+      "status": "active",
+      "price_input_per_mtok": 2.5,
+      "price_output_per_mtok": 10.0,
+      "context_tokens": 128000,
+      "max_output_tokens": 16384,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
+    },
+    {
+      "id": "qwen/qwen-2.5-coder-32b-instruct",
+      "provider": "qwen",
+      "family": "qwen",
+      "tier": "high",
+      "aliases": [
+        "qwen-coder"
+      ],
+      "gateway_ids": [],
+      "status": "active",
+      "price_input_per_mtok": 0.07,
+      "price_output_per_mtok": 0.16,
+      "context_tokens": 128000,
+      "max_output_tokens": 8192,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     }
   ],
   "roles": {
@@ -527,6 +578,8 @@
     "development.grok": "grok-4.7",
     "planning.claude": "claude-opus-5-5",
     "planning.codex": "gpt-sol",
+    "planning.openrouter": "openai/gpt-4o",
+    "development.openrouter": "qwen/qwen-2.5-coder-32b-instruct",
     "review.codex": "gpt-6-luna",
     "review.grok": "grok-4.6",
     "distill.openrouter": "deepseek/deepseek-v4.1-flash"

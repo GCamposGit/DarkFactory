@@ -461,12 +461,27 @@ def test_grok_read_mode_success(tmp_path, make_fake_cli, monkeypatch):
     assert result.text == "grok says hi"
 
 
-def test_openrouter_write_mode_rejected(tmp_path):
+def test_openrouter_write_mode_success(tmp_path, monkeypatch):
+    class _FakeResponse:
+        text = '```file:sample.py\nprint("written by openrouter")\n```'
+        tokens_prompt = 10
+        tokens_completion = 20
+        total_tokens = 30
+        is_measured = True
+        measured_cost = 0.001
+        estimated_cost = 0.001
+        model = "deepseek/deepseek-v4.1-flash"
+
+    class _FakeProvider:
+        def generate(self, prompt, **kwargs):
+            return _FakeResponse()
+
+    monkeypatch.setattr("core.execution.providers.OpenRouterModelProvider", _FakeProvider)
     req = AgentRequest(prompt="do work", cwd=tmp_path, mode="write", harness="openrouter")
     result = run_agent(req)
 
-    assert result.ok is False
-    assert "read-only" in result.text.lower()
+    assert result.ok is True
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == 'print("written by openrouter")\n'
 
 
 def test_openrouter_read_mode_success(tmp_path, monkeypatch):

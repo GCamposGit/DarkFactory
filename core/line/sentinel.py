@@ -83,6 +83,53 @@ def read_quotas() -> Dict[str, Optional[float]]:
     return quotas
 
 
+def _probe_sentinel_routes() -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Avalia rotas ativas de desenvolvimento, frota e planejamento."""
+    from core.line.routing import pick
+
+    try:
+        dev_pick = pick("development", ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"])
+        dev_harness = dev_pick[0] if dev_pick else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Erro ao checar rota de desenvolvimento: %s", exc)
+        dev_harness = None
+
+    try:
+        fleet_dev_pick = pick("development", ["harness:claude", "harness:codex", "harness:grok"])
+        fleet_dev_harness = fleet_dev_pick[0] if fleet_dev_pick else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Erro ao checar rota da frota headless: %s", exc)
+        fleet_dev_harness = None
+
+    try:
+        plan_pick = pick("planning", ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"])
+        plan_harness = plan_pick[0] if plan_pick else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Erro ao checar rota de planejamento: %s", exc)
+        plan_harness = None
+
+    return dev_harness, fleet_dev_harness, plan_harness
+
+
+def _find_stalled_in_flight_tickets(
+    in_flight_map: Mapping[str, str],
+    log_dir: Optional[Path],
+    max_flight_duration_sec: float,
+    now_epoch: float,
+) -> list[str]:
+    stalled_tickets: list[str] = []
+    effective_log_dir = log_dir or (PROJECT_ROOT / ".factory" / "runs" / "fleet_dispatcher_logs")
+    for tid, host in in_flight_map.items():
+        log_file = effective_log_dir / f"{tid}-{host}.log"
+        if log_file.is_file():
+            try:
+                if now_epoch - log_file.stat().st_mtime > max_flight_duration_sec:
+                    stalled_tickets.append(tid)
+            except OSError:
+                pass
+    return stalled_tickets
+
+
 def check_factory_status(
     *,
     max_flight_duration_sec: float = DEFAULT_STALL_TIMEOUT_SECONDS,
@@ -94,7 +141,6 @@ def check_factory_status(
 ) -> SentinelReport:
     """Executa analise completa do estado da linha, rotas e cotas."""
     from core.line.fleet_dispatcher import default_demands_loader, running_fleet_runs
-    from core.line.routing import pick
 
     # 1. Carrega demandas
     loader = demands_loader or default_demands_loader
@@ -122,52 +168,12 @@ def check_factory_status(
     # 3. Cotas dos modelos
     quotas = read_quotas()
 
-    # 4. Avaliacao de rotas
-    try:
-        dev_pick = pick(
-            "development",
-            ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"],
-        )
-        dev_harness = dev_pick[0] if dev_pick else None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Erro ao checar rota de desenvolvimento: %s", exc)
-        dev_harness = None
-
-    try:
-        fleet_dev_pick = pick(
-            "development",
-            ["harness:claude", "harness:codex", "harness:grok"],
-        )
-        fleet_dev_harness = fleet_dev_pick[0] if fleet_dev_pick else None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Erro ao checar rota da frota headless: %s", exc)
-        fleet_dev_harness = None
-
-    try:
-        plan_pick = pick(
-            "planning",
-            ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"],
-        )
-        plan_harness = plan_pick[0] if plan_pick else None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Erro ao checar rota de planejamento: %s", exc)
-        plan_harness = None
-
-    # 5. Deteccao de estagnacao em voo
-    stalled_tickets: List[str] = []
-    effective_log_dir = log_dir or (PROJECT_ROOT / ".factory" / "runs" / "fleet_dispatcher_logs")
+    # 4. Avaliacao de rotas e estagnacao
+    dev_harness, fleet_dev_harness, plan_harness = _probe_sentinel_routes()
     now_epoch = time.time()
-    for tid, host in in_flight_map.items():
-        log_file = effective_log_dir / f"{tid}-{host}.log"
-        if log_file.is_file():
-            try:
-                mtime = log_file.stat().st_mtime
-                if now_epoch - mtime > max_flight_duration_sec:
-                    stalled_tickets.append(tid)
-            except OSError:
-                pass
+    stalled_tickets = _find_stalled_in_flight_tickets(in_flight_map, log_dir, max_flight_duration_sec, now_epoch)
 
-    # 6. Determinacao do status
+    # 5. Determinacao do status
     is_stalled = False
     alert_sent = False
     reason = "Linha operando normalmente."
@@ -187,6 +193,12 @@ def check_factory_status(
         reason = (
             f"Fila contem {len(pending_tickets)} ticket(s) pendente(s) ({', '.join(pending_tickets[:3])}), "
             f"mas nenhum harness possui cota acima do piso de 15% para desenvolvimento. Cotas: {quota_str}."
+        )
+    elif pending_tickets and fleet_dev_harness == "openrouter":
+        status = SentinelStatus.DEGRADED
+        reason = (
+            "Frota headless operando em contingencia via OpenRouter (fallback ativo). "
+            f"Cotas de assinatura no piso critico ({quota_str if 'quota_str' in locals() else 'Claude, Codex, Grok <= 15%'})."
         )
     elif pending_tickets and fleet_dev_harness is None and dev_harness == "antigravity":
         status = SentinelStatus.DEGRADED
