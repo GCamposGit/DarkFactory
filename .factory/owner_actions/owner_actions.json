@@ -897,35 +897,6 @@
       ]
     },
     {
-      "id": "OA-QR-364",
-      "kind": "action",
-      "title": "PR de registro #364 (USR-269) aberto sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: CI failed on DarkFac CI / pr-validation (windows-latest); merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nErrors: Process completed with exit code 1.\n---\nC_TEST_POSTGRES_DSN not set: real-PostgreSQL integration tests are opt-in\nSKIPPED [1] tests\\test_reusable_pilots.py:454: Historical experiment results.json not found\nSKIPPED [1] tests\\test_dokploy_redeploy.py:412: this test targets the non-win32 short-circuit\nSKIPPED [1] tests\\test_executor_contract.py:134: POSIX descendant regression requires Linux /proc\nSKIPPED [1] tests\\test_audio_transcriber.py:147: ensaio live desabilitado; use --run-live-audio explicitamente\nFAILED tests/test_runtime_spike_effects.py::test_http_approval_only_forwards_to_bound_subject - TimeoutError: timed out\n1 failed, 4202 passed, 23 skipped, 2 warnings in 892.74s (0:14:52)\n[STEP_FAIL] unit_and_integration_tests_parallel (exit code: 1)\n[STEP_TIME] unit_and_integration_tests_parallel 894.1s\n[TEST_COUNT] count=4226\n[HARNESS_RESULT] {\"schema_version\":\"1\",\"candidate_sha\":\"819f9c7c70ba80a6e68b23ddc59b25ea2f3ee69a\",\"config_hash\":\"5fbdfdca494daf34f2b15dcffc07c5df48933fd0135b57d5a469775621fb14ac\",\"required_steps\":[\"syntax_and_types\",\"unit_and_integration_tests_parallel\",\"unit_and_integration_tests_serial\"],\"started_steps\":[\"syntax_and_types\",\"unit_and_integration_tests_parallel\"],\"passed_steps\":[\"syntax_and_types\"],\"failed_steps\":[\"unit_and_integration_tests_parallel\"],\"discovered_count\":4226,\"passed_count\":4202,\"skipped_count\":23,\"exit_codes\":{\"syntax_and_types\":0,\"unit_and_integration_tests_parallel\":1},\"artifact_refs\":[\"D:\\\\a\\\\DarkFactory\\\\DarkFactory\\\\candidate\\\\harness.config.json\"],\"reused_from\":null,\"executed_on\":null}\n[HARNESS_FAIL]\n[RUN_TIMING] {\"exec_sec\": 895.3, \"host\": \"runnervm0xl3a\", \"local_only\": false, \"lock_timed_out\": false, \"lock_wait_sec\": 0.0, \"no_cache\": false, \"path\": \"local\", \"quick\": true, \"remote_attempts\": [], \"remote_lost_sec\": 0, \"schema\": 1, \"steps_timeout_sum_sec\": 3420.0, \"success\": false, \"total_sec\": 895.3, \"tree_hash\": null, \"ts\": \"2026-10-16T12:45:09Z\", \"worker_job\": false}\n##[error]Process completed with exit code 1.. PR: https://github.com/GCamposGit/DarkFactory/pull/364",
-      "blocks": [
-        "USR-269"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #364.",
-          "command": "gh pr view 364 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 364 --delete-branch"
-        }
-      ],
-      "verify": "O PR #364 aparece como MERGED e o ticket USR-269 esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-16T12:45:41Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-16T17:45:07Z"
-    },
-    {
       "id": "OA-024",
       "kind": "decision",
       "title": "Primeira prova real de projeto independente pos-V0",
@@ -1117,29 +1088,6 @@
       }
     },
     {
-      "id": "OA-MAIN-CI",
-      "kind": "action",
-      "title": "CI vermelho em main @1d8bc07: main-validation (windows-latest)",
-      "priority": "critical",
-      "status": "done",
-      "why": "O workflow 'DarkFac CI' terminou em 'failure' no ultimo push de main (SHA 1d8bc07a90d5e53fb37b5700133ce9bc0dd60b1a). Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38927481009.",
-      "blocks": [],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o log do job vermelho.",
-          "command": "gh run view 38927481009 --log-failed"
-        },
-        {
-          "text": "Corrija a causa raiz na branch 'main' (ou reverta o commit que quebrou) e aguarde um push verde."
-        }
-      ],
-      "verify": "Um push seguinte de main termina o workflow 'DarkFac CI' em sucesso.",
-      "created_at": "2026-10-16T18:22:32Z",
-      "created_by": "main-ci-watch",
-      "resolved_at": "2026-10-16T18:56:32Z"
-    },
-    {
       "id": "OA-029",
       "kind": "action",
       "title": "Verificar e configurar com segurança a conexão do Notebook ao control store",
@@ -1206,100 +1154,6 @@
           "at": "2026-10-21T23:45:00Z",
           "outcome": "resolved",
           "note": "Grokbox de volta na Tailscale: /health ok, busy=False apos reinicio em 21/10."
-        }
-      ]
-    },
-    {
-      "id": "OA-QR-384",
-      "kind": "action",
-      "title": "PR de registro #384 (USR-293) aberto ha 241 min sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: o PR conflita com a main (outro registro alterou .factory/demands/demands.json depois do ultimo push); mergeable=CONFLICTING, mergeStateStatus=DIRTY. PR: https://github.com/GCamposGit/DarkFactory/pull/384",
-      "blocks": [
-        "USR-293"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #384.",
-          "command": "gh pr view 384 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 384 --delete-branch"
-        }
-      ],
-      "verify": "O PR #384 aparece como MERGED e o ticket USR-293 esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-17T12:04:26Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-18T05:08:53Z"
-    },
-    {
-      "id": "OA-QR-387",
-      "kind": "action",
-      "title": "PR de registro #387 (oa-queue-watchdog) aberto ha 75 min sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: o PR conflita com a main (outro registro alterou .factory/demands/demands.json depois do ultimo push); mergeable=CONFLICTING, mergeStateStatus=DIRTY. PR: https://github.com/GCamposGit/DarkFactory/pull/387",
-      "blocks": [
-        "oa-queue-watchdog"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #387.",
-          "command": "gh pr view 387 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 387 --delete-branch"
-        }
-      ],
-      "verify": "O PR #387 aparece como MERGED e o ticket oa-queue-watchdog esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-17T13:16:47Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-18T11:12:54Z"
-    },
-    {
-      "id": "OA-QR-396",
-      "kind": "action",
-      "title": "PR de registro #396 (USR-307) aberto ha 174 min sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: a politica da main bloqueia o merge (checks obrigatorios pendentes ou vermelhos); mergeable=MERGEABLE. PR: https://github.com/GCamposGit/DarkFactory/pull/396",
-      "blocks": [
-        "USR-307"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #396.",
-          "command": "gh pr view 396 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 396 --delete-branch"
-        }
-      ],
-      "verify": "O PR #396 aparece como MERGED e o ticket USR-307 esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-18T05:08:53Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-21T18:00:00Z",
-      "history": [
-        {
-          "at": "2026-10-21T18:00:00Z",
-          "outcome": "resolved",
-          "note": "USR-307 ja estava na main (completed); PR #396 fechado como duplicado."
         }
       ]
     },
@@ -1433,64 +1287,6 @@
       "resolved_at": "2026-10-18T19:09:14Z"
     },
     {
-      "id": "OA-QR-409",
-      "kind": "action",
-      "title": "PR de registro #409 (USR-310) aberto sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: demands.json ticket ID collision; merge blocked: USR-310: origin/main='Cliente Python para enviar e-mail ao grokbot pelo Worker darkfac-mailer da Cloudflare', branch='Publicacao de arquivo protegido por push direto na main pula o CI e deixou a main vermelha (32fd792)'. PR: https://github.com/GCamposGit/DarkFactory/pull/409",
-      "blocks": [
-        "USR-310"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #409.",
-          "command": "gh pr view 409 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 409 --delete-branch"
-        }
-      ],
-      "verify": "O PR #409 aparece como MERGED e o ticket USR-310 esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-18T11:45:28Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-18T12:54:51Z"
-    },
-    {
-      "id": "OA-QR-411",
-      "kind": "action",
-      "title": "PR de registro #411 (USR-313) aberto sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: Conflict on retry 1: .factory/owner_actions/owner_actions.json. PR: https://github.com/GCamposGit/DarkFactory/pull/411",
-      "blocks": [
-        "USR-313"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #411.",
-          "command": "gh pr view 411 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 411 --delete-branch"
-        }
-      ],
-      "verify": "O PR #411 aparece como MERGED e o ticket USR-313 esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-18T12:12:07Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-18T12:54:51Z"
-    },
-    {
       "id": "OA-035",
       "kind": "action",
       "title": "Atualizar o worker do grokbox para a main (USR-298) e coletar quem envia o SIGTERM ao pytest",
@@ -1577,6 +1373,49 @@
       "resolved_at": "2026-10-19T13:35:53Z"
     },
     {
+      "id": "OA-038",
+      "kind": "action",
+      "title": "Publicar USR-317 (identidade de processo do worker, core/harness protegido)",
+      "priority": "high",
+      "status": "done",
+      "why": "core/harness e protegido: o agente nao pode commitar. O patch docs/proposals/USR-317-process-identity.patch corrige o falso 'processo morto' causado por deriva do boot_time apos congelar/restaurar a VM do grokbox (recuperacao de orfaos matava job vivo; _ProcessTree ignorava a raiz; suite_lock igual) e torna o app do worker lazy (importar o modulo deixa de rodar a recuperacao). Ver docs/proposals/USR-317-process-identity.md.",
+      "blocks": [
+        "USR-317"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "O PR #464 (owner/usr-317-ready) contem o patch do USR-317 + a correcao dos testes de orfao, ja rebaseado sobre a main; o portao oficial passou no grokbox (4563 testes). O trusted-pr-policy reprova por politica (core/harness protegido): conferir que pr-validation (ubuntu e windows) esta verde e fazer o merge com bypass de admin.",
+          "command": "gh pr checks 464 --repo GCamposGit/DarkFactory; gh pr merge 464 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Conferir o CI da main depois do merge (se ficar vermelho, o agente abre hotfix).",
+          "command": "gh run list --repo GCamposGit/DarkFactory --branch main --limit 3"
+        }
+      ],
+      "verify": "Portao [HARNESS_PASS] antes do push; CI verde na main (gh run list --branch main --limit 3); tests/test_process_identity_usr317.py sem skip; apos atualizar o worker do grokbox, um job de portao sobrevive a congelar/restaurar sem SIGTERM e importar core.harness.remote_worker nao toca a pasta de estado real.",
+      "created_at": "2026-10-19T14:44:45Z",
+      "created_by": "claude-code",
+      "resolved_at": "2026-10-20T10:14:50Z",
+      "history": [
+        {
+          "at": "2026-10-20T02:11:47Z",
+          "outcome": "steps_updated",
+          "note": "1o portao do owner (e952da3) falhou em 4 testes de recuperacao de orfao no Linux: o helper de teste so trocava owner_started_at e a identidade nova usa os ticks de /proc. Testes corrigidos (b02a5df) e portao verde no grokbox; push direto do agente foi negado pelo classificador, publicacao fica com o owner."
+        },
+        {
+          "at": "2026-10-20T05:10:37Z",
+          "outcome": "steps_updated",
+          "note": "Main andou (USR-305/307/303); o commit validado foi rebaseado e virou o PR #464 para nao depender de fast-forward. Push direto e PR de .github pelo agente foram negados pelo classificador."
+        },
+        {
+          "at": "2026-10-20T10:14:50Z",
+          "outcome": "done",
+          "note": "PR #464 mergeado pelo owner (08a79ec); CI da main verde. Atualizacao do worker do grokbox segue pela OA-040 (supervisor recarrega no HEAD novo)."
+        }
+      ]
+    },
+    {
       "id": "OA-039",
       "kind": "action",
       "title": "Publicar USR-300 (CI mais rapida: shards Windows, filtro de caminho, cancelamento)",
@@ -1633,49 +1472,6 @@
       ]
     },
     {
-      "id": "OA-038",
-      "kind": "action",
-      "title": "Publicar USR-317 (identidade de processo do worker, core/harness protegido)",
-      "priority": "high",
-      "status": "done",
-      "why": "core/harness e protegido: o agente nao pode commitar. O patch docs/proposals/USR-317-process-identity.patch corrige o falso 'processo morto' causado por deriva do boot_time apos congelar/restaurar a VM do grokbox (recuperacao de orfaos matava job vivo; _ProcessTree ignorava a raiz; suite_lock igual) e torna o app do worker lazy (importar o modulo deixa de rodar a recuperacao). Ver docs/proposals/USR-317-process-identity.md.",
-      "blocks": [
-        "USR-317"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "O PR #464 (owner/usr-317-ready) contem o patch do USR-317 + a correcao dos testes de orfao, ja rebaseado sobre a main; o portao oficial passou no grokbox (4563 testes). O trusted-pr-policy reprova por politica (core/harness protegido): conferir que pr-validation (ubuntu e windows) esta verde e fazer o merge com bypass de admin.",
-          "command": "gh pr checks 464 --repo GCamposGit/DarkFactory; gh pr merge 464 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
-        },
-        {
-          "text": "Conferir o CI da main depois do merge (se ficar vermelho, o agente abre hotfix).",
-          "command": "gh run list --repo GCamposGit/DarkFactory --branch main --limit 3"
-        }
-      ],
-      "verify": "Portao [HARNESS_PASS] antes do push; CI verde na main (gh run list --branch main --limit 3); tests/test_process_identity_usr317.py sem skip; apos atualizar o worker do grokbox, um job de portao sobrevive a congelar/restaurar sem SIGTERM e importar core.harness.remote_worker nao toca a pasta de estado real.",
-      "created_at": "2026-10-19T14:44:45Z",
-      "created_by": "claude-code",
-      "resolved_at": "2026-10-20T10:14:50Z",
-      "history": [
-        {
-          "at": "2026-10-20T02:11:47Z",
-          "outcome": "steps_updated",
-          "note": "1o portao do owner (e952da3) falhou em 4 testes de recuperacao de orfao no Linux: o helper de teste so trocava owner_started_at e a identidade nova usa os ticks de /proc. Testes corrigidos (b02a5df) e portao verde no grokbox; push direto do agente foi negado pelo classificador, publicacao fica com o owner."
-        },
-        {
-          "at": "2026-10-20T05:10:37Z",
-          "outcome": "steps_updated",
-          "note": "Main andou (USR-305/307/303); o commit validado foi rebaseado e virou o PR #464 para nao depender de fast-forward. Push direto e PR de .github pelo agente foram negados pelo classificador."
-        },
-        {
-          "at": "2026-10-20T10:14:50Z",
-          "outcome": "done",
-          "note": "PR #464 mergeado pelo owner (08a79ec); CI da main verde. Atualizacao do worker do grokbox segue pela OA-040 (supervisor recarrega no HEAD novo)."
-        }
-      ]
-    },
-    {
       "id": "OA-040",
       "kind": "action",
       "title": "Grokbox: instalar o supervisor versionado (scripts/grokbox) com recarga a cada ciclo (USR-315)",
@@ -1709,6 +1505,51 @@
           "at": "2026-10-20T11:20:23Z",
           "outcome": "steps_updated",
           "note": "Grok (operador da VM) apontou que trocar o supervisor removeria a recuperacao do Tailscale e que o git_sha do /health vem do HEAD; OA reescrita para integrar."
+        }
+      ]
+    },
+    {
+      "id": "OA-041",
+      "kind": "action",
+      "title": "Publicar arquivos protegidos de USR-253 por push direto (com portao completo)",
+      "priority": "high",
+      "status": "done",
+      "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
+      "blocks": [
+        "USR-253"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Crie a worktree a partir de origin/main, aplique o patch de USR-253 e faca o commit LOCAL (o portao recusa arvore suja). O patch altera core/harness/remote_worker.py (watchdog estende o deadline pelo tempo de fila do suite_lock); o teste tests/test_watchdog_suite_lock_wait.py ja esta na main.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin\ngit -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\usr-253-publish -b owner/usr-253-publish origin/main\ncd C:\\dev\\DarkFac\\.worktrees\\usr-253-publish\ngit apply docs\\proposals\\USR-253-watchdog-suite-lock.patch\ngit commit -am \"feat(harness): watchdog estende o deadline pela fila do suite_lock [USR-253]\""
+        },
+        {
+          "text": "Na worktree do commit candidato de USR-253 (core/harness/remote_worker.py), rode primeiro os guardas rapidos. Eles NAO substituem o portao completo.",
+          "command": "cd C:\\dev\\DarkFac\\.worktrees\\<WORKTREE_DO_CANDIDATO>\npython -m pytest tests/test_clock_bomb_guard.py tests/test_hub_coverage.py tests/test_safe_git_state.py tests/test_harness_contract.py -q"
+        },
+        {
+          "text": "Rode o portao oficial COMPLETO no commit candidato exato (worker remoto ou local). So continue se a saida contiver [HARNESS_PASS]; qualquer outro resultado: NAO publique, avise o agente. Nunca troque o portao completo por testes focados.",
+          "command": "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Somente com [HARNESS_PASS] no passo anterior, confirme que o HEAD e o commit candidato e publique por push direto na main.",
+          "command": "git rev-parse HEAD\ngit push origin HEAD:main"
+        },
+        {
+          "text": "Depois do push confira o CI da main ate ficar verde. Se ficar vermelho, avise o agente: ele abre o hotfix (voce nao corrige).",
+          "command": "gh run list --branch main --limit 3\ngh run watch"
+        }
+      ],
+      "verify": "[HARNESS_PASS] no portao antes do push e ultimo run da main verde em gh run list --branch main --limit 3.",
+      "created_at": "2026-10-20T10:07:13Z",
+      "created_by": "claude-code",
+      "resolved_at": "2026-10-21T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "Publicado no main em 24c23b85 (lote unico com USR-228/185) apos HARNESS_PASS."
         }
       ]
     },
@@ -1837,51 +1678,6 @@
       ]
     },
     {
-      "id": "OA-041",
-      "kind": "action",
-      "title": "Publicar arquivos protegidos de USR-253 por push direto (com portao completo)",
-      "priority": "high",
-      "status": "done",
-      "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
-      "blocks": [
-        "USR-253"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Crie a worktree a partir de origin/main, aplique o patch de USR-253 e faca o commit LOCAL (o portao recusa arvore suja). O patch altera core/harness/remote_worker.py (watchdog estende o deadline pelo tempo de fila do suite_lock); o teste tests/test_watchdog_suite_lock_wait.py ja esta na main.",
-          "command": "git -C C:\\dev\\DarkFac fetch origin\ngit -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\usr-253-publish -b owner/usr-253-publish origin/main\ncd C:\\dev\\DarkFac\\.worktrees\\usr-253-publish\ngit apply docs\\proposals\\USR-253-watchdog-suite-lock.patch\ngit commit -am \"feat(harness): watchdog estende o deadline pela fila do suite_lock [USR-253]\""
-        },
-        {
-          "text": "Na worktree do commit candidato de USR-253 (core/harness/remote_worker.py), rode primeiro os guardas rapidos. Eles NAO substituem o portao completo.",
-          "command": "cd C:\\dev\\DarkFac\\.worktrees\\<WORKTREE_DO_CANDIDATO>\npython -m pytest tests/test_clock_bomb_guard.py tests/test_hub_coverage.py tests/test_safe_git_state.py tests/test_harness_contract.py -q"
-        },
-        {
-          "text": "Rode o portao oficial COMPLETO no commit candidato exato (worker remoto ou local). So continue se a saida contiver [HARNESS_PASS]; qualquer outro resultado: NAO publique, avise o agente. Nunca troque o portao completo por testes focados.",
-          "command": "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick"
-        },
-        {
-          "text": "Somente com [HARNESS_PASS] no passo anterior, confirme que o HEAD e o commit candidato e publique por push direto na main.",
-          "command": "git rev-parse HEAD\ngit push origin HEAD:main"
-        },
-        {
-          "text": "Depois do push confira o CI da main ate ficar verde. Se ficar vermelho, avise o agente: ele abre o hotfix (voce nao corrige).",
-          "command": "gh run list --branch main --limit 3\ngh run watch"
-        }
-      ],
-      "verify": "[HARNESS_PASS] no portao antes do push e ultimo run da main verde em gh run list --branch main --limit 3.",
-      "created_at": "2026-10-20T10:07:13Z",
-      "created_by": "claude-code",
-      "resolved_at": "2026-10-21T23:45:00Z",
-      "history": [
-        {
-          "at": "2026-10-21T23:45:00Z",
-          "outcome": "resolved",
-          "note": "Publicado no main em 24c23b85 (lote unico com USR-228/185) apos HARNESS_PASS."
-        }
-      ]
-    },
-    {
       "id": "OA-045",
       "kind": "action",
       "title": "Publicar arquivos protegidos de USR-228 por push direto (com portao completo)",
@@ -1927,56 +1723,6 @@
           "at": "2026-10-21T23:45:00Z",
           "outcome": "resolved",
           "note": "Publicado no main em 24c23b85 apos HARNESS_PASS; testes ajustados a regra nova do guard."
-        }
-      ]
-    },
-    {
-      "id": "OA-047",
-      "kind": "action",
-      "title": "Piloto USR-279 M3: enviar pelo Telegram a demanda do pilot-hello (depois do deploy)",
-      "priority": "medium",
-      "status": "done",
-      "why": "O marco M3 do piloto greenfield exige que o owner envie a demanda real do produto pelo Telegram, para provar que o roteamento por projeto (USR-278) cai no projeto pilot-hello e nao em darkfac. So o owner pode enviar mensagem como owner no bot.",
-      "blocks": [
-        "USR-279"
-      ],
-      "depends_on": [
-        "USR-340"
-      ],
-      "steps": [
-        {
-          "text": "Espere o agente avisar que o deploy unico de 20/10 terminou (o Hub precisa conhecer o projeto pilot-hello registrado no USR-279 M1)."
-        },
-        {
-          "text": "No Telegram, abra a conversa com o bot da DarkFac e envie exatamente a mensagem abaixo.",
-          "command": "/demand pilot-hello: pagina inicial com o texto DarkFac pilot e endpoint /healthz que devolve status ok e a versao"
-        },
-        {
-          "text": "Se o bot fizer perguntas (Gate G1), responda com as decisoes ja tomadas na OA-042: nome pilot-hello, texto 'DarkFac pilot', deploy opcao A (Dokploy existente), manter arquivado, build no venv."
-        },
-        {
-          "text": "Confira no DarkHub (https://darkhub.ggcampos.com) que a demanda aparece no projeto pilot-hello com um ticket PH-..."
-        }
-      ],
-      "verify": "Existe ticket do projeto pilot-hello (prefixo PH) vinculado a demanda enviada; nenhum ticket novo USR- foi criado para ela.",
-      "created_at": "2026-10-20T15:39:28Z",
-      "created_by": "claude-session-43f612c4",
-      "resolved_at": "2026-10-22T12:00:00Z",
-      "history": [
-        {
-          "at": "2026-10-22T00:20:00Z",
-          "outcome": "evidence:keep_open",
-          "note": "Dependencia OA-043 concluida; aguardando aviso do agente apos deploy do Hub com pilot-hello registrado."
-        },
-        {
-          "at": "2026-10-22T00:40:00Z",
-          "outcome": "evidence:keep_open",
-          "note": "Owner enviou o /demand em 21/10; bot recusou (Hub cria TelegramGateway sem intake_service). Bloqueada pelo USR-340; reenviar a mesma mensagem depois do deploy dele."
-        },
-        {
-          "at": "2026-10-22T12:00:00Z",
-          "outcome": "resolved",
-          "note": "Owner reenviou /demand apos USR-340 no ar; nasceu PH-01 no projeto pilot-hello (nenhum USR)."
         }
       ]
     },
@@ -2030,6 +1776,56 @@
           "at": "2026-10-21T23:45:00Z",
           "outcome": "resolved",
           "note": "Publicado no main em 24c23b85 apos HARNESS_PASS."
+        }
+      ]
+    },
+    {
+      "id": "OA-047",
+      "kind": "action",
+      "title": "Piloto USR-279 M3: enviar pelo Telegram a demanda do pilot-hello (depois do deploy)",
+      "priority": "medium",
+      "status": "done",
+      "why": "O marco M3 do piloto greenfield exige que o owner envie a demanda real do produto pelo Telegram, para provar que o roteamento por projeto (USR-278) cai no projeto pilot-hello e nao em darkfac. So o owner pode enviar mensagem como owner no bot.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [
+        "USR-340"
+      ],
+      "steps": [
+        {
+          "text": "Espere o agente avisar que o deploy unico de 20/10 terminou (o Hub precisa conhecer o projeto pilot-hello registrado no USR-279 M1)."
+        },
+        {
+          "text": "No Telegram, abra a conversa com o bot da DarkFac e envie exatamente a mensagem abaixo.",
+          "command": "/demand pilot-hello: pagina inicial com o texto DarkFac pilot e endpoint /healthz que devolve status ok e a versao"
+        },
+        {
+          "text": "Se o bot fizer perguntas (Gate G1), responda com as decisoes ja tomadas na OA-042: nome pilot-hello, texto 'DarkFac pilot', deploy opcao A (Dokploy existente), manter arquivado, build no venv."
+        },
+        {
+          "text": "Confira no DarkHub (https://darkhub.ggcampos.com) que a demanda aparece no projeto pilot-hello com um ticket PH-..."
+        }
+      ],
+      "verify": "Existe ticket do projeto pilot-hello (prefixo PH) vinculado a demanda enviada; nenhum ticket novo USR- foi criado para ela.",
+      "created_at": "2026-10-20T15:39:28Z",
+      "created_by": "claude-session-43f612c4",
+      "resolved_at": "2026-10-22T12:00:00Z",
+      "history": [
+        {
+          "at": "2026-10-22T00:20:00Z",
+          "outcome": "evidence:keep_open",
+          "note": "Dependencia OA-043 concluida; aguardando aviso do agente apos deploy do Hub com pilot-hello registrado."
+        },
+        {
+          "at": "2026-10-22T00:40:00Z",
+          "outcome": "evidence:keep_open",
+          "note": "Owner enviou o /demand em 21/10; bot recusou (Hub cria TelegramGateway sem intake_service). Bloqueada pelo USR-340; reenviar a mesma mensagem depois do deploy dele."
+        },
+        {
+          "at": "2026-10-22T12:00:00Z",
+          "outcome": "resolved",
+          "note": "Owner reenviou /demand apos USR-340 no ar; nasceu PH-01 no projeto pilot-hello (nenhum USR)."
         }
       ]
     },
@@ -2258,32 +2054,6 @@
       ]
     },
     {
-      "id": "OA-055",
-      "kind": "action",
-      "title": "Mesclar PR #576 (USR-342 + conserto do CI vermelho USR-349) com --admin",
-      "priority": "high",
-      "status": "done",
-      "why": "O PR toca core/harness (protegido); o GUARD barra o agente. Portao oficial passou no Desktop (4984 passed, 0 failed). Ele tambem corrige o CI vermelho da main (USR-349), que bloqueia todas as entregas.",
-      "blocks": [
-        "USR-342",
-        "USR-349"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Mesclar o PR com privilegio de admin",
-          "command": "gh pr merge 576 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
-        },
-        {
-          "text": "Avisar no chat; o agente faz o deploy e fecha os tickets"
-        }
-      ],
-      "verify": "gh pr view 576 --repo GCamposGit/DarkFactory mostra MERGED",
-      "created_at": "2026-10-22T11:50:00Z",
-      "created_by": "claude",
-      "resolved_at": "2026-10-22T12:35:00Z"
-    },
-    {
       "id": "OA-054",
       "kind": "action",
       "title": "Desktop: tela azul 0x50 do driver do Warsaw (modulo bancario) derrubou o worker em 21/10; atualizar ou remover o Warsaw",
@@ -2322,6 +2092,32 @@
           "note": "Owner informou no chat em 23/10/2026: Warsaw resolvido; falta so reiniciar o Desktop, que ja pode ser usado como 3a opcao de portao."
         }
       ]
+    },
+    {
+      "id": "OA-055",
+      "kind": "action",
+      "title": "Mesclar PR #576 (USR-342 + conserto do CI vermelho USR-349) com --admin",
+      "priority": "high",
+      "status": "done",
+      "why": "O PR toca core/harness (protegido); o GUARD barra o agente. Portao oficial passou no Desktop (4984 passed, 0 failed). Ele tambem corrige o CI vermelho da main (USR-349), que bloqueia todas as entregas.",
+      "blocks": [
+        "USR-342",
+        "USR-349"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Mesclar o PR com privilegio de admin",
+          "command": "gh pr merge 576 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        },
+        {
+          "text": "Avisar no chat; o agente faz o deploy e fecha os tickets"
+        }
+      ],
+      "verify": "gh pr view 576 --repo GCamposGit/DarkFactory mostra MERGED",
+      "created_at": "2026-10-22T11:50:00Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-22T12:35:00Z"
     },
     {
       "id": "OA-056",
@@ -2392,35 +2188,6 @@
         "answered_at": "2026-10-23T03:00:00Z",
         "answered_by": "owner"
       }
-    },
-    {
-      "id": "OA-QR-601",
-      "kind": "action",
-      "title": "PR de registro #601 (PLANO-20261023) aberto sem mergear: o ticket nao chegou ao backlog da main",
-      "priority": "high",
-      "status": "done",
-      "why": "Motivo: CI failed on DarkFac CI / ledger-fast; merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nErrors: Process completed with exit code 1.\n---\nclient.py:1\n  /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_demand_id_allocator.py::test_two_worktrees_reserve_distinct_ids_concurrently\ntests/test_demand_id_allocator.py::test_two_worktrees_reserve_distinct_ids_concurrently\n  /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2477) is multi-threaded, use of fork() may lead to deadlocks in the child.\n    self.pid = os.fork()\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nSKIPPED [1] tests/test_demand_id_allocator.py:110: Windows Git fallback\nFAILED tests/test_owner_actions_core.py::test_seeded_backlog_is_valid_and_complete - AssertionError: assert ['item OA-054...eld required'] == []\n  \n  Left contains one more item: 'item OA-054 ignorado: answer.option_id: Field required'\n  \n  Full diff:\n  - []\n  + [\n  +     'item OA-054 ignorado: answer.option_id: Field required',\n  + ]\n1 failed, 73 passed, 1 skipped, 3 warnings in 4.42s\n##[error]Process completed with exit code 1.\npr-validation (ubuntu-latest)\tAggregate result\t﻿2026-10-23T11:29:33.1794598Z ##[group]Run heavy=\"false\"\n^[[36;1mheavy=\"false\"^[[0m\n^[[36;1mecho \"changes=success heavy=$heavy ledger-fast=failure pr-tests=skipped\"^[[0m\n^[[36;1m[ \"success\" = \"success\" ] || exit 1^[[0m\n^[[36;1mif [ \"$heavy\" = \"true\" ]; then^[[0m\n^[[36;1m  [ \"skipped\" = \"success\" ] || exit 1^[[0m\n^[[36;1melse^[[0m\n^[[36;1m  [ \"failure\" = \"success\" ] || exit 1^[[0m\n^[[36;1mfi^[[0m\nshell: /usr/bin/bash -e {0}\n##[endgroup]\nchanges=success heavy=false ledger-fast=failure pr-tests=skipped\n##[error]Process completed with exit code 1.. PR: https://github.com/GCamposGit/DarkFactory/pull/601",
-      "blocks": [
-        "PLANO-20261023"
-      ],
-      "depends_on": [],
-      "steps": [
-        {
-          "text": "Veja o estado e os checks do PR #601.",
-          "command": "gh pr view 601 --json mergeable,mergeStateStatus,statusCheckRollup"
-        },
-        {
-          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
-        },
-        {
-          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
-          "command": "gh pr close 601 --delete-branch"
-        }
-      ],
-      "verify": "O PR #601 aparece como MERGED e o ticket PLANO-20261023 esta em .factory/demands/demands.json na main.",
-      "created_at": "2026-10-23T11:29:39Z",
-      "created_by": "queue-registration",
-      "resolved_at": "2026-10-23T11:34:36Z"
     },
     {
       "id": "OA-058",
@@ -2864,26 +2631,135 @@
       "resolved_at": "2026-10-25T10:41:22Z"
     },
     {
-      "id": "OA-075",
+      "id": "OA-072",
       "kind": "action",
-      "title": "Assinar o PR #745 (AGENTS.md como fonte unica; CLAUDE/GEMINI importam) [USR-379]",
-      "priority": "high",
+      "title": "Aprovar no Telegram o PR #728 (portoes de qualidade no CI)",
+      "priority": "medium",
       "status": "done",
-      "why": "O PR #745 reescreve AGENTS.md (105 linhas, fonte unica) e reduz FACTORY_RULES.md a ponteiro; ambos sao protegidos pelo guard e so entram com autorizacao assinada do owner. O registro ja esta pronto em C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS.json (paths .agents/rules/AGENTS.md, AGENTS.md e FACTORY_RULES.md, candidato d772bff9; a 1a assinatura nao cobria o .agents/rules/AGENTS.md, que o guard tambem protege).",
+      "why": "O PR #728 liga no job de PR do CI o import-linter, o ratchet de complexidade e o docs-sync. Mexe em .github/workflows/ci.yml, que e protegido; so o toque do owner autoriza. Sem isso os tres portoes ficam so locais (o main quebrou 3 vezes hoje por falta de checagem no PR, USR-390).",
       "blocks": [
-        "USR-379"
+        "USR-376",
+        "USR-377"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "No PowerShell, assinar o registro preparado (a fabrica publica a autorizacao e mescla o PR sozinha depois):",
-          "command": "cd C:\\dev\\DarkFac; python -m core.governance.keys sign C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS.json"
+          "text": "No celular, abra o Telegram e o chat do bot da fabrica."
+        },
+        {
+          "text": "Procure a mensagem do Hub sobre o PR #728 (caminho protegido .github/workflows/ci.yml)."
+        },
+        {
+          "text": "Toque em Aprovar. Pronto: o Hub assina a autorizacao e mescla o PR sozinho quando os checks ficarem verdes."
+        },
+        {
+          "text": "Se a mensagem nao chegou em 10 minutos, abra https://github.com/GCamposGit/DarkFactory/pull/728, confira que so muda .github/workflows/ci.yml e .factory/config/complexity_baseline.json e siga docs/manual/governanca.md (secao Assinar um registro)."
         }
       ],
-      "verify": "C:\\dev\\DarkFac-auth\\AUTH-PR745-AGENTS.json passa a ter o campo signature; depois gh pr view 745 --repo GCamposGit/DarkFactory mostra MERGED",
-      "created_at": "2026-10-26T10:30:00Z",
+      "verify": "gh pr view 728 --repo GCamposGit/DarkFactory mostra MERGED; o proximo PR mostra os passos Layer contracts, Complexity ratchet e Docs-sync no job pr-tests.",
+      "created_at": "2026-10-25T18:11:18Z",
       "created_by": "claude",
-      "resolved_at": "2026-10-26T11:00:00Z"
+      "resolved_at": "2026-10-25T18:46:23Z"
+    },
+    {
+      "id": "OA-073",
+      "kind": "decision",
+      "title": "Confirmar o valor mensal de cada assinatura (custo por ticket no Hub)",
+      "priority": "low",
+      "status": "done",
+      "why": "O custo implicito por ticket (USR-378) rateia a mensalidade pelo consumo semanal. Os valores foram preenchidos com precos publicos de lista e podem nao ser os que voce paga.",
+      "blocks": [
+        "USR-378"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Responda no Hub escolhendo uma opcao; se corrigir, informe o valor real em USD/mes de cada plano."
+        },
+        {
+          "text": "Valores atuais: Claude Pro 20; ChatGPT Plus/Codex 20; SuperGrok 30; Gemini Pro 19,99 (arquivo .factory/config/subscription_prices.json)."
+        }
+      ],
+      "options": [
+        {
+          "id": "manter",
+          "label": "Manter os valores de lista (recomendado se forem os planos basicos)"
+        },
+        {
+          "id": "corrigir",
+          "label": "Corrigir os valores",
+          "detail": "informe o valor de cada plano"
+        }
+      ],
+      "verify": "Arquivo .factory/config/subscription_prices.json sem status a_confirmar_pelo_owner.",
+      "created_at": "2026-10-25T18:20:18Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-25T22:02:31Z",
+      "answer": {
+        "option_id": "corrigir",
+        "note": "Owner 25/10: Grok anual ~20/mes; Gemini pacote promocional, uso misto (Gmail etc.), considerar 20. Claude e Codex 20.",
+        "answered_at": "2026-10-25T22:02:29Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-074",
+      "kind": "action",
+      "title": "Refazer o login da CLI do Claude no Notebook (sessao OAuth expirada)",
+      "priority": "high",
+      "status": "done",
+      "why": "A CLI do Claude no Notebook responde 'Failed to authenticate: OAuth session expired'. Sem login a frota nao usa o Claude (nem para planejar com Opus, nem para desenvolver) e a cota dele fica desconhecida; em 25/10 a fila inteira parou quando o Codex chegou a 12% (o Grok nao tem modelo de nivel alto para o PLAN).",
+      "blocks": [
+        "USR-391",
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Notebook, abra o PowerShell (Iniciar, digite PowerShell, Enter)."
+        },
+        {
+          "text": "Rode o comando abaixo. Ele abre o navegador na pagina de login da Anthropic.",
+          "command": "& \"$env:APPDATA\\npm\\claude.cmd\" auth login"
+        },
+        {
+          "text": "No navegador, entre com a sua conta do Claude (a mesma do plano Pro) e clique em Autorizar. Volte ao PowerShell e espere a mensagem de login concluido."
+        },
+        {
+          "text": "Confira: o comando abaixo deve mostrar loggedIn: true.",
+          "command": "& \"$env:APPDATA\\npm\\claude.cmd\" auth status --json"
+        }
+      ],
+      "verify": "claude auth status --json mostra loggedIn true; run_ticket --dry-run mostra a cota do Claude com numero.",
+      "created_at": "2026-10-25T23:00:29Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-26T10:00:29Z"
+    },
+    {
+      "id": "OA-075",
+      "kind": "action",
+      "title": "Assinar a autorizacao do PR #739 (hub-image.yml: cloud no GHCR e VPS enxuta)",
+      "priority": "medium",
+      "status": "done",
+      "why": "O PR #739 muda .github/workflows/hub-image.yml (protegido) para publicar a imagem do cloud no GHCR e reconstruir o Hub quando .factory/config muda; leva junto a VPS enxuta (sem n8n, sem build na VPS). O aviso do Telegram ainda nao funciona (USR-395), entao a aprovacao e por assinatura local.",
+      "blocks": [
+        "USR-397",
+        "USR-369"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell do Notebook, rode o comando abaixo (assina com a sua chave privada).",
+          "command": "cd C:\\dev\\DarkFac; python -m core.governance.keys sign C:\\dev\\DarkFac-auth\\AUTH-INFRA-HUBIMAGE.json"
+        },
+        {
+          "text": "Avise no chat 'assinei'; a fabrica publica o registro, roda os checks e mescla o PR."
+        }
+      ],
+      "verify": "gh pr view 739 --repo GCamposGit/DarkFactory mostra MERGED.",
+      "created_at": "2026-10-25T23:23:28Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-26T02:32:13Z"
     },
     {
       "id": "OA-076",
@@ -2908,11 +2784,54 @@
       "resolved_at": "2026-10-26T11:20:00Z"
     },
     {
+      "id": "OA-077",
+      "kind": "action",
+      "title": "Publicar a consulta git de core/governance/authorization.py (USR-386)",
+      "priority": "high",
+      "status": "open",
+      "why": "USR-386 move o helper _git de core/governance/authorization.py para core.common.git. Esse caminho e protegido por core/orchestrator/guard.py. O branch ticket/usr-386 ja contem a migracao (tentativa anterior). O CI trusted-pr-policy reprova o PR. Sem uma publicacao autorizada pelo owner, ou o PR nao entra, ou o helper local continua duplicado se o arquivo for retirado do PR. A fatia T1 (CREATE_NO_WINDOW em core.common.process) nao depende deste passo.",
+      "blocks": [
+        "USR-386"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell pelo menu Iniciar (digite PowerShell e pressione Enter). Nao edite core/governance/authorization.py no editor."
+        },
+        {
+          "text": "Se o PR do USR-386 ainda esta aberto e o unico check vermelho e o de governanca (trusted-pr-policy), abra o PR no GitHub, role ate o quadro de merge, marque Merge without waiting for requirements to be met (bypass rules) se a caixa existir, e clique em Squash and merge. Nao aplique o patch: o arquivo ja esta no PR. Pule para o passo de verificacao."
+        },
+        {
+          "text": "Se o PR foi fechado sem o arquivo protegido, atualize o checkout compartilhado.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin; git -C C:\\dev\\DarkFac checkout main; git -C C:\\dev\\DarkFac pull --ff-only origin main"
+        },
+        {
+          "text": "Confira que o patch aplica limpo. Se o comando disser que o patch ja foi aplicado, pare.",
+          "command": "git -C C:\\dev\\DarkFac apply --check C:\\dev\\DarkFac\\docs\\proposals\\USR-386-governance-git-helper.patch"
+        },
+        {
+          "text": "Aplique o patch, rode os testes do modulo e publique direto no main, sem PR. Nao use git add -A.",
+          "command": "git -C C:\\dev\\DarkFac apply C:\\dev\\DarkFac\\docs\\proposals\\USR-386-governance-git-helper.patch; python -m pytest C:\\dev\\DarkFac\\tests\\test_governance_authorization.py C:\\dev\\DarkFac\\tests\\test_governance_guard.py -q; git -C C:\\dev\\DarkFac add -- core/governance/authorization.py docs/manual/governanca.md docs/proposals/USR-386-governance-git-helper.md docs/proposals/USR-386-governance-git-helper.patch; git -C C:\\dev\\DarkFac commit -m \"refactor(governance): autorizacao consulta git pelo executor compartilhado [USR-386]\"; git -C C:\\dev\\DarkFac push origin main"
+        },
+        {
+          "text": "Verifique o modulo e o guard. Depois do push o guard imprime [GUARD PASS]. Antes do push, GUARD VIOLATION nesse arquivo e esperado.",
+          "command": "python -c \"import inspect, core.governance.authorization as auth; src = inspect.getsource(auth); assert 'def _git(' not in src; assert '_execute_git' in src\"; python C:\\dev\\DarkFac\\core\\orchestrator\\guard.py origin/main"
+        },
+        {
+          "text": "No DarkHub, menu Acoes do Owner, abra este item e marque como feito."
+        }
+      ],
+      "verify": "O main contem core/governance/authorization.py sem def _git e com _execute_git, e python C:\\dev\\DarkFac\\core\\orchestrator\\guard.py origin/main imprime [GUARD PASS].",
+      "created_at": "2026-10-26T13:46:51Z",
+      "created_by": "grok",
+      "resolved_at": null
+    },
+    {
       "id": "OA-078",
       "kind": "decision",
       "title": "Ligar o aviso de PR protegido no Telegram: chat id no Hub e decidir sobre a chave de assinatura [USR-395]",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "USR-395 achou a causa: o compose do Hub nao repassava TELEGRAM_OWNER_CHAT_ID (corrigido no PR #772), entao o aviso de PR protegido nunca saia. Falta o valor no Dokploy. Sem ele, a fabrica agora abre uma OA com o comando de assinatura (nada fica parado). A chave de assinatura no servidor permitiria aprovar com um toque, mas guarda um segredo forte na VPS.",
       "blocks": [
         "USR-395"
@@ -2942,7 +2861,13 @@
       "verify": "Proximo PR que tocar arquivo protegido gera mensagem no Telegram do owner (ou OA automatica no Hub)",
       "created_at": "2026-10-27T09:40:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-30T23:37:23Z",
+      "answer": {
+        "option_id": "sem-chave",
+        "note": "Configurado TELEGRAM_OWNER_CHAT_ID no Dokploy darkhub pelo owner em 30/10/2026",
+        "answered_at": "2026-10-30T23:37:21Z",
+        "answered_by": "owner"
+      }
     },
     {
       "id": "OA-079",
@@ -2965,6 +2890,31 @@
       "created_at": "2026-10-27T09:14:12Z",
       "created_by": "codex",
       "resolved_at": "2026-10-28T10:25:00Z"
+    },
+    {
+      "id": "OA-080",
+      "kind": "action",
+      "title": "Assinar a regra do Antigravity como harness de operacao no AGENTS.md [USR-433]",
+      "priority": "high",
+      "status": "done",
+      "why": "O AGENTS.md diz que o Antigravity e somente leitura. Regra decidida pelo owner em 29/10: ele escreve (etapa development) quando e o harness de operacao interativo, e nunca no headless/frota. AGENTS.md e protegido, entao a mudanca (commit 1edb1d4d na branch gov/usr433-antigravity-operator) so entra com sua assinatura.",
+      "blocks": [
+        "USR-433"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Notebook, no PowerShell, assine o registro de autorizacao (a chave privada pede a senha se tiver):",
+          "command": "cd C:\\dev\\DarkFac\\.worktrees\\usr433-gov; python -m core.governance.keys sign .factory\\governance\\authorizations\\AUTH-USR433-AGENTS.json"
+        },
+        {
+          "text": "Responda 'assinado' no chat; o agente commita a assinatura, abre o PR e faz o merge."
+        }
+      ],
+      "verify": "O arquivo AUTH-USR433-AGENTS.json passa a ter o campo signature e o PR da branch gov/usr433-antigravity-operator fica verde e mesclado",
+      "created_at": "2026-10-29T10:12:13Z",
+      "created_by": "claude",
+      "resolved_at": "2026-10-30T11:21:58Z"
     },
     {
       "id": "OA-081",
@@ -2990,6 +2940,270 @@
       "created_at": "2026-10-28T11:10:00Z",
       "created_by": "claude",
       "resolved_at": null
+    },
+    {
+      "id": "OA-HR-run-7b5577d5e2c9-planning",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-7b5577d5e2c9 aguarda voce no estagio 'planning'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.2h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'planning' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe planning",
+      "created_at": "2026-10-30T06:16:13Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-10-30T13:37:06Z"
+    },
+    {
+      "id": "OA-MAIN-CI",
+      "kind": "action",
+      "title": "CI vermelho em main @1d8bc07: main-validation (windows-latest)",
+      "priority": "critical",
+      "status": "done",
+      "why": "O workflow 'DarkFac CI' terminou em 'failure' no ultimo push de main (SHA 1d8bc07a90d5e53fb37b5700133ce9bc0dd60b1a). Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38927481009.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o log do job vermelho.",
+          "command": "gh run view 38927481009 --log-failed"
+        },
+        {
+          "text": "Corrija a causa raiz na branch 'main' (ou reverta o commit que quebrou) e aguarde um push verde."
+        }
+      ],
+      "verify": "Um push seguinte de main termina o workflow 'DarkFac CI' em sucesso.",
+      "created_at": "2026-10-16T18:22:32Z",
+      "created_by": "main-ci-watch",
+      "resolved_at": "2026-10-16T18:56:32Z"
+    },
+    {
+      "id": "OA-QR-364",
+      "kind": "action",
+      "title": "PR de registro #364 (USR-269) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: CI failed on DarkFac CI / pr-validation (windows-latest); merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nErrors: Process completed with exit code 1.\n---\nC_TEST_POSTGRES_DSN not set: real-PostgreSQL integration tests are opt-in\nSKIPPED [1] tests\\test_reusable_pilots.py:454: Historical experiment results.json not found\nSKIPPED [1] tests\\test_dokploy_redeploy.py:412: this test targets the non-win32 short-circuit\nSKIPPED [1] tests\\test_executor_contract.py:134: POSIX descendant regression requires Linux /proc\nSKIPPED [1] tests\\test_audio_transcriber.py:147: ensaio live desabilitado; use --run-live-audio explicitamente\nFAILED tests/test_runtime_spike_effects.py::test_http_approval_only_forwards_to_bound_subject - TimeoutError: timed out\n1 failed, 4202 passed, 23 skipped, 2 warnings in 892.74s (0:14:52)\n[STEP_FAIL] unit_and_integration_tests_parallel (exit code: 1)\n[STEP_TIME] unit_and_integration_tests_parallel 894.1s\n[TEST_COUNT] count=4226\n[HARNESS_RESULT] {\"schema_version\":\"1\",\"candidate_sha\":\"819f9c7c70ba80a6e68b23ddc59b25ea2f3ee69a\",\"config_hash\":\"5fbdfdca494daf34f2b15dcffc07c5df48933fd0135b57d5a469775621fb14ac\",\"required_steps\":[\"syntax_and_types\",\"unit_and_integration_tests_parallel\",\"unit_and_integration_tests_serial\"],\"started_steps\":[\"syntax_and_types\",\"unit_and_integration_tests_parallel\"],\"passed_steps\":[\"syntax_and_types\"],\"failed_steps\":[\"unit_and_integration_tests_parallel\"],\"discovered_count\":4226,\"passed_count\":4202,\"skipped_count\":23,\"exit_codes\":{\"syntax_and_types\":0,\"unit_and_integration_tests_parallel\":1},\"artifact_refs\":[\"D:\\\\a\\\\DarkFactory\\\\DarkFactory\\\\candidate\\\\harness.config.json\"],\"reused_from\":null,\"executed_on\":null}\n[HARNESS_FAIL]\n[RUN_TIMING] {\"exec_sec\": 895.3, \"host\": \"runnervm0xl3a\", \"local_only\": false, \"lock_timed_out\": false, \"lock_wait_sec\": 0.0, \"no_cache\": false, \"path\": \"local\", \"quick\": true, \"remote_attempts\": [], \"remote_lost_sec\": 0, \"schema\": 1, \"steps_timeout_sum_sec\": 3420.0, \"success\": false, \"total_sec\": 895.3, \"tree_hash\": null, \"ts\": \"2026-10-16T12:45:09Z\", \"worker_job\": false}\n##[error]Process completed with exit code 1.. PR: https://github.com/GCamposGit/DarkFactory/pull/364",
+      "blocks": [
+        "USR-269"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #364.",
+          "command": "gh pr view 364 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 364 --delete-branch"
+        }
+      ],
+      "verify": "O PR #364 aparece como MERGED e o ticket USR-269 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-16T12:45:41Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-16T17:45:07Z"
+    },
+    {
+      "id": "OA-QR-384",
+      "kind": "action",
+      "title": "PR de registro #384 (USR-293) aberto ha 241 min sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: o PR conflita com a main (outro registro alterou .factory/demands/demands.json depois do ultimo push); mergeable=CONFLICTING, mergeStateStatus=DIRTY. PR: https://github.com/GCamposGit/DarkFactory/pull/384",
+      "blocks": [
+        "USR-293"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #384.",
+          "command": "gh pr view 384 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 384 --delete-branch"
+        }
+      ],
+      "verify": "O PR #384 aparece como MERGED e o ticket USR-293 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-17T12:04:26Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-18T05:08:53Z"
+    },
+    {
+      "id": "OA-QR-387",
+      "kind": "action",
+      "title": "PR de registro #387 (oa-queue-watchdog) aberto ha 75 min sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: o PR conflita com a main (outro registro alterou .factory/demands/demands.json depois do ultimo push); mergeable=CONFLICTING, mergeStateStatus=DIRTY. PR: https://github.com/GCamposGit/DarkFactory/pull/387",
+      "blocks": [
+        "oa-queue-watchdog"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #387.",
+          "command": "gh pr view 387 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 387 --delete-branch"
+        }
+      ],
+      "verify": "O PR #387 aparece como MERGED e o ticket oa-queue-watchdog esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-17T13:16:47Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-18T11:12:54Z"
+    },
+    {
+      "id": "OA-QR-396",
+      "kind": "action",
+      "title": "PR de registro #396 (USR-307) aberto ha 174 min sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: a politica da main bloqueia o merge (checks obrigatorios pendentes ou vermelhos); mergeable=MERGEABLE. PR: https://github.com/GCamposGit/DarkFactory/pull/396",
+      "blocks": [
+        "USR-307"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #396.",
+          "command": "gh pr view 396 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 396 --delete-branch"
+        }
+      ],
+      "verify": "O PR #396 aparece como MERGED e o ticket USR-307 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-18T05:08:53Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-21T18:00:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T18:00:00Z",
+          "outcome": "resolved",
+          "note": "USR-307 ja estava na main (completed); PR #396 fechado como duplicado."
+        }
+      ]
+    },
+    {
+      "id": "OA-QR-409",
+      "kind": "action",
+      "title": "PR de registro #409 (USR-310) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: demands.json ticket ID collision; merge blocked: USR-310: origin/main='Cliente Python para enviar e-mail ao grokbot pelo Worker darkfac-mailer da Cloudflare', branch='Publicacao de arquivo protegido por push direto na main pula o CI e deixou a main vermelha (32fd792)'. PR: https://github.com/GCamposGit/DarkFactory/pull/409",
+      "blocks": [
+        "USR-310"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #409.",
+          "command": "gh pr view 409 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 409 --delete-branch"
+        }
+      ],
+      "verify": "O PR #409 aparece como MERGED e o ticket USR-310 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-18T11:45:28Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-18T12:54:51Z"
+    },
+    {
+      "id": "OA-QR-411",
+      "kind": "action",
+      "title": "PR de registro #411 (USR-313) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: Conflict on retry 1: .factory/owner_actions/owner_actions.json. PR: https://github.com/GCamposGit/DarkFactory/pull/411",
+      "blocks": [
+        "USR-313"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #411.",
+          "command": "gh pr view 411 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 411 --delete-branch"
+        }
+      ],
+      "verify": "O PR #411 aparece como MERGED e o ticket USR-313 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-18T12:12:07Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-18T12:54:51Z"
+    },
+    {
+      "id": "OA-QR-601",
+      "kind": "action",
+      "title": "PR de registro #601 (PLANO-20261023) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "done",
+      "why": "Motivo: CI failed on DarkFac CI / ledger-fast; merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nErrors: Process completed with exit code 1.\n---\nclient.py:1\n  /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_demand_id_allocator.py::test_two_worktrees_reserve_distinct_ids_concurrently\ntests/test_demand_id_allocator.py::test_two_worktrees_reserve_distinct_ids_concurrently\n  /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/multiprocessing/popen_fork.py:66: DeprecationWarning: This process (pid=2477) is multi-threaded, use of fork() may lead to deadlocks in the child.\n    self.pid = os.fork()\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nSKIPPED [1] tests/test_demand_id_allocator.py:110: Windows Git fallback\nFAILED tests/test_owner_actions_core.py::test_seeded_backlog_is_valid_and_complete - AssertionError: assert ['item OA-054...eld required'] == []\n  \n  Left contains one more item: 'item OA-054 ignorado: answer.option_id: Field required'\n  \n  Full diff:\n  - []\n  + [\n  +     'item OA-054 ignorado: answer.option_id: Field required',\n  + ]\n1 failed, 73 passed, 1 skipped, 3 warnings in 4.42s\n##[error]Process completed with exit code 1.\npr-validation (ubuntu-latest)\tAggregate result\t﻿2026-10-23T11:29:33.1794598Z ##[group]Run heavy=\"false\"\n^[[36;1mheavy=\"false\"^[[0m\n^[[36;1mecho \"changes=success heavy=$heavy ledger-fast=failure pr-tests=skipped\"^[[0m\n^[[36;1m[ \"success\" = \"success\" ] || exit 1^[[0m\n^[[36;1mif [ \"$heavy\" = \"true\" ]; then^[[0m\n^[[36;1m  [ \"skipped\" = \"success\" ] || exit 1^[[0m\n^[[36;1melse^[[0m\n^[[36;1m  [ \"failure\" = \"success\" ] || exit 1^[[0m\n^[[36;1mfi^[[0m\nshell: /usr/bin/bash -e {0}\n##[endgroup]\nchanges=success heavy=false ledger-fast=failure pr-tests=skipped\n##[error]Process completed with exit code 1.. PR: https://github.com/GCamposGit/DarkFactory/pull/601",
+      "blocks": [
+        "PLANO-20261023"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #601.",
+          "command": "gh pr view 601 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 601 --delete-branch"
+        }
+      ],
+      "verify": "O PR #601 aparece como MERGED e o ticket PLANO-20261023 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-23T11:29:39Z",
+      "created_by": "queue-registration",
+      "resolved_at": "2026-10-23T11:34:36Z"
     }
   ]
 }

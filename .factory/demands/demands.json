@@ -6001,7 +6001,6 @@
       "user-demand",
       "plano-v0-20261024",
       "bloco-g",
-      "planning-only",
       "owner-decision:OA-024=A",
       "owner-decision:OA-025=A",
       "owner-decision:OA-042=recomendado"
@@ -7673,16 +7672,15 @@
     "project_id": "darkfac",
     "title": "Atrito zero: fila no control store, guard enxuto com aprovacao de um toque, GitHub App e cofre de segredos",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias S1 a S6: guard enxuto (PR #673), token GitHub App (PR #666), aprovacao via Telegram (PR #685), fila no control store sem PR (PR #681), acoes do owner e snapshot diario (PR #695), cofre SOPS+age (PR #663), isolamento de ambiente allowlist (PR #686) e leitura da fila pelo despachante (PR #733). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-b",
-      "planning-only"
+      "bloco-b"
     ],
     "problem_statement": "Cerca de 80% das 70 acoes do owner desde 09/10 foram criadas pela propria fabrica: 23 rituais de publicar arquivo protegido com merge --admin ou push direto (core/orchestrator/guard.py protege core/harness/*, que e codigo operacional), PRs de registro de fila e de OA que nao mergeiam (39 PRs ticket/queue-* e 22 chore/oa-* entre os ultimos 100), chaves recadastradas e segredos espalhados entre .env, registro do Windows e Dokploy. O merge autonomo depende do gh do owner com permissao de admin. Este bloco absorve USR-370 (isolamento de credenciais do agente) e USR-374 (owner_actions.json local bloqueia o node_sync). Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -7730,7 +7728,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-22T09:19:41.449353Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-344",
@@ -8479,16 +8477,15 @@
     "project_id": "darkfac",
     "title": "Capacidade, infraestrutura e rede: 3 tickets em paralelo, despachante como servico, VPS leve, deploy confiavel e worker seguro",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias: recuperacao de deploy do Hub (PR #662), blue-green resiliente (PR #701), trava de linha por host (PR #705), despachante como servico de sistema (PR #723) e hub-image lean VPS (PR #739). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-c",
-      "planning-only"
+      "bloco-c"
     ],
     "problem_statement": "Paralelismo efetivo e 1 (trava por maquina recusa o segundo run). O despachante e tarefa AtLogOn no notebook (so roda com o owner logado), guarda in_flight so em memoria e ignora falha de deploy; o agente sempre roda no notebook e a VM do Grok (5x mais rapida) so recebe testes. A VPS de 4 GB faz build de 4 servicos e tem limites de memoria somando ~6 GB; o n8n inativo reserva 1,28 GB. O job de CD do CI fica verde pulando o deploy quando falta DOKPLOY_DEPLOY_URL, e os botoes Deploy/Start do Dokploy reimplantam um SHA velho. O worker de testes expoe /system/exec com shell=True, token opcional e escuta em 0.0.0.0; nao ha ACL de Tailscale. Este bloco absorve USR-207 e USR-363 (deploy do Hub sem queda e rollback), USR-372 e USR-373 (worker do grokbox para de responder e cai do Tailscale). Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -8541,7 +8538,7 @@
       "USR-343"
     ],
     "created_at": "2026-10-24T05:09:42.041470Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-370",
@@ -8695,16 +8692,15 @@
     "project_id": "darkfac",
     "title": "Motor unico: todo canal executa a mesma sequencia de estagios com artefatos obrigatorios e grill de owner",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias S1 a S7: remocao de handlers sem chamador (PR #665), contrato de artefatos por estagio (PR #667), quebra de run_ticket em estagios (PR #688), sequencia canonica de estagios (PR #704), planejamento com modelo alto (PR #669), G1 semantico e grill do owner (PR #668), entrada unica e grill com um toque (PR #682). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-a1",
-      "planning-only"
+      "bloco-a1"
     ],
     "problem_statement": "Existem tres motores sem dono unico: a linha DAG (core/line, Postgres, 37 commits), o run_ticket.py chamado pelo despachante (534 commits) e o chat. O caminho dominante vai direto do ticket ao desenvolvimento, sem grill, planejamento, revisao nem deploy; pesquisa e learning pack nao tem estagio em nenhum caminho. O Gate G1 e sintatico (core/demands/readiness.py aprova 'Quero um painel que mostre minhas vendas do mes'), o grill legado faz perguntas tecnicas fixas e .agents/rules/GEMINI.md induz perguntas de arquitetura ao owner. Ticket vindo do Telegram e gravado dentro do container e o feeder le a fila congelada na imagem. Este bloco absorve USR-355 (run retomado volta a waiting_human) e USR-371 (propagar project_id ate pick e deliver_branch), necessarios para projetos externos. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -8756,23 +8752,22 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-24T20:33:41.067748Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-376",
     "project_id": "darkfac",
     "title": "Entrega completa: pesquisa condicional com ledger, documentacao verificada, learning pack e resumo diario ao owner",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias: politica de pesquisa condicional com ledger (PR #710), learning pack gerado do diff com afirmacoes verificadas (PR #711), resumo diario manha/noite ao owner (PR #716), checagem docs-sync do manual (PR #727, #728) e estagios de pesquisa/docs/learning-pack no motor (PR #730). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-a2",
-      "planning-only"
+      "bloco-a2"
     ],
     "problem_statement": "Combinados do owner que hoje dependem da iniciativa do agente: pesquisa com fontes registradas (ledger .factory/research parado em 15/09, sem estagio), learning pack (aparece no Antigravity e nao no Claude Code; nenhum estagio), manual do usuario atualizado a cada entrega (nao existe manual da fabrica; docs/ARCHITECTURE.md parado em 06/09) e relatorios uteis no Telegram (links hoje pouco uteis). O owner quer operar com 30 minutos de manha e 30 a noite. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -8814,23 +8809,22 @@
       "USR-375"
     ],
     "created_at": "2026-10-24T20:33:41.067748Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-377",
     "project_id": "darkfac",
     "title": "Enxugar codigo e testes: arquivar o que nao roda, portao em camadas e suite menor e mais rapida",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias: testes deterministicos (PR #676), remocao de codigo sem uso (PR #678, #698, #715, #740), remocao de testes de forma do portao (PR #679), perfil pr em camadas (PR #680), divisao de servicos do Hub (PR #713), contratos de camada e complexidade (PR #714, #728), fixtures leves de git/socket (PR #724), relogio simulado (PR #735), quebra de funcoes longas (PR #743) e helpers em core/common (PR #779). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-d",
-      "planning-only"
+      "bloco-d"
     ],
     "problem_statement": "Cerca de 12 a 15 mil linhas de core/ nao sao alcancadas por producao (handlers de core/workflow sem chamador, partes de core/orchestrator usadas so por testes, core/planning, core/pilots, core/security, core/game, core/marketing, core/knowledge, roteadores legados) e carregam ~600 testes. A suite tem 5.120 testes; roda local, no PR e de novo em main (Windows em 4 shards duas vezes); 3 testes esperam 30 s reais (DEAD_PROBE_GAP_SEC nao simulado); ha ~350-450 itens de testes de forma; core/harness/affected.py existe e nao e usado; testes de temporizacao oscilam no grokbox sob carga. Helpers copiados ate 13 vezes; hub/backend/service.py tem 3.925 linhas; PostgresControlStore.materialize definido duas vezes; styles.css duplicado (16 mil linhas). Este bloco absorve USR-367 e USR-368. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -8877,23 +8871,22 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-24T20:33:41.067748Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-378",
     "project_id": "darkfac",
     "title": "Roteamento enxuto e custo real: um roteador, cascata justa entre assinaturas, OpenRouter para escrita barata e custo por ticket",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias: unificacao em roteador unico routing.pick (PR #709), probe CLI de quota do Claude (PR #721), custo por ticket com rateio (PR #729), precificacao de assinaturas (PR #732) e Grok na cascata com dinamica de headroom (PR #737). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-e",
-      "planning-only"
+      "bloco-e"
     ],
     "problem_statement": "So core/line/routing.pick esta em producao, mas existem 6 roteadores paralelos (model_router, harness_router, benchmarks/router, qualified_routes, router_optimizer, subagent_routing) e a skill 03 manda usar o legado. Com CLAUDECODE=1 o Claude e preferido em todo ticket (372 commits Opus x 187 Sonnet); o Grok (plano de US$30) esta fora da cascata de desenvolvimento; o OpenRouter so entra como ultimo recurso de leitura e o teto openrouter_usd nunca e aplicado; MiniMax nao esta no registro; o Jev (core/pilots/jev_adapter.py) nao tem chamador; a politica Haiku nao esta ligada a producao. Cota desconhecida bloqueia tudo com mensagem enganosa; o probe do Claude faz POST com User-Agent falsificado. Eventos de uso nao tem ticket_id e o custo aparece zerado. Limiar critico diverge (10% x 15%). Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -8940,23 +8933,22 @@
       "USR-375"
     ],
     "created_at": "2026-10-24T20:33:41.067748Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-379",
     "project_id": "darkfac",
     "title": "Governanca e manual: MISSION e AGENTS como fonte unica curta, skills alinhadas ao codigo e manual completo da fabrica",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue no main via fatias: MISSION de longo prazo e FASE_ATUAL vigente (PR #741), AGENTS.md como fonte unica (PR #745, #747, #748, #749), paridade de operacao com turn_guard (PR #811) e atualizacao de README e ARCHITECTURE (PR #769). Portao oficial verde e Dokploy live.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
       "plano-v0-20261024",
-      "bloco-f",
-      "planning-only"
+      "bloco-f"
     ],
     "problem_statement": "Regras repetidas em CLAUDE.md, AGENTS.md, FACTORY_RULES.md e um segundo AGENTS.md em .agents/rules (a regra Haiku aparece tres vezes); CLAUDE.md nao importa AGENTS.md; skills prometem o que o codigo nao faz (02, 03, 04, 17, 19); README cita 17 skills e modelos antigos; docs/ARCHITECTURE.md descreve a topologia de setembro; AGENTS.md declara V0 encerrada em 17/10 sem o criterio atual; nao existe manual que permita entregar a fabrica a outra pessoa; nao ha dicionario de dados de .factory/*.json; ha ~10 planos datados sobrepostos em docs/. Plano: docs/plans/PLANO_V0_2026-10-24.md.",
     "core_journey": [
@@ -9003,7 +8995,7 @@
       "USR-376"
     ],
     "created_at": "2026-10-24T20:33:41.067748Z",
-    "updated_at": "2026-10-24T20:33:41.067748Z"
+    "updated_at": "2026-10-31T12:00:00Z"
   },
   {
     "id": "USR-380",
@@ -9299,6 +9291,32 @@
     "updated_at": "2026-10-26T12:49:10.035042Z"
   },
   {
+    "id": "USR-390",
+    "project_id": "darkfac",
+    "title": "Perfil de PR nao roda testes-guarda do repositorio inteiro (clock-bomb passou no PR e quebrou o main)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #778 mesclado (3d2d617c)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "PRs #710 e #716 passaram no CI de PR e mesclaram com datas fixas de 2026 em testes novos (tests/test_research_policy.py:48, tests/test_daily_digest.py:6). O teste tests/test_clock_bomb_guard.py varre todos os testes, mas o perfil pr (testes afetados) nao o seleciona quando so arquivos novos de teste mudam; o main ficou vermelho (corrigido no PR fix/research-test-clock). Criterios de aceite: (1) testes-guarda que varrem o repositorio (clock_bomb_guard, serial_marker_guard, tree_hygiene_guard, skills_drift, model_id_ratchet e similares, por marcador explicito) sempre entram no perfil pr de core/harness/affected.py, com teste; (2) PR que adiciona teste com data fixa de 2026 falha no CI de PR (teste do seletor); (3) nenhum teste de forma novo.",
+    "core_journey": [
+      "PRs #710 e #716 passaram no CI de PR e mesclaram com datas fixas de 2026 em testes novos (tests/test_research_policy.py:48, tests/test_daily_digest.py:6). O teste tests/test_clock_bomb_guard.py varre todos os testes, mas o perfil pr (testes afetados) nao o seleciona quando so arquivos novos de teste mudam; o main ficou vermelho (corrigido no PR fix/research-test-clock). Criterios de aceite: (1) testes-guarda que varrem o repositorio (clock_bomb_guard, serial_marker_guard, tree_hygiene_guard, skills_drift, model_id_ratchet e similares, por marcador explicito) sempre entram no perfil pr de core/harness/affected.py, com teste; (2) PR que adiciona teste com data fixa de 2026 falha no CI de PR (teste do seletor); (3) nenhum teste de forma novo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T12:45:50.211358Z",
+    "updated_at": "2026-10-25T12:45:50.211358Z"
+  },
+  {
     "id": "USR-391",
     "project_id": "darkfac",
     "title": "Cota do Claude sem fonte real: CLI nao logada e auth status sem rate_limits (seguimento do USR-382)",
@@ -9328,6 +9346,613 @@
     "dependencies": [],
     "created_at": "2026-10-25T13:39:43.691571Z",
     "updated_at": "2026-10-28T10:30:00Z"
+  },
+  {
+    "id": "USR-392",
+    "project_id": "darkfac",
+    "title": "Despachante nao registra codigo de saida nem motivo quando o run_ticket da frota falha",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #776 mesclado (2a47a7a0)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10: USR-383 (desktop) terminou 155 s depois de iniciar o Codex e USR-382 (grokbox) depois de 'Disparando fase de entrega em processo novo isolado'; os dois foram para cooldown_infra sem nenhuma linha de erro em .factory/runs/fleet_dispatcher_logs/USR-38x-*.log, e o logger do despachante nao persiste nada (.factory/logs so tem usage_sync). A entrega do USR-382 parou com commit pronto e sem push; foi preciso enviar a mao. Criterios de aceite: (1) o despachante grava, por execucao, codigo de saida, duracao e as ultimas linhas de stderr no log do ticket e em fleet_dispatcher_state.json; (2) a saida do processo de entrega (--resume-delivery) vai para o mesmo log do ticket; (3) teste do despachante com processo falso que falha; (4) motivo aparece no resumo diario/Hub.",
+    "core_journey": [
+      "Evidencia 25/10: USR-383 (desktop) terminou 155 s depois de iniciar o Codex e USR-382 (grokbox) depois de 'Disparando fase de entrega em processo novo isolado'; os dois foram para cooldown_infra sem nenhuma linha de erro em .factory/runs/fleet_dispatcher_logs/USR-38x-*.log, e o logger do despachante nao persiste nada (.factory/logs so tem usage_sync). A entrega do USR-382 parou com commit pronto e sem push; foi preciso enviar a mao. Criterios de aceite: (1) o despachante grava, por execucao, codigo de saida, duracao e as ultimas linhas de stderr no log do ticket e em fleet_dispatcher_state.json; (2) a saida do processo de entrega (--resume-delivery) vai para o mesmo log do ticket; (3) teste do despachante com processo falso que falha; (4) motivo aparece no resumo diario/Hub."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T13:40:51.306153Z",
+    "updated_at": "2026-10-25T13:40:51.306153Z"
+  },
+  {
+    "id": "USR-393",
+    "project_id": "darkfac",
+    "title": "Deploy blue-green do Hub: Dokploy compose up da timeout e o Hub fica preso no sha 60fe467",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #725 mesclado; redeploy 25/10: [Darkhub] blue-green ok e /health git_sha=ac3813fe25e5 (sha do main).",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10 ~13:50 e ~14:10 UTC: python scripts/dokploy_redeploy.py para 327d210e e a5950d62 -> '[Darkhub] blue-green deploy (USR-339) / deploy of <sha> failed (Dokploy compose up timed out); restoring previous compose'; na 2a tentativa 'RESTORE FAILED (Dokploy compose up timed out)'. O Hub continua respondendo 200 em /health com git_sha 60fe46730ab2 (antigo), entao nada do que entrou hoje (#701..#722, #704) esta em producao. darkfac-cloud e canary deployaram normalmente. Suspeita: VPS sem folga de memoria/CPU (n8n ainda no ar, limites somam > 3,2 GB; fatia 'VPS enxuta' segurada na worktree .claude/worktrees/agent-ae7e95d90f2b1c119 ate existir job cloud no hub-image.yml) ou timeout do cliente curto demais para pull da imagem GHCR. Criterios de aceite: (1) causa raiz identificada lendo o log do deploy no Dokploy (websocket listen-deployment) e registrada no PR; (2) deploy blue-green do Hub conclui com a cor nova saudavel e /health mostra o sha do main; (3) timeout e restauracao com teste; (4) ticket/OA para o que depender do owner.",
+    "core_journey": [
+      "Evidencia 25/10 ~13:50 e ~14:10 UTC: python scripts/dokploy_redeploy.py para 327d210e e a5950d62 -> '[Darkhub] blue-green deploy (USR-339) / deploy of <sha> failed (Dokploy compose up timed out); restoring previous compose'; na 2a tentativa 'RESTORE FAILED (Dokploy compose up timed out)'. O Hub continua respondendo 200 em /health com git_sha 60fe46730ab2 (antigo), entao nada do que entrou hoje (#701..#722, #704) esta em producao. darkfac-cloud e canary deployaram normalmente. Suspeita: VPS sem folga de memoria/CPU (n8n ainda no ar, limites somam > 3,2 GB; fatia 'VPS enxuta' segurada na worktree .claude/worktrees/agent-ae7e95d90f2b1c119 ate existir job cloud no hub-image.yml) ou timeout do cliente curto demais para pull da imagem GHCR. Criterios de aceite: (1) causa raiz identificada lendo o log do deploy no Dokploy (websocket listen-deployment) e registrada no PR; (2) deploy blue-green do Hub conclui com a cor nova saudavel e /health mostra o sha do main; (3) timeout e restauracao com teste; (4) ticket/OA para o que depender do owner."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T14:42:22.625392Z",
+    "updated_at": "2026-10-25T14:42:22.625392Z"
+  },
+  {
+    "id": "USR-394",
+    "project_id": "darkfac",
+    "title": "Desktop nao atualiza: owner_actions.json alterado localmente bloqueia o node_sync",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #766 mesclado (c5af087a)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10 no redeploy: '[PENDING] Desktop divergent: Desktop update did not reach expected SHA; worker output: Updating fcbb10a1..c21bcd36 | error: Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json'. Algum processo no Desktop grava owner_actions.json versionado no checkout (provavel answer_sync/Hub local). Desde o USR-343 S4b as acoes do owner vivem no control store; o arquivo do git e so snapshot diario. Criterios de aceite: (1) nenhum processo grava owner_actions.json no checkout de um host worker (escreve no control store ou em state_root); (2) node_sync descarta/arquiva alteracoes locais em arquivos de estado versionados antes do update, com teste; (3) Desktop converge para o sha do main no proximo redeploy.",
+    "core_journey": [
+      "Evidencia 25/10 no redeploy: '[PENDING] Desktop divergent: Desktop update did not reach expected SHA; worker output: Updating fcbb10a1..c21bcd36 | error: Your local changes to the following files would be overwritten by merge: .factory/owner_actions/owner_actions.json'. Algum processo no Desktop grava owner_actions.json versionado no checkout (provavel answer_sync/Hub local). Desde o USR-343 S4b as acoes do owner vivem no control store; o arquivo do git e so snapshot diario. Criterios de aceite: (1) nenhum processo grava owner_actions.json no checkout de um host worker (escreve no control store ou em state_root); (2) node_sync descarta/arquiva alteracoes locais em arquivos de estado versionados antes do update, com teste; (3) Desktop converge para o sha do main no proximo redeploy."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T14:42:59.695445Z",
+    "updated_at": "2026-10-25T14:42:59.695445Z"
+  },
+  {
+    "id": "USR-395",
+    "project_id": "darkfac",
+    "title": "Aviso de PR protegido nao chega ao Telegram do owner (aprovacao por toque inoperante)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #772 mesclado (807285e8)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia: PR #728 (toca .github/workflows/ci.yml) aberto em 25/10 ~18:00 UTC; o owner confirmou que nenhuma mensagem com Aprovar/Rejeitar chegou no Telegram e precisou assinar manualmente (python -m core.governance.keys sign). Mesmo sintoma no #696 (handoff 25/10 manha: suspeita TELEGRAM_OPS_BOT_TOKEN ausente no container do Hub; #702 deixou a falha ruidosa e auditada em protected_publication/audit.jsonl). Criterios de aceite: (1) causa raiz identificada pelo audit.jsonl/log do Hub e corrigida (webhook pull_request do GitHub chegando em /api/webhooks/github, token do bot, chat id); (2) teste de ponta a ponta com webhook simulado gera a mensagem com botoes; (3) se o envio falhar, o Hub cria OA automatica com o passo de assinatura manual (sem depender do agente); (4) proximo PR protegido real recebe o aviso.",
+    "core_journey": [
+      "Evidencia: PR #728 (toca .github/workflows/ci.yml) aberto em 25/10 ~18:00 UTC; o owner confirmou que nenhuma mensagem com Aprovar/Rejeitar chegou no Telegram e precisou assinar manualmente (python -m core.governance.keys sign). Mesmo sintoma no #696 (handoff 25/10 manha: suspeita TELEGRAM_OPS_BOT_TOKEN ausente no container do Hub; #702 deixou a falha ruidosa e auditada em protected_publication/audit.jsonl). Criterios de aceite: (1) causa raiz identificada pelo audit.jsonl/log do Hub e corrigida (webhook pull_request do GitHub chegando em /api/webhooks/github, token do bot, chat id); (2) teste de ponta a ponta com webhook simulado gera a mensagem com botoes; (3) se o envio falhar, o Hub cria OA automatica com o passo de assinatura manual (sem depender do agente); (4) proximo PR protegido real recebe o aviso."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T18:40:32.758072Z",
+    "updated_at": "2026-10-25T18:40:32.758072Z"
+  },
+  {
+    "id": "USR-396",
+    "project_id": "darkfac",
+    "title": "cancel_run no Postgres falha quando o motivo passa de 64 caracteres",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #757 mesclado (3605230f)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10: PostgresControlStore.cancel_run(run_id, reason='obsoleto: USR-343 executado por fatias...') -> psycopg.errors.StringDataRightTruncation: value too long for type character varying(64) (core/orchestrator/adapters/control_postgres.py:1860), embrulhado em StoreUnavailableError; nenhum job foi cancelado. Criterios de aceite: (1) motivo longo e truncado com seguranca (ou guardado em coluna de texto livre) e o cancelamento conclui; (2) teste com motivo de 200 caracteres; (3) mesma protecao nos outros campos varchar(64) gravados a partir de texto livre.",
+    "core_journey": [
+      "Evidencia 25/10: PostgresControlStore.cancel_run(run_id, reason='obsoleto: USR-343 executado por fatias...') -> psycopg.errors.StringDataRightTruncation: value too long for type character varying(64) (core/orchestrator/adapters/control_postgres.py:1860), embrulhado em StoreUnavailableError; nenhum job foi cancelado. Criterios de aceite: (1) motivo longo e truncado com seguranca (ou guardado em coluna de texto livre) e o cancelamento conclui; (2) teste com motivo de 200 caracteres; (3) mesma protecao nos outros campos varchar(64) gravados a partir de texto livre."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T21:59:15.129588Z",
+    "updated_at": "2026-10-25T21:59:15.129588Z"
+  },
+  {
+    "id": "USR-397",
+    "project_id": "darkfac",
+    "title": "Mudanca so em .factory/config nao chega ao Hub (classificador de deploy e gatilho do hub-image.yml)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #739 (2c764f34) mesclado em 25/10",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10: PR #732 (so .factory/config/subscription_prices.json) -> dokploy_redeploy: '[Darkhub] deploy skipped (USR-207): somente caminhos fora da imagem'. Mas deploy/dokploy/Dockerfile.hub faz COPY .factory /app/.factory e o Hub le .factory/config em tempo de execucao (precos do custo por ticket, roteamento, registro de modelos), entao o Hub fica com a config antiga ate o proximo merge que toque core/ ou hub/. Corrigir exige: (1) core/infra/deploy_classifier.py REBUILD_PREFIXES incluir .factory/config/ e o teste de COPY aceitar subcaminho de fonte COPY; (2) .github/workflows/hub-image.yml (protegido, precisa assinatura do owner) disparar build em .factory/config/**. Criterios de aceite: merge que muda so .factory/config gera imagem no GHCR e o redeploy troca a cor do Hub; teste do classificador; registro de autorizacao preparado para o owner assinar (ver docs/manual/governanca.md) junto com outra mudanca protegida.",
+    "core_journey": [
+      "Evidencia 25/10: PR #732 (so .factory/config/subscription_prices.json) -> dokploy_redeploy: '[Darkhub] deploy skipped (USR-207): somente caminhos fora da imagem'. Mas deploy/dokploy/Dockerfile.hub faz COPY .factory /app/.factory e o Hub le .factory/config em tempo de execucao (precos do custo por ticket, roteamento, registro de modelos), entao o Hub fica com a config antiga ate o proximo merge que toque core/ ou hub/. Corrigir exige: (1) core/infra/deploy_classifier.py REBUILD_PREFIXES incluir .factory/config/ e o teste de COPY aceitar subcaminho de fonte COPY; (2) .github/workflows/hub-image.yml (protegido, precisa assinatura do owner) disparar build em .factory/config/**. Criterios de aceite: merge que muda so .factory/config gera imagem no GHCR e o redeploy troca a cor do Hub; teste do classificador; registro de autorizacao preparado para o owner assinar (ver docs/manual/governanca.md) junto com outra mudanca protegida."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T22:12:06.298367Z",
+    "updated_at": "2026-10-25T22:12:06.298367Z"
+  },
+  {
+    "id": "USR-398",
+    "project_id": "darkfac",
+    "title": "Motor nao roda ratchet de complexidade e lint-imports antes do PR (PR da frota fica vermelho e parado)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #759 mesclado (5a27d56e)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 25/10: PR #723 (USR-384, aberto pela frota) falhou no passo 'Complexity ratchet' do CI (#728): PostgresControlStore.finish 194>173 e SQLiteControlStore.finish 265>244; o PR ficou aberto e vermelho sem nova tentativa (corrigido a mao por subagente). O motor (run_ticket) ja roda docs-sync antes do REVIEW (#730), mas nao roda 'python scripts/complexity_ratchet.py' nem 'lint-imports'. Criterios de aceite: (1) a validacao do motor roda ratchet e lint-imports no worktree antes do REVIEW e, se reprovar, devolve ao agente de desenvolvimento uma vez com a saida (mesmo padrao do docs-sync); (2) CI vermelho em PR aberto pela frota volta o ticket para o agente com o log do check que falhou, em vez de ficar parado; (3) testes de comportamento.",
+    "core_journey": [
+      "Evidencia 25/10: PR #723 (USR-384, aberto pela frota) falhou no passo 'Complexity ratchet' do CI (#728): PostgresControlStore.finish 194>173 e SQLiteControlStore.finish 265>244; o PR ficou aberto e vermelho sem nova tentativa (corrigido a mao por subagente). O motor (run_ticket) ja roda docs-sync antes do REVIEW (#730), mas nao roda 'python scripts/complexity_ratchet.py' nem 'lint-imports'. Criterios de aceite: (1) a validacao do motor roda ratchet e lint-imports no worktree antes do REVIEW e, se reprovar, devolve ao agente de desenvolvimento uma vez com a saida (mesmo padrao do docs-sync); (2) CI vermelho em PR aberto pela frota volta o ticket para o agente com o log do check que falhou, em vez de ficar parado; (3) testes de comportamento."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T22:26:28.229480Z",
+    "updated_at": "2026-10-25T22:26:28.229480Z"
+  },
+  {
+    "id": "USR-399",
+    "project_id": "darkfac",
+    "title": "run_ticket nao passa a complexidade do ticket ao pick (preferencia do chat em high nunca vale)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #758 mesclado (0f8e175a)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento da fatia USR-378 (cascata justa): pick(stage, ..., complexity=...) agora so aplica a preferencia pelo harness de operacao em complexity=='high' e ranqueia low/medium por folga semanal. Mas run_ticket.py chama pick(...) sem complexity (perto das linhas 760, 2556 e 2571), entao em execucao real o ticket nunca e tratado como high. Criterios de aceite: (1) run_ticket passa estimated_complexity do ticket ao pick em development e review; (2) teste: ticket high elege o harness de operacao com cota > 15%, ticket medium segue a folga; (3) docs/manual/roteamento.md atualizado.",
+    "core_journey": [
+      "Seguimento da fatia USR-378 (cascata justa): pick(stage, ..., complexity=...) agora so aplica a preferencia pelo harness de operacao em complexity=='high' e ranqueia low/medium por folga semanal. Mas run_ticket.py chama pick(...) sem complexity (perto das linhas 760, 2556 e 2571), entao em execucao real o ticket nunca e tratado como high. Criterios de aceite: (1) run_ticket passa estimated_complexity do ticket ao pick em development e review; (2) teste: ticket high elege o harness de operacao com cota > 15%, ticket medium segue a folga; (3) docs/manual/roteamento.md atualizado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-25T22:49:01.289247Z",
+    "updated_at": "2026-10-25T22:49:01.289247Z"
+  },
+  {
+    "id": "USR-400",
+    "project_id": "darkfac",
+    "title": "Remover politica Haiku sem chamador (subagent_routing, config, docs, baseline)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #764 mesclado (c468573c)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-379 tirou a politica Haiku 5.5 dos textos de regra (PR #745). O codigo core/line/subagent_routing.py, .factory/config/subagent_model_routing.json, docs/MODEL_SELECTION_GUIDE.md secao Haiku, skills 03/17/19 e tests/line/test_subagent_routing.py seguem mantendo uma politica sem chamador no motor (principio Menos e mais / saldo de codigo).",
+    "core_journey": [
+      "USR-379 tirou a politica Haiku 5.5 dos textos de regra (PR #745). O codigo core/line/subagent_routing.py, .factory/config/subagent_model_routing.json, docs/MODEL_SELECTION_GUIDE.md secao Haiku, skills 03/17/19 e tests/line/test_subagent_routing.py seguem mantendo uma politica sem chamador no motor (principio Menos e mais / saldo de codigo)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Nenhum chamador de producao perdido (grep prova que subagent_routing nao e importado fora de testes antes de remover)",
+      "subagent_routing.py, sua config e testes removidos ou reduzidos ao que o motor usa",
+      "Skills 03/17/19 e MODEL_SELECTION_GUIDE sem a politica Haiku; docs_sync e drift verdes",
+      "Saldo de linhas de core/ e tests/ negativo; portao oficial verde"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T10:32:16.009318Z",
+    "updated_at": "2026-10-26T10:32:16.009318Z"
+  },
+  {
+    "id": "USR-401",
+    "project_id": "darkfac",
+    "title": "Hook Stop do Claude Code bloqueia encerrar sessao que alterou codigo sem artefatos obrigatorios (fatia USR-379)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #762 mesclado (dc835500)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-379 exige que uma sessao do Claude Code que alterou codigo nao encerre sem os artefatos do ticket (plano, veredito, learning pack). Hoje nada verifica isso.",
+    "core_journey": [
+      "USR-379 exige que uma sessao do Claude Code que alterou codigo nao encerre sem os artefatos do ticket (plano, veredito, learning pack). Hoje nada verifica isso."
+    ],
+    "non_goals": [
+      "Nao criar hook equivalente do Codex nesta fatia"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Hook Stop em .claude/settings.json chama script em scripts/ que bloqueia (exit 2 com motivo) quando ha diff de codigo sem artefatos do ticket",
+      "Sessao sem diff de codigo encerra normalmente",
+      "Um teste de comportamento do script substitui ou consolida teste existente (saldo de testes nao aumenta)",
+      "Manual docs/manual atualizado na mesma entrega"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T10:44:44.859373Z",
+    "updated_at": "2026-10-26T10:44:44.859373Z"
+  },
+  {
+    "id": "USR-402",
+    "project_id": "darkfac",
+    "title": "README e docs/ARCHITECTURE.md refletem skills, modelos e motor unico reais (fatia USR-379)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #769 mesclado (17a315c8)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "README cita 17 skills e modelos antigos; docs/ARCHITECTURE.md descreve a topologia de setembro; planos datados sobrepostos em docs/.",
+    "core_journey": [
+      "README cita 17 skills e modelos antigos; docs/ARCHITECTURE.md descreve a topologia de setembro; planos datados sobrepostos em docs/."
+    ],
+    "non_goals": [
+      "Nao reescrever o manual inteiro"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "README lista as skills reais de .agents/skills e cita modelos so por alias do registro",
+      "ARCHITECTURE.md descreve o motor unico (run_ticket/despachante), control store, frota e deploy GHCR atual, conferido contra o codigo",
+      "Planos antigos de docs/plans substituidos pelo PLANO_V0_2026-10-24 movidos para docs/archive/",
+      "docs_sync e portao verdes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T10:45:09.434812Z",
+    "updated_at": "2026-10-26T10:45:09.434812Z"
+  },
+  {
+    "id": "USR-403",
+    "project_id": "darkfac",
+    "title": "Dicionario de dados de todos os .factory/*.json versionados (fatia USR-379)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #765 mesclado (20ce79ed)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Nao ha dicionario de dados dos arquivos .factory/*.json; quem assume a fabrica nao sabe o que cada campo faz.",
+    "core_journey": [
+      "Nao ha dicionario de dados dos arquivos .factory/*.json; quem assume a fabrica nao sabe o que cada campo faz."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "docs/manual/dicionario_dados.md cobre todos os .factory/**/*.json versionados (git ls-files), com proposito, quem le/escreve e campos principais",
+      "Checagem fora do portao principal lista .json versionados sem entrada no dicionario",
+      "Saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T10:45:34.227459Z",
+    "updated_at": "2026-10-26T10:45:34.227459Z"
+  },
+  {
+    "id": "USR-404",
+    "project_id": "darkfac",
+    "title": "Probe de cota do Google estoura o prazo de 10 s em toda chamada do roteador",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #760 mesclado (4f992adb)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 26/10 toda chamada de core.line.routing.pick e run_ticket --create registra 'Quota probe timed out provider=google duration_s=10.0; failing closed', somando 10 s por chamada e deixando o Antigravity sem cota conhecida.",
+    "core_journey": [
+      "Em 26/10 toda chamada de core.line.routing.pick e run_ticket --create registra 'Quota probe timed out provider=google duration_s=10.0; failing closed', somando 10 s por chamada e deixando o Antigravity sem cota conhecida."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa do timeout identificada e registrada no ticket",
+      "Probe do Google responde em menos de 3 s ou e pulado com cache negativo de curta duracao quando o harness nao e elegivel ao estagio",
+      "pick('development') sem atraso de 10 s; teste de comportamento cobre o caminho de cache"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T10:46:06.867447Z",
+    "updated_at": "2026-10-26T10:46:06.867447Z"
+  },
+  {
+    "id": "USR-405",
+    "project_id": "darkfac",
+    "title": "dokploy_redeploy espera 900 s por imagem que o hub-image nunca publica (merge so em arquivos da raiz)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #756 mesclado (fd3f7200)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 26/10 o merge do #745 (so AGENTS.md, CLAUDE.md, FACTORY_RULES.md, .agents/rules, tests) nao casa com os paths do hub-image.yml; scripts/dokploy_redeploy.py esperou 900 s por ghcr.io/gcamposgit/darkhub:3dadae2e e recusou o deploy (HTTP 404). O Hub ficou corretamente em dc0e0de8, mas o script gasta 15 min e reporta falha.",
+    "core_journey": [
+      "Em 26/10 o merge do #745 (so AGENTS.md, CLAUDE.md, FACTORY_RULES.md, .agents/rules, tests) nao casa com os paths do hub-image.yml; scripts/dokploy_redeploy.py esperou 900 s por ghcr.io/gcamposgit/darkhub:3dadae2e e recusou o deploy (HTTP 404). O Hub ficou corretamente em dc0e0de8, mas o script gasta 15 min e reporta falha."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o diff desde a ultima imagem publicada nao toca paths do hub-image, o script reporta 'sem mudanca de imagem' e sai 0 sem esperar",
+      "Paths do script e do workflow vem de uma fonte so (sem duplicar a lista)",
+      "Teste de comportamento cobre o caso; saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T11:02:26.372041Z",
+    "updated_at": "2026-10-26T11:02:26.372041Z"
+  },
+  {
+    "id": "USR-406",
+    "project_id": "darkfac",
+    "title": "DarkHub: login pelo rodape envia o link direto ao Telegram e autoriza a sessao do navegador onde o owner clicou",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #768 mesclado (25a9b62c)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Pedido do owner em 26/10. (1) O link 'modo leitura' do rodape do DarkHub abre uma pagina intermediaria com outro botao para enviar o link ao Telegram; passo desnecessario. (2) O link recebido no Telegram, ao ser tocado, abre o Hub no celular em vez de liberar a sessao do navegador (desktop/notebook) onde o owner pediu o acesso. (3) Mesmo aberto no celular pelo link, o Hub continua com a tag de somente leitura.",
+    "core_journey": [
+      "Pedido do owner em 26/10. (1) O link 'modo leitura' do rodape do DarkHub abre uma pagina intermediaria com outro botao para enviar o link ao Telegram; passo desnecessario. (2) O link recebido no Telegram, ao ser tocado, abre o Hub no celular em vez de liberar a sessao do navegador (desktop/notebook) onde o owner pediu o acesso. (3) Mesmo aberto no celular pelo link, o Hub continua com a tag de somente leitura."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Clicar no link do rodape envia na hora a mensagem de autorizacao ao Telegram do owner, sem pagina intermediaria, e mostra confirmacao no proprio rodape",
+      "Tocar/aprovar no Telegram libera a sessao do navegador que fez o pedido (desktop ou notebook) para modo de edicao, sem precisar abrir o Hub no celular (ex.: pedido com token pendente que o navegador consulta ate ser aprovado)",
+      "Se o owner abrir o link no celular, o Hub do celular tambem entra em modo de edicao, sem a tag de somente leitura",
+      "Teste de comportamento cobre o fluxo pedido -> aprovacao -> sessao liberada; saldo de testes nao aumenta",
+      "Deploy e smoke verdes no darkhub.ggcampos.com"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-26T11:54:29.842695Z",
+    "updated_at": "2026-10-26T11:54:29.842695Z"
+  },
+  {
+    "id": "USR-407",
+    "project_id": "darkfac",
+    "title": "Hub mostra intervencoes vencidas: OA-HR de 21/10 e grill_pending em tickets guarda-chuva planning-only",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #761 mesclado (7da4192c)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 27/10 /api/interventions/priority lista OA-HR-run-aebc0411b972-development (aberta desde 21/10, run morto) e waiting_human grill_pending para USR-343 (run-dc49b27f00ea) e USR-375 (run-66a99b286961), tickets planning-only fatiados cujo grill foi decidido em 24/10 e nao tem perguntas abertas. Ruido na fila do owner.",
+    "core_journey": [
+      "Em 27/10 /api/interventions/priority lista OA-HR-run-aebc0411b972-development (aberta desde 21/10, run morto) e waiting_human grill_pending para USR-343 (run-dc49b27f00ea) e USR-375 (run-66a99b286961), tickets planning-only fatiados cujo grill foi decidido em 24/10 e nao tem perguntas abertas. Ruido na fila do owner."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Runs WAITING_HUMAN de tickets com tag planning-only nao geram intervencao (ou sao cancelados)",
+      "OA-HR espelhada fecha quando o run termina, falha ou expira",
+      "Intervencoes atuais limpas no Hub; teste de comportamento cobre o filtro"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-27T08:48:19.489733Z",
+    "updated_at": "2026-10-27T08:48:19.489733Z"
+  },
+  {
+    "id": "USR-408",
+    "project_id": "darkfac",
+    "title": "deploy_classifier tem lista de paths propria divergente do hub-image.yml",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #763 mesclado (c3f513b9)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Achado no USR-405 (PR #756): core/infra/deploy_classifier.py mantem sua propria lista de paths que geram imagem/deploy, diferente de on.push.paths do .github/workflows/hub-image.yml (ex.: nao inclui docs/). Duas fontes para a mesma regra podem decidir deploy diferente do que o workflow publica.",
+    "core_journey": [
+      "Achado no USR-405 (PR #756): core/infra/deploy_classifier.py mantem sua propria lista de paths que geram imagem/deploy, diferente de on.push.paths do .github/workflows/hub-image.yml (ex.: nao inclui docs/). Duas fontes para a mesma regra podem decidir deploy diferente do que o workflow publica."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "deploy_classifier usa scripts/dokploy_redeploy.hub_image_paths() (ou um helper comum) como fonte unica",
+      "Teste de comportamento cobre um path que so um dos lados aceitava; saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-27T09:07:05.034100Z",
+    "updated_at": "2026-10-27T09:07:05.034100Z"
+  },
+  {
+    "id": "USR-409",
+    "project_id": "darkfac",
+    "title": "CI vermelho em PR aberto pela frota volta o ticket ao agente com o log do check (seguimento USR-398)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #767 mesclado (4625acd7)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-398 (PR #759) fez o motor rodar ratchet e lint-imports antes do REVIEW. Falta o criterio 2 original: quando o CI de um PR ja aberto pela frota fica vermelho (ex.: PR #723 em 25/10), o PR fica parado; deveria voltar ao agente de desenvolvimento com o log do check que falhou.",
+    "core_journey": [
+      "USR-398 (PR #759) fez o motor rodar ratchet e lint-imports antes do REVIEW. Falta o criterio 2 original: quando o CI de um PR ja aberto pela frota fica vermelho (ex.: PR #723 em 25/10), o PR fica parado; deveria voltar ao agente de desenvolvimento com o log do check que falhou."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Entrega do motor detecta check vermelho do PR que abriu e devolve ao agente uma vez com o log (gh run view --log-failed)",
+      "Segunda falha vira ticket/OA em vez de ficar parado",
+      "Teste de comportamento com gh simulado; saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-27T09:11:56.043249Z",
+    "updated_at": "2026-10-27T09:11:56.043249Z"
+  },
+  {
+    "id": "USR-410",
+    "project_id": "darkfac",
+    "title": "Configs .factory sem leitor no codigo: model_discovery, qualification_battery, qualification_spend, context_intelligence",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #771 mesclado (750b40c3)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Achado no USR-403 (PR #765): model_discovery.json, qualification_battery.json, qualification_spend.json e context_intelligence.json em .factory nao tem leitor nem escritor em core/, hub/ ou scripts/. Possivel config morta.",
+    "core_journey": [
+      "Achado no USR-403 (PR #765): model_discovery.json, qualification_battery.json, qualification_spend.json e context_intelligence.json em .factory nao tem leitor nem escritor em core/, hub/ ou scripts/. Possivel config morta."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Para cada arquivo: confirmar uso real (grep no repo, skills e CI) ou remover junto com referencias",
+      "Dicionario de dados atualizado e docs_sync --dictionary verde",
+      "Saldo de linhas negativo ou zero"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-27T09:24:43.843501Z",
+    "updated_at": "2026-10-27T09:24:43.843501Z"
+  },
+  {
+    "id": "USR-411",
+    "project_id": "darkfac",
+    "title": "Numeracao de OA colide entre owner_actions.json e o overlay/control store",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #774 mesclado (86ef1d86)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 26-27/10 tres OAs criadas pelo chat colidiram com ids ja usados em outra fonte do backlog (OA-073/074 fora do json; OA-077 no overlay, achada por OwnerActionStore.get). Quem cria OA escolhe o numero lendo so o owner_actions.json.",
+    "core_journey": [
+      "Em 26-27/10 tres OAs criadas pelo chat colidiram com ids ja usados em outra fonte do backlog (OA-073/074 fora do json; OA-077 no overlay, achada por OwnerActionStore.get). Quem cria OA escolhe o numero lendo so o owner_actions.json."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Funcao unica em core/owner_actions (ex.: next_id()) devolve o proximo id livre considerando todas as fontes do OwnerActionStore",
+      "run_ticket/hub/agentes usam essa funcao; teste de comportamento com id ocupado no overlay",
+      "Validacao (teste ou guard) rejeita id duplicado entre fontes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-27T09:35:14.200349Z",
+    "updated_at": "2026-10-27T09:35:14.200349Z"
+  },
+  {
+    "id": "USR-412",
+    "project_id": "darkfac",
+    "title": "Conflito de rebase na entrega vira loop rc=2 na frota em vez de ser resolvido pelo agente",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #780 mesclado (027ee1bf)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "27-28/10: USR-386 e USR-390 falharam 6x na frota com 'causa: rebase_conflict ... codigo de saida do filho: 2' (fleet-dispatcher.log), redespachados a cada cooldown sem progresso. AGENTS.md secao 6 manda o proprio agente resolver conflito com origin/main; o motor so sai com rc=2. Tambem: 'checkout compartilhado tem alteracoes nao commitadas' (snapshot diario do ledger escreve demands.json no checkout compartilhado) abortou runs no Notebook.",
+    "core_journey": [
+      "27-28/10: USR-386 e USR-390 falharam 6x na frota com 'causa: rebase_conflict ... codigo de saida do filho: 2' (fleet-dispatcher.log), redespachados a cada cooldown sem progresso. AGENTS.md secao 6 manda o proprio agente resolver conflito com origin/main; o motor so sai com rc=2. Tambem: 'checkout compartilhado tem alteracoes nao commitadas' (snapshot diario do ledger escreve demands.json no checkout compartilhado) abortou runs no Notebook."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Na entrega, conflito de rebase devolve ao agente de desenvolvimento uma vez na worktree com a lista de arquivos e as marcas de conflito para resolver; ledgers (.factory/demands/demands.json, .factory/owner_actions/owner_actions.json) sao resolvidos automaticamente pegando origin/main",
+      "Segunda falha marca o ticket waiting_human com o motivo, sem redespacho infinito",
+      "Escrita do snapshot diario nao suja o checkout compartilhado (worktree propria ou commit imediato)",
+      "Testes de comportamento; saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:12:26.748129Z",
+    "updated_at": "2026-10-28T10:12:26.748129Z"
   },
   {
     "id": "USR-413",
@@ -9360,6 +9985,191 @@
     "dependencies": [],
     "created_at": "2026-10-28T10:13:00.136868Z",
     "updated_at": "2026-10-28T16:00:42.502705Z"
+  },
+  {
+    "id": "USR-414",
+    "project_id": "darkfac",
+    "title": "Snapshot diario do ledger escreve demands.json no checkout compartilhado e aborta runs da frota",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #781 mesclado (fcc79ba4)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "28/10: o snapshot diario da fila do control store (commit fb546fab, USR-343) deixou .factory/demands/demands.json alterado em C:\\dev\\DarkFac; runs da frota no Notebook abortaram com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao'. Seguimento do USR-412 (PR #780).",
+    "core_journey": [
+      "28/10: o snapshot diario da fila do control store (commit fb546fab, USR-343) deixou .factory/demands/demands.json alterado em C:\\dev\\DarkFac; runs da frota no Notebook abortaram com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao'. Seguimento do USR-412 (PR #780)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O snapshot escreve e commita numa worktree propria (ou via API) sem tocar o checkout compartilhado",
+      "Checkout compartilhado fica limpo apos o snapshot (teste com repo temporario)",
+      "Saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:18:01.160015Z",
+    "updated_at": "2026-10-28T10:18:01.160015Z"
+  },
+  {
+    "id": "USR-415",
+    "project_id": "darkfac",
+    "title": "DemandsStore grava demands.json no checkout de onde o processo roda (suja o checkout compartilhado)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #786 mesclado (6e771023)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Achado no USR-414 (PR #781): DemandsStore usa caminho relativo e save_ticket/_ensure_storage reescrevem .factory/demands/demands.json no diretorio atual; qualquer create/update de ticket rodado de C:\\dev\\DarkFac (ex.: run_ticket --create, update_status de waiting_human) suja o checkout compartilhado e faz a frota abortar.",
+    "core_journey": [
+      "Achado no USR-414 (PR #781): DemandsStore usa caminho relativo e save_ticket/_ensure_storage reescrevem .factory/demands/demands.json no diretorio atual; qualquer create/update de ticket rodado de C:\\dev\\DarkFac (ex.: run_ticket --create, update_status de waiting_human) suja o checkout compartilhado e faz a frota abortar."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Escritas de ticket a partir do checkout compartilhado vao para o control store (ou worktree propria), sem alterar arquivos rastreados do checkout",
+      "Teste: create/update de ticket com cwd num repo temporario deixa git status limpo",
+      "Saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:20:36.887888Z",
+    "updated_at": "2026-10-28T10:20:36.887888Z"
+  },
+  {
+    "id": "USR-416",
+    "project_id": "darkfac",
+    "title": "Cota do Claude fica stale 30 min apos fechar a sessao: probe da CLI nao le nada",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #785 mesclado (c0497cdf)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "28/10 (owner): 'python -m core.usage.cli accounts --refresh' -> 'Claude CLI quota probe returned no reading; only a stale snapshot is available'. O snapshot anthropic (headers anthropic-ratelimit-unified, 65% semanal, 0% 5h) tinha age 1786 s e stale=true. Sem sessao do Claude Code aberta gravando a statusline (USR-391), o roteador volta a ver a cota como desconhecida e o Claude sai das rotas.",
+    "core_journey": [
+      "28/10 (owner): 'python -m core.usage.cli accounts --refresh' -> 'Claude CLI quota probe returned no reading; only a stale snapshot is available'. O snapshot anthropic (headers anthropic-ratelimit-unified, 65% semanal, 0% 5h) tinha age 1786 s e stale=true. Sem sessao do Claude Code aberta gravando a statusline (USR-391), o roteador volta a ver a cota como desconhecida e o Claude sai das rotas."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Probe sob demanda obtem os headers anthropic-ratelimit-unified (ex.: chamada minima autenticada da CLI) e grava snapshot fresco",
+      "Sem leitura nova, o roteador usa o ultimo snapshot ate o reset da janela com margem conservadora em vez de desconhecido",
+      "Teste de comportamento do caminho de refresh; saldo de testes nao aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:21:43.019063Z",
+    "updated_at": "2026-10-28T10:21:43.019063Z"
+  },
+  {
+    "id": "USR-417",
+    "project_id": "darkfac",
+    "title": "Compatibilizar leitura dos registros historicos de pesquisa",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR791 https://github.com/GCamposGit/DarkFactory/pull/791; merged a68e70ecf3937c5572aa633f4a8d3b35a72064d4; official gate tree4a17cc4a success; independent review and CI green; cloud/Hub deployed a68e70ec, canary done; backup snp3t_darkfac_20261028_185815_af15a0 drill_verified=True. USR-417 implementation absorbed by USR-425; no duplicate implementation. Node sync deferred (USR-420).",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 07:19 BRT estagio RESEARCH USR-386 ignorou registros 20260908_hybrid_workflow por primary invalido para AuthorityTier e 20260908_owner_workflow_revision/20260909_handoff_review por canonical_url inesperado em ResearchSource. Fonte heartbeat-usr386-20261028.err. Evidencia de incompatibilidade de schema, sem afirmar efeito no veredito research_skipped.",
+    "core_journey": [
+      "Em 28/10/2026 07:19 BRT estagio RESEARCH USR-386 ignorou registros 20260908_hybrid_workflow por primary invalido para AuthorityTier e 20260908_owner_workflow_revision/20260909_handoff_review por canonical_url inesperado em ResearchSource. Fonte heartbeat-usr386-20261028.err. Evidencia de incompatibilidade de schema, sem afirmar efeito no veredito research_skipped."
+    ],
+    "non_goals": [
+      "Nao alterar politica de quando pesquisar nem inventar fontes; nao reexecutar ticket em voo."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Leitor normaliza schema historico conhecido ou oferece migracao explicita preservando fontes e proveniencia.",
+      "Registro invalido tem erro estruturado sem credenciais e nao invalida os registros validos.",
+      "Regressao comportamental cobre primary e canonical_url historicos sem testes de forma."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:21:51.755299Z",
+    "updated_at": "2026-10-28T19:01:27.478017Z"
+  },
+  {
+    "id": "USR-418",
+    "project_id": "darkfac",
+    "title": "Evitar nova implementacao quando ja existe PR ativo do mesmo ticket",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR795 merged4e69c19a0310cea0f2bddde3f84ed656f8d21b92; PR/main CI green; cross-family review via canonical launcher. Dokploy read verification2026-10-29T10:42Z cloud deploymentpaC5C6lbU_Slgf50ATUrA done descriptionCommit4e69c19a; HubhealthSHA4e69c19a and deploymentScR2zhutvp0z1PTPy0Siedone; canarydone non-code-bearing. Backup snp3t_darkfac_20261029_104215_e091ea success drill_verifiedTrue. No duplicate deploy: own script returned no-image-change, later untriggered cloud attempt stopped when origin/main moved to docs433. Node sync deferred420; Desktop exclusion430/OA080 pending.",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 28/10/2026 launcher USR-386 PID4356 criou WT usr-386-20261028T101330Z e iniciou T1 enquanto outra sessao abriu PR779 head35dc99f ticket/usr-386. Estado fleet dizia in_flight vazio. Launcher proprio foi encerrado com arvore; WT e alteracoes preservadas. Evidencias heartbeat-usr386-20261028.log e PR779. Nao presumir ausencia de trabalho a partir de uma unica projecao.",
+    "core_journey": [
+      "Em 28/10/2026 launcher USR-386 PID4356 criou WT usr-386-20261028T101330Z e iniciou T1 enquanto outra sessao abriu PR779 head35dc99f ticket/usr-386. Estado fleet dizia in_flight vazio. Launcher proprio foi encerrado com arvore; WT e alteracoes preservadas. Evidencias heartbeat-usr386-20261028.log e PR779. Nao presumir ausencia de trabalho a partir de uma unica projecao."
+    ],
+    "non_goals": [
+      "Nao matar processos de outra sessao nem apagar trabalho preservado; nao criar scheduler concorrente."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Dois canais concorrentes para mesmo projeto/ticket compartilham exclusao canonica e nao criam segunda implementacao.",
+      "PR ativo ou ownership canonico vigente produz recusa estruturada e aponta execucao existente.",
+      "Teste de comportamento cobre concorrencia e liberacao apos encerramento, sem bloquear tickets distintos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:21:58.064069Z",
+    "updated_at": "2026-10-28T10:21:58.065075Z"
+  },
+  {
+    "id": "USR-419",
+    "project_id": "darkfac",
+    "title": "CRITICO: snapshot diario do ledger apaga tickets e OAs que nao estao no control store",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #784 mesclado (0647ec9b)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Commit fb546fab (snapshot diario, 28/10) removeu USR-391 de .factory/demands/demands.json (328 -> 327 ids) e OA-079 de .factory/owner_actions/owner_actions.json: o snapshot sobrescreve os ledgers com o conteudo do control store em vez de mesclar. Perda de historico e de acao do owner. Restaurado manualmente em 28/10. PR #781 (USR-414) passa a mesclar o control store sobre o demands.json da worktree; owner_actions nao confirmado.",
+    "core_journey": [
+      "Commit fb546fab (snapshot diario, 28/10) removeu USR-391 de .factory/demands/demands.json (328 -> 327 ids) e OA-079 de .factory/owner_actions/owner_actions.json: o snapshot sobrescreve os ledgers com o conteudo do control store em vez de mesclar. Perda de historico e de acao do owner. Restaurado manualmente em 28/10. PR #781 (USR-414) passa a mesclar o control store sobre o demands.json da worktree; owner_actions nao confirmado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Snapshot nunca remove id existente no ledger: mescla control store sobre o arquivo (control store vence nos campos, ids so do arquivo permanecem)",
+      "Mesma regra para owner_actions.json",
+      "Teste de comportamento: ledger com id ausente do control store mantem o id apos o snapshot",
+      "Guard/checagem no CI que reprova commit de snapshot que reduz o numero de ids"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:22:53.756283Z",
+    "updated_at": "2026-10-28T10:22:53.756283Z"
   },
   {
     "id": "USR-42",
@@ -9399,6 +10209,38 @@
     "dependencies": [],
     "created_at": "2026-09-23T06:26:35.118086Z",
     "updated_at": "2026-09-23T07:11:06.153595Z"
+  },
+  {
+    "id": "USR-420",
+    "project_id": "darkfac",
+    "title": "Convergencia pos-deploy usa candidato fixo e respeita hosts desabilitados",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #808 merged into main at d2092f0e; Dokploy redeploy verified (Darkhub health git_sha d2092f0e); fixed candidate convergence and disabled hosts policy (Desktop excluded cleanly); official gate verified on Grokbox with [HARNESS_PASS] (4753 discovered, 4723 passed, 30 skipped, 0 failed).",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "28/10/2026: deploy canônico iniciado em bc08a34f concluiu cloud/Darkhub/canary e health confirmou bc08. node_sync recalculou expected0647ec9 com main avançando em outra sessão; classificou VPS divergente e suprimiu backup. Também tentou atualizar Desktop, desabilitado na FASE_ATUAL por indexação, e encontrou owner_actions.json local modificado. Não apagar trabalho alheio. Evidencia sessão10431 e heartbeat-20261028.md.",
+    "core_journey": [
+      "28/10/2026: deploy canônico iniciado em bc08a34f concluiu cloud/Darkhub/canary e health confirmou bc08. node_sync recalculou expected0647ec9 com main avançando em outra sessão; classificou VPS divergente e suprimiu backup. Também tentou atualizar Desktop, desabilitado na FASE_ATUAL por indexação, e encontrou owner_actions.json local modificado. Não apagar trabalho alheio. Evidencia sessão10431 e heartbeat-20261028.md."
+    ],
+    "non_goals": [
+      "Nao relaxar health, CI ou verificação de SHA; nao apagar ou comitar arquivos de outras sessoes; nao habilitar Desktop."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Convergencia e backup usam o SHA imutavel validado/deployado na execucao, sem perseguir origin/main que avancou concorrentemente.",
+      "Hosts explicitamente desabilitados na politica corrente nao recebem update ou restart e sao reportados como excluidos, sem declarar convergencia falsa.",
+      "Teste concorrente main-avanca e hostdesabilitado preserva arquivos alheios, backup de VPS convergente e diagnosticos estruturados."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T10:42:11.145881Z",
+    "updated_at": "2026-10-31T11:24:39.328939Z"
   },
   {
     "id": "USR-421",
@@ -9490,6 +10332,35 @@
     "dependencies": [],
     "created_at": "2026-10-28T13:36:37.709581Z",
     "updated_at": "2026-10-29T03:51:14.718523Z"
+  },
+  {
+    "id": "USR-424",
+    "project_id": "darkfac",
+    "title": "Entrega deve resolver ticket da fila duravel antes de exigir ledger local",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #809 (https://github.com/GCamposGit/DarkFactory/pull/809) mesclado no commit 9842a697420b29938a6cca7870bed1599768d693.\nPortao oficial rapido aprovado [HARNESS_PASS] em 9c58d863 (4796 descobertos, 4773 passados, 23 pulados, 0 falhas).\nPre-checks aprovados: docs-sync ok, complexity ratchet ok (4138 funcoes), lint-imports ok.\nDeploy verificado ao vivo: https://darkhub.ggcampos.com/health retornando git_sha 9842a697420b29938a6cca7870bed1599768d693.",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-413 passou gate treec96078d1 e revisao independente12:30:58, mas complete_ticket falhou Ticket USR-413 not found in demands store. Ticket existe na fila control store. Resume deve materializar/resolver registro canonico no store usado pela entrega; evidencias em .factory/reports/heartbeat-20261028.md. Nao duplicar tickets nem reexecutar implementacao.",
+    "core_journey": [
+      "USR-413 passou gate treec96078d1 e revisao independente12:30:58, mas complete_ticket falhou Ticket USR-413 not found in demands store. Ticket existe na fila control store. Resume deve materializar/resolver registro canonico no store usado pela entrega; evidencias em .factory/reports/heartbeat-20261028.md. Nao duplicar tickets nem reexecutar implementacao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ticket queue-only chega ao PR por resume-delivery sem depender de ledger compartilhado",
+      "Preservar gate/revisao e registrar falha estruturada quando ticket realmente ausente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-28T15:36:40.280498Z",
+    "updated_at": "2026-10-31T12:29:33.836304Z"
   },
   {
     "id": "USR-425",
@@ -9586,8 +10457,8 @@
     "project_id": "darkfac",
     "title": "Revalidar quota de development apos planejamento antes de iniciar agente",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #806 merged into main at c7c0fb70; [HARNESS_PASS] grokbox 4665 passed; run_ticket revalidates development quota post-planning",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9608,7 +10479,35 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-29T01:47:10.905536Z",
-    "updated_at": "2026-10-29T01:47:10.905536Z"
+    "updated_at": "2026-10-31T05:40:00Z"
+  },
+  {
+    "id": "USR-429",
+    "project_id": "darkfac",
+    "title": "Excluir estado temporario do harness dos commits de entrega",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "Entregue via PR #807 (commit dccb44a6). Portao oficial deterministicamente aprovado com [HARNESS_PASS] (4735 testes descobertos, 4705 aprovados, 30 pulados, 0 falhas). Exclui estado temporario /.tmp/ dos commits de entrega e do staging.",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "PR794 incluiu .tmp/harness-state-usr-423/run_timings.jsonl e suite-0.lock. Evidencia: merge8b8f5f11, git show --stat. Estado de execucao temporario foi versionado durante autocorrecao.",
+    "core_journey": [
+      "PR794 incluiu .tmp/harness-state-usr-423/run_timings.jsonl e suite-0.lock. Evidencia: merge8b8f5f11, git show --stat. Estado de execucao temporario foi versionado durante autocorrecao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Remover artefatos temporarios versionados sem apagar estado em uso; prevenir reincidencia no staging de entrega; validar com testes comportamentais existentes e portao oficial."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T03:56:57.550029Z",
+    "updated_at": "2026-10-31T06:00:00Z"
   },
   {
     "id": "USR-43",
@@ -9651,12 +10550,73 @@
     "updated_at": "2026-09-23T14:42:43.774998Z"
   },
   {
+    "id": "USR-430",
+    "project_id": "darkfac",
+    "title": "Harness remoto deve excluir hosts desabilitados inclusive Desktop",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #803 merged into main at ed6cf52d300cbf204d45abef2217acb8aa30748b; quick gate [HARNESS_PASS] on grokbox (4646 passed, 30 skipped); redeployed to Dokploy (darkfac-cloud, darkhub blue-green)",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Telemetria08:54Z treec4a6e758 registrou worker Desktop100.78.181.90 jobe14d02808f864d2da31d1a50f5b69643 apesar DARKFAC_FLEET_DISABLED_HOSTS=desktop. User DARKFAC_TEST_WORKERS ainda continhaDesktop; corrigido User somenteGrokbox, processos existentes podem reter ambiente antigo. Auto-review rejeitou suspender dispatcher e parar418 por risco ao trabalho em voo; nenhuma parada executada.",
+    "core_journey": [
+      "Telemetria08:54Z treec4a6e758 registrou worker Desktop100.78.181.90 jobe14d02808f864d2da31d1a50f5b69643 apesar DARKFAC_FLEET_DISABLED_HOSTS=desktop. User DARKFAC_TEST_WORKERS ainda continhaDesktop; corrigido User somenteGrokbox, processos existentes podem reter ambiente antigo. Auto-review rejeitou suspender dispatcher e parar418 por risco ao trabalho em voo; nenhuma parada executada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Filtrar hosts desabilitados no harness remoto e em toda origem de workers; provar ausencia de envio ao Desktop desabilitado; preservar418/420emvoo; reiniciar servico somente em janela segura apos encerramento; portao e revisao cruzada."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T08:58:11.434809Z",
+    "updated_at": "2026-10-31T07:38:14.427884Z"
+  },
+  {
+    "id": "USR-431",
+    "project_id": "darkfac",
+    "title": "Paridade do harness de operacao: Codex e Antigravity como interface de chat",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #811 (https://github.com/GCamposGit/DarkFactory/pull/811) mesclado no commit b25b5fc594d89c1be345766253420e0801d464e8.\nPortao oficial rapido aprovado [HARNESS_PASS] em 60f17473 (4805 descobertos, 4782 passados, 23 pulados, 0 falhas).\nPre-checks aprovados: docs-sync ok, complexity ratchet ok (4148 funcoes), lint-imports ok.\nDeploy verificado ao vivo: https://darkhub.ggcampos.com/health retornando git_sha b25b5fc594d89c1be345766253420e0801d464e8.\nImplementado core/ops/turn_guard.py para guardas de fim de turno agnosticas (learning pack, session lifecycle, handoff) e integrado ao stop_hook_artifacts.py.",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A operacao continua (>24h) so foi provada com o Claude Code como interface. Partes da continuidade sao especificas do Claude: handoffs em memoria fora do repo (~/.claude/projects/.../memory), hooks de sessao e Stop (claude_execution_hook, learning pack USR-401), snapshot de cota via statusline. Codex le AGENTS.md mas nao tem esses ganchos; Antigravity e somente leitura e nao roda headless. Risco: perda de contexto e de disciplina de entrega ao trocar de harness, falha da fabrica e nao do harness.",
+    "core_journey": [
+      "A operacao continua (>24h) so foi provada com o Claude Code como interface. Partes da continuidade sao especificas do Claude: handoffs em memoria fora do repo (~/.claude/projects/.../memory), hooks de sessao e Stop (claude_execution_hook, learning pack USR-401), snapshot de cota via statusline. Codex le AGENTS.md mas nao tem esses ganchos; Antigravity e somente leitura e nao roda headless. Risco: perda de contexto e de disciplina de entrega ao trocar de harness, falha da fabrica e nao do harness."
+    ],
+    "non_goals": [
+      "Antigravity com escrita"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Handoff operacional versionado no repo ou control store e lido por qualquer harness no inicio da sessao",
+      "Guardas de fim de turno (learning pack, registro de sessao, defeito vira ticket) aplicados por codigo agnostico de harness, com equivalente para Codex",
+      "Medidor de cota do harness de operacao funciona para Codex",
+      "Ensaio real: Codex opera a fila por pelo menos 4h entregando 2 tickets sem resgate; resultado em docs/FASE_ATUAL.md"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-29T09:57:41.833568Z",
+    "updated_at": "2026-10-31T13:13:40.207658Z"
+  },
+  {
     "id": "USR-433",
     "project_id": "darkfac",
     "title": "Antigravity como interface de operacao: briefing de sessao agnostico de harness",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #798 mesclado (c78153fe); dokploy redeploy ok",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9686,15 +10646,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T00:00:00Z",
-    "updated_at": "2026-10-29T10:08:27.176857Z"
+    "updated_at": "2026-10-29T10:15:00Z"
   },
   {
     "id": "USR-434",
     "project_id": "darkfac",
     "title": "Snapshot diario do ledger voltou a apagar OAs (regressao do USR-419)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #799 mesclado no main (3b655f03); Dokploy redeploy ok (darkfac-cloud, darkhub blue-green, darkfac-canary, backup snp3t_darkfac_20261030_134027_f915bc verificado)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9718,7 +10678,66 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-29T10:12:50.231859Z",
-    "updated_at": "2026-10-29T10:12:50.231859Z"
+    "updated_at": "2026-10-30T13:50:00Z"
+  },
+  {
+    "id": "USR-435",
+    "project_id": "darkfac",
+    "title": "CI vermelho no main @caaef6c: main-tests (ubuntu-latest), main-tests (windows-latest 3/4), main-tests (windows-latest...",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "CI verde em main no commit 58b4b2a: https://github.com/GCamposGit/DarkFactory/actions/runs/41130641330",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA caaef6c25a9ddba594180ac240b7a5107b46cba9) terminou em 'failure'. Jobs vermelhos: main-tests (ubuntu-latest), main-tests (windows-latest 3/4), main-tests (windows-latest 4/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/41066314171. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "core_journey": [
+      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA caaef6c25a9ddba594180ac240b7a5107b46cba9) terminou em 'failure'. Jobs vermelhos: main-tests (ubuntu-latest), main-tests (windows-latest 3/4), main-tests (windows-latest 4/4), main-validation. Run: https://github.com/GCamposGit/DarkFactory/actions/runs/41066314171. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O workflow 'DarkFac CI' volta a ficar verde em main (novo run concluido com sucesso depois de caaef6c).",
+      "A causa raiz esta corrigida ou coberta por teste de regressao."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-30T21:28:52.168896Z",
+    "updated_at": "2026-10-30T21:30:38.706661Z"
+  },
+  {
+    "id": "USR-436",
+    "project_id": "darkfac",
+    "title": "Roteador rejeita Antigravity em development interativo por supports write falso",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #805 merged into main at 90390014; [HARNESS_PASS] grokbox 4648 passed; supports write allowed for antigravity operating harness in interactive dev",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Ao rodar pick com stage=development e operating_harness=antigravity em modo interativo (AGENTS.md §3 / USR-433), o roteador descarta Antigravity com 'Skipping harness antigravity for stage development (does not declare write mode)' porque agent_cli.supports('antigravity', 'write') consulta HARNESS_CAPABILITIES fixo em read-only.",
+    "core_journey": [
+      "Ao rodar pick com stage=development e operating_harness=antigravity em modo interativo (AGENTS.md §3 / USR-433), o roteador descarta Antigravity com 'Skipping harness antigravity for stage development (does not declare write mode)' porque agent_cli.supports('antigravity', 'write') consulta HARNESS_CAPABILITIES fixo em read-only."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Roteador elege Antigravity para development quando operating_harness='antigravity' em contexto interativo acima do piso",
+      "Antigravity continua proibido em development headless ou frota",
+      "Testes unitarios em tests/line/test_operating_harness.py e test_routing.py cobrem a eleicao sem monkeypatch"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-31T07:18:31.748999Z",
+    "updated_at": "2026-10-31T08:15:21.279333Z"
   },
   {
     "id": "USR-44",
@@ -11957,33 +12976,5 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
-  },
-  {
-    "id": "USR-429",
-    "project_id": "darkfac",
-    "title": "Excluir estado temporario do harness dos commits de entrega",
-    "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "PR794 incluiu .tmp/harness-state-usr-423/run_timings.jsonl e suite-0.lock. Evidencia: merge8b8f5f11, git show --stat. Estado de execucao temporario foi versionado durante autocorrecao.",
-    "core_journey": [
-      "PR794 incluiu .tmp/harness-state-usr-423/run_timings.jsonl e suite-0.lock. Evidencia: merge8b8f5f11, git show --stat. Estado de execucao temporario foi versionado durante autocorrecao."
-    ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Remover artefatos temporarios versionados sem apagar estado em uso; prevenir reincidencia no staging de entrega; validar com testes comportamentais existentes e portao oficial."
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-10-29T03:56:57.550029Z",
-    "updated_at": "2026-10-29T03:56:57.550029Z"
   }
 ]
