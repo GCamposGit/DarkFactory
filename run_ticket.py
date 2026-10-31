@@ -56,10 +56,12 @@ from core.line.stages import Stage, StageArtifactMissing, require_artifact
 from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.workflow import execution_registry
+from core.models.registry import QUOTA_FLOOR_MIN
 from core.line.operating_harness import detect_operating_harness
 from core.line.routing import (
     _HARNESS_TO_PROVIDER,
     _default_quota_headroom,
+    _resolve_role_ref,
     harness_cli_pin,
     load_routing_config,
     pick,
@@ -205,13 +207,14 @@ def inspect_quotas() -> dict[str, dict[str, Any]]:
         raw = sanitize_raw(provider, raw)
         flags = snapshot.get("plausibility_flags") or latest.get("flags") or []
         # Unknown remains ineligible for the launch guard, while the report
-        # labels it separately from a measured critical percentage.
-        is_critical = headroom is None or headroom <= 15.0
+        # labels it separately from a measured critical percentage. bool is not a percent.
+        measured = _numeric_headroom(headroom)
+        is_critical = measured is None or measured <= QUOTA_FLOOR_MIN
         quotas[harness] = {
             "provider": provider,
-            "headroom": headroom,
+            "headroom": measured,
             "is_critical": is_critical,
-            "status": "SEM MEDIDOR / SUSPEITA" if headroom is None else ("CRÍTICO (<= 15%)" if is_critical else "SAUDÁVEL"),
+            "status": "SEM MEDIDOR / SUSPEITA" if measured is None else ("CRÍTICO (<= 15%)" if is_critical else "SAUDÁVEL"),
             "source": source, "age": age, "raw_fields": raw, "flags": flags,
         }
     return quotas
@@ -279,9 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--harness", default=None,
         help=(
-            "Explicitly requested harness (must support write mode: claude, codex). Never falls back to "
-            "another harness, except on a harness_infra_error (USR-188: the harness's own terminal/sandbox "
-            "tooling failed to start the call)"
+            "Explicitly requested harness (must support write mode: claude, codex, grok). "
+            "On each plan slice the pin is kept only when that reading has a known headroom above 15%%; "
+            "at or below the floor, or unknown, the fresh development pick decides. "
+            "--force does not keep a harness that pick refuses. During the run, a pinned harness "
+            "still does not fall through, except on harness_infra_error (USR-188)."
         ),
     )
     parser.add_argument("--force", action="store_true", help="Explicit override to allow running on a critical quota harness")
@@ -2811,10 +2816,13 @@ def _run_dev_agent(
     selected_model: Optional[str],
     progress: ProgressPublisher,
     extra_prompt: str = "",
+    pinned: Optional[bool] = None,
 ) -> Any:
     """Runs the development agent with the line's retry policy; returns the retry report.
 
-    `extra_prompt` scopes the run to one sub-ticket of a multi-ticket plan (USR-375 S4)."""
+    `extra_prompt` scopes the run to one sub-ticket of a multi-ticket plan (USR-375 S4).
+    `pinned` overrides ``bool(args.harness)``: after PLAN a critical or unknown pin is discarded
+    and the fresh route must be allowed to fall through (USR-428)."""
     dev_prompt = ticket_stages.build_dev_prompt(ticket, workspace) + extra_prompt
 
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
@@ -2854,7 +2862,7 @@ def _run_dev_agent(
         run_func=run_agent,
         pick_func=pick,
         sleep_fn=time.sleep,
-        pinned=bool(args.harness),
+        pinned=bool(args.harness) if pinned is None else pinned,
         on_event=_report_progress,
     )
 
@@ -3300,50 +3308,266 @@ def _resumed_build_result(ticket: UserTicket, workspace: TicketWorkspace, progre
     }
 
 
+def _numeric_headroom(headroom: Any) -> Optional[float]:
+    """A measured percent. `bool` is not a percent: True/False must not pass as 1/0."""
+    if isinstance(headroom, bool) or not isinstance(headroom, (int, float)):
+        return None
+    return float(headroom)
+
+
+def _quota_above_floor(headroom: Any) -> bool:
+    """Known headroom strictly above the development floor. The floor, unknown and bool do not pass."""
+    number = _numeric_headroom(headroom)
+    return number is not None and number > QUOTA_FLOOR_MIN
+
+
+def _quota_lookup_from_reading(quotas: dict[str, Any]) -> Any:
+    """Provider headroom from one `inspect_quotas()` reading. Missing or non-numeric stays unknown.
+
+    The closure snapshots this reading. A later probe does not change a pick that already closed over it.
+    """
+    by_provider: dict[str, Optional[float]] = {}
+    for harness, info in quotas.items():
+        if not isinstance(info, dict):
+            continue
+        provider = str(info.get("provider") or _HARNESS_TO_PROVIDER.get(str(harness), harness))
+        by_provider[provider] = _numeric_headroom(info.get("headroom"))
+
+    def lookup(provider_id: str) -> Optional[float]:
+        return by_provider.get(provider_id)
+
+    return lookup
+
+
+def _development_harness_model(harness: str) -> Optional[str]:
+    """Model the development stage declares for this harness.
+
+    The pin wins, then that harness's own cascade entry. Never the model of a different harness
+    the fresh pick happened to elect.
+    """
+    cfg = load_routing_config()
+    stage_cfg = cfg.stages.get("development")
+    cascade_model: Optional[str] = None
+    cascade = getattr(stage_cfg, "cascade", None)
+    if isinstance(cascade, list):
+        for name, model in cascade:
+            if name == harness:
+                cascade_model = _resolve_role_ref(model)
+                break
+    cli_model, _effort = harness_cli_pin(harness, cascade_model, stage="development", config=cfg)
+    return _resolve_role_ref(cli_model)
+
+
+def _fresh_development_pick(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    quotas: dict[str, Any],
+) -> Optional[tuple[str, Optional[str]]]:
+    """Development pick on this reading. No override flag and no previous route (USR-428)."""
+    execution_context = "headless" if getattr(args, "fleet", False) else "interactive"
+    caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
+    return pick(
+        "development",
+        caps,
+        mode=DEVELOPMENT_MODE,
+        operating_harness=detect_operating_harness(),
+        project_id=ticket.project_id,
+        complexity=_routing_complexity(ticket),
+        execution_context=execution_context,
+        quota_lookup=_quota_lookup_from_reading(quotas),
+    )
+
+
+def _development_route_after_plan(
+    args: argparse.Namespace,
+    quotas: dict[str, Any],
+    fresh: Optional[tuple[str, Optional[str]]],
+) -> Optional[tuple[str, Optional[str], bool]]:
+    """`(harness, model, pinned)` for one development slice, or None to wait.
+
+    An explicit `--harness` is kept only when this reading has a known headroom above the floor.
+    The model is the one declared for that harness, not the fresh pick's model when the pick elected
+    someone else. `--force` and a prompt authorization are not consulted: a harness the fresh pick
+    refuses does not start.
+    """
+    pinned_name = str(getattr(args, "harness", "") or "").lower().strip()
+    if pinned_name:
+        info = quotas.get(pinned_name) or {}
+        headroom = info.get("headroom") if isinstance(info, dict) else None
+        if _quota_above_floor(headroom):
+            return pinned_name, _development_harness_model(pinned_name), True
+        logger.info(
+            "pin %s descartado apos o PLAN (headroom=%s); o pick fresco decide",
+            pinned_name, headroom,
+        )
+    if fresh is None:
+        return None
+    return fresh[0], fresh[1], False
+
+
+def _resolve_development_slice(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    *,
+    index: int,
+    total: int,
+    preflight_harness: Optional[str],
+) -> Optional[tuple[str, Optional[str], bool, dict[str, Any]]]:
+    """Fresh `(harness, model, pinned, quotas)` for plan slice `index`, or None to wait.
+
+    Each slice repeats the post-PLAN revalidation (USR-428): a new `development` pick on the
+    reading of that moment, with no override and no preflight tuple. `_stage_build` calls this only
+    after `plan_tickets` has required the PLAN artifact, so the probe below is not the preflight
+    reading and is not cached. An explicit pin is kept only while this reading has a known headroom
+    above the floor, with the model declared for that harness.
+    """
+    quotas = inspect_quotas()
+    fresh = _fresh_development_pick(args, ticket, quotas)
+    decided = _development_route_after_plan(args, quotas, fresh)
+    if decided is None:
+        return None
+    harness, model, follow_pin = decided
+    logger.info(
+        "development fatia %s/%s: harness %s (preflight era %s)",
+        index, total, harness, preflight_harness,
+    )
+    return harness, model, follow_pin, quotas
+
+
+# Statuses a route wait may put back on the planned queue. waiting_human stays a human decision;
+# completed and cancelled are never reopened here.
+_ROUTE_WAIT_REQUEUE_FROM = frozenset({
+    DeliveryStatus.DISCOVERED,
+    DeliveryStatus.ACCEPTED,
+    DeliveryStatus.IMPLEMENTING,
+    DeliveryStatus.VALIDATING,
+})
+
+
+def _requeue_after_route_wait(ticket: UserTicket) -> None:
+    """Put the ticket back on the planned queue. Does not touch the worktree.
+
+    Exit 75 is the fleet requeue signal. A ticket that is already `planned` stays there (no ledger
+    write). One that the line had moved to implementing or validating goes back to `planned`, which
+    is the only status the dispatcher selects.
+    """
+    try:
+        store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
+        current = store.get_ticket(ticket.id)
+        if current is None or current.status == DeliveryStatus.PLANNED:
+            return
+        if current.status not in _ROUTE_WAIT_REQUEUE_FROM:
+            logger.info(
+                "route_wait leaves %s as %s", ticket.id, getattr(current.status, "value", current.status),
+            )
+            return
+        store.requeue_ticket(ticket.id, reason="development_no_route")
+    except Exception as exc:  # noqa: BLE001 - requeue must not hide the wait itself
+        logger.warning("Could not requeue %s after route_wait: %s", ticket.id, exc)
+
+
+def _stage_development_route_wait(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    progress: ProgressPublisher,
+    *,
+    slice_index: int = 1,
+    slice_total: int = 1,
+) -> int:
+    """No writable harness above the floor for this slice. Keep the worktree and requeue.
+
+    Does not call `_report_workspace_fate` or `_discard_untouched_workspace`. `_run` returns this
+    exit code before delivery, so those cleanups do not run later either.
+    """
+    _requeue_after_route_wait(ticket)
+    cause = "development_no_route"
+    floor = f"{QUOTA_FLOOR_MIN:g}"
+    message = f"development apos o PLAN sem rota com cota acima de {floor}%"
+    if slice_index > 1:
+        message = (
+            f"development da fatia {slice_index}/{slice_total} sem rota com cota acima de {floor}%; "
+            "o trabalho das fatias anteriores permanece na worktree"
+        )
+    progress.phase("agent", "skipped", message, cause="route_wait")
+    progress.set_outcome(message, "route_wait")
+    print(
+        f"[AGUARDANDO] {message}. Ticket segue planned e volta a fila depois ({ROUTE_WAIT_MARKER}).",
+        file=sys.stderr,
+    )
+    print(f"[i] Worktree preservada: {workspace.path}", file=sys.stderr)
+    if args.json:
+        print(json.dumps({
+            "ok": False, "cause": "route_wait", "stage": "BUILD", "error": cause,
+            "ticket_id": ticket.id, "workspace": str(workspace.path),
+        }, indent=2, ensure_ascii=False))
+    return EXIT_ROUTE_WAIT
+
+
 def _stage_build(
     args: argparse.Namespace,
     ticket: UserTicket,
     workspace: TicketWorkspace,
-    quotas: dict[str, Any],
+    _quotas: dict[str, Any],
     route: dict[str, Any],
     progress: ProgressPublisher,
 ) -> Any:
-    """Development agent run. Returns an int exit code, or a dict with the agent outcome."""
-    selected_harness = route["harness"]
-    selected_model = route["model"]
+    """Development agent run. Returns an int exit code, or a dict with the agent outcome.
+
+    The preflight tuple in `route` is not a license to start an agent. Each plan slice picks again
+    on the quota reading of that moment, before its agent (USR-428). A slice with no route waits
+    and leaves the worktree, including whatever earlier slices already wrote.
+    """
     ticket_size = route["ticket_size"]
     # 4. Execution Phase
     mcp_healthy, mcp_reasons = check_optional_mcp_servers()
     if not mcp_healthy and not args.json:
         print(f"[!] Integração opcional MCP indisponível ({'; '.join(mcp_reasons)}). Continuando em modo degradado.")
-    if not args.json:
-        print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
 
-    before_headroom = quotas.get(selected_harness, {}).get("headroom")
     rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
     plan_items = ticket_engine.plan_tickets(rws)
     # A multi-ticket plan runs its sub-tickets sequentially inside this same ticket (USR-375 S4).
+    # Every slice revalidates development before run_agent; a one-slice plan does this once (USR-428).
     sequential = len(plan_items) > 1
     tickets_done: list[str] = []
     total_duration = 0.0
-    implementer = selected_harness
+    implementer = str(route.get("harness") or "")
+    selected_harness = implementer
+    selected_model: Optional[str] = None
+    cost_before: Any = None
+    cost_harness: Optional[str] = None
+    report: Any = None
+    preflight_harness = route.get("harness") if isinstance(route.get("harness"), str) else None
     for index, item in enumerate(plan_items, start=1):
-        if sequential:
-            if not args.json:
-                print(f"--> Sub-ticket {index}/{len(plan_items)} do plano: {item.id} {item.title}")
-            extra = ticket_engine.sub_ticket_prompt(item, index, len(plan_items))
-            report = _run_dev_agent(
-                args, ticket, workspace, quotas, selected_harness, selected_model, progress, extra_prompt=extra
+        resolved = _resolve_development_slice(
+            args, ticket, index=index, total=len(plan_items), preflight_harness=preflight_harness,
+        )
+        if resolved is None:
+            return _stage_development_route_wait(
+                args, ticket, workspace, progress, slice_index=index, slice_total=len(plan_items),
             )
-        else:
-            report = _run_dev_agent(args, ticket, workspace, quotas, selected_harness, selected_model, progress)
+        selected_harness, selected_model, follow_pin, quotas = resolved
+        slice_before = quotas.get(selected_harness, {}).get("headroom")
+        if cost_harness != selected_harness:
+            cost_before = slice_before
+            cost_harness = selected_harness
+        if sequential and not args.json:
+            print(f"--> Sub-ticket {index}/{len(plan_items)} do plano: {item.id} {item.title}")
+        if not args.json:
+            print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
+        extra = ticket_engine.sub_ticket_prompt(item, index, len(plan_items)) if sequential else ""
+        report = _run_dev_agent(
+            args, ticket, workspace, quotas, selected_harness, selected_model, progress,
+            extra_prompt=extra, pinned=follow_pin,
+        )
         early = _stage_agent_early_exit(
-            args, ticket, workspace, report, selected_harness, before_headroom, ticket_size, progress
+            args, ticket, workspace, report, selected_harness, slice_before, ticket_size, progress
         )
         if early is not None:
             return early
         total_duration += float(report.total_duration_s or 0.0)
         tickets_done.append(item.id)
+        implementer = selected_harness
         if report.route is not None:
             implementer = report.route[0]
 
@@ -3358,7 +3582,7 @@ def _stage_build(
     cost_record = record_ticket_quota_cost(
         ticket_id=ticket.id,
         harness=selected_harness,
-        before_headroom=before_headroom,
+        before_headroom=cost_before,
         after_headroom=after_headroom,
         duration_s=total_duration if sequential else report.total_duration_s,
         success=True,
@@ -3515,6 +3739,9 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
         built = _stage_build(args, ticket, workspace, quotas, route, progress)
     if isinstance(built, int):
+        # EXIT_ROUTE_WAIT is one of these ints. The waiting stage already requeued the ticket.
+        # Delivery does not start, and this return does not call `_report_workspace_fate` or
+        # `_discard_untouched_workspace`: the worktree, including the PLAN file and earlier slices, stays.
         return built
 
     exit_code, completion_info = _stage_deliver(args, ticket, workspace, progress, exec_tracker)

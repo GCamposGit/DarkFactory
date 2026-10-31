@@ -38,6 +38,23 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    valido o ticket nao chega ao BUILD nem a entrega (`_require_plan_and_build` exige PLAN, RESEARCH e BUILD).
 4. **BUILD** roda o agente de desenvolvimento uma vez por sub-ticket do plano, em sequencia, na mesma
    worktree, e grava `progress.json` (`harness` = familia do implementador).
+   Antes de cada fatia, o launcher relê a cota e chama `pick` de novo (`development`, modo `write`),
+   sem override e sem a tupla do preflight (USR-428). Um plano de uma fatia, inclusive o plano mínimo
+   de correção pequena, faz esse pick uma vez. Um plano de várias fatias repete esse pick antes do
+   agente de cada uma; a leitura pode trocar o harness write (Codex acima de 15% numa fatia, Claude
+   na seguinte quando o Codex está no piso de 15%). Com `--fleet`, o pick da fatia usa `execution_context`
+   headless: Antigravity não inicia o agente mesmo como harness de operação, com Google acima de 15%
+   e os demais no piso.
+   `--harness` só segue naquela fatia se a leitura nova tiver headroom conhecido acima de 15%; 15.0, abaixo
+   ou desconhecido descarta o pin e usa o pick fresco. O modelo passado ao agente é o declarado para esse
+   harness na etapa development, não o modelo de outro harness que o pick fresco tenha elegido.
+   `--force` e a autorização no prompt não iniciam um harness que esse pick recusa. Se o pick de uma fatia
+   devolve `None`, essa fatia não chama o agente, a entrega não começa, o processo sai com 75
+   (`EXIT_ROUTE_WAIT`) e o JSON traz `cause` `route_wait`, `stage` `BUILD` e o caminho da worktree. O
+   diretório permanece, com o arquivo que o PLAN gravou nele e com o que as fatias anteriores já gravaram.
+   `_discard_untouched_workspace` e `_report_workspace_fate` não rodam nesse caminho e portanto não removem
+   a worktree. O ticket volta a `planned` se estava `implementing` ou `validating`; um ticket que já estava
+   `planned` permanece na fila.
 5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD; **VALIDATE** grava `validation.json`
    depois do portao; **REVIEW** roda `stage_review.ReviewStage` com familia diferente do implementador e grava
    `review_verdict.json` so na aprovacao (`changes_required` reinvoca o agente, comita e repete o portao);
