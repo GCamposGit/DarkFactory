@@ -6001,7 +6001,6 @@
       "user-demand",
       "plano-v0-20261024",
       "bloco-g",
-      "planning-only",
       "owner-decision:OA-024=A",
       "owner-decision:OA-025=A",
       "owner-decision:OA-042=recomendado"
@@ -10739,6 +10738,38 @@
     "dependencies": [],
     "created_at": "2026-10-31T07:18:31.748999Z",
     "updated_at": "2026-10-31T08:15:21.279333Z"
+  },
+  {
+    "id": "USR-438",
+    "project_id": "darkfac",
+    "title": "Mensagens do Telegram para leigo com opcoes completas de grill e botoes resumidos",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #814 merged at commit 33cba72295368deb6abcd3e6d1f35f13a991da78; live DarkHub verified healthy at https://darkhub.ggcampos.com/health; official test gate passed (4806 tests [HARNESS_PASS]).",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Mensagens do bot do Telegram continham termos tecnicos, comandos inapropriados para mobile e alternativas de grill truncadas nos botoes de selecao (limite de largura da UI mobile do Telegram corta o texto). O usuario nao conseguia ler as alternativas completas antes de votar. Alem disso, links locais (127.0.0.1) ou sem validade quebram a experiencia no celular.",
+    "core_journey": [
+      "Mensagens do bot do Telegram continham termos tecnicos, comandos inapropriados para mobile e alternativas de grill truncadas nos botoes de selecao (limite de largura da UI mobile do Telegram corta o texto). O usuario nao conseguia ler as alternativas completas antes de votar. Alem disso, links locais (127.0.0.1) ou sem validade quebram a experiencia no celular."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Mensagens de grill no Telegram exibem o texto integral de cada alternativa numerada no corpo da mensagem, incluindo a indicacao clara da opcao recomendada",
+      "Botoes de selecao do grill contem apenas o numero da alternativa e um resumo conciso de 2-3 palavras, evitando truncamento na UI do Telegram",
+      "Mensagens do Telegram usam linguagem clara e acessivel para leigo, sem jargoes tecnicos desnecessarios nem blocos de codigo/comandos que nao podem ser executados no celular",
+      "Todos os links enviados nas mensagens sao URLs publicas validas e funcionais (respeitando DARKHUB_PUBLIC_URL), sem links locais 127.0.0.1",
+      "Testes unitarios e de integracao cobrindo a formatacao de mensagens do Telegram e o layout dos botoes e opcoes de grill"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-31T15:37:30.784250Z",
+    "updated_at": "2026-10-31T16:12:12.878800Z"
   },
   {
     "id": "USR-44",
