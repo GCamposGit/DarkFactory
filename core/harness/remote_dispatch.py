@@ -105,6 +105,14 @@ ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
 #: 127.0.0.1 on purpose, which the real self-dispatch guard would otherwise
 #: (correctly) refuse. Never meant to be set outside a test process.
 ENV_SELF_DISPATCH_TEST_OVERRIDE = "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE"
+ENV_FLEET_DISABLED_HOSTS = "DARKFAC_FLEET_DISABLED_HOSTS"
+
+#: USR-430: Known host identifiers and IPs to exclude workers when a host is disabled.
+KNOWN_HOST_IDENTIFIERS: dict[str, frozenset[str]] = {
+    "desktop": frozenset({"desktop", "desktop-g45ipem", "100.78.181.90"}),
+    "grokbox": frozenset({"grokbox", "grok-bot-vm-418374532", "100.77.130.5"}),  # census: wire-id
+    "notebook": frozenset({"notebook", "ai-notebook", "ai_notebook", "100.81.84.124"}),
+}
 
 #: grokbox (Linux, Tailscale 100.77.130.5) first: it runs the official gate in ~143 s
 #: (4157 passed, 14/10/2026) versus 23-30 min on the Notebook; the Desktop is second.
@@ -219,9 +227,61 @@ def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def worker_urls() -> list[str]:
+def disabled_hosts(raw: str | None = None) -> set[str]:
+    """USR-430: Parse comma-separated disabled host identifiers from env or argument."""
+    if raw is None:
+        raw = os.environ.get(ENV_FLEET_DISABLED_HOSTS, "")
+    return {x.strip().casefold() for x in raw.split(",") if x.strip()}
+
+
+def is_worker_disabled(url: str, disabled: set[str] | None = None) -> bool:
+    """USR-430: True if url or its hostname/IP matches any disabled host."""
+    if disabled is None:
+        disabled = disabled_hosts()
+    if not disabled:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = (parsed.hostname or "").strip().casefold()
+    except Exception:
+        hostname = ""
+    if not hostname:
+        hostname = url.strip().casefold()
+
+    for d in disabled:
+        if hostname == d:
+            return True
+        aliases = KNOWN_HOST_IDENTIFIERS.get(d, frozenset())
+        if hostname in aliases:
+            return True
+        if d in hostname:
+            return True
+    return False
+
+
+def is_worker_node_disabled(node_id: str | None, hostname: str | None, disabled: set[str] | None = None) -> bool:
+    """USR-430: True if the worker's reported node_id or hostname is in the disabled hosts set."""
+    if disabled is None:
+        disabled = disabled_hosts()
+    if not disabled:
+        return False
+    candidates = {s.strip().casefold() for s in (node_id or "", hostname or "") if s.strip()}
+    for cand in candidates:
+        for d in disabled:
+            if cand == d or cand in KNOWN_HOST_IDENTIFIERS.get(d, frozenset()) or d in cand:
+                return True
+    return False
+
+
+def worker_urls(disabled: set[str] | None = None) -> list[str]:
+    """USR-430: Filter out worker URLs on disabled hosts (DARKFAC_FLEET_DISABLED_HOSTS)."""
     raw = os.environ.get(ENV_TEST_WORKERS, DEFAULT_WORKERS)
-    return [url.strip() for url in raw.split(",") if url.strip()]
+    all_urls = [url.strip() for url in raw.split(",") if url.strip()]
+    if disabled is None:
+        disabled = disabled_hosts()
+    if not disabled:
+        return all_urls
+    return [url for url in all_urls if not is_worker_disabled(url, disabled)]
 
 
 def _effective_mode(*, remote_required: bool) -> str:
@@ -1145,6 +1205,23 @@ def _dispatch_with_restart_retry(
             health = stable
 
 
+def _probe_eligible_worker(base_url: str, disabled: set[str]) -> dict[str, Any] | None:
+    """Probe worker health and ensure it is not disabled or self-dispatching."""
+    if is_worker_disabled(base_url, disabled):
+        print(f"[REMOTE] {base_url} is on a disabled host (DARKFAC_FLEET_DISABLED_HOSTS); skipping")
+        return None
+    health = probe_health(base_url)
+    if health is None:
+        print(f"[REMOTE] {base_url} unreachable (worker offline or port blocked)")
+        return None
+    if is_worker_node_disabled(health.get("node_id"), health.get("hostname"), disabled):
+        print(f"[REMOTE] {base_url} reported disabled node (DARKFAC_FLEET_DISABLED_HOSTS); skipping")
+        return None
+    if is_self_dispatch(base_url, health):
+        return None
+    return health
+
+
 def maybe_dispatch_remote(
     *,
     steps: list[HarnessStepConfig],
@@ -1183,20 +1260,20 @@ def maybe_dispatch_remote(
     if _unconditional_disable_reason() is not None:
         return None
 
-    urls = worker_urls()
+    disabled = disabled_hosts()
+    urls = worker_urls(disabled)
     if not urls:
         if remote_required:
-            raise RemoteRequiredError("--remote-required: DARKFAC_TEST_WORKERS is empty")
+            raise RemoteRequiredError(
+                "--remote-required: no eligible remote workers (all candidates disabled or DARKFAC_TEST_WORKERS is empty)"
+            )
         return None
 
     tried_any_reachable = False
 
     for base_url in urls:
-        health = probe_health(base_url)
+        health = _probe_eligible_worker(base_url, disabled)
         if health is None:
-            print(f"[REMOTE] {base_url} unreachable (worker offline or port blocked)")
-            continue
-        if is_self_dispatch(base_url, health):
             continue
         tried_any_reachable = True
 

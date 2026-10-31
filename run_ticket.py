@@ -1208,6 +1208,9 @@ def _rotate_gate_workers(failed_output: str) -> str | None:
     for u in rd.DEFAULT_WORKERS.split(","):
         if u not in pool:
             pool.append(u)
+    # USR-430: Never re-add workers on hosts disabled by DARKFAC_FLEET_DISABLED_HOSTS
+    disabled = rd.disabled_hosts()
+    pool = [u for u in pool if not rd.is_worker_disabled(u, disabled)]
     kept = [u for u in pool if u not in failed] or pool
     previous = os.environ.get(rd.ENV_TEST_WORKERS)
     os.environ[rd.ENV_TEST_WORKERS] = ",".join(kept)

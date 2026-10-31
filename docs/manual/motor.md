@@ -148,3 +148,7 @@ continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_i
 
 `run_ticket.py` detecta o harness de operacao ativo (`DARKFAC_OPERATING_HARNESS` ou contexto do terminal). Se for passado `--fleet` com `--harness antigravity`, a execucao e recusada na inicializacao (`_stage_check_harness`) antes de qualquer efeito colateral (`[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.`). O briefing agnostico de sessao `python -m core.ops.briefing` e o handoff versionado `docs/operacao/HANDOFF.md` sincronizam o estado entre sessoes.
 
+## Rotacao de workers remotos com hosts desabilitados (USR-430)
+
+Durante a validacao pelo portao oficial, `run_ticket.py` rotaciona os workers remotos quando uma tentativa falha (`_rotate_gate_workers`). Essa rotacao filtra estritamente hosts listados em `DARKFAC_FLEET_DISABLED_HOSTS` (ex.: `desktop` ocupado com indexacao), garantindo que nos desabilitados nao sejam reinseridos no pool ativo de validacao.
+
