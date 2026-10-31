@@ -185,7 +185,28 @@ class TicketCompletionReport(BaseModel):
     commit_sha: Optional[str] = None
     sync_result: Optional[GitSyncResult] = None
     delivery: Optional[DeliveryReport] = None
+    cause: Optional[str] = None
     message: str = ""
+
+
+class TicketAbsentError(LookupError):
+    """The ticket id is in neither the worktree ledger nor the durable queue."""
+
+    def __init__(self, ticket_id: str) -> None:
+        self.ticket_id = ticket_id
+        super().__init__(
+            f"Ticket '{ticket_id}' is absent from the worktree ledger and the durable queue."
+        )
+
+
+def absent_ticket_report(ticket_id: str) -> TicketCompletionReport:
+    """Structured refusal: do not allocate an id, a queue row, or a commit."""
+    return TicketCompletionReport(
+        ok=False,
+        ticket_id=ticket_id,
+        cause="ticket_absent",
+        message=str(TicketAbsentError(ticket_id)),
+    )
 
 
 def _win_kwargs() -> dict[str, Any]:
@@ -914,16 +935,21 @@ class GitAutonomyManager:
     def _record_completion(
         self, ticket_id: str, title: str, cwd: Path, custom_message: str | None = None
     ) -> str:
-        """Commit implementation, then atomically record its SHA and completed status."""
+        """Commit implementation, then atomically record its SHA and completed status.
+
+        The canonical row is the worktree ledger or, when that id is missing, the
+        durable queue (USR-424). A missing ledger file with no queue row keeps the
+        standalone-repo path: commit the tree and do not invent a ticket.
+        """
         ledger = cwd / _LEDGER_RELATIVE
-        if not ledger.is_file():  # small standalone repositories used by callers/tests
+        if not ledger.is_file() and _durable_queue_ticket(ticket_id) is None:
             if self.is_dirty(cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
             return self.get_current_sha(cwd)
         store = DemandsStore(ledger)
-        ticket = store.get_ticket(ticket_id)
+        ticket = store.resolve_for_delivery(ticket_id)
         if ticket is None:
-            raise ValueError(f"Ticket {ticket_id} not found in demands ledger")
+            raise TicketAbsentError(ticket_id)
         if ticket.status == DeliveryStatus.COMPLETED and ticket.delivery_evidence:
             if self.is_dirty(cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
@@ -1557,18 +1583,18 @@ class GitAutonomyManager:
         gh_runner: Optional[GhRunner] = None,
         live_verifier: Optional[Callable[[str], Any]] = None,
     ) -> TicketCompletionReport:
-        """Finalize ticket development: update DemandsStore to completed, commit, and push."""
+        """Finalize ticket development: resolve the canonical row, record completed, commit, and push.
+
+        The row is the worktree ledger or the durable queue. An id in neither place
+        returns ``cause=ticket_absent`` without allocating a ticket.
+        """
         target_dir = cwd or self.root
         store_path = target_dir / ".factory" / "demands" / "demands.json"
         store = DemandsStore(store_path)
 
-        ticket = store.get_ticket(ticket_id)
-        if not ticket:
-            return TicketCompletionReport(
-                ok=False,
-                ticket_id=ticket_id,
-                message=f"Ticket '{ticket_id}' not found in demands store.",
-            )
+        ticket = store.canonical_ticket(ticket_id)
+        if ticket is None:
+            return absent_ticket_report(ticket_id)
         inspection_error = self._inspect_completion_changes(ticket_id, target_dir)
         if inspection_error:
             return inspection_error
@@ -1635,6 +1661,9 @@ class GitAutonomyManager:
         self._phase("commit", "running", "commit da implementacao e do registro de conclusao")
         try:
             sha = self._record_completion(ticket_id, title, target_dir, custom_message)
+        except TicketAbsentError as exc:
+            self._phase("commit", "failed", str(exc), "ticket_absent")
+            return None, absent_ticket_report(report_ticket_id)
         except StagedInspectError as exc:
             self._phase("commit", "failed", str(exc), STAGED_INSPECT_FAILED)
             error = TicketCompletionReport(
@@ -1741,6 +1770,13 @@ Notifier = Callable[[str, str], bool]
 
 _LEDGER_RELATIVE = ".factory/demands/demands.json"
 _TICKET_ID_PATTERN = re.compile(r"\bUSR-\d+\b")
+
+
+def _durable_queue_ticket(ticket_id: str) -> UserTicket | None:
+    """Queue row for ``ticket_id``, or ``None`` without creating the control store."""
+    from core.demands import queue_store
+
+    return queue_store.get_ticket(ticket_id)
 
 
 def _ledger_entries(raw: str) -> list[dict[str, Any]]:

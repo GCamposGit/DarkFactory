@@ -2,8 +2,10 @@
 
 Implements the "Review" section of `docs/handoffs/production-line/HF-27-05.md`:
 
-1. Computes `git diff origin/<default>...HEAD` for the run's branch,
-   summarizing it when it exceeds 60 KB.
+1. Computes `git diff origin/<default>...HEAD` for the run's branch.
+   The prompt carries that diff in full. The same bytes are written to
+   `candidate.diff` in the tree the reviewer reads, and every changed
+   path is listed so the reviewer can open the files.
 2. Runs a read-mode agent from a *different family* than the one recorded
    in `progress.json` (written by `core.line.stage_build.DevelopmentStage`),
    via `core.line.routing.pick(stage="review", ...)`'s
@@ -51,9 +53,10 @@ _DEFAULT_HOST_CAPS: tuple[str, ...] = (
     "harness:antigravity",
 )
 
-_MAX_DIFF_BYTES = 60 * 1024
 # The run's own context files (logs, reviews, progress) are not product code.
 _DIFF_PATHSPEC = (".", ":(exclude).darkfac/runs")
+_CANDIDATE_DIFF_NAME = "candidate.diff"
+_REVIEW_CONTEXT_FILES = ("SPEC.md", "tickets.json")
 
 _FALLBACK_REVIEW_TEMPLATE = """\
 Voce e um revisor independente de codigo da DarkFac, de familia diferente de quem
@@ -76,7 +79,16 @@ testes presentes atendem o aceite e a validacao esta verde, aprove.
 A SPEC e os tickets (com criterios de aceite) estao em `{context_dir}/SPEC.md`
 e `{context_dir}/tickets.json` neste repositorio; leia-os antes de julgar.
 
-## Diff (rodada {round_num})
+O diff integral desta rodada tem {diff_bytes} bytes e sha256 {diff_sha256}.
+Os mesmos bytes estao em `{context_dir}/candidate.diff` nesta worktree.
+Leia esse arquivo por completo e abra cada arquivo alterado antes de julgar.
+A lista abaixo e so um indice. O bloco Diff integral e o `git diff` completo:
+nenhuma linha foi omitida e nada foi substituido por um aviso de tamanho.
+
+## Arquivos alterados
+{changed_files}
+
+## Diff integral (rodada {round_num})
 {diff_text}
 """
 
@@ -171,38 +183,106 @@ def _write_review_state(ws: RunWorkspace, state: ReviewState) -> None:
     workspace.write_context(ws, "review_state.json", state.model_dump_json(indent=2))
 
 
-def _get_diff(ws: RunWorkspace, default_branch: str) -> str:
-    """`git diff origin/<default>...HEAD`, summarized when larger than 60 KB."""
-    proc = workspace._run_git(
-        ["diff", f"origin/{default_branch}...HEAD", "--", *_DIFF_PATHSPEC], cwd=ws.path, check=False
-    )
-    diff_text = proc.stdout or ""
-    if len(diff_text.encode("utf-8")) <= _MAX_DIFF_BYTES:
-        return diff_text
+def _utf8_len(text: str) -> int:
+    return len(text.encode("utf-8"))
 
-    stat_proc = workspace._run_git(
-        ["diff", "--numstat", f"origin/{default_branch}...HEAD", "--", *_DIFF_PATHSPEC],
-        cwd=ws.path,
-        check=False,
+
+def _diff_args(default_branch: str, *extra: str) -> list[str]:
+    return ["diff", *extra, f"origin/{default_branch}...HEAD", "--", *_DIFF_PATHSPEC]
+
+
+def _get_diff(ws: RunWorkspace, default_branch: str) -> str:
+    """Full `git diff origin/<default>...HEAD`. Never a summary and never truncated."""
+    proc = workspace._run_git(_diff_args(default_branch), cwd=ws.path, check=False)
+    return proc.stdout or ""
+
+
+def _changed_paths(ws: RunWorkspace, default_branch: str) -> list[str]:
+    """Repo-relative paths in the same diff the reviewer receives."""
+    proc = workspace._run_git(
+        _diff_args(default_branch, "--name-only"), cwd=ws.path, check=False
     )
-    rows: list[tuple[int, str]] = []
-    for line in (stat_proc.stdout or "").splitlines():
-        parts = line.split("\t")
-        if len(parts) != 3:
-            continue
-        added, removed, path = parts
+    if getattr(proc, "returncode", 0) != 0:
+        return []
+    return [line.strip().replace("\\", "/") for line in (proc.stdout or "").splitlines() if line.strip()]
+
+
+def _review_context_dir(git_ws: RunWorkspace, run_id: str) -> Path:
+    """Directory the reviewer can open from its cwd (the candidate worktree)."""
+    return git_ws.path / ".darkfac" / "runs" / run_id
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.is_file() and right.is_file() and left.resolve() == right.resolve()
+    except OSError:
+        return False
+
+
+def _stage_bytes(path: Path, content: bytes) -> tuple[Path, Optional[bytes]]:
+    """Write ``content`` and remember the previous bytes so the tree can be restored."""
+    previous = path.read_bytes() if path.is_file() else None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path, previous
+
+
+def _restore_staged(staged: list[tuple[Path, Optional[bytes]]]) -> None:
+    """Put staged paths back. A path that did not exist is removed."""
+    for path, previous in reversed(staged):
         try:
-            churn = int(added or 0) + int(removed or 0)
-        except ValueError:
-            churn = 0
-        rows.append((churn, path))
-    rows.sort(reverse=True)
-    top_files = "\n".join(f"- {path} (+/-{churn} linhas)" for churn, path in rows[:15])
-    return (
-        f"[diff completo tem {len(diff_text.encode('utf-8'))} bytes, acima do limite de "
-        f"{_MAX_DIFF_BYTES} bytes; mostrando apenas o resumo]\n\n"
-        f"Arquivos de maior risco (por linhas alteradas):\n{top_files}"
-    )
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(previous)
+        except OSError as exc:
+            logger.warning("Could not restore review input %s (%s)", path, exc)
+
+
+def _materialize_review_sources(
+    git_ws: RunWorkspace,
+    artifact_ws: RunWorkspace,
+    run_id: str,
+    diff_text: str,
+) -> list[tuple[Path, Optional[bytes]]]:
+    """Put the full diff, SPEC and tickets where the reviewer (cwd = candidate tree) can read them.
+
+    Delivery keeps those files outside the worktree. The line keeps them in the
+    worktree already; the same path is left untouched. Every write is restored
+    after the reviewer returns so the candidate tree does not stay dirty.
+    """
+    directory = _review_context_dir(git_ws, run_id)
+    staged = [_stage_bytes(directory / _CANDIDATE_DIFF_NAME, diff_text.encode("utf-8"))]
+    source_dir = workspace.context_dir(artifact_ws)
+    for name in _REVIEW_CONTEXT_FILES:
+        src = source_dir / name
+        dest = directory / name
+        if not src.is_file() or _same_file(src, dest):
+            continue
+        try:
+            payload = src.read_bytes()
+        except OSError as exc:
+            logger.warning("Could not copy review context %s (%s)", src, exc)
+            continue
+        staged.append(_stage_bytes(dest, payload))
+    return staged
+
+
+def _diff_payload(stdout: object) -> Optional[bytes]:
+    """UTF-8 bytes of a successful diff.
+
+    ``None`` and ``""`` are an empty diff and stay computable. Any other
+    non-text value cannot be hashed, so the digest stays unavailable.
+    """
+    if stdout is None:
+        return b""
+    if isinstance(stdout, str):
+        return stdout.encode("utf-8")
+    if isinstance(stdout, bytes):
+        return stdout
+    if isinstance(stdout, bytearray):
+        return bytes(stdout)
+    return None
 
 
 def _candidate_digest(ws: RunWorkspace, default_branch: str) -> Optional[str]:
@@ -212,7 +292,10 @@ def _candidate_digest(ws: RunWorkspace, default_branch: str) -> Optional[str]:
     )
     if getattr(proc, "returncode", 0) != 0:
         return None
-    return hashlib.sha256((proc.stdout or "").encode("utf-8")).hexdigest()
+    payload = _diff_payload(getattr(proc, "stdout", None))
+    if payload is None:
+        return None
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _policy_digest(routing_config: RoutingConfig) -> str:
@@ -521,25 +604,32 @@ class ReviewStage:
         harness, model = route
 
         diff_text = _get_diff(git_ws, default_branch)
+        changed = _changed_paths(git_ws, default_branch)
         template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
         prompt = fill_template(
             template,
             round_num=str(round_num),
             diff_text=diff_text,
             context_dir=f".darkfac/runs/{run_id}",
+            diff_bytes=str(_utf8_len(diff_text)),
+            diff_sha256=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+            changed_files="\n".join(f"- `{path}`" for path in changed) or "- (nenhum)",
         )
-
-        agent_result = self.run_agent_func(
-            AgentRequest(
-                prompt=prompt,
-                cwd=git_ws.path,
-                mode="read",
-                harness=harness,
-                model=model,
-                timeout_s=self.agent_timeout_s,
-                output_schema=ReviewVerdict.model_json_schema(),
+        staged_inputs = _materialize_review_sources(git_ws, ws, run_id, diff_text)
+        try:
+            agent_result = self.run_agent_func(
+                AgentRequest(
+                    prompt=prompt,
+                    cwd=git_ws.path,
+                    mode="read",
+                    harness=harness,
+                    model=model,
+                    timeout_s=self.agent_timeout_s,
+                    output_schema=ReviewVerdict.model_json_schema(),
+                )
             )
-        )
+        finally:
+            _restore_staged(staged_inputs)
         record_result(agent_result, config=self.routing_config)
 
         if not agent_result.ok:

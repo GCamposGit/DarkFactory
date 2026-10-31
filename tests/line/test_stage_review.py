@@ -363,21 +363,155 @@ def test_review_agent_request_includes_review_verdict_schema(tmp_path: Path, mon
     assert schema["properties"]["verdict"]["enum"] == ["approve", "changes_required"]
 
 
-def test_get_diff_summarizes_when_over_60kb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from core.line.stage_review import _get_diff
+def test_candidate_digest_is_none_when_stdout_is_not_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-text diff (the continuation test stubs git this way) is unavailable, not a crash."""
+    from types import SimpleNamespace
+
+    from core.line.stage_review import _candidate_digest
+    from core.line.workspace import RunWorkspace
+
+    ws = RunWorkspace(
+        project_id="darkfac", run_id="USR-94", branch="ticket/usr-94", path=tmp_path, base_sha="0" * 40,
+    )
+    calls: dict[str, SimpleNamespace] = {}
+
+    def fake_git(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return calls["proc"]
+
+    monkeypatch.setattr(ws_mod, "_run_git", fake_git)
+
+    calls["proc"] = SimpleNamespace(returncode=0, stdout="diff --git a/core/foo.py")
+    assert _candidate_digest(ws, "main") == hashlib.sha256(b"diff --git a/core/foo.py").hexdigest()
+
+    calls["proc"] = SimpleNamespace(returncode=0, stdout=None)
+    assert _candidate_digest(ws, "main") == hashlib.sha256(b"").hexdigest()
+
+    calls["proc"] = SimpleNamespace(returncode=0, stdout=b"diff")
+    assert _candidate_digest(ws, "main") == hashlib.sha256(b"diff").hexdigest()
+
+    calls["proc"] = SimpleNamespace(returncode=0, stdout=object())
+    assert _candidate_digest(ws, "main") is None
+
+    calls["proc"] = SimpleNamespace(returncode=1, stdout="diff")
+    assert _candidate_digest(ws, "main") is None
+
+
+def _candidate_diff(cwd: Path) -> str:
+    return _git(
+        ["diff", "origin/main...HEAD", "--", ".", ":(exclude).darkfac/runs"],
+        cwd,
+    ).stdout
+
+
+def test_get_diff_returns_the_full_diff_when_it_exceeds_60kb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large candidate is still the raw git diff. No size banner replaces it."""
+    from core.line import stage_review
 
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
     run_id = "run-6"
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
     ws = ws_mod.checkout(project, run_id)
-    (ws.path / "big.py").write_text("x = 1\n" * 20000, encoding="utf-8")
-    ws_mod.commit(ws, "add big file", job_key=f"{run_id}:T1")
+    (ws.path / "a.py").write_text("alpha = 1\n" * 7000, encoding="utf-8")
+    (ws.path / "b.py").write_text("beta = 2\n", encoding="utf-8")
+    ws_mod.commit(ws, "add files", job_key=f"{run_id}:T1")
 
-    diff_text = _get_diff(ws, "main")
+    raw = _candidate_diff(ws.path)
+    assert len(raw.encode("utf-8")) > 60 * 1024
+    assert stage_review._get_diff(ws, "main") == raw
+    assert "acima do limite" not in raw
+    assert "mostrando apenas o resumo" not in raw
+    assert stage_review._changed_paths(ws, "main") == ["a.py", "b.py"]
 
-    assert "diff completo tem" in diff_text
-    assert "big.py" in diff_text
+
+def test_review_prompt_includes_full_diff_file_list_and_candidate_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reviewer sees every byte, the changed paths, and candidate.diff while it runs."""
+    from core.line import stage_review
+
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-full-diff"
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = ws_mod.checkout(project, run_id)
+    ws_mod.write_context(ws, "progress.json", json.dumps({"harness": "claude", "tickets_done": ["T1"]}))
+    ws_mod.write_context(ws, "SPEC.md", "# SPEC\naceite do ticket\n")
+    ws_mod.write_context(ws, "tickets.json", "{\"tickets\":[]}\n")
+    (ws.path / "big.py").write_text("value = 1\n" * 8000, encoding="utf-8")
+    ws_mod.commit(ws, "add big", job_key=f"{run_id}:T1")
+    ws_mod.push(ws)
+
+    raw = _candidate_diff(ws.path)
+    assert len(raw.encode("utf-8")) > 60 * 1024
+    seen: dict[str, object] = {}
+
+    def agent(req: AgentRequest) -> AgentResult:
+        diff_path = req.cwd / ".darkfac" / "runs" / run_id / "candidate.diff"
+        spec_path = req.cwd / ".darkfac" / "runs" / run_id / "SPEC.md"
+        seen["diff"] = diff_path.read_bytes()
+        seen["spec"] = spec_path.read_text(encoding="utf-8")
+        seen["prompt"] = req.prompt
+        return AgentResult(
+            ok=True,
+            text=json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),
+            harness=req.harness,
+            duration_s=0.01,
+        )
+
+    stage = ReviewStage(
+        run_agent_func=agent,
+        pick_func=_isolated_pick(tmp_path),
+        routing_config=load_routing_config(),
+    )
+    assert stage.run(project, run_id).outcome == "success"
+
+    prompt = str(seen["prompt"])
+    assert seen["diff"] == raw.encode("utf-8")
+    assert raw in prompt
+    assert "- `big.py`" in prompt
+    assert "candidate.diff" in prompt
+    assert hashlib.sha256(raw.encode("utf-8")).hexdigest() in prompt
+    assert "acima do limite" not in prompt
+    assert "mostrando apenas o resumo" not in prompt
+    assert "aceite do ticket" in str(seen["spec"])
+    assert not (ws.path / ".darkfac" / "runs" / run_id / "candidate.diff").exists()
+
+
+def test_delivery_review_copies_spec_into_the_worktree_and_restores_it(
+    tmp_path: Path,
+) -> None:
+    """Delivery artifacts live outside the worktree. The reviewer still opens them from cwd."""
+    from core.line import stage_review
+    from core.line.workspace import RunWorkspace
+
+    artifact = RunWorkspace(
+        project_id="darkfac", run_id="USR-424", branch="ticket/usr-424",
+        path=tmp_path / "artifacts", base_sha="0" * 40,
+    )
+    reviewer = RunWorkspace(
+        project_id="darkfac", run_id="USR-424", branch="ticket/usr-424",
+        path=tmp_path / "worktree", base_sha="0" * 40,
+    )
+    ws_mod.write_context(artifact, "SPEC.md", "# SPEC\nfila duravel\n")
+    ws_mod.write_context(artifact, "tickets.json", "{\"id\":\"USR-424\"}\n")
+    diff_text = "diff --git a/core/demands/store.py b/core/demands/store.py\n+resolve\n"
+
+    staged = stage_review._materialize_review_sources(reviewer, artifact, "USR-424", diff_text)
+    directory = reviewer.path / ".darkfac" / "runs" / "USR-424"
+    assert (directory / "candidate.diff").read_bytes() == diff_text.encode("utf-8")
+    assert "fila duravel" in (directory / "SPEC.md").read_text(encoding="utf-8")
+    assert "USR-424" in (directory / "tickets.json").read_text(encoding="utf-8")
+    assert (artifact.path / ".darkfac" / "runs" / "USR-424" / "SPEC.md").is_file()
+
+    stage_review._restore_staged(staged)
+    assert not (directory / "candidate.diff").exists()
+    assert not (directory / "SPEC.md").exists()
+    assert "fila duravel" in (
+        artifact.path / ".darkfac" / "runs" / "USR-424" / "SPEC.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_consecutive_agent_errors_fail_after_max_retries(

@@ -400,7 +400,13 @@ def test_delivery_in_fresh_process_prevents_stale_module_value_error(tmp_path: P
 
 
 def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True)
+    # GIT_EDITOR from the parent process overrides ``-c core.editor`` and, on Windows, a
+    # ``cmd.exe /c exit 0`` value is not executable from Git's shell. ``rebase --continue``
+    # must still be able to finish.
+    env = os.environ.copy()
+    env["GIT_EDITOR"] = "true"
+    env["GIT_SEQUENCE_EDITOR"] = "true"
+    subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True, env=env)
 
 
 def _conflict_repo(tmp_path: Path, files: dict[str, tuple[str, str]]) -> Path:
@@ -470,3 +476,454 @@ def test_unresolved_rebase_conflict_parks_ticket_waiting_human_with_rc_1(tmp_pat
     assert code == 1 and agent.call_count == 1
     assert DemandsStore(ledger).get_ticket("USR-412").status == DeliveryStatus.WAITING_HUMAN
     assert not _rebase_in_progress(repo)
+
+
+def _forbid_next_ticket_id(self: DemandsStore, project_id: str = "darkfac") -> str:
+    raise AssertionError(f"next_ticket_id must not allocate ({project_id})")
+
+
+def _isolate_resume_queue(monkeypatch: pytest.MonkeyPatch, state: Path) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state))
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DARKFAC_DEMANDS_PATH", raising=False)
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    from core.demands import queue_store
+
+    queue_store._store.cache_clear()
+
+
+def test_resume_delivery_materializes_queue_only_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Queue-only id reaches delivery with no shared ledger, no origin row and no fix agent."""
+    state = tmp_path / "state"
+    _isolate_resume_queue(monkeypatch, state)
+    from core.demands import queue_store
+
+    repo = tmp_path / "wt"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "empty ledger")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-b", "ticket/usr-413")
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    queue_store.register_ticket(UserTicket(
+        id="USR-413", project_id="darkfac", title="Veio da fila",
+        problem_statement="registrado so na fila duravel", status=DeliveryStatus.IMPLEMENTING,
+    ))
+    monkeypatch.setattr(DemandsStore, "next_ticket_id", _forbid_next_ticket_id)
+    seen: dict[str, str] = {}
+
+    def deliver(_git_mgr: object, ticket: UserTicket, *_args: object, **_kwargs: object) -> int:
+        seen["id"] = ticket.id
+        seen["title"] = ticket.title
+        return 0
+
+    with patch("run_ticket.PROJECT_ROOT", shared), \
+            patch("run_ticket._deliver_worktree", side_effect=deliver) as delivered, \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-413", worktree_path=repo, skip_validation=True)
+
+    assert code == 0
+    assert delivered.call_count == 1
+    assert seen == {"id": "USR-413", "title": "Veio da fila"}
+    ids = [row["id"] for row in json.loads(ledger.read_text(encoding="utf-8"))]
+    assert ids.count("USR-413") == 1
+    assert not (shared / ".factory" / "demands" / "demands.json").exists()
+    shown = subprocess.run(
+        ["git", "show", "origin/main:.factory/demands/demands.json"],
+        cwd=repo, check=True, capture_output=True, text=True,
+    )
+    assert "USR-413" not in shown.stdout
+
+
+def test_resume_delivery_materializes_when_worktree_is_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Linked worktree that is the project root still gets one ledger line from the queue.
+
+    ``get_ticket`` would merge the queue in memory and skip the write.
+    """
+    state = tmp_path / "state"
+    _isolate_resume_queue(monkeypatch, state)
+    from core.demands import queue_store
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _init_git_repo(seed)
+    repo = tmp_path / "wt"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "ticket/usr-413", str(repo), "HEAD"],
+        cwd=seed, check=True, capture_output=True,
+    )
+    assert (repo / ".git").is_file()
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(repo))
+    queue_store.register_ticket(UserTicket(
+        id="USR-413", project_id="darkfac", title="Veio da fila",
+        problem_statement="registrado so na fila duravel", status=DeliveryStatus.IMPLEMENTING,
+    ))
+    monkeypatch.setattr(DemandsStore, "next_ticket_id", _forbid_next_ticket_id)
+    seen: dict[str, str] = {}
+
+    def deliver(_git_mgr: object, ticket: UserTicket, *_args: object, **_kwargs: object) -> int:
+        seen["id"] = ticket.id
+        seen["title"] = ticket.title
+        return 0
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    with patch("run_ticket.PROJECT_ROOT", shared), \
+            patch("run_ticket._deliver_worktree", side_effect=deliver), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-413", worktree_path=repo, skip_validation=True)
+
+    assert code == 0
+    assert seen == {"id": "USR-413", "title": "Veio da fila"}
+    ids = [row["id"] for row in json.loads(ledger.read_text(encoding="utf-8"))]
+    assert ids.count("USR-413") == 1
+    assert not (shared / ".factory" / "demands" / "demands.json").exists()
+
+
+def test_reusable_validation_keeps_matching_or_bound_empty_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Passed validation stays for a matching digest, or an empty digest with a valid approval."""
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    ticket = UserTicket(
+        id="USR-424", project_id="darkfac", title="Regra", problem_statement="p", status=DeliveryStatus.IMPLEMENTING,
+    )
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    from core.line import workspace as line_workspace
+
+    ctx = line_workspace.context_dir(rws)
+    ctx.mkdir(parents=True, exist_ok=True)
+    digest, other, policy = "a" * 64, "b" * 64, "c" * 64
+
+    def write_validation(payload: dict[str, object]) -> None:
+        (ctx / "validation.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def write_review(verdict: str, cand: str, pol: str, *, forced: bool = False) -> None:
+        state = {"rounds": [{
+            "round": 1, "verdict": verdict, "forced": forced,
+            "candidate_digest": cand, "policy_digest": pol,
+        }]}
+        (ctx / "review_state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    write_validation({"passed": True, "candidate_digest": digest})
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is True
+    assert run_ticket.ticket_engine.reusable_validation(rws, other, policy) is False
+    write_review("changes_required", digest, policy)
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is True
+
+    write_validation({"passed": True, "gate": "previous"})
+    write_review("approve", digest, policy)
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is True
+    write_review("approve", other, policy)
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is False
+    write_review("approve", digest, policy, forced=True)
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is False
+    write_review("changes_required", digest, policy)
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is False
+    write_validation({"passed": False, "candidate_digest": digest})
+    assert run_ticket.ticket_engine.reusable_validation(rws, digest, policy) is False
+
+    write_validation({"passed": True, "candidate_digest": other, "marker": "drop"})
+    assert run_ticket.ticket_engine.keep_reusable_validation(rws, digest, policy) is False
+    assert not (ctx / "validation.json").exists()
+    write_validation({"passed": False, "candidate_digest": digest, "marker": "drop"})
+    assert run_ticket.ticket_engine.keep_reusable_validation(rws, digest, policy) is False
+    assert not (ctx / "validation.json").exists()
+
+    write_validation({"passed": True, "candidate_digest": digest, "marker": "keep"})
+    (ctx / "merge.json").write_text('{"marker":"previous-attempt"}', encoding="utf-8")
+    (ctx / "deploy_report.json").write_text('{"marker":"previous-attempt"}', encoding="utf-8")
+    assert run_ticket.ticket_engine.keep_reusable_validation(rws, digest, policy) is True
+    run_ticket.ticket_engine.clear_delivery(rws, keep_validation=True)
+    assert "keep" in (ctx / "validation.json").read_text(encoding="utf-8")
+    assert not (ctx / "merge.json").exists()
+    assert not (ctx / "deploy_report.json").exists()
+
+
+def _candidate_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, UserTicket, object, str, str]:
+    """Clean ticket branch whose candidate digest is stable across resume."""
+    _isolate_resume_queue(monkeypatch, tmp_path / "state")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ticket = UserTicket(
+        id="USR-424", project_id="darkfac", title="Preservar gate",
+        problem_statement="gate e revisao vigentes", status=DeliveryStatus.IMPLEMENTING,
+    )
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    DemandsStore(ledger).save_ticket(ticket)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ledger")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-b", "ticket/usr-424")
+    (repo / "impl.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "impl.py")
+    _git(repo, "commit", "-m", "feat: impl")
+    rws = run_ticket.ticket_engine.run_workspace(ticket, "ticket/usr-424")
+    from core.research.policy import ResearchArtifact
+
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_minimal_plan(rws, ticket)
+    run_ticket.ticket_engine.write_research(
+        rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
+    )
+    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    candidate, policy = run_ticket._candidate_binding(rws, repo, run_ticket._review_base_branch(ticket))
+    assert candidate
+    return repo, ticket, rws, candidate, policy
+
+
+def _seed_attempt(
+    rws: object, validation: dict[str, object], rounds: list[dict[str, object]]
+) -> tuple[Path, bytes]:
+    from core.line import workspace as line_workspace
+
+    ctx = line_workspace.context_dir(rws)  # type: ignore[arg-type]
+    (ctx / "validation.json").write_text(json.dumps(validation), encoding="utf-8")
+    before = (ctx / "validation.json").read_bytes()
+    (ctx / "review_state.json").write_text(json.dumps({"rounds": rounds}), encoding="utf-8")
+    (ctx / "review_verdict.json").write_text(json.dumps({"verdict": "approve"}), encoding="utf-8")
+    (ctx / "merge.json").write_text(
+        json.dumps({"pr_url": "https://old.example/pull/1", "merge_sha": "abc", "marker": "previous-attempt"}),
+        encoding="utf-8",
+    )
+    (ctx / "deploy_report.json").write_text(
+        json.dumps({"sha": "old", "smoke_ok": True, "deployed": True, "detail": "previous-attempt"}),
+        encoding="utf-8",
+    )
+    return ctx, before
+
+
+def test_resume_keeps_matching_validation_and_skips_reviewer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Matching digest skips the gate; a bound approval skips the reviewer; prior merge/deploy are dropped."""
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    ctx, validation_before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "detail": "kept", "candidate_digest": candidate},
+        [{"round": 1, "verdict": "approve", "candidate_digest": candidate, "policy_digest": policy}],
+    )
+    verdict_before = (ctx / "review_verdict.json").read_bytes()
+
+    def gate(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("gate ran")
+
+    def reviewer(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("reviewer agent ran")
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", return_value=TicketCompletionReport(
+                ok=True, ticket_id="USR-424", commit_sha="c" * 40, message="ok",
+            )), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=gate), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")), \
+            patch("core.line.stage_review.run_agent", side_effect=reviewer):
+        code = run_ticket.resume_delivery("USR-424", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert (ctx / "review_verdict.json").read_bytes() == verdict_before
+    assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
+    assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")
+    out = capsys.readouterr().out
+    assert "portao nao reexecutado" in out
+    assert "revisor nao reexecutado" in out
+
+
+def test_resume_keeps_empty_digest_when_review_binding_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An older validation.json without a digest stays when review_state approves this candidate."""
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    ctx, validation_before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous"},
+        [{"round": 1, "verdict": "approve", "candidate_digest": candidate, "policy_digest": policy}],
+    )
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", return_value=TicketCompletionReport(
+                ok=True, ticket_id="USR-424", commit_sha="c" * 40, message="ok",
+            )), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")), \
+            patch("core.line.stage_review.run_agent", side_effect=AssertionError("reviewer agent ran")):
+        code = run_ticket.resume_delivery("USR-424", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
+    assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")
+
+
+def _stale_validation(case: str, candidate: str, policy: str) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Validation and review rows that must not be reused for `candidate`/`policy`."""
+    old = "0" * 64
+    approve = {"round": 1, "verdict": "approve", "candidate_digest": candidate, "policy_digest": policy}
+    if case == "different_digest":
+        return {"passed": True, "gate": "previous", "candidate_digest": old}, [approve]
+    if case == "passed_false":
+        return {"passed": False, "gate": "previous", "candidate_digest": candidate}, [approve]
+    if case == "changes_required":
+        return {"passed": True, "gate": "previous"}, [{**approve, "verdict": "changes_required"}]
+    if case == "forced":
+        return {"passed": True, "gate": "previous"}, [{**approve, "forced": True}]
+    if case == "wrong_policy":
+        return {"passed": True, "gate": "previous"}, [{**approve, "policy_digest": "d" * 64}]
+    if case == "wrong_candidate":
+        return {"passed": True, "gate": "previous"}, [{**approve, "candidate_digest": old}]
+    raise AssertionError(case)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["different_digest", "passed_false", "changes_required", "forced", "wrong_policy", "wrong_candidate"],
+)
+def test_resume_erases_stale_validation_and_runs_the_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """A report that does not cover this candidate is deleted and the gate runs."""
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    validation, rounds = _stale_validation(case, candidate, policy)
+    ctx, _before = _seed_attempt(rws, validation, rounds)
+    seen: dict[str, bool] = {}
+
+    def gate(*_args: object, **_kwargs: object) -> dict[str, object]:
+        seen["gate"] = True
+        assert not (ctx / "validation.json").exists()
+        return {"exit_code": 1, "ok": False, "cause": "gate_failed"}
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=gate):
+        result = run_ticket.resume_delivery(
+            "USR-424", worktree_path=repo, skip_validation=False, return_result=True
+        )
+
+    assert seen.get("gate") is True
+    assert result["exit_code"] == 1
+    assert not (ctx / "validation.json").exists()
+    assert not (ctx / "merge.json").exists()
+    assert not (ctx / "deploy_report.json").exists()
+
+
+def test_resume_candidate_change_runs_gate_and_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A different candidate digest reruns the gate and then the review stage."""
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    old = "0" * 64
+    ctx, _before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "candidate_digest": old},
+        [{"round": 1, "verdict": "approve", "candidate_digest": old, "policy_digest": policy}],
+    )
+    seen: dict[str, bool] = {}
+
+    def gate(*_args: object, **_kwargs: object) -> None:
+        seen["gate"] = True
+        assert not (ctx / "validation.json").exists()
+        return None
+
+    def review(*_args: object, **_kwargs: object) -> object:
+        seen["review"] = True
+        return type("ReviewHit", (), {"outcome": "success", "cause_code": None})()
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", return_value=TicketCompletionReport(
+                ok=True, ticket_id="USR-424", commit_sha="c" * 40, message="ok",
+            )), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=gate), \
+            patch("run_ticket._review_candidate", side_effect=review), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-424", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    assert seen == {"gate": True, "review": True}
+    written = json.loads((ctx / "validation.json").read_text(encoding="utf-8"))
+    assert written["passed"] is True
+    assert written["candidate_digest"] == candidate
+    assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
+    assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")
+
+
+def test_resume_policy_change_keeps_validation_and_runs_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A matching digest skips the gate. A different review policy still runs the reviewer."""
+    repo, _ticket, rws, candidate, _policy = _candidate_repo(tmp_path, monkeypatch)
+    ctx, validation_before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "detail": "kept", "candidate_digest": candidate},
+        [{"round": 1, "verdict": "approve", "candidate_digest": candidate, "policy_digest": "e" * 64}],
+    )
+    seen: dict[str, bool] = {}
+
+    def review(*_args: object, **_kwargs: object) -> object:
+        seen["review"] = True
+        return type("ReviewHit", (), {"outcome": "success", "cause_code": None})()
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", return_value=TicketCompletionReport(
+                ok=True, ticket_id="USR-424", commit_sha="c" * 40, message="ok",
+            )), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._review_candidate", side_effect=review), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-424", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    assert seen.get("review") is True
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
+    assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")
+    out = capsys.readouterr().out
+    assert "portao nao reexecutado" in out
+    assert "revisor nao reexecutado" not in out
+
+
+@pytest.mark.parametrize("prior", [None, {"verdict": "changes_required", "blocking": [], "non_blocking": []}])
+def test_resume_reuses_approval_and_writes_approve_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prior: dict[str, object] | None
+) -> None:
+    """A current approval skips the reviewer and leaves review_verdict.json as approve."""
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    ctx, validation_before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "detail": "kept", "candidate_digest": candidate},
+        [{"round": 1, "verdict": "approve", "candidate_digest": candidate, "policy_digest": policy}],
+    )
+    verdict_path = ctx / "review_verdict.json"
+    if prior is None:
+        verdict_path.unlink()
+    else:
+        verdict_path.write_text(json.dumps(prior), encoding="utf-8")
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", return_value=TicketCompletionReport(
+                ok=True, ticket_id="USR-424", commit_sha="c" * 40, message="ok",
+            )), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._review_candidate", side_effect=AssertionError("reviewer ran")), \
+            patch("core.line.stage_review.run_agent", side_effect=AssertionError("reviewer agent ran")), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-424", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    written = json.loads(verdict_path.read_text(encoding="utf-8"))
+    assert written["verdict"] == "approve"
+    assert written["blocking"] == []
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
+    assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
-<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py -->
+<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py -->
 # Fila de tickets (USR-343)
 
 A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
@@ -25,12 +25,57 @@ de ID vale o control store, exceto quando o ledger já marca o ticket como `comp
 `cancelled`. Se o control store estiver inacessível, a leitura cai para o `demands.json`.
 Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
 
+## Resolver para entrega (USR-424)
+
+`queue_store.get_ticket(ticket_id)` devolve o `UserTicket` da control store.
+Retorna `None` sem exceção quando o id não existe ou quando o store ainda não
+foi criado, e não cria `control.db` nesse caminho.
+
+`DemandsStore.materialize_ticket(ticket_id)` e `resolve_for_delivery(ticket_id)`
+copiam esse mesmo id para o `demands.json` da worktree, uma única vez, sem
+chamar `next_ticket_id`. A segunda chamada não acrescenta linha. Uma linha
+local aberta com o mesmo id é substituída no lugar pela linha da fila. Uma
+linha local já `completed` ou `cancelled` permanece no arquivo, sem regravar,
+quando a fila ainda não está terminal, mesmo que a linha não tenha
+`created_at` nem `updated_at`. A fila aberta continua aberta. No checkout
+compartilhado (ledger control-only, USR-415) a materialização não altera
+`demands.json` nem o git status. Id ausente nos dois lados devolve `None` e
+não cria linha na fila nem no arquivo.
+
+`DemandsStore.save_ticket` no ledger da worktree atualiza a linha
+`(project_id, ticket_id)` que já está na fila. Não cria linha para um ticket
+que existe só no arquivo, mesmo quando o `demands.json` da worktree é o ledger
+padrão daquele checkout (`.git` é arquivo). Com `DARKFAC_DEMANDS_PATH`
+definida, a gravação permanece só no arquivo: a fila não é criada nem
+atualizada.
+
+`complete_ticket` consulta esse registro antes de exigir o id no `demands.json`
+da worktree e sem usar o ledger compartilhado. Ao concluir, a mesma linha
+`(project_id, ticket_id)` da fila fica `completed` com `delivery_evidence`.
+Id ausente na worktree e na fila devolve `TicketCompletionReport` com
+`ok=false` e `cause=ticket_absent`, sem linha nova e sem commit. Ticket que
+já está só no ledger local conclui sem criar o control store. Branch sem
+mudança fora do ledger continua recusada com `no_changes`.
+
+`--resume-delivery` usa a mesma resolucao antes de chamar a entrega, nesta
+ordem: ledger da worktree, fila do control store (materializa o mesmo id, sem
+`next_ticket_id` e sem o agente de correcao), arquivo do checkout compartilhado
+(sem gravar a worktree e sem criar linha na fila) e `origin/main` (o rebase
+posterior traz a linha). Nao depende do ledger compartilhado. Nao copie o
+ledger compartilhado para a worktree so para a entrega passar. Id ausente nos
+quatro devolve exit 1, `ok=false`, `cause=ticket_absent` e `error` no formato
+`Ticket <ID> not found in demands store`. O stderr cita o ledger da worktree, a
+control store, o checkout compartilhado e `origin/main`. O ledger e o
+`control.db` permanecem como estavam. Gate e revisao ja validos para o
+candidato atual nao sao reexecutados; `merge.json` e o relatorio de deploy do
+attempt anterior sao apagados.
+
 ## Acoes do owner e status (S4b)
 
 - Escritores de `owner_actions` (respostas do Hub via `answer_sync`, espelhos, alertas de CI, CLI)
   gravam no control store (`OwnerActionStore` no ledger padrao). Nao existem mais PRs `chore/oa-*`
   nem `ticket/queue-*`; a leitura mescla o control store sobre o `owner_actions.json`.
-- `DemandsStore.save_ticket` e `update_status` gravam tambem a linha em `tickets` do control store.
+- `DemandsStore.save_ticket` e `update_status` gravam a linha em `tickets` do control store no ledger do checkout compartilhado. No ledger da worktree a mesma chamada só atualiza a linha `(project_id, ticket_id)` já presente na fila. `DARKFAC_DEMANDS_PATH` deixa a gravação só no arquivo.
 - Snapshot diario: `python C:\dev\DarkFac\scripts\snapshot_queue.py` (a flag `--force` ignora o
   marcador do dia) escreve `demands.json` e `owner_actions.json` a partir do control store em UM
   commit, publicado em `main` com o token do GitHub App (`core/git/app_token.py`). E idempotente

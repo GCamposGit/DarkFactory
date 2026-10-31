@@ -302,3 +302,323 @@ def test_hub_api_demands_endpoints(temp_demands_env):
         assert "delivery_evidence" in refused.json()["detail"]
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def queue_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Control store isolated from the shared checkout and from Postgres."""
+    state = tmp_path / "state"
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state))
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DARKFAC_DEMANDS_PATH", raising=False)
+    from core.demands import queue_store
+
+    queue_store._store.cache_clear()
+    yield {"state": state, "queue": queue_store, "root": tmp_path}
+    queue_store._store.cache_clear()
+
+
+def _queued_ticket(
+    ticket_id: str,
+    *,
+    title: str | None = None,
+    status: DeliveryStatus = DeliveryStatus.PLANNED,
+    delivery_evidence: str | None = None,
+) -> UserTicket:
+    return UserTicket(
+        id=ticket_id,
+        project_id="darkfac",
+        title=title or f"Ticket {ticket_id}",
+        problem_statement="registrado so na fila duravel",
+        status=status,
+        delivery_evidence=delivery_evidence,
+    )
+
+
+def _ledger_ids(path: Path) -> list[str]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return [row["id"] for row in raw]
+
+
+def _forbid_next_ticket_id(*_args: object, **_kwargs: object) -> str:
+    raise AssertionError("next_ticket_id must not run while resolving a queued ticket")
+
+
+def _linked_worktree_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Worktree ledger: default demands.json path, but ``.git`` is a file (not control-only)."""
+    repo = tmp_path / "wt"
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    (repo / ".git").write_text("gitdir: /unused\n", encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(repo))
+    return ledger
+
+
+def test_queue_get_ticket_reads_control_store_or_none(queue_env) -> None:
+    """USR-424: get_ticket returns the queued UserTicket, or None without creating the store."""
+    queue = queue_env["queue"]
+    state = queue_env["state"]
+
+    assert queue.get_ticket("USR-404") is None
+    assert queue.get_ticket("") is None
+    assert not (state / "control.db").exists()
+
+    queued = _queued_ticket("USR-413", title="Veio da fila", status=DeliveryStatus.IMPLEMENTING)
+    queue.register_ticket(queued)
+
+    found = queue.get_ticket("USR-413")
+    assert found is not None
+    assert found.id == "USR-413"
+    assert found.title == "Veio da fila"
+    assert found.status == DeliveryStatus.IMPLEMENTING
+    assert queue.get_ticket("USR-404") is None
+    assert [ticket.id for ticket in queue.list_queue_tickets()] == ["USR-413"]
+
+
+def test_worktree_resolve_writes_the_same_id_once(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The worktree ledger gains one row with the queue id; a second call does not allocate."""
+    queue = queue_env["queue"]
+    ledger = _linked_worktree_ledger(queue_env["root"], monkeypatch)
+    queued = _queued_ticket("USR-413", title="Veio da fila", status=DeliveryStatus.IMPLEMENTING)
+    queue.register_ticket(queued)
+
+    store = DemandsStore(ledger)
+    assert store._control_only() is False
+    monkeypatch.setattr(store, "next_ticket_id", _forbid_next_ticket_id)
+
+    materialized = store.materialize_ticket("USR-413")
+    assert materialized is not None
+    assert materialized.id == "USR-413"
+    assert materialized.title == "Veio da fila"
+    assert _ledger_ids(ledger) == ["USR-413"]
+    written = ledger.read_bytes()
+
+    resolved = store.resolve_for_delivery("USR-413")
+    assert resolved is not None
+    assert resolved.id == "USR-413"
+    assert ledger.read_bytes() == written
+    assert _ledger_ids(ledger) == ["USR-413"]
+    assert [ticket.id for ticket in queue.list_queue_tickets()] == ["USR-413"]
+
+    assert store.materialize_ticket("USR-404") is None
+    assert _ledger_ids(ledger) == ["USR-413"]
+    assert [ticket.id for ticket in queue.list_queue_tickets()] == ["USR-413"]
+
+
+def test_open_local_row_is_updated_in_place_from_the_queue(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-terminal file row with the same id is replaced by the queue ticket, still one line."""
+    queue = queue_env["queue"]
+    ledger = _linked_worktree_ledger(queue_env["root"], monkeypatch)
+    store = DemandsStore(ledger)
+    store.save_ticket(_queued_ticket("USR-413", title="Rascunho", status=DeliveryStatus.PLANNED))
+    queue.register_ticket(_queued_ticket("USR-413", title="Veio da fila", status=DeliveryStatus.IMPLEMENTING))
+    monkeypatch.setattr(store, "next_ticket_id", _forbid_next_ticket_id)
+
+    resolved = store.resolve_for_delivery("USR-413")
+    assert resolved is not None
+    assert resolved.id == "USR-413"
+    assert resolved.title == "Veio da fila"
+    assert resolved.status == DeliveryStatus.IMPLEMENTING
+    assert _ledger_ids(ledger) == ["USR-413"]
+
+    again = store.materialize_ticket("USR-413")
+    assert again is not None and again.id == "USR-413"
+    assert _ledger_ids(ledger) == ["USR-413"]
+
+
+@pytest.mark.parametrize(
+    ("status", "title", "evidence"),
+    [
+        (DeliveryStatus.COMPLETED, "Ja entregue", "sha256:abc"),
+        (DeliveryStatus.CANCELLED, "Cancelado", None),
+    ],
+)
+def test_terminal_local_row_is_not_replaced_by_open_queue(
+    queue_env, monkeypatch: pytest.MonkeyPatch, status: DeliveryStatus, title: str, evidence: str | None
+) -> None:
+    """A completed or cancelled ledger row stays when the durable queue is still open."""
+    queue = queue_env["queue"]
+    ledger = _linked_worktree_ledger(queue_env["root"], monkeypatch)
+    store = DemandsStore(ledger)
+    store.save_ticket(
+        _queued_ticket("USR-413", title=title, status=status, delivery_evidence=evidence)
+    )
+    before = ledger.read_bytes()
+    queue.register_ticket(_queued_ticket("USR-413", title="Ainda na fila", status=DeliveryStatus.PLANNED))
+    monkeypatch.setattr(store, "next_ticket_id", _forbid_next_ticket_id)
+
+    resolved = store.resolve_for_delivery("USR-413")
+    assert resolved is not None
+    assert resolved.status == status
+    assert resolved.title == title
+    assert resolved.delivery_evidence == evidence
+    assert ledger.read_bytes() == before
+    assert json.loads(ledger.read_text(encoding="utf-8"))[0]["status"] == status.value
+    assert queue.get_ticket("USR-413") is not None
+    assert queue.get_ticket("USR-413").status == DeliveryStatus.PLANNED
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
+def test_terminal_row_without_timestamps_is_not_rewritten(
+    queue_env, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """A second parse must not refill created_at and then close the open queue row."""
+    from datetime import datetime, timezone
+
+    import core.common.time as time_mod
+
+    class _Clock:
+        n = 0
+
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            cls.n += 1
+            return datetime(2020, 1, 1, 0, 0, cls.n, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(time_mod, "datetime", _Clock)
+    queue = queue_env["queue"]
+    ledger = _linked_worktree_ledger(queue_env["root"], monkeypatch)
+    row: dict[str, object] = {
+        "id": "USR-413",
+        "title": "Ja fechado",
+        "status": status,
+        "problem_statement": "linha local terminal sem datas",
+    }
+    if status == "completed":
+        row["delivery_evidence"] = "sha256:abc"
+    payload = [
+        {"id": "USR-1", "title": "Vizinho", "status": "planned", "problem_statement": "outra linha"},
+        row,
+    ]
+    ledger.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    queue.register_ticket(_queued_ticket("USR-413", title="Ainda na fila", status=DeliveryStatus.PLANNED))
+
+    store = DemandsStore(ledger)
+    monkeypatch.setattr(store, "next_ticket_id", _forbid_next_ticket_id)
+    ticks_before = _Clock.n
+    resolved = store.materialize_ticket("USR-413")
+    assert _Clock.n > ticks_before
+
+    assert resolved is not None
+    assert resolved.status.value == status
+    assert resolved.title == "Ja fechado"
+    assert ledger.read_bytes() == before
+    assert _ledger_ids(ledger) == ["USR-1", "USR-413"]
+    queued = queue.get_ticket("USR-413")
+    assert queued is not None and queued.status == DeliveryStatus.PLANNED
+    assert queued.title == "Ainda na fila"
+
+
+def test_shared_checkout_materialize_does_not_rewrite_demands_json(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-415: materializing on the shared checkout leaves the tracked ledger untouched."""
+    import subprocess
+
+    queue = queue_env["queue"]
+    repo = queue_env["root"] / "repo"
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    for cmd in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]):
+        subprocess.run(["git", *cmd], cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(repo))
+    monkeypatch.chdir(repo)
+
+    store = DemandsStore(ledger)
+    assert store._control_only() is True
+    before = ledger.read_bytes()
+    assert store.resolve_for_delivery("USR-NOPE") is None
+    assert ledger.read_bytes() == before
+    assert not (queue_env["state"] / "control.db").exists()
+
+    queued = _queued_ticket("USR-9001", title="So na fila")
+    queue.register_ticket(queued)
+    monkeypatch.setattr(store, "next_ticket_id", _forbid_next_ticket_id)
+
+    found = store.materialize_ticket("USR-9001")
+    again = store.resolve_for_delivery("USR-9001")
+    assert found is not None and found.id == "USR-9001"
+    assert again is not None and again.id == "USR-9001"
+    assert again.title == "So na fila"
+    assert ledger.read_bytes() == before
+    assert [ticket.id for ticket in queue.list_queue_tickets()] == ["USR-9001"]
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    assert status.stdout.strip() == ""
+
+
+def _queue_pairs(state: Path) -> list[tuple[str, str, str]]:
+    import sqlite3
+
+    db = state / "control.db"
+    if not db.is_file():
+        return []
+    conn = sqlite3.connect(db)
+    try:
+        return list(conn.execute(
+            "SELECT project_id, ticket_id, status FROM tickets ORDER BY project_id, ticket_id"
+        ))
+    finally:
+        conn.close()
+
+
+def test_worktree_save_updates_existing_queue_pair_only(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A worktree save updates (project_id, ticket_id) and does not insert a file-only ticket."""
+    queue = queue_env["queue"]
+    state = queue_env["state"]
+    ledger = _linked_worktree_ledger(queue_env["root"], monkeypatch)
+    store = DemandsStore(ledger)
+    assert store._inserts_missing_queue_rows() is False
+
+    store.save_ticket(_queued_ticket("USR-500", title="So no arquivo", status=DeliveryStatus.PLANNED))
+    assert not (state / "control.db").exists()
+    assert queue.get_ticket("USR-500") is None
+    assert _ledger_ids(ledger) == ["USR-500"]
+
+    queue.register_ticket(_queued_ticket("USR-413", title="Na fila", status=DeliveryStatus.PLANNED))
+    store.save_ticket(_queued_ticket("USR-413", title="Atualizado na worktree", status=DeliveryStatus.IMPLEMENTING))
+
+    found = queue.get_ticket("USR-413")
+    assert found is not None
+    assert found.id == "USR-413"
+    assert found.project_id == "darkfac"
+    assert found.title == "Atualizado na worktree"
+    assert found.status == DeliveryStatus.IMPLEMENTING
+    assert _queue_pairs(state) == [("darkfac", "USR-413", "implementing")]
+    assert _ledger_ids(ledger) == ["USR-500", "USR-413"]
+
+    store.save_ticket(_queued_ticket("USR-413", title="Outro projeto", status=DeliveryStatus.VALIDATING).model_copy(
+        update={"project_id": "other"}
+    ))
+    assert _queue_pairs(state) == [("darkfac", "USR-413", "implementing")]
+    assert queue.get_ticket("USR-413") is not None
+    assert queue.get_ticket("USR-413").title == "Atualizado na worktree"
+    assert queue.get_ticket("USR-500") is None
+
+
+def test_demands_path_override_stays_file_only(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DARKFAC_DEMANDS_PATH writes the file and does not create or update the queue."""
+    queue = queue_env["queue"]
+    state = queue_env["state"]
+    ledger = _linked_worktree_ledger(queue_env["root"], monkeypatch)
+    monkeypatch.setenv("DARKFAC_DEMANDS_PATH", str(queue_env["root"] / "override.json"))
+    store = DemandsStore(ledger)
+
+    store.save_ticket(_queued_ticket("USR-500", title="So no arquivo"))
+    assert not (state / "control.db").exists()
+    assert _ledger_ids(ledger) == ["USR-500"]
+
+    queue.register_ticket(_queued_ticket("USR-413", title="Na fila", status=DeliveryStatus.PLANNED))
+    store.save_ticket(_queued_ticket("USR-413", title="Nao pode espelhar", status=DeliveryStatus.IMPLEMENTING))
+    store.save_ticket(_queued_ticket("USR-501", title="Outro so no arquivo"))
+
+    found = queue.get_ticket("USR-413")
+    assert found is not None
+    assert found.title == "Na fila"
+    assert found.status == DeliveryStatus.PLANNED
+    assert queue.get_ticket("USR-500") is None
+    assert queue.get_ticket("USR-501") is None
+    assert _queue_pairs(state) == [("darkfac", "USR-413", "planned")]
+    assert _ledger_ids(ledger) == ["USR-500", "USR-413", "USR-501"]
