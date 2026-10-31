@@ -6,7 +6,7 @@ Duas mensagens por dia no bot do Telegram (mesmo envio da linha, `default_telegr
 - Manha (a partir das 08:00 de Sao Paulo, ate 12:00): tickets prontos por bloco (max. 8), em voo, decisoes e acoes do owner abertas por prioridade.
 - Noite (a partir das 21:00): entregas das ultimas 24 h com PR, learning pack e paginas do manual alteradas.
 
-Links: fila do owner `/#owner-actions` e demandas `/#demands` no DarkHub (o frontend e por hash; nao ha pagina por ticket), learning pack em `/api/learning-packs/<pack_id>/html`, PR no GitHub. O learning pack so aparece se o indice de packs citar o ticket.
+Links: fila do owner `/#owner-actions` e demandas `/#demands` no DarkHub (o frontend e por hash; nao ha pagina por ticket), learning pack em `/api/learning-packs/<pack_id>/html`, PR no GitHub. O learning pack so aparece se o indice de packs citar o ticket. Todos os links enviados ao Telegram utilizam a URL publica funcional (`https://darkhub.ggcampos.com`), prevenindo links locais inacessiveis (USR-438).
 
 CLI (nao envia com `--dry-run`):
 

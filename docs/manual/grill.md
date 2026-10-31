@@ -21,3 +21,10 @@ Qualquer outra pergunta (arquitetura, biblioteca, teste, resiliencia) e descarta
 - Toda pergunta traz uma opcao `recommended`; se voce nao responder, ela vale.
 - Correcoes e ajustes pequenos ("corrigir o erro de digitacao no menu") nao geram perguntas.
 - Uma demanda vaga como "Quero um painel que mostre minhas vendas do mes" so segue depois de objetivo, criterio de sucesso verificavel e modo de aceite (`auto` ou `owner`) definidos.
+
+## Formato móvel no Telegram (USR-438)
+
+- **Corpo da mensagem**: o texto integral de cada alternativa e exibido em destaque no corpo da mensagem, com indicacao clara da recomendada (`⭐ (Recomendada)`), garantindo que nada fique truncado.
+- **Botoes de selecao**: exibem apenas o numero da opcao e um resumo conciso de 2 a 3 palavras (ex.: `1. Usar o Grok`), otimizados para telas de celular sem quebra de layout.
+- **Botao recomendado one-tap**: formato `⭐ Opção X: <resumo>` para aceite imediato com um toque.
+- **Links publicos funcionais**: todos os links apontam exclusivamente para endpoints publicos acessiveis externamente (`https://darkhub.ggcampos.com`), eliminando qualquer referencia a `127.0.0.1` ou `localhost`.
