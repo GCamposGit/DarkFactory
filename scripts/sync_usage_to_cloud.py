@@ -320,8 +320,7 @@ def main() -> int:
                 )
                 missing_key_logged = True
             delay = max(0.0, args.interval - (time.monotonic() - iteration_started))
-            if delay:
-                time.sleep(delay)
+            time.sleep(delay)
             continue
 
         if missing_key_logged:
@@ -392,8 +391,7 @@ def main() -> int:
 
         delay = max(0.0, args.interval - (time.monotonic() - iteration_started))
         logger.info("Waiting %.1f seconds before the next sync...", delay)
-        if delay:
-            time.sleep(delay)
+        time.sleep(delay)
 
     return 0
 

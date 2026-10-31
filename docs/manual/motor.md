@@ -55,9 +55,30 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    `_discard_untouched_workspace` e `_report_workspace_fate` não rodam nesse caminho e portanto não removem
    a worktree. O ticket volta a `planned` se estava `implementing` ou `validating`; um ticket que já estava
    `planned` permanece na fila.
-5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD; **VALIDATE** grava `validation.json`
-   depois do portao; **REVIEW** roda `stage_review.ReviewStage` com familia diferente do implementador e grava
-   `review_verdict.json` so na aprovacao (`changes_required` reinvoca o agente, comita e repete o portao);
+5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD. O id e resolvido nesta
+   ordem: arquivo do ledger da worktree; fila duravel do control store (mesmo id, uma linha materializada
+   no ledger da worktree, sem `next_ticket_id` e sem o agente de correcao); arquivo do checkout
+   compartilhado (segue para a entrega sem gravar a worktree e sem criar linha na fila); `origin/main`
+   (o rebase posterior traz a linha). Id ausente nos quatro devolve exit 1, `ok=false`,
+   `cause=ticket_absent` e `error` no formato `Ticket <ID> not found in demands store`. O stderr cita o
+   ledger da worktree, a control store, o checkout compartilhado e `origin/main`. O ledger e o
+   `control.db` permanecem como estavam. Nao copie o ledger compartilhado para a worktree so para a
+   entrega passar.
+   **VALIDATE** grava `validation.json` (`ValidationReport`, campo `candidate_digest`) depois do portao.
+   No resume do projeto `darkfac`, um `validation.json` ja `passed` cujo `candidate_digest` coincide com
+   o candidato atual permanece e o portao nao roda, tambem quando so a politica de revisao mudou.
+   Digest vazio permanece somente quando a ultima rodada de `review_state` e `approve`,
+   `approval_binding_valid` aceita esse candidato e essa politica, e `forced` e false. Digest diferente,
+   `passed=false`, veredito diferente de `approve` ou digest vazio sem esse binding apagam
+   `validation.json` e o portao roda. O veredito so entra nessa decisao quando o digest gravado esta
+   vazio: um digest coincidente permanece mesmo se a ultima rodada nao for `approve`. **REVIEW** roda `stage_review.ReviewStage`
+   com familia diferente do implementador e grava `review_verdict.json` so na aprovacao. Aprovacao
+   vigente (ultima rodada `approve`, binding valido, sem `forced`) nao chama o agente revisor:
+   `review_verdict.json` approve e mantido ou reescrito como `approve`. Mudanca de candidato (digest
+   diferente) segue o fluxo normal de gate e revisao. Mudanca so de politica, com digest coincidente,
+   nao reexecuta o portao e a revisao segue o fluxo normal. O prompt leva o `git diff` inteiro, grava
+   os mesmos bytes em `candidate.diff` na arvore do revisor e lista cada arquivo alterado.
+   `changes_required` reinvoca o agente, comita e repete o portao.
    **MERGE** grava `merge.json` (PR e SHA); **DEPLOY_SMOKE** grava `deploy_report.json`. Na DarkFac o deploy
    pos-merge continua unico, pelo `fleet_dispatcher`/`scripts/dokploy_redeploy.py`, entao o relatorio sai com
    `deployed=false` e `smoke_ok=null`: `require_artifact` aceita isso SO como "deploy pendente" e o ticket e
@@ -87,13 +108,23 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
 
 Os artefatos do ticket ficam fora da worktree (que o merge remove), em
 `<state_root>/artifacts/ticket_runs/<ID>/.darkfac/runs/<ID>/` (`core/line/ticket_engine.py`). Uma execucao
-nova do launcher normalmente apaga os artefatos anteriores; a entrega apaga validacao, merge e deploy anteriores.
+nova do launcher normalmente apaga os artefatos anteriores. A entrega apaga `merge.json` e o relatorio de
+deploy do attempt anterior mesmo quando `validation.json` e reaproveitado. `validation.json` `passed` com
+o mesmo `candidate_digest` fica, inclusive se so a politica de revisao mudou. Digest vazio fica so quando
+a ultima rodada de `review_state` e `approve`, `approval_binding_valid` aceita o candidato e a politica, e
+`forced` e false. Digest diferente, `passed=false`, veredito diferente de `approve` ou digest vazio sem
+esse binding apagam a validacao e o portao roda de novo. Veredito diferente de `approve` apaga so o
+digest vazio; digest coincidente fica. Aprovacao vigente nao chama o revisor
+(`review_verdict.json` approve e mantido ou reescrito). Mudanca de `candidate_digest` roda o portao e a
+revisao de novo.
 Excecao de retomada (USR-426): se a worktree preservada estiver limpa, PLAN, RESEARCH, BUILD e VALIDATE
 forem validos, VALIDATE estiver verde e `review_state.json` registrar resposta JSON invalida para o mesmo
 digest de candidato e politica de REVIEW, o launcher preserva esses artefatos e retoma sem reinvocar BUILD.
-A entrega executa a validacao novamente; o runner so reutiliza o veredito do portao quando o hash da arvore,
-a configuracao e as etapas selecionadas ainda correspondem ao cache. Worktree suja, digest/politica diferentes
-ou artefato ausente/invalido seguem pelo fluxo normal de planejamento e desenvolvimento.
+A entrega reexecuta a validacao quando o `candidate_digest` nao cobre o candidato atual, quando
+`passed` e falso, ou quando o digest esta vazio e a revisao nao aprova esse candidato. Com digest
+coincidente, o portao nao roda de novo. Quando o portao roda, o runner so reutiliza o veredito cacheado
+se o hash da arvore, a configuracao e as etapas selecionadas ainda correspondem. Worktree suja,
+digest/politica diferentes ou artefato ausente/invalido seguem pelo fluxo normal de planejamento e desenvolvimento.
 Um `--resume-delivery` digitado pelo operador numa worktree anterior ao S4 (sem nenhum artefato) registra
 plano/build minimos e segue por VALIDATE, REVIEW e MERGE.
 

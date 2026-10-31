@@ -64,9 +64,98 @@ def reset(ws: workspace.RunWorkspace) -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
-def clear_delivery(ws: workspace.RunWorkspace) -> None:
+def clear_delivery(ws: workspace.RunWorkspace, *, keep_validation: bool = False) -> None:
+    """Drop delivery artifacts from an earlier attempt.
+
+    ``merge.json`` and the deploy report always go. ``validation.json`` stays only
+    when the caller has decided it still covers the current candidate (USR-424).
+    """
     for name in DELIVERY_FILES:
+        if keep_validation and name == VALIDATION_FILE:
+            continue
         (workspace.context_dir(ws) / name).unlink(missing_ok=True)
+
+
+def review_approves(
+    ws: workspace.RunWorkspace,
+    candidate_digest: Optional[str],
+    policy_digest: Optional[str],
+) -> bool:
+    """True when the last review round approves this candidate and policy."""
+    from pydantic import ValidationError
+
+    from core.line.stage_review import ReviewState, approval_binding_valid
+
+    path = workspace.context_dir(ws) / "review_state.json"
+    if not path.is_file():
+        return False
+    try:
+        state = ReviewState.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, ValidationError):
+        return False
+    if not state.rounds:
+        return False
+    last = state.rounds[-1]
+    if last.verdict != "approve" or last.forced:
+        return False
+    return approval_binding_valid(last, candidate_digest, policy_digest)
+
+
+def reusable_validation(
+    ws: workspace.RunWorkspace,
+    candidate_digest: Optional[str],
+    policy_digest: Optional[str],
+) -> bool:
+    """True when a passed ``validation.json`` still covers this candidate.
+
+    A recorded digest must equal the current candidate. An empty digest is kept
+    only when ``review_approves`` accepts that candidate.
+    """
+    from pydantic import ValidationError
+
+    path = workspace.context_dir(ws) / VALIDATION_FILE
+    if not path.is_file():
+        return False
+    try:
+        report = ValidationReport.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError, ValidationError):
+        return False
+    if not report.passed:
+        return False
+    stored = report.candidate_digest.strip()
+    current = (candidate_digest or "").strip()
+    if stored:
+        return bool(current) and stored == current
+    return review_approves(ws, current or None, policy_digest)
+
+
+def keep_reusable_validation(
+    ws: workspace.RunWorkspace,
+    candidate_digest: Optional[str],
+    policy_digest: Optional[str],
+) -> bool:
+    """Keep a reusable validation artifact; delete it when the candidate moved."""
+    if reusable_validation(ws, candidate_digest, policy_digest):
+        return True
+    (workspace.context_dir(ws) / VALIDATION_FILE).unlink(missing_ok=True)
+    return False
+
+
+def ensure_approved_verdict(ws: workspace.RunWorkspace) -> None:
+    """Write ``review_verdict.json`` when a bound approval has no contract artifact yet."""
+    from pydantic import ValidationError
+
+    from core.line.stage_review import VERDICT_FILE, ReviewVerdict
+
+    path = workspace.context_dir(ws) / VERDICT_FILE
+    if path.is_file():
+        try:
+            verdict = ReviewVerdict.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError, ValidationError):
+            verdict = None
+        if verdict is not None and verdict.verdict == "approve" and not verdict.blocking:
+            return
+    workspace.write_context(ws, VERDICT_FILE, ReviewVerdict(verdict="approve").model_dump_json(indent=2))
 
 
 def has_any(ws: workspace.RunWorkspace) -> bool:
@@ -133,8 +222,16 @@ def write_build(ws: workspace.RunWorkspace, harness: Optional[str], tickets_done
     workspace.write_context(ws, BUILD_FILE, report.model_dump_json(indent=2))
 
 
-def write_validation(ws: workspace.RunWorkspace, passed: bool, gate: str, detail: str = "") -> None:
-    report = ValidationReport(passed=passed, gate=gate, detail=detail)
+def write_validation(
+    ws: workspace.RunWorkspace,
+    passed: bool,
+    gate: str,
+    detail: str = "",
+    candidate_digest: str = "",
+) -> None:
+    report = ValidationReport(
+        passed=passed, gate=gate, detail=detail, candidate_digest=candidate_digest or ""
+    )
     workspace.write_context(ws, VALIDATION_FILE, report.model_dump_json(indent=2))
 
 
@@ -162,7 +259,9 @@ def merge_receipt_from(report: Any, branch: str, fallback_sha: str) -> tuple[str
 
 __all__ = [
     "DEMAND_FILE", "GRILL_FILE", "SPEC_FILE", "TICKETS_FILE", "VERDICT_FILE", "DELIVERY_FILES",
-    "artifacts_root", "run_workspace", "reset", "clear_delivery", "has_any", "write_demand", "write_grill",
+    "artifacts_root", "run_workspace", "reset", "clear_delivery", "review_approves",
+    "reusable_validation", "keep_reusable_validation", "ensure_approved_verdict", "has_any",
+    "write_demand", "write_grill",
     "write_minimal_plan", "write_research", "plan_tickets", "sub_ticket_prompt", "write_build", "write_validation",
     "write_merge", "write_deploy", "merge_receipt_from",
 ]

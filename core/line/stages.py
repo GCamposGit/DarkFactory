@@ -70,11 +70,18 @@ class BuildReport(BaseModel):
 
 
 class ValidationReport(BaseModel):
-    """`validation.json` written by VALIDATE."""
+    """`validation.json` written by VALIDATE.
+
+    ``candidate_digest`` is empty when an older gate did not record the candidate.
+    Resume keeps a passed report when the digest equals the current candidate, or
+    when it is empty and ``review_state`` approves that candidate with a valid
+    binding and without ``forced`` (USR-424). Any other report is dropped.
+    """
 
     passed: bool
     gate: str = ""
     detail: str = ""
+    candidate_digest: str = ""
 
 
 class MergeReceipt(BaseModel):

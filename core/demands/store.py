@@ -20,6 +20,19 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DEMANDS_PATH = Path(".factory/demands/demands.json")
 
+
+def _choose_delivery_row(local: UserTicket | None, queued: UserTicket | None) -> UserTicket | None:
+    """File row wins when it is missing from the queue or already terminal.
+
+    A non-terminal file row yields to the durable queue. Both missing is ``None``.
+    """
+    from core.demands import queue_store
+
+    if local is not None and (queued is None or queue_store.is_terminal_ticket(local)):
+        return local
+    return queued
+
+
 # One mutex per ledger file for the whole process: separate DemandsStore instances (threads, launchers)
 # pointing at the same file must serialize their read-modify-write cycles (USR-321).
 _PATH_LOCKS: dict[str, "_PathMutex"] = {}
@@ -227,6 +240,64 @@ class DemandsStore:
                     return ticket
             return None
 
+    def materialize_ticket(self, ticket_id: str) -> UserTicket | None:
+        """Copy the durable-queue ticket into this store under the same id, once."""
+        return self.resolve_for_delivery(ticket_id)
+
+    def canonical_ticket(self, ticket_id: str) -> UserTicket | None:
+        """Read-only row delivery may close. Does not create a ledger or queue line.
+
+        A terminal row in this file wins. A non-terminal row yields to the
+        durable queue. ``None`` when both are missing.
+        """
+        with self._lock:
+            local, queued = self._delivery_pair(ticket_id)
+            return _choose_delivery_row(local, queued)
+
+    def resolve_for_delivery(self, ticket_id: str) -> UserTicket | None:
+        """Resolve ``ticket_id`` from the durable queue into this delivery store.
+
+        The written row keeps ``ticket_id``; this never calls ``next_ticket_id``.
+        A second call does not add a row. A local ``completed`` or ``cancelled``
+        row is returned as parsed once and is not rewritten when the queue row
+        is still open, so a missing timestamp cannot mint a second version and
+        close the queue. The shared checkout's control-only ledger is not
+        rewritten (USR-415). An id missing from both places yields ``None`` and
+        writes nothing.
+        """
+        with self._lock:
+            local, queued = self._delivery_pair(ticket_id)
+            chosen = _choose_delivery_row(local, queued)
+            if chosen is None or self._control_only():
+                return chosen
+            # ``chosen is local`` covers a terminal row and a ledger-only row.
+            # One parse: a second read would fill created_at/updated_at again and
+            # the mismatch would rewrite the file and mirror it onto the queue.
+            if local is not None and (
+                chosen is local or local.model_dump(mode="json") == chosen.model_dump(mode="json")
+            ):
+                return local
+            logger.info("Materialized %s into %s from the durable queue", chosen.id, self.path)
+            return self.save_ticket(chosen)
+
+    def _delivery_pair(self, ticket_id: str) -> tuple[UserTicket | None, UserTicket | None]:
+        """``(file row, queue row)``. The queue read does not create ``control.db``."""
+        from core.demands import queue_store
+
+        return self._file_ticket(ticket_id), queue_store.get_ticket(ticket_id)
+
+    def _file_ticket(self, ticket_id: str) -> UserTicket | None:
+        """The row stored in this ledger file, ignoring the control-store merge."""
+        for raw in self._read_raw():
+            if raw.get("id") != ticket_id:
+                continue
+            try:
+                return UserTicket.model_validate(raw)
+            except Exception as exc:
+                logger.warning("Skipping corrupted demand row %s in %s: %s", ticket_id, self.path, exc)
+                return None
+        return None
+
     def save_ticket(self, ticket: UserTicket) -> UserTicket:
         if ticket.status == DeliveryStatus.COMPLETED and not (ticket.delivery_evidence or "").strip():
             raise ValueError(f"Completed ticket {ticket.id} requires delivery_evidence")
@@ -256,11 +327,36 @@ class DemandsStore:
             self._mirror_to_control(ticket)
             return ticket
 
+    def _inserts_missing_queue_rows(self) -> bool:
+        """True when a save may insert a queue row this file alone knows about.
+
+        The shared default ledger does (USR-343). A linked worktree — ``.git`` is
+        a file, and its ``demands.json`` is the default ledger of that checkout —
+        and any other ledger path only update a ``(project_id, ticket_id)`` that
+        is already in the queue (USR-424).
+        """
+        from core.demands import queue_store
+        from core.paths import project_root
+
+        if not queue_store.is_default_ledger(self.path):
+            return False
+        return not (project_root() / ".git").is_file()
+
     def _mirror_to_control(self, ticket: UserTicket) -> None:
-        """USR-343 S4b: keep the control-store row in step with the ledger write (best effort)."""
+        """Keep an existing control-store row aligned with this ledger write.
+
+        The default project ledger mirrors every save (USR-343). A worktree ledger
+        still closes the same ``(project_id, ticket_id)`` when that row is already
+        in the queue (USR-424) and does not create one for a ledger-only ticket.
+        ``DARKFAC_DEMANDS_PATH`` stays file-only.
+        """
         from core.demands import queue_store
 
-        if os.environ.get("DARKFAC_DEMANDS_PATH") or not queue_store.is_default_ledger(self.path):
+        if os.environ.get("DARKFAC_DEMANDS_PATH"):
+            return
+        queued = queue_store.get_ticket(ticket.id)
+        pair_present = queued is not None and queued.project_id == ticket.project_id
+        if not pair_present and not self._inserts_missing_queue_rows():
             return
         try:
             queue_store.register_ticket(ticket)

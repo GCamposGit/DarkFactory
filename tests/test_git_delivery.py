@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from pathlib import Path
 import subprocess
 from typing import Sequence
@@ -337,6 +339,7 @@ def test_complete_ticket_uses_delivery(env: tuple[Path, Path, FakeGh]) -> None:
     rep = GitAutonomyManager(local).complete_ticket("USR-76", cwd=local, gh_runner=gh)
     assert rep.ok and rep.delivery is not None and rep.delivery.action == "merged"
     assert rep.sync_result is not None and rep.sync_result.ok
+    assert not (Path(os.environ["DARKFAC_STATE_ROOT"]) / "control.db").exists()
     ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-76")
     assert ticket is not None and ticket.status == DeliveryStatus.COMPLETED
     assert ticket.delivery_evidence
@@ -399,6 +402,270 @@ def test_complete_ticket_rejects_ledger_only_branch(env: tuple[Path, Path, FakeG
     assert not rep.ok and rep.delivery is not None and rep.delivery.action == "no_changes"
     assert (local / ".factory" / "demands" / "demands.json").read_bytes() == before
     assert DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-98").status == DeliveryStatus.PLANNED
+    assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
+
+
+def _gitfile_env(tmp_path: Path) -> tuple[Path, FakeGh]:
+    """Checkout whose ``.git`` is a file, the shape of a linked worktree ledger."""
+    bare = tmp_path / "origin.git"
+    bare.mkdir()
+    _git(bare, "init", "--bare", "--quiet", "-b", "main")
+    local = tmp_path / "repo"
+    gitdir = tmp_path / "gitdir"
+    subprocess.run(
+        ["git", "init", "--separate-git-dir", str(gitdir), "--quiet", "-b", "main", str(local)],
+        check=True, capture_output=True, text=True,
+    )
+    assert (local / ".git").is_file()
+    _ident(local)
+    (local / "README.md").write_text("base\n", encoding="utf-8")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: initial")
+    _git(local, "remote", "add", "origin", "https://github.com/x/y.git")
+    _git(local, "config", f"url.{bare.as_posix()}.insteadOf", "https://github.com/x/y.git")
+    _git(local, "push", "--quiet", "-u", "origin", "main")
+    return local, FakeGh(bare)
+
+
+def _isolate_queue(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Control store for one test, with no shared demands ledger and no Postgres."""
+    state = tmp_path / "queue-state"
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state))
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DARKFAC_DEMANDS_PATH", raising=False)
+    from core.demands import queue_store
+
+    queue_store._store.cache_clear()
+    return state, queue_store
+
+
+def _forbid_next_ticket_id(self: DemandsStore, project_id: str = "darkfac") -> str:
+    raise AssertionError(f"next_ticket_id must not allocate ({project_id})")
+
+
+def _commit_empty_ledger(local: Path) -> Path:
+    ledger = local / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: empty demands ledger")
+    return ledger
+
+
+def _queue_rows(state: Path) -> list[sqlite3.Row]:
+    db = state / "control.db"
+    if not db.is_file():
+        return []
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        return list(conn.execute(
+            "SELECT project_id, ticket_id, status, payload FROM tickets ORDER BY project_id, ticket_id"
+        ))
+    finally:
+        conn.close()
+
+
+def _commit_ledger_without(local: Path, ticket_id: str) -> Path:
+    """Commit a worktree ledger that already has another ticket and not ``ticket_id``."""
+    _seed_ticket(local, "USR-1")
+    ledger = local / ".factory" / "demands" / "demands.json"
+    assert ticket_id not in ledger.read_text(encoding="utf-8")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: ledger without the queued ticket")
+    return ledger
+
+
+def test_complete_ticket_closes_queue_row_without_shared_ledger(
+    env: tuple[Path, Path, FakeGh], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-424: a queue-only ticket completes past the ledger lookup and keeps one row."""
+    local, _, gh = env
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    ledger = _commit_ledger_without(local, "USR-413")
+    monkeypatch.setattr(DemandsStore, "next_ticket_id", _forbid_next_ticket_id)
+    queue.register_ticket(UserTicket(
+        id="USR-413", project_id="darkfac", title="Veio da fila",
+        problem_statement="registrado so na fila duravel", status=DeliveryStatus.IMPLEMENTING,
+    ))
+    assert "USR-413" not in ledger.read_text(encoding="utf-8")
+    (local / "impl.py").write_text("x = 1\n", encoding="utf-8")
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-413", cwd=local, gh_runner=gh)
+
+    assert rep.ok, rep.message
+    assert "not found in demands store" not in rep.message
+    assert rep.cause != "ticket_absent"
+    assert rep.delivery is not None and rep.delivery.pr_url
+    assert any(call[:2] == ["pr", "create"] for call in gh.calls)
+    assert any(
+        call[:2] == ["pr", "edit"] and "--add-label" in call and call[call.index("--add-label") + 1] == "implementation"
+        for call in gh.calls
+    )
+    rows = _queue_rows(state)
+    assert [(row["project_id"], row["ticket_id"]) for row in rows] == [("darkfac", "USR-413")]
+    assert rows[0]["status"] == "completed"
+    payload = json.loads(rows[0]["payload"])
+    assert payload["id"] == "USR-413"
+    assert payload["status"] == "completed"
+    assert payload["delivery_evidence"]
+    stored = DemandsStore(ledger).get_ticket("USR-413")
+    assert stored is not None and stored.status == DeliveryStatus.COMPLETED
+    assert stored.delivery_evidence == payload["delivery_evidence"]
+    ids = [row["id"] for row in json.loads(ledger.read_text(encoding="utf-8"))]
+    assert ids.count("USR-413") == 1
+    assert "USR-1" in ids
+
+
+def test_complete_ticket_absent_from_worktree_and_queue(
+    env: tuple[Path, Path, FakeGh], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing in both stores is ticket_absent: no new row and no commit."""
+    local, _, gh = env
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    ledger = _commit_empty_ledger(local)
+    monkeypatch.setattr(DemandsStore, "next_ticket_id", _forbid_next_ticket_id)
+    head = _git(local, "rev-parse", "HEAD")
+    before = ledger.read_bytes()
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-404", cwd=local, gh_runner=gh)
+
+    assert rep.ok is False
+    assert rep.cause == "ticket_absent"
+    assert rep.commit_sha is None
+    assert _git(local, "rev-parse", "HEAD") == head
+    assert ledger.read_bytes() == before
+    assert _queue_rows(state) == []
+    assert not (state / "control.db").exists()
+    assert queue.get_ticket("USR-404") is None
+    assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
+
+
+def test_complete_ticket_queue_ticket_ledger_only_branch_is_no_changes(
+    env: tuple[Path, Path, FakeGh], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queue ticket on a ledger-only branch is refused before the row is closed."""
+    local, _, gh = env
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    ledger = _commit_empty_ledger(local)
+    before = ledger.read_bytes()
+    queue.register_ticket(UserTicket(
+        id="USR-413", project_id="darkfac", title="Veio da fila",
+        problem_statement="registrado so na fila duravel", status=DeliveryStatus.IMPLEMENTING,
+    ))
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-413", cwd=local, gh_runner=gh)
+
+    assert not rep.ok and rep.delivery is not None and rep.delivery.action == "no_changes"
+    assert rep.cause != "ticket_absent"
+    assert "not found in demands store" not in rep.message
+    assert ledger.read_bytes() == before
+    rows = _queue_rows(state)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "implementing"
+    assert not json.loads(rows[0]["payload"]).get("delivery_evidence")
+    assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
+
+
+def test_complete_ticket_gitfile_queue_opens_pr_without_shared_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default ledger of a linked checkout still closes the queue row and opens the PR."""
+    local, gh = _gitfile_env(tmp_path)
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(local))
+    shared = tmp_path / "shared" / ".factory" / "demands" / "demands.json"
+    ledger = _commit_ledger_without(local, "USR-413")
+    monkeypatch.setattr(DemandsStore, "next_ticket_id", _forbid_next_ticket_id)
+    queue.register_ticket(UserTicket(
+        id="USR-413", project_id="darkfac", title="Veio da fila",
+        problem_statement="registrado so na fila duravel", status=DeliveryStatus.IMPLEMENTING,
+    ))
+    assert "USR-413" not in ledger.read_text(encoding="utf-8")
+    (local / "impl.py").write_text("x = 1\n", encoding="utf-8")
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-413", cwd=local, gh_runner=gh)
+
+    assert rep.ok, rep.message
+    assert "not found in demands store" not in rep.message
+    assert rep.cause != "ticket_absent"
+    assert rep.delivery is not None and rep.delivery.pr_url
+    create = next(call for call in gh.calls if call[:2] == ["pr", "create"])
+    assert "[USR-413]" in create[create.index("--title") + 1]
+    assert any(
+        call[:2] == ["pr", "edit"] and "--add-label" in call and call[call.index("--add-label") + 1] == "implementation"
+        for call in gh.calls
+    )
+    rows = _queue_rows(state)
+    assert [(row["project_id"], row["ticket_id"]) for row in rows] == [("darkfac", "USR-413")]
+    assert rows[0]["status"] == "completed"
+    payload = json.loads(rows[0]["payload"])
+    assert payload["status"] == "completed"
+    assert payload["delivery_evidence"]
+    committed = json.loads(_git(local, "show", "HEAD:.factory/demands/demands.json"))
+    ids = [row["id"] for row in committed]
+    assert ids.count("USR-413") == 1
+    assert "USR-1" in ids
+    stored = next(row for row in committed if row["id"] == "USR-413")
+    assert stored["status"] == "completed"
+    assert stored["delivery_evidence"] == payload["delivery_evidence"]
+    assert not shared.exists()
+    assert queue.get_ticket("USR-1") is None
+
+
+def test_complete_ticket_gitfile_ledger_only_does_not_create_control_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ticket that exists only in the local ledger completes without a control store."""
+    local, gh = _gitfile_env(tmp_path)
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(local))
+    monkeypatch.setattr(DemandsStore, "next_ticket_id", _forbid_next_ticket_id)
+    _seed_ticket(local, "USR-76")
+    assert not (state / "control.db").exists()
+    (local / "c.txt").write_text("c\n", encoding="utf-8")
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-76", cwd=local, gh_runner=gh)
+
+    assert rep.ok, rep.message
+    assert "not found in demands store" not in rep.message
+    assert rep.cause != "ticket_absent"
+    assert rep.delivery is not None and rep.delivery.pr_url
+    assert any(call[:2] == ["pr", "create"] for call in gh.calls)
+    assert not (state / "control.db").exists()
+    assert queue.get_ticket("USR-76") is None
+    committed = json.loads(_git(local, "show", "HEAD:.factory/demands/demands.json"))
+    assert [row["id"] for row in committed] == ["USR-76"]
+    assert committed[0]["status"] == "completed"
+    assert committed[0]["delivery_evidence"]
+
+
+def test_complete_ticket_gitfile_ledger_only_branch_keeps_queue_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No implementation change on the default worktree ledger does not close the queue row."""
+    local, gh = _gitfile_env(tmp_path)
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(local))
+    ledger = _commit_empty_ledger(local)
+    before = ledger.read_bytes()
+    queue.register_ticket(UserTicket(
+        id="USR-413", project_id="darkfac", title="Veio da fila",
+        problem_statement="registrado so na fila duravel", status=DeliveryStatus.IMPLEMENTING,
+    ))
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-413", cwd=local, gh_runner=gh)
+
+    assert not rep.ok and rep.delivery is not None and rep.delivery.action == "no_changes"
+    assert rep.cause != "ticket_absent"
+    assert "not found in demands store" not in rep.message
+    assert ledger.read_bytes() == before
+    rows = _queue_rows(state)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "implementing"
+    assert not json.loads(rows[0]["payload"]).get("delivery_evidence")
+    assert queue.get_ticket("USR-413") is not None
+    assert queue.get_ticket("USR-413").status == DeliveryStatus.IMPLEMENTING
     assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
 
 

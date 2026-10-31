@@ -272,10 +272,11 @@ def test_sync_client_loop_recovers_when_telemetry_key_becomes_available(tmp_path
         "send_sync_payload",
         lambda _url, _payload, telemetry_key: sent_keys.append(telemetry_key) or {},
     )
-    # The loop also polls the Hub for refresh requests (USR-234) and owner answers (USR-195):
-    # keep the test offline, or a real HTTPS call to the Hub hangs the gate on hosts that have network.
+    # The loop also polls the Hub for refresh requests (USR-234), owner answers (USR-195)
+    # and daily queue snapshots (USR-343): keep the test offline, or real HTTPS / git calls hang or delay.
     monkeypatch.setattr(sync_client, "fetch_pending_refresh_requests", lambda *args, **kwargs: [])
     monkeypatch.setattr(sync_client, "sync_owner_answers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sync_client, "run_daily_queue_snapshot", lambda *args, **kwargs: None)
 
     def fake_sleep(_delay: float) -> None:
         nonlocal sleep_calls

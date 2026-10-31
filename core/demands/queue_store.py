@@ -65,6 +65,25 @@ def list_queue_tickets() -> list[UserTicket]:
     return tickets
 
 
+def get_ticket(ticket_id: str) -> UserTicket | None:
+    """Return the control-store ``UserTicket`` for ``ticket_id``.
+
+    ``None`` when the id is absent or the store does not exist yet. Does not
+    create the store and does not raise for those two cases.
+    """
+    if not ticket_id:
+        return None
+    for ticket in list_queue_tickets():
+        if ticket.id == ticket_id:
+            return ticket
+    return None
+
+
+def is_terminal_ticket(ticket: UserTicket) -> bool:
+    """True when the ledger row is closed (``completed`` / ``cancelled``)."""
+    return str(getattr(ticket.status, "value", ticket.status)) in _TERMINAL
+
+
 def is_default_ledger(path: Path) -> bool:
     from core.paths import project_root
 
@@ -79,7 +98,7 @@ def merge_tickets(file_rows: list[UserTicket], control_rows: list[UserTicket]) -
     merged = {t.id: t for t in file_rows}
     for ticket in control_rows:
         current = merged.get(ticket.id)
-        if current is not None and str(getattr(current.status, "value", current.status)) in _TERMINAL:
+        if current is not None and is_terminal_ticket(current):
             continue
         merged[ticket.id] = ticket
     return sorted(merged.values(), key=lambda t: t.id)

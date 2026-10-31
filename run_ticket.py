@@ -1833,6 +1833,113 @@ def _ticket_from_origin_main(ticket_id: str, worktree: Path) -> Optional[UserTic
         return DemandsStore(ledger).get_ticket(ticket_id)
 
 
+def _ledger_file_ticket(store: Any, ticket_id: str) -> Optional[UserTicket]:
+    """One row from the ledger file, without the durable-queue merge.
+
+    ``DemandsStore.get_ticket`` merges the queue. Resume must not treat that merge as a file
+    hit (USR-424): a queue-only id is materialized, and a shared-checkout hit must not write
+    the worktree or the queue. A double that only implements ``get_ticket`` keeps that public
+    contract. The launcher tests inject ``DemandsStore`` and do not grow a private reader.
+    """
+    reader = getattr(type(store), "_file_ticket", None)
+    if reader is None:
+        return store.get_ticket(ticket_id)
+    return reader(store, ticket_id)
+
+
+def _resolve_resume_ticket(ticket_id: str, target_worktree: Path) -> Optional[UserTicket]:
+    """Row the delivery will close. A queue-only id is materialized into the worktree ledger.
+
+    Order: worktree file, durable queue (same id, no ``next_ticket_id``), shared checkout file,
+    then ``origin/main`` (USR-314). A miss creates no ticket, no ledger file and no control store.
+    The worktree file is read on its own: ``get_ticket`` merges the queue when this worktree is
+    the project root and would return the row without writing a ledger line.
+    """
+    from core.demands import queue_store
+
+    ledger = target_worktree / ".factory" / "demands" / "demands.json"
+    store: Optional[Any] = DemandsStore(ledger) if ledger.is_file() else None
+    if store is not None:
+        ticket = _ledger_file_ticket(store, ticket_id)
+        if ticket is not None:
+            return ticket
+    if queue_store.get_ticket(ticket_id) is not None:
+        writer = store if store is not None else DemandsStore(ledger)
+        return writer.resolve_for_delivery(ticket_id)
+    shared_ledger = PROJECT_ROOT / ".factory" / "demands" / "demands.json"
+    if shared_ledger.is_file() and not _same_ledger(shared_ledger, ledger):
+        shared = _ledger_file_ticket(DemandsStore(shared_ledger), ticket_id)
+        if shared is not None:
+            return shared
+    return _ticket_from_origin_main(ticket_id, target_worktree)
+
+
+def _same_ledger(left: Path, right: Path) -> bool:
+    """True when both paths are the same ledger. A missing file still compares."""
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return False
+
+
+def _ticket_absent_result(
+    ticket_id: str, target_worktree: Path, *, as_json: bool, return_result: bool
+) -> Any:
+    """Structured refusal: the id is not in the worktree, the queue, the shared checkout or origin/main."""
+    worktree_ledger = target_worktree / ".factory" / "demands" / "demands.json"
+    shared_ledger = PROJECT_ROOT / ".factory" / "demands" / "demands.json"
+    print(
+        f"[ERRO] Ticket {ticket_id} não encontrado no ledger de demandas. Locais procurados: "
+        f"(1) ledger da worktree ({worktree_ledger}); "
+        f"(2) fila durável (control store); "
+        f"(3) checkout compartilhado ({shared_ledger}); "
+        f"(4) origin/main (.factory/demands/demands.json, após git fetch).",
+        file=sys.stderr,
+    )
+    payload = {
+        "exit_code": 1,
+        "ok": False,
+        "cause": "ticket_absent",
+        "error": f"Ticket {ticket_id} not found in demands store",
+    }
+    if as_json and not return_result:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    if return_result:
+        return payload
+    return 1
+
+
+def _candidate_binding(rws: Any, repo: Path, default_branch: str) -> tuple[Optional[str], str]:
+    """``(candidate_digest, policy_digest)`` of the tree the review stage would bind."""
+    git_ws = rws.model_copy(update={"path": repo})
+    return (
+        stage_review._candidate_digest(git_ws, default_branch),
+        stage_review._policy_digest(load_routing_config()),
+    )
+
+
+def _review_base_branch(ticket: UserTicket) -> str:
+    """Default branch ``ReviewStage`` uses to hash the candidate. ``main`` if the project is unreadable."""
+    try:
+        project = _resolve_project(ticket)
+    except Exception as exc:  # noqa: BLE001 - a missing project must not skip a real review
+        logger.warning("projeto de %s indisponivel para o binding da revisao: %s", ticket.id, exc)
+        return "main"
+    branch = getattr(project, "default_branch", None)
+    return branch if isinstance(branch, str) and branch else "main"
+
+
+def _reuse_current_approval(ticket: UserTicket, rws: Any, repo: Path, default_branch: str) -> bool:
+    """True when the last review round already approves this candidate. The reviewer agent must not run."""
+    if ticket.project_id != "darkfac":
+        return False
+    candidate_digest, policy_digest = _candidate_binding(rws, repo, default_branch)
+    if not ticket_engine.review_approves(rws, candidate_digest, policy_digest):
+        return False
+    ticket_engine.ensure_approved_verdict(rws)
+    return True
+
+
 def _resume_delivery_scoped(
     ticket_id: str,
     worktree_path: Optional[Path | str],
@@ -1873,24 +1980,11 @@ def _resume_delivery_scoped(
     except Exception:
         git_root = PROJECT_ROOT
     git_mgr = GitAutonomyManager(git_root)
-    store = DemandsStore(target_worktree / ".factory" / "demands" / "demands.json")
-    ticket = store.get_ticket(ticket_id)
+    ticket = _resolve_resume_ticket(ticket_id, target_worktree)
     if ticket is None:
-        shared_store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
-        ticket = shared_store.get_ticket(ticket_id)
-    if ticket is None:
-        ticket = _ticket_from_origin_main(ticket_id, target_worktree)
-    if ticket is None:
-        print(
-            f"[ERRO] Ticket {ticket_id} não encontrado no ledger de demandas. Locais procurados: "
-            f"(1) ledger da worktree ({target_worktree / '.factory' / 'demands' / 'demands.json'}); "
-            f"(2) checkout compartilhado ({PROJECT_ROOT / '.factory' / 'demands' / 'demands.json'}); "
-            f"(3) origin/main (.factory/demands/demands.json, após git fetch).",
-            file=sys.stderr,
+        return _ticket_absent_result(
+            ticket_id, target_worktree, as_json=as_json, return_result=return_result
         )
-        if return_result:
-            return {"exit_code": 1, "ok": False, "error": f"Ticket {ticket_id} not found in ledger"}
-        return 1
 
     session_probe_path = os.environ.get("DARKFAC_CODEX_SESSION_PATH", "").strip()
     if session_probe_path:  # USR-79: aviso somente leitura de chamada de ferramenta orfa
@@ -2098,7 +2192,7 @@ def _deliver_worktree(
         _require_plan_and_build(ticket, rws, standalone)
     except StageArtifactMissing as exc:
         return refused(exc.stage, exc.reason)
-    ticket_engine.clear_delivery(rws)
+    ticket_engine.clear_delivery(rws, keep_validation=True)
 
     # 1. Commit uncommitted changes in worktree if any (required before rebase)
     if _cancelled():
@@ -2117,23 +2211,34 @@ def _deliver_worktree(
         return synced
     current_sha = synced
 
-    # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245)
+    # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245).
+    # A passed validation.json for this same candidate is kept and the gate does not run (USR-424).
     if _cancelled():
         return cancelled_payload()
     attempts_log: list[dict[str, Any]] = []
-    gate_outcome = _run_gate_with_self_correction(
-        target_worktree, current_branch, current_sha, ticket, resume_cmd,
-        skip_validation, as_json, return_result, progress, cancelled_payload,
-        attempts_log,
+    candidate_digest, policy_digest = _candidate_binding(rws, target_worktree, _review_base_branch(ticket))
+    reuse_validation = (
+        ticket.project_id == "darkfac"
+        and ticket_engine.keep_reusable_validation(rws, candidate_digest, policy_digest)
     )
-    if gate_outcome is not None:
-        return gate_outcome
-    if attempts_log and not as_json:
-        print(_render_self_correction_log(attempts_log))
-    ticket_engine.write_validation(
-        rws, True, "skip_validation" if skip_validation else "core/harness/runner.py --quick",
-        f"{len(attempts_log)} autocorrecao(oes)",
-    )
+    if reuse_validation:
+        if not as_json:
+            print("[+] Validacao vigente para este candidato; portao nao reexecutado.")
+    else:
+        gate_outcome = _run_gate_with_self_correction(
+            target_worktree, current_branch, current_sha, ticket, resume_cmd,
+            skip_validation, as_json, return_result, progress, cancelled_payload,
+            attempts_log,
+        )
+        if gate_outcome is not None:
+            return gate_outcome
+        if attempts_log and not as_json:
+            print(_render_self_correction_log(attempts_log))
+        ticket_engine.write_validation(
+            rws, True, "skip_validation" if skip_validation else "core/harness/runner.py --quick",
+            f"{len(attempts_log)} autocorrecao(oes)",
+            candidate_digest=candidate_digest or "",
+        )
 
     docs_outcome = _stage_docs_sync(
         ticket, target_worktree, current_branch, resume_cmd, as_json, return_result, progress, external_project
@@ -2419,7 +2524,15 @@ def _stage_review(
 
     `changes_required` reinvokes the development agent with the review, commits its fix and re-runs
     the gate before the next round (rounds are capped by `run_caps.review_rounds` in the stage).
+
+    An approval whose binding still matches this candidate is reused: the reviewer agent does not run
+    (USR-424). ``merge.json`` and the previous deploy report were already removed by ``clear_delivery``.
     """
+    if _reuse_current_approval(ticket, rws, target_worktree, _review_base_branch(ticket)):
+        logger.info("estagio REVIEW: aprovacao vigente para este candidato; revisor nao reexecutado")
+        if not as_json:
+            print("--> Estagio REVIEW: aprovacao vigente para este candidato; revisor nao reexecutado.")
+        return None
     cause = "review_not_attempted"
     for _attempt in range(REVIEW_ATTEMPTS):
         if _cancelled():
