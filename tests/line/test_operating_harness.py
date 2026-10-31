@@ -396,7 +396,7 @@ def test_stale_operating_quota_is_allowed_with_stale_reason(
 
 @pytest.mark.parametrize("signal", ["explicit", "autodetect"])
 def test_antigravity_operator_is_preferred_interactively_but_excluded_headless(
-    signal: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grok_and_antigravity_write: None,
+    signal: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     levels = _lookup(claude=90.0, codex=80.0, grok=70.0, antigravity=30.0)
     monkeypatch.delenv(OPERATING_HARNESS_ENV, raising=False)
@@ -452,8 +452,9 @@ def test_an_operating_harness_that_does_not_declare_write_falls_back_to_headroom
     monkeypatch.setitem(agent_cli.HARNESS_CAPABILITIES, operating, frozenset({"read"}))
     lookup = _lookup(claude=40.0, codex=95.0, grok=99.0, antigravity=99.0)
 
-    assert _pick(tmp_path, lookup, operating_harness=operating) == ("codex", None)
-    assert _pick(tmp_path, lookup, operating_harness=operating, mode="write") == ("codex", None)
+    exec_ctx = "headless" if operating == "antigravity" else "interactive"
+    assert _pick(tmp_path, lookup, operating_harness=operating, execution_context=exec_ctx) == ("codex", None)
+    assert _pick(tmp_path, lookup, operating_harness=operating, mode="write", execution_context=exec_ctx) == ("codex", None)
 
 
 def test_an_operating_harness_with_a_forbidden_model_falls_back_to_headroom(tmp_path: Path) -> None:

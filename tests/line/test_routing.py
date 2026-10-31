@@ -729,3 +729,39 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     assert used == {"claude:5h": 25.0, "claude:weekly": 65.0}
     assert "-p" in calls[0][0] and "--model" in calls[0][0]
     assert (tmp_path / "anthropic.json").is_file()
+
+
+def test_pick_development_elects_antigravity_when_operating_interactively_without_monkeypatch(tmp_path: Path):
+    """USR-436: Interactive operating Antigravity elects Antigravity for development above floor without monkeypatch."""
+    caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
+    lookup = lambda p: 60.0 if p == "google" else (80.0 if p == "xai" else 50.0)
+
+    winner = pick(
+        "development",
+        caps,
+        quota_lookup=lookup,
+        operating_harness="antigravity",
+        execution_context="interactive",
+        cooldown_path=tmp_path / "cd1.json",
+    )
+    assert winner == ("antigravity", None)
+
+    headless_winner = pick(
+        "development",
+        caps,
+        quota_lookup=lookup,
+        operating_harness="antigravity",
+        execution_context="headless",
+        cooldown_path=tmp_path / "cd2.json",
+    )
+    assert headless_winner != ("antigravity", None)
+
+    cascade_winner = pick(
+        "development",
+        caps,
+        quota_lookup=lookup,
+        operating_harness=None,
+        execution_context="interactive",
+        cooldown_path=tmp_path / "cd3.json",
+    )
+    assert cascade_winner != ("antigravity", None)
