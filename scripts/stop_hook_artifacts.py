@@ -27,7 +27,12 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def missing_artifact(cwd: Path) -> str | None:
-    """Retorna o motivo do bloqueio ou None se a sessao pode encerrar."""
+    """Retorna o motivo do bloqueio ou None se a sessao pode encerrar (USR-431)."""
+    try:
+        from core.ops.turn_guard import check_learning_pack
+        return check_learning_pack(cwd)
+    except Exception:
+        pass
     paths = _git(cwd, "diff", "--name-only", "origin/main...HEAD").split()
     paths += [line[3:] for line in _git(cwd, "status", "--porcelain").splitlines()]
     if not any(p.replace("\\", "/").startswith(CODE_PREFIXES) for p in paths):

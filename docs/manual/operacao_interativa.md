@@ -1,12 +1,12 @@
-<!-- covers: core/ops/briefing.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, run_ticket.py -->
-# Operacao interativa por Antigravity (USR-433)
+<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, run_ticket.py -->
+# Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
 ## Inicio e roteamento
 
-Antigravity e uma interface de chat para coordenar a fabrica, nao um executor headless. No inicio de uma sessao:
+Antigravity e Codex atuam como interfaces de operacao interativa para coordenar a fabrica pelo chat. No inicio de uma sessao:
 
 ```powershell
-$env:DARKFAC_OPERATING_HARNESS = 'antigravity'
+$env:DARKFAC_OPERATING_HARNESS = 'antigravity' # ou 'codex'
 python -m core.ops.briefing
 ```
 
@@ -33,6 +33,20 @@ No projeto `darkfac`, validacao e revisao ja vigentes para o mesmo candidato nao
 O briefing le apenas snapshots locais e mostra idade e causa estruturada quando disponiveis. Snapshot ausente, invalido ou `STALE` nao confirma percentual. Na rota interativa, o harness de operacao Antigravity continua elegivel com aviso explicito de cota desconhecida/antiga enquanto a telemetria e reparada; esse fail-open e restrito a preferencia do operador no chat e nao muda o piso para qualquer snapshot atual conhecido. A causa da falha fica registrada pelo medidor `antigravity_rpc`. Execucao headless continua excluida mesmo que a cota esteja atual.
 
 Para solicitar uma leitura atualizada fora do briefing, use o comando de contas autenticado conforme o runbook de quota; nao interprete uma falha do probe como percentual zero ou como amostra nova.
+
+## Guardas de fim de turno agnosticas (USR-431)
+
+Para garantir a disciplina de entrega e continuidade independentemente do harness (Claude Code, Codex, Antigravity ou Grok Build), as guardas de fim de turno sao centralizadas em `core/ops/turn_guard.py`:
+
+```powershell
+# Verificar invariantes de encerramento de turno (learning pack, handoff e sessao)
+python -m core.ops.turn_guard --check
+
+# Encerramento de sessao no registro unificado de execucoes
+python -m core.ops.turn_guard --finish-session --harness codex --status succeeded --evidence "PR #810"
+```
+
+O `turn_guard` valida se alteracoes em arquivos de codigo (`core/`, `hub/`, `scripts/`, `tests/`, `run_ticket.py`) possuem o respectivo learning pack em `.factory/learning_packs/`. Em caso de violacao, encerra com codigo de saida `2` e mensagem orientando a geracao do artefato. O hook `stop_hook_artifacts.py` delega a mesma verificacao ao `turn_guard`, assegurando fonte unica das regras.
 
 ## Encerramento e continuidade
 
