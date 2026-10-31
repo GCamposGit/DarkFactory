@@ -679,7 +679,12 @@ def _routable_candidates(
                 stage, CODEX_HEADLESS_BLOCK_REASON,
             )
             continue
-        if not supports(harness, required_mode):
+        if not supports(
+            harness,
+            required_mode,
+            execution_context=execution_context,
+            operating_harness=operating_harness,
+        ):
             logger.info(
                 "Skipping harness %s for stage %s (does not declare '%s' mode)", harness, stage, required_mode
             )

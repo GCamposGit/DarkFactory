@@ -132,9 +132,31 @@ def headless_development_preamble(harness: str, headroom: Optional[float] = None
     return HEADLESS_DEVELOPMENT_PREAMBLE.format(harness=harness, headroom=quota) + protected_paths_notice()
 
 
-def supports(harness: str, mode: str) -> bool:
-    """True when `harness` declares `mode`. An unknown harness supports nothing (fail-closed)."""
-    return mode in HARNESS_CAPABILITIES.get(harness.lower().strip(), frozenset())
+def supports(
+    harness: str,
+    mode: str,
+    *,
+    execution_context: Optional[str] = None,
+    operating_harness: Optional[str] = None,
+) -> bool:
+    """True when `harness` declares `mode`. An unknown harness supports nothing (fail-closed).
+
+    Antigravity writes only when operating interactively as the owner-facing harness (AGENTS.md §3/§10);
+    it is strictly read-only in headless, fleet, and background contexts.
+    """
+    h = harness.lower().strip()
+    if (
+        h == "antigravity"
+        and mode == "write"
+        and execution_context != "headless"
+    ):
+        op = operating_harness or os.environ.get("DARKFAC_OPERATING_HARNESS")
+        if not op:
+            from core.line.operating_harness import detect_operating_harness
+            op = detect_operating_harness()
+        if op == "antigravity":
+            return True
+    return mode in HARNESS_CAPABILITIES.get(h, frozenset())
 
 
 class AgentRequest(BaseModel):

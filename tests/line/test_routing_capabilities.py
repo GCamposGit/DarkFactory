@@ -378,3 +378,12 @@ def test_run_agent_does_not_refuse_a_declared_mode(tmp_path: Path, monkeypatch: 
     result = run_agent(AgentRequest(prompt="x", cwd=tmp_path, mode="write", harness="claude"))
 
     assert result.error_kind == "not_installed"  # got past the capability gate to the runner
+
+
+def test_supports_antigravity_write_only_in_interactive_operating_context() -> None:
+    """USR-436: agent_cli.supports only declares write for Antigravity when operating interactively."""
+    assert supports("antigravity", "write") is False
+    assert supports("antigravity", "write", execution_context="headless", operating_harness="antigravity") is False
+    assert supports("antigravity", "write", execution_context="interactive", operating_harness="antigravity") is True
+    assert supports("antigravity", "write", execution_context="interactive", operating_harness="claude") is False
+    assert supports("antigravity", "read") is True
