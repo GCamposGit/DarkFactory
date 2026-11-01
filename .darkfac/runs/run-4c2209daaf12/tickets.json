@@ -1,0 +1,54 @@
+[
+  {
+    "id": "T1",
+    "title": "Preservar decisões pendentes no motor de demandas",
+    "goal": "Fazer o grill de core/demands manter respostas materiais ausentes como pendentes, inclusive em respostas parciais e lotes com mais de três perguntas.",
+    "files_hint": [
+      "core/demands/grill.py",
+      "core/demands/models.py",
+      "core/demands/integrated_service.py",
+      "tests/test_criar_mecanismo_de_grill_.py"
+    ],
+    "acceptance": [
+      "Nenhuma pergunta material sem resposta recebe a opção recomendada por auto_accept_unanswered, ausência de resposta ou conclusão da sessão.",
+      "Mais de três perguntas materiais permanecem no estado da sessão e são disponibilizadas em rodadas de até três, sem serem classificadas como técnicas.",
+      "Resposta parcial produz GrillRecord com ready_for_spec=false, perguntas restantes e status waiting_human; somente respostas explícitas para todas as decisões permitem ready_for_spec.",
+      "Decisões respondidas registram human_response, e decisões técnicas reversíveis mantêm resolução automática com origem auto_technical.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Consolidar teste de resposta parcial para provar que recomendações ausentes não entram no ticket nem no GrillRecord.",
+      "Adicionar cenário com quatro ou mais perguntas materiais, verificando preservação da fila e rodada seguinte.",
+      "Adicionar cenário em que todas as rodadas são respondidas explicitamente e a prontidão passa para ready_for_spec.",
+      "Cobrir compatibilidade do estado serializado da GrillSession e a origem human_response/auto_technical."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Aplicar espera estrita no grill da linha",
+    "goal": "Remover defaults por prazo no stage_grill, preservar perguntas materiais excedentes e documentar as exceções automáticas autorizadas.",
+    "files_hint": [
+      "core/line/stage_grill.py",
+      "tests/line/test_stage_grill.py",
+      "docs/manual/grill.md",
+      "docs/FASE_ATUAL.md"
+    ],
+    "acceptance": [
+      "Demanda normal com decisão de objetivo, sucesso, negócio ou aceite pendente continua waiting_human antes e depois do prazo, sem default_after_timeout e sem commit de grill resolvido.",
+      "O estado persistido conserva todas as decisões materiais; cada notificação apresenta no máximo três e, após respostas explícitas da rodada, a rodada seguinte é enviada.",
+      "Respostas parciais nunca limpam GRILL_PENDING.json nem permitem avanço ao planejamento.",
+      "Perguntas técnicas reversíveis continuam automáticas com origem auto_technical; canário com grill_policy=auto continua automático com origem auto_canary; segredos e acessos continuam bloqueantes.",
+      "O manual deixa explícito que três é limite por rodada, que silêncio não vale como decisão e quais origens automáticas são permitidas.",
+      "python scripts/line_validate.py termina com sucesso; o portão oficial emite [HARNESS_PASS]; a árvore final recebe revisão cruzada de família de modelo diferente."
+    ],
+    "tests_to_add": [
+      "Substituir o teste de default após timeout por teste comportamental de permanência em waiting_human sem escolha registrada.",
+      "Adicionar cenário com mais de três decisões materiais, duas rodadas e preservação integral no GRILL_PENDING.json.",
+      "Consolidar respostas parciais para verificar que prazo vencido não finaliza nem apaga pendências.",
+      "Manter e ajustar o cenário de canário explícito, comprovando auto_canary e bloqueio de segredo ou conta.",
+      "Cobrir decisão técnica automática com origem auto_technical e ausência de regressão na notificação idempotente."
+    ],
+    "smoke": []
+  }
+]
