@@ -236,6 +236,9 @@
     "GET /api/line/status": {
       "surface": "line-status-card"
     },
+    "GET /api/line/v0-proof": {
+      "surface": "sec-v0proof"
+    },
     "POST /api/line/runs/{run_id}/cancel": {
       "machine": "Cancelamento de run da linha autonoma por run_id, acionado pelo comando /cancelar do Telegram e por scripts (USR-123)."
     },
