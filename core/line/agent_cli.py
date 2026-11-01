@@ -1813,9 +1813,14 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
 
     model_raw = req.model or os.environ.get("DARKFAC_OPENROUTER_CHEAP_MODEL") or _DEFAULT_OPENROUTER_MODEL
     try:
-        model = resolve_model(model_raw)
+        from core.models.registry import gateway_id
+
+        model = gateway_id(model_raw)
     except Exception:
-        model = model_raw
+        try:
+            model = resolve_model(model_raw)
+        except Exception:
+            model = model_raw
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     prompt = req.prompt + _OPENROUTER_WRITE_PROMPT_APPENDIX if req.mode == "write" else req.prompt

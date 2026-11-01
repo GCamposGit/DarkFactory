@@ -942,9 +942,8 @@ def _elect_openrouter(
 ) -> Optional[tuple[str, str]]:
     if _openrouter_has_credits(balance_lookup):
         _check_openrouter_monthly_budget(cfg)
-        if stage_cfg.openrouter_model in (None, "pareto", "dynamic") or os.environ.get("DARKFAC_OPENROUTER_DYNAMIC_PARETO") == "1":
-            return "openrouter", resolve_pareto_openrouter_model(stage, fallback_model=stage_cfg.openrouter_model)
-        return "openrouter", stage_cfg.openrouter_model
+        model = resolve_pareto_openrouter_model(stage, fallback_model=stage_cfg.openrouter_model)
+        return "openrouter", model
     logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
     return None
 
