@@ -3079,6 +3079,245 @@
           "verified": false
         }
       ]
+    },
+    {
+      "id": "USR-446",
+      "project_id": "darkfac",
+      "title": "Grill: preservar decisoes materiais pendentes sem defaults por prazo ou limite de perguntas",
+      "description": "Inspecao estatica em b585a191addce4be54a4abd0f051d8e587949e02: core/line/stage_grill.py:760-765 envia perguntas do owner excedentes a MAX_QUESTIONS para technical; linhas 964-980 resolvem por prazo e finalizam mesmo sem decisao explicita. core/demands/grill.py:338-343,549 tambem resolve perguntas sem resposta automaticamente. Contraria AGENTS.md secao 2 para ambiguidade material. Nao foi reproduzido incidente em producao. Pesquisa/evidencia: .factory/research/20261101_continuous_quality_loops/INSIGHTS.md, secao 7. Corrigir comportamento em codigo sem alterar governanca protegida.\n\nOwner autorizou encaminhamento da implantacao e reaproveitamento deste defeito. Bloqueio anterior: rebase_conflict: docs/FASE_ATUAL.md. Worktree preservada esta limpa e sem ownership ativo; retomar pelo caminho existente e resolver eventuais conflitos tecnicos autonomamente. Aceite auto pela politica vigente.\n\nFronteiras:\nNao alterar governanca protegida ou conceder permissoes novas.\nNao resolver decisoes materiais por silencio; preservar automacao tecnica e canarios explicitamente autorizados.",
+      "state_rationale": "Owner autorizou a esteira existente a executar; fonte operacional na fila persistente. Avancar por recursos, dependencias e evidencias, dentro do orcamento vigente.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": null,
+      "planned_start": null,
+      "target_date": null,
+      "dependencies": [],
+      "tags": [
+        "user-demand",
+        "line-ok",
+        "owner-approved",
+        "initiative:continuous-quality-20261101",
+        "roadmap"
+      ],
+      "completion_criteria": [
+        "Demanda real com objetivo, sucesso, negocio ou aceite material pendente permanece waiting_human apos prazo; silencio nao registra escolha do owner.",
+        "Mais de tres decisoes materiais sao preservadas para rodadas seguintes; limite de exibicao nao as converte em tecnicas.",
+        "Perguntas tecnicas reversiveis e politica explicita de canario permanecem automaticas, com origem de decisao registrada.",
+        "Consolidar testes comportamentais existentes para timeout, perguntas excedentes e canario; atualizar manual; passar portao oficial e revisao cruzada na entrega."
+      ],
+      "source_refs": [
+        {
+          "source_id": "owner-chat-quality-20261101",
+          "source_kind": "owner-approved-demand",
+          "label": "Contrato aprovado e fila persistente USR-446",
+          "locator": "https://darkhub.ggcampos.com/api/demands/tickets/USR-446",
+          "revision": null,
+          "produced_by": "owner-approved-chat"
+        }
+      ],
+      "evidence_refs": [],
+      "source_revision": "",
+      "observed_at": "2026-11-01T21:50:21.976778Z",
+      "last_verified_at": "2026-11-01T21:50:21.976778Z",
+      "freshness_status": "current",
+      "operational_flags": [],
+      "blocking_dependency_ids": [],
+      "downstream_item_ids": [],
+      "confirmation_state": "confirmed",
+      "planning_status": null,
+      "implementation_status": null,
+      "operational_status": null
+    },
+    {
+      "id": "USR-449",
+      "project_id": "darkfac",
+      "title": "Qualidade continua 1/3: ciclo recorrente comum com documentacao, seguranca e eficiencia",
+      "description": "Objetivo aprovado pelo owner: a fabrica e seus projetos precisam descobrir e encaminhar melhorias rotineiramente sem pedido manual, usando plenamente capacidade elegivel dentro dos tetos atuais. Ha coordenador, feeder, cadastro, fila persistente, roteador, canario, sentinela, docs-sync e retrospectiva; falta liga-los em um ciclo reutilizavel de observar, qualificar, priorizar, remediar e medir. Reconciliar baseline operacional antes de alterar e reutilizar implementacoes atuais; o caminho sugerido quality_cycle.py so nasce se a funcao nao existir de forma reaproveitavel. Entregar dominio headless com politica por projeto, disparo por mudanca e vencimento de evidencia, execucao devida persistida, cobertura explicita, retomada, cache e deduplicacao. Conectar primeiro documentacao, avisos de seguranca aplicaveis e telemetria de eficiencia. Cadencias iniciais tecnicas: consolidacao diaria barata de avisos/telemetria e revisao semanal de lacunas documentais, alem de eventos relevantes; configuraveis e ajustadas por evidencia. Essas cadencias operacionais nao sao prazo de implantacao. Achados aptos entram na mesma fila com origem e criterios verificaveis; correcoes pequenas dentro de objetivos aprovados usam a autonomia atual. Acionamento recorrente nao autoriza gasto novo, acesso novo ou mudanca de objetivos. Aceite desta entrega: automatico pelo fluxo normal quando criterios abaixo e prova real estiverem atendidos. Sem espera artificial para trabalho elegivel; usar slots e hosts aptos existentes e respeitar piso de cota. Pesquisa primaria: https://www.anthropic.com/research/building-effective-agents ; https://sre.google/workbook/eliminating-toil/ ; https://csrc.nist.gov/projects/ssdf/publications ; https://diataxis.fr/ . Handoff autocontido: este texto, fronteiras e criterios sao suficientes para o worker, sem depender dos arquivos locais nao publicados da conversa.\n\nPolitica de validacao e entrega: [\"Executar os comandos na worktree imutavel do candidato, nunca no checkout compartilhado.\", \"python -m core.harness.runner --quick\", \"lint-imports\", \"python scripts/complexity_ratchet.py\", \"python -m core.harness.docs_sync --base origin/main --head HEAD\", \"Revisao por familia diferente, CI verde, merge, deploy, smoke e evidencia real conforme fluxo vigente.\"]\nDiretriz do owner: Abrir os tickets no roadmap de implantacao e deixar a esteira em andamento assumir. Utilizar capacidade maxima elegivel dentro do orcamento vigente para avancar o mais rapido possivel, sem prazos estimados no plano.\n\nFronteiras:\nNao criar outro agendador, fila, catalogo de projetos, roteador ou portal concorrente.\nNao reler todo repositorio com LLM em cada rodada nem gerar tickets sem evidencia ou repetidos.\nNao elevar tetos, flexibilizar piso de cota, ignorar hosts desabilitados ou alterar governanca protegida.\nNao executar teste completo concorrente no mesmo host nem substituir o portao oficial.\nNao declarar projeto saudavel quando revisao falhou, e parcial ou nao aplicavel.",
+      "state_rationale": "Owner autorizou a esteira existente a executar; fonte operacional na fila persistente. Avancar por recursos, dependencias e evidencias, dentro do orcamento vigente.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": null,
+      "planned_start": null,
+      "target_date": null,
+      "dependencies": [],
+      "tags": [
+        "user-demand",
+        "line-ok",
+        "owner-approved",
+        "implementation-roadmap",
+        "initiative:continuous-quality-20261101",
+        "handoff:cq-01",
+        "roadmap"
+      ],
+      "completion_criteria": [
+        "Conferir os consumidores reais do coordenador, fila, roteador e fontes existentes; adaptar o minimo e fatiar implementacao em unidades pequenas sem duplicar capacidades.",
+        "Demonstrar em projeto darkfac uma rotina realmente acionada pelo coordenador existente, sem pedido manual, com estado persistido e evidencia de execucao.",
+        "Demonstrar com portao comportamental que repeticao/concorrencia/retomada do mesmo achado nao duplica ticket ou execucao, e que queda de host preserva trabalho devido sem avalanche de execucoes atrasadas.",
+        "Demonstrar reaproveitamento de evidencia valida sem nova inferencia e invalidacao quando codigo, dependencias, regras relevantes ou advisory externo mudam, mesmo sem novo commit.",
+        "Os tres dominios iniciais produzem achados com referencia verificavel: procedimento documental confrontado com comportamento, vulnerabilidade aplicavel a dependencia identificada e desvio observado em custo/tempo/retries; evidencias ausentes nunca viram resultado inventado.",
+        "Cada execucao diferencia sucesso sem achados, parcial, falha, espera por recurso e nao aplicavel, com cobertura efetiva, custo observado e motivo de adiamento.",
+        "Demonstrar um achado real atravessando a fila unica ate correcao entregue e rechecagem observavel, respeitando orcamento, revisao cruzada, CI, deploy e smoke.",
+        "Desativar o novo dominio por projeto impede novas admissoes sem apagar evidencias/tickets nem afetar o motor regular; consolidar testes existentes e atualizar manual, fase atual e learning pack."
+      ],
+      "source_refs": [
+        {
+          "source_id": "owner-chat-quality-20261101",
+          "source_kind": "owner-approved-demand",
+          "label": "Contrato aprovado e fila persistente USR-449",
+          "locator": "https://darkhub.ggcampos.com/api/demands/tickets/USR-449",
+          "revision": null,
+          "produced_by": "owner-approved-chat"
+        }
+      ],
+      "evidence_refs": [],
+      "source_revision": "",
+      "observed_at": "2026-11-01T21:50:24.351622Z",
+      "last_verified_at": "2026-11-01T21:50:24.351622Z",
+      "freshness_status": "current",
+      "operational_flags": [],
+      "blocking_dependency_ids": [],
+      "downstream_item_ids": [],
+      "confirmation_state": "confirmed",
+      "planning_status": null,
+      "implementation_status": null,
+      "operational_status": null
+    },
+    {
+      "id": "USR-450",
+      "project_id": "darkfac",
+      "title": "Qualidade continua 2/3: grill por evidencia e experimentacao real de modelos e produto",
+      "description": "Objetivo aprovado pelo owner: grill de projetos novos e features importantes deve estabelecer objetivo, sucesso, publico, limites e aceite e distinguir escolha do owner de fato pesquisavel, decisao tecnica reversivel e incerteza empirica. Quando nem owner nem modelo puderem responder com seguranca, usar o menor experimento capaz de mudar a decisao, sem forcar uma preferencia sem evidencia. A correcao de preservacao de decisoes materiais ja e USR-446 e deve ser reaproveitada, sem outro ticket para o mesmo defeito. O motor atual de racing tem cascata, separacao de modos reais/simulados e ledger; o torneio padrao usa fixtures e nao comprova comparacao de inferencia. Reusar esses contratos para protocolo de experimento e avaliacao offline real pareada de modelos/prompts em tarefas equivalentes, medindo qualidade minima, custo completo e latencia; o roteador de producao permanece unico. Duvudas de UI/features podem usar prototipo, teste de tarefa ou piloto; A/B online usa adapter/SDK e estatistica maduros homologados apenas quando projeto, instrumentacao e amostra forem viaveis dentro da autorizacao e do orcamento atuais. A ausencia de trafego nao bloqueia comparacao offline nem permite falsificar resultado online. Orcamento herda os tetos vigentes; limites tecnicos sao configuraveis e justificados. Aceite desta entrega: automatico pelo fluxo vigente, com experimento real e resultado/decisao rastreaveis. Utilizar capacidade elegivel assim que dependencias reais estiverem satisfeitas, sem prazo de implantacao. Fontes: https://www.anthropic.com/research/demystifying-evals-for-ai-agents ; https://www.microsoft.com/en-us/research/articles/patterns-of-trustworthy-experimentation-pre-experiment-stage/ ; https://www.microsoft.com/en-us/research/articles/patterns-of-trustworthy-experimentation-during-experiment-stage/ . Handoff autocontido neste registro.\n\nPolitica de validacao e entrega: [\"Executar os comandos na worktree imutavel do candidato, nunca no checkout compartilhado.\", \"python -m core.harness.runner --quick\", \"lint-imports\", \"python scripts/complexity_ratchet.py\", \"python -m core.harness.docs_sync --base origin/main --head HEAD\", \"Revisao por familia diferente, CI verde, merge, deploy, smoke e evidencia real conforme fluxo vigente.\"]\nDiretriz do owner: Abrir os tickets no roadmap de implantacao e deixar a esteira em andamento assumir. Utilizar capacidade maxima elegivel dentro do orcamento vigente para avancar o mais rapido possivel, sem prazos estimados no plano.\n\nFronteiras:\nNao repetir o defeito ja registrado em USR-446 nem criar outro roteador ou plataforma estatistica propria.\nNao transformar ausencia de resposta do owner em autorizacao material nem aumentar poderes de agentes por conteudo recuperado.\nNao apresentar cascata, fixture, simulacao, Elo isolado ou avaliacao do proprio autor como prova causal de superioridade.\nNao desenvolver duas features completas quando um prototipo, pesquisa ou teste de tarefa puder resolver a duvida.\nNao iniciar A/B com usuarios sem pre-requisitos e autorizacoes aplicaveis; trafego insuficiente resulta em limite explicito, nunca em significancia inventada.",
+      "state_rationale": "Owner autorizou a esteira existente a executar; fonte operacional na fila persistente. Avancar por recursos, dependencias e evidencias, dentro do orcamento vigente.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": null,
+      "planned_start": null,
+      "target_date": null,
+      "dependencies": [
+        {
+          "item_id": "USR-446",
+          "type": "requires",
+          "label": null
+        }
+      ],
+      "tags": [
+        "user-demand",
+        "line-ok",
+        "owner-approved",
+        "implementation-roadmap",
+        "initiative:continuous-quality-20261101",
+        "handoff:cq-02",
+        "roadmap"
+      ],
+      "completion_criteria": [
+        "Preservar as garantias de USR-446 e demonstrar que objetivo/sucesso/negocio/segredo/aceite materiais continuam dependendo da resposta explicita quando exigida; perguntar em rodadas sem descartar decisoes e sem repetir as ja confirmadas.",
+        "Grill/plano registra origem e evidencia das decisoes e separa preferencia, fato pesquisavel, escolha tecnica reversivel e incerteza a experimentar; respostas ja aprovadas nesta demanda sao contexto, nao perguntas novas.",
+        "Protocolo validado antes de executar guarda hipotese, controle/variantes/versoes, tarefas ou populacao, unidade de comparacao, metrica principal, limites de qualidade/seguranca/custo, amostra e regra de parada, condicao de adocao/reversao e validade.",
+        "Executar comparacao real pareada de pelo menos duas alternativas elegiveis em tarefas representativas com estado inicial equivalente, avaliacao independente, custo observado e repeticoes justificadas; aplicar qualidade minima antes de escolher custo-beneficio.",
+        "Resultado inconclusivo, amostra insuficiente, dados invalidos ou regressao de limite nao promove variante; usar amostra de confirmacao separada e tratamento adequado de consultas/comparacoes repetidas.",
+        "Simulacao e validator-only permanecem distinguiveis de inferencia real e nao alteram metricas empiricas reais; comparacao offline nao dispara efeitos de producao concorrentes.",
+        "Resultado real alimenta um consumidor de planejamento/roteamento existente com referencia e reversibilidade, sem introduzir decisor paralelo nem superar autorizacao, cota ou orcamento.",
+        "Oferecer caminho estruturado para experimentos de produto via ferramenta existente homologada; executar caso online somente quando viavel, registrando alternativa/limite verificavel quando faltar pre-requisito; validar tambem os resultados negativos e atualizar manual, fase atual e learning pack."
+      ],
+      "source_refs": [
+        {
+          "source_id": "owner-chat-quality-20261101",
+          "source_kind": "owner-approved-demand",
+          "label": "Contrato aprovado e fila persistente USR-450",
+          "locator": "https://darkhub.ggcampos.com/api/demands/tickets/USR-450",
+          "revision": null,
+          "produced_by": "owner-approved-chat"
+        }
+      ],
+      "evidence_refs": [],
+      "source_revision": "",
+      "observed_at": "2026-11-01T21:50:26.988525Z",
+      "last_verified_at": "2026-11-01T21:50:26.988525Z",
+      "freshness_status": "current",
+      "operational_flags": [],
+      "blocking_dependency_ids": [],
+      "downstream_item_ids": [],
+      "confirmation_state": "confirmed",
+      "planning_status": null,
+      "implementation_status": null,
+      "operational_status": null
+    },
+    {
+      "id": "USR-451",
+      "project_id": "darkfac",
+      "title": "Qualidade continua 3/3: refatoracao, interface, alinhamento de objetivos e expansao verificavel",
+      "description": "Objetivo aprovado pelo owner: todos os projetos e a fabrica devem evoluir continuamente com qualidade e alto custo-beneficio, cobrindo tambem refatoracao, interface, novas features e alinhamento entre missao/objetivos vigentes e entregas reais. Estender o ciclo e a experimentacao das entregas anteriores sem um agente/agendador por tema. Refatoracao prioriza areas alteradas com retrabalho, defeitos ou gargalos; interface usa jornadas, acessibilidade e desempenho; features partem de necessidade observada ligada a objetivo aprovado e hipotese mensuravel. Entrega nao basta: comparar comportamento/resultado depois da mudanca, registrar limites de atribuicao causal, realimentar retrospectiva/promocao de aprendizado e reverter quando necessario. Reusar Hub e resumo existentes para cobertura, execucoes, achados, custo, fila e resultado. Aplicar primeiro na fabrica e em outro projeto ja cadastrado operacional, expandindo por evidencias e sem espera artificial. Fontes ausentes ou projeto pausado sao estados explicitos; nao exigir segredo novo para provar artificialmente uma expansao. Correcoes e melhorias pequenas no objetivo vigente seguem a autonomia atual; mudancas de objetivo/negocio, segredo, governanca e aceite de entregas grandes continuam com o owner. Aceite desta entrega: automatico pelo fluxo vigente quando funcionamento multi-projeto e efeito real estiverem comprovados. Capacidade maxima elegivel dentro do orcamento e dos portoes; nao aumentar gasto nem adicionar prazos. Fontes: https://dora.dev/capabilities/customer-feedback/ ; https://dora.dev/guides/dora-metrics/ ; https://www.w3.org/WAI/test-evaluate/ ; https://web.dev/articles/vitals ; https://sre.google/workbook/error-budget-policy/ . Handoff autocontido neste registro.\n\nPolitica de validacao e entrega: [\"Executar os comandos na worktree imutavel do candidato, nunca no checkout compartilhado.\", \"python -m core.harness.runner --quick\", \"lint-imports\", \"python scripts/complexity_ratchet.py\", \"python -m core.harness.docs_sync --base origin/main --head HEAD\", \"Revisao por familia diferente, CI verde, merge, deploy, smoke e evidencia real conforme fluxo vigente.\"]\nDiretriz do owner: Abrir os tickets no roadmap de implantacao e deixar a esteira em andamento assumir. Utilizar capacidade maxima elegivel dentro do orcamento vigente para avancar o mais rapido possivel, sem prazos estimados no plano.\n\nFronteiras:\nNao criar outro portal, quadro de tickets, catalogo de objetivos ou motor de aprendizagem concorrente.\nNao reescrever modulos estaveis por pontuacao estetica nem executar mudancas cosmeticas sem beneficio plausivel.\nNao alterar missao, regra de negocio ou limite autorizado autonomamente nem usar volume de tickets/tokens/linhas como sucesso.\nNao prometer conformidade integral de acessibilidade por scanner, causalidade por antes/depois ou resultado em fonte sem dados.\nNao aguardar janela de calendario ou quantidade fixa de ciclos para admitir trabalho ja comprovadamente pronto.",
+      "state_rationale": "Owner autorizou a esteira existente a executar; fonte operacional na fila persistente. Avancar por recursos, dependencias e evidencias, dentro do orcamento vigente.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": null,
+      "planned_start": null,
+      "target_date": null,
+      "dependencies": [
+        {
+          "item_id": "USR-449",
+          "type": "requires",
+          "label": null
+        },
+        {
+          "item_id": "USR-450",
+          "type": "requires",
+          "label": null
+        }
+      ],
+      "tags": [
+        "user-demand",
+        "line-ok",
+        "owner-approved",
+        "implementation-roadmap",
+        "initiative:continuous-quality-20261101",
+        "handoff:cq-03",
+        "roadmap"
+      ],
+      "completion_criteria": [
+        "Mesma infraestrutura do ciclo cobre refatoracao, interface, missao/valor e novas features com evidencias e estados de cobertura, sem agente permanente ou fila por dominio.",
+        "Sugestao de refatoracao aponta custo/risco concreto e alvo; sugestao de UI aponta jornada/barreira ou dado de desempenho; sugestao de feature liga objetivo vigente, necessidade, hipotese, medida e menor intervencao.",
+        "Cada entrega selecionada para verificacao registra baseline, candidato e efeito observado; regressao ou ausencia de evidencia nao e rotulada melhoria, e antes/depois nao e apresentado automaticamente como efeito causal.",
+        "Realimentar consumidor existente de retrospectiva/aprendizado com resultado positivo ou negativo; promocao/reversao respeita verificacao independente e fronteiras atuais.",
+        "Hub e resumo existentes mostram ultimo/proximo acionamento, cobertura parcial/nao aplicavel, achados vinculados, fila, custo, decisoes de experimento e efeito, sem incorporar detalhes internos desnecessarios ao fluxo do usuario.",
+        "Demonstrar funcionamento real na DarkFac e em outro projeto cadastrado operacional, com comandos/ambiente do projeto e isolamento de evidencias, recursos e permissoes; selecionar candidato operacional de forma autonoma.",
+        "Expandir por prontidao/evidencia, manter pausa/desativacao por dominio/projeto e preservar tickets; nenhum tempo de espera artificial substitui os criterios de saida.",
+        "Comprovar respeito a cota, orcamento e capacidade elegivel e medir utilidade/custo/recorrencia sem premiar consumo; consolidar testes, atualizar manual, fase atual e learning pack; CI, revisao cruzada, deploy e smoke reais passam."
+      ],
+      "source_refs": [
+        {
+          "source_id": "owner-chat-quality-20261101",
+          "source_kind": "owner-approved-demand",
+          "label": "Contrato aprovado e fila persistente USR-451",
+          "locator": "https://darkhub.ggcampos.com/api/demands/tickets/USR-451",
+          "revision": null,
+          "produced_by": "owner-approved-chat"
+        }
+      ],
+      "evidence_refs": [],
+      "source_revision": "",
+      "observed_at": "2026-11-01T21:50:29.361074Z",
+      "last_verified_at": "2026-11-01T21:50:29.361074Z",
+      "freshness_status": "current",
+      "operational_flags": [],
+      "blocking_dependency_ids": [],
+      "downstream_item_ids": [],
+      "confirmation_state": "confirmed",
+      "planning_status": null,
+      "implementation_status": null,
+      "operational_status": null
     }
   ]
 }

@@ -1,5 +1,5 @@
 <!-- covers: docs/manual/dicionario_dados.md -->
-<!-- paths: .factory/config/*.json, .factory/projects.json, .factory/demands/*.json, .factory/owner_actions/*.json, .factory/roadmap/*.json, .factory/infra/*.json, .factory/learning/*.json, .factory/telegram/*.json, .factory/n8n/workflows/*.json, .factory/governance/authorizations/*.json, .factory/worktrees/*.json, .factory/planning/*.json, .factory/research/*/ledger.json, .factory/baselines/*.json, .factory/experiments/*.json, .factory/reviews/*.json, .factory/reports/*.json, .factory/runs/*.json -->
+<!-- paths: .factory/research/20261101_continuous_quality_loops/*.json, .factory/config/*.json, .factory/projects.json, .factory/demands/*.json, .factory/owner_actions/*.json, .factory/roadmap/*.json, .factory/infra/*.json, .factory/learning/*.json, .factory/telegram/*.json, .factory/n8n/workflows/*.json, .factory/governance/authorizations/*.json, .factory/worktrees/*.json, .factory/planning/*.json, .factory/research/*/ledger.json, .factory/baselines/*.json, .factory/experiments/*.json, .factory/reviews/*.json, .factory/reports/*.json, .factory/runs/*.json -->
 # Dicionario de dados dos `.factory/**/*.json`
 
 Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `python C:\dev\DarkFac\core\harness\docs_sync.py --dictionary` sai com 1 se algum `.json` versionado nao casar com um padrao da linha `paths:` acima. Ao criar um JSON novo em `.factory/`, acrescente o padrao e a entrada.
@@ -55,3 +55,7 @@ Autorizacoes assinadas pelo owner para alterar paths protegidos. Le: `core/gover
 | `.factory/reviews/**/*.json` (11) | Pacotes de revisao `hf-critical-20260909` e `hf-wave1-luna` (validacao, dispositions, delta). | historico; `scripts/run_deepseek_review.py` grava em `.factory/reviews` | revisores e `scripts/run_deepseek_review.py` | `schema_version`, `scope`, `files`, `harness`, `count_delta`, `head` |
 | `.factory/reports/**/*.json` (2) | Relatorio de aceite da linha e evidencias de revisao de projeto. | `core/line/acceptance.py` | `core/line/acceptance.py` | `review_date`, `base_commit`, `validation`, `probes`, `inventory` |
 | `.factory/planning/**/*.json` (12) | Pacote de planejamento `continuous-autonomy` (plan, bindings, handoff, integridade, validacao, recibos) e `hf01-hf02-handoffs.json`. | `core/demands/specifier.py`, `core/roadmap/sources.py`, `core/workflow/*_handler.py`, `core/learning/research_dispatch.py` | planejador (modelo `opus`) | `schema_version`, `ticket_id`, `baseline_sha`, `environment_profile`, `depends_on`, `artifacts` |
+
+## Implantacao de qualidade continua
+
+Em `.factory/research/20261101_continuous_quality_loops/`, `ledger.json` guarda fontes e decisao do owner; `LOCAL_AUDIT.json` registra arquivos e hashes inspecionados; `TICKETS_IMPLANTACAO.json` guarda os tres contratos; `REGISTRO_IMPLANTACAO.json` registra IDs, dependencias e comprovacao de persistencia. A fila persistente continua sendo a fonte de status operacional.
