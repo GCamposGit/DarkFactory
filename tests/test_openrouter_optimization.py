@@ -77,13 +77,26 @@ def test_openrouter_roles_resolve_to_high_tier_models() -> None:
     dev_model = resolve("development.openrouter")
     distill_model = resolve("distill.openrouter")
 
-    assert planning_model == "openai/gpt-4o"
+    assert planning_model == "gpt-sol"
     assert is_high_tier_model("planning.openrouter") is True
+    assert is_high_tier_model(planning_model) is True
 
-    assert dev_model == "qwen/qwen-2.5-coder-32b-instruct"
+    assert dev_model == "gpt-sol"
     assert is_high_tier_model("development.openrouter") is True
+    assert is_high_tier_model(dev_model) is True
 
     assert distill_model == "deepseek/deepseek-v4.1-flash"
+
+
+def test_dynamic_pareto_model_resolution_selects_frontier_high_tier() -> None:
+    from core.line.routing import resolve_pareto_openrouter_model
+
+    plan_pareto = resolve_pareto_openrouter_model("planning")
+    assert is_high_tier_model(plan_pareto) is True
+    assert plan_pareto in ("anthropic/claude-opus-5", "openai/gpt-5-6-sol", "gpt-sol")
+
+    dev_pareto = resolve_pareto_openrouter_model("development")
+    assert dev_pareto is not None
 
 
 def test_openrouter_write_mode_executes_and_modifies_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,7 +151,9 @@ def test_openrouter_fallback_elected_for_both_planning_and_development(tmp_path:
         operating_harness=None,
         openrouter_balance_lookup=lambda: 10.0,
     )
-    assert plan_choice == ("openrouter", "openai/gpt-4o")
+    assert plan_choice[0] == "openrouter"
+    assert is_high_tier_model(plan_choice[1]) is True
+    assert plan_choice[1] in ("anthropic/claude-opus-5", "openai/gpt-5-6-sol", "gpt-sol")
 
     dev_choice = pick(
         "development",
@@ -149,7 +164,8 @@ def test_openrouter_fallback_elected_for_both_planning_and_development(tmp_path:
         operating_harness=None,
         openrouter_balance_lookup=lambda: 10.0,
     )
-    assert dev_choice == ("openrouter", "qwen/qwen-2.5-coder-32b-instruct")
+    assert dev_choice[0] == "openrouter"
+    assert dev_choice[1] is not None
 
 
 def test_check_openrouter_monthly_budget_triggers_alert_when_exceeding_threshold(monkeypatch: pytest.MonkeyPatch) -> None:

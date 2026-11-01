@@ -59,8 +59,8 @@ def test_line_routing_json_resolves_to_same_values_as_defaults() -> None:
     dev = cfg.stages["development"]
     assert dev.harness_pins["codex"].model == "gpt-6-luna"
     assert dev.harness_pins["grok"].model == "grok-4.7"
-    assert cfg.stages["planning"].openrouter_model == "openai/gpt-4o"
-    assert cfg.stages["development"].openrouter_model == "qwen/qwen-2.5-coder-32b-instruct"
+    assert cfg.stages["planning"].openrouter_model == "gpt-sol"
+    assert cfg.stages["development"].openrouter_model == "gpt-sol"
     for stage_name in ("grill", "review", "distill"):
         assert cfg.stages[stage_name].openrouter_model == "deepseek/deepseek-v4.1-flash"
     assert agent_cli._DEFAULT_OPENROUTER_MODEL == "deepseek/deepseek-v4.1-flash"

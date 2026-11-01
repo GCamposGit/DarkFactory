@@ -840,6 +840,72 @@ def _planning_high_tier_healthy(
     return False
 
 
+def resolve_pareto_openrouter_model(
+    stage: str,
+    fallback_model: Optional[str] = None,
+    domain: str = "coding",
+) -> str:
+    """Dynamically resolves the optimal model from the daily Pareto frontier.
+
+    Never hard-codes models; queries the daily updated benchmark ledger and selects
+    non-dominated Pareto frontier models.
+    For high-intelligence stages (planning, architecture):
+      Requires frontier high-tier intelligence (coding/reasoning score >= 85.0),
+      e.g. class GPT Sol, Claude Opus, DeepSeek Pro.
+    For development stages:
+      Selects the optimal coding Pareto model balancing capability and efficiency.
+    """
+    try:
+        from core.benchmarks.fetcher import ensure_daily_benchmark
+        from core.benchmarks.models import ModelTier
+
+        ledger = ensure_daily_benchmark()
+        if ledger and ledger.models:
+            forbidden = set(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS)
+            candidates = [
+                m for m in ledger.models.values()
+                if not any(f in m.model_id.lower() for f in forbidden)
+            ]
+            if stage in ("planning", "architecture"):
+                high_cands = [
+                    m for m in candidates
+                    if (m.coding_score or 0.0) >= 85.0
+                    and (is_high_tier_model(m.model_id) or getattr(m, "tier", None) == ModelTier.FRONTIER_HIGH)
+                ]
+                if high_cands:
+                    high_cands.sort(
+                        key=lambda m: (m.is_pareto_coding, m.coding_score or 0.0),
+                        reverse=True,
+                    )
+                    return high_cands[0].model_id
+            elif stage in ("development", "coding"):
+                dev_cands = [
+                    m for m in candidates
+                    if (m.coding_score or 0.0) >= 80.0
+                    and getattr(m, "tier", None) in (
+                        ModelTier.FRONTIER_HIGH,
+                        ModelTier.BALANCED_MID,
+                        "frontier_high",
+                        "balanced_mid",
+                        "high",
+                        "mid",
+                    )
+                ]
+                if dev_cands:
+                    dev_cands.sort(
+                        key=lambda m: (
+                            m.is_pareto_coding,
+                            (m.coding_score or 0.0) / max(getattr(m, "cost_per_task", 0.01) or 0.01, 0.001),
+                        ),
+                        reverse=True,
+                    )
+                    return dev_cands[0].model_id
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Dynamic Pareto model lookup failed (%s); using fallback %s", exc, fallback_model)
+
+    return fallback_model or resolve_model("planning.openrouter")
+
+
 def _check_openrouter_monthly_budget(cfg: RoutingConfig) -> None:
     """Verifica teto mensal e dispara alerta critico se spend atingir threshold."""
     try:
@@ -866,6 +932,21 @@ def _check_openrouter_monthly_budget(cfg: RoutingConfig) -> None:
                 )
     except Exception as exc:  # noqa: BLE001
         logger.debug("Falha ao checar alerta de orcamento OpenRouter: %s", exc)
+
+
+def _elect_openrouter(
+    stage: str,
+    stage_cfg: StageRoute,
+    cfg: RoutingConfig,
+    balance_lookup: Optional[Callable[[], Optional[float]]],
+) -> Optional[tuple[str, str]]:
+    if _openrouter_has_credits(balance_lookup):
+        _check_openrouter_monthly_budget(cfg)
+        if stage_cfg.openrouter_model in (None, "pareto", "dynamic") or os.environ.get("DARKFAC_OPENROUTER_DYNAMIC_PARETO") == "1":
+            return "openrouter", resolve_pareto_openrouter_model(stage, fallback_model=stage_cfg.openrouter_model)
+        return "openrouter", stage_cfg.openrouter_model
+    logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
+    return None
 
 
 def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float]]]) -> bool:
@@ -1109,10 +1190,7 @@ def pick(
         and allow_openrouter
         and spent_usd < cfg.run_caps.openrouter_usd
     ):
-        if _openrouter_has_credits(openrouter_balance_lookup):
-            _check_openrouter_monthly_budget(cfg)
-            return "openrouter", stage_cfg.openrouter_model
-        logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
+        return _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
 
     return None
 
