@@ -953,6 +953,75 @@
     setText(el.foot, t);
   }
 
+  /* =====================================================================
+   * 7b. Prova da V0 (USR-279 T3): painel independente do snapshot da esteira,
+   * buscado do próprio endpoint /api/line/v0-proof em um ciclo próprio.
+   * ===================================================================== */
+
+  const V0PROOF_URL = '/api/line/v0-proof';
+  const V0PROOF_POLL_MS = 60000;
+
+  function v0ProofEvidenceUrl(text) {
+    const m = /https?:\/\/\S+/.exec(String(text || ''));
+    return m ? m[0] : null;
+  }
+
+  /** Filhos do nó estável `.v0slot` (a classe `v0slot-empty` e o `title` são aplicados no decorate). */
+  function renderV0ProofSlot(slot) {
+    if (!slot.filled) {
+      return [
+        h('span', { class: 'v0slot-idx', text: String(slot.index) }),
+        h('span', { class: 'v0slot-waiting', text: 'aguardando demanda' }),
+      ];
+    }
+    const chk = function (ok, label) { return h('span', { class: 'v0chk' + (ok ? ' ok' : ''), text: label }); };
+    const evidenceUrl = v0ProofEvidenceUrl(slot.delivery_evidence);
+    const evidence = evidenceUrl
+      ? h('a', { class: 'v0slot-evidence', href: evidenceUrl, target: '_blank', rel: 'noopener noreferrer', text: 'PR / commit' })
+      : (slot.merge_sha ? h('span', { class: 'v0slot-evidence mono', text: slot.merge_sha.slice(0, 10) }) : null);
+    return [
+      h('div', { class: 'v0slot-head' },
+        h('span', { class: 'v0slot-idx', text: String(slot.index) }),
+        projectBadge(slot.project_id)),
+      h('div', { class: 'v0slot-ticket' }, h('span', { class: 'ticket-id', text: slot.ticket_id })),
+      h('div', { class: 'v0slot-chan', text: 'canal: ' + (slot.channel || '—') }),
+      h('div', { class: 'v0slot-checks' },
+        chk(slot.smoke_passed, 'smoke'),
+        chk(slot.learning_pack_linked, 'learning pack'),
+        chk(slot.manual_page_changed, 'manual')),
+      evidence,
+    ];
+  }
+
+  function renderV0Proof(report) {
+    const host = $('v0proof-slots');
+    const statusEl = $('v0proof-status');
+    const missingEl = $('v0proof-missing');
+    if (!host || !statusEl || !missingEl || !report || !Array.isArray(report.slots)) return;
+    setText(statusEl, report.criterion_met ? 'cumprido' : (report.current_streak + '/' + report.slots.length));
+    setClass(statusEl, 'count-pill' + (report.criterion_met ? ' count-pill-success' : ''));
+    reconcile(host, report.slots, function (s) { return s.index; }, sigNode('div', 'v0slot'),
+      sigUpdate(
+        function (s) { return JSON.stringify(s); },
+        renderV0ProofSlot,
+        function (node, s) {
+          node.classList.toggle('v0slot-empty', !s.filled);
+          node.title = s.filled ? (s.delivery_evidence || '') : '';
+        }));
+    const missing = (report.missing || []).concat(report.degraded_sources && report.degraded_sources.length
+      ? ['fontes indisponíveis: ' + report.degraded_sources.join(', ')]
+      : []);
+    missingEl.hidden = missing.length === 0;
+    if (missing.length) setText(missingEl, missing.join(' '));
+  }
+
+  function fetchV0Proof() {
+    fetch(V0PROOF_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(renderV0Proof)
+      .catch(function () { /* mantém o último estado renderizado; o próximo ciclo corrige */ });
+  }
+
   function renderTitle(view) {
     const n = view.attentionAll;
     const t = (n > 0 ? '(' + n + ') ' : '') + 'Esteira ao vivo';
@@ -1533,5 +1602,7 @@
   setInterval(tick, 1000);
   if (!document.hidden) connect();
   else fetchSnapshot().then(applySnapshot).catch(function () { /* reabre ao ficar visível */ });
+  fetchV0Proof();
+  setInterval(function () { if (!document.hidden) fetchV0Proof(); }, V0PROOF_POLL_MS);
   root.LineLive._state = state;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#020617">
   <title>Esteira ao vivo · DarkHub</title>
-  <link rel="stylesheet" href="/static/live.css?v=20261020a">
+  <link rel="stylesheet" href="/static/live.css?v=20261101a">
 </head>
 <body>
   <a class="skip-link" href="#line-live-board">Pular para o conteúdo</a>
@@ -140,6 +140,11 @@
             <div id="backlog" class="backlog"></div>
             <div id="backlog-empty" class="empty empty-small" hidden>Sem backlog para exibir.</div>
           </section>
+          <section id="sec-v0proof" class="panel" aria-labelledby="h-v0proof">
+            <h2 id="h-v0proof" class="panel-title">Prova da V0 <span id="v0proof-status" class="count-pill">–</span></h2>
+            <div id="v0proof-slots" class="v0proof-slots"></div>
+            <p id="v0proof-missing" class="note" hidden></p>
+          </section>
           <section id="sec-offline" class="panel" aria-labelledby="h-off" hidden>
             <h2 id="h-off" class="panel-title">Fora da esteira <span id="off-count" class="count-pill">0</span></h2>
             <p class="note">Em desenvolvimento via run_ticket local — progresso etapa a etapa não reportado ainda.</p>
@@ -166,6 +171,6 @@
   </div>
 
   <noscript><p class="noscript">A Esteira ao vivo precisa de JavaScript habilitado.</p></noscript>
-  <script src="/static/live.js?v=20261020a"></script>
+  <script src="/static/live.js?v=20261101a"></script>
 </body>
 </html>

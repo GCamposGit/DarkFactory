@@ -27,7 +27,7 @@ Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `pyt
 | `line_fleet.json` | Hosts e slots da frota de workers. | `core/line/fleet_dispatcher.py`, `core/line/fleet_policy.py`, `scripts/start_fleet_worker.py` | edicao via ticket | `max_fleet_slots`, `hosts` |
 | `subagent_model_routing.json` | Politica de modelo por tipo de tarefa de subagente. | `core/line/subagent_routing.py`, `core/models/docgen.py` | edicao via ticket | `limits`, `eligible_task_types`, `forbidden_tags`, `forbidden_stages`, `opus_stages` |
 | `agent_env_policy.json` | Allowlist/denylist de variaveis de ambiente dos agentes. | `core/line/agent_env.py` | edicao via ticket | `keep_names`, `deny_names`, `deny_patterns`, `allow_names`, `network_allowlist` |
-| `secrets_required.json` | Chaves exigidas no cofre SOPS. | `core/infra/secrets_vault.py`, `scripts/bootstrap_secrets.py` | edicao via ticket | `version`, `required` |
+| `secrets_required.json` | Chaves exigidas no cofre SOPS, inclusive as de piloto (prefixo por projeto, ex. `MANSAODOLAGO_`). | `core/infra/secrets_vault.py`, `scripts/bootstrap_secrets.py`, `core/line/pilot_secrets.py` | edicao via ticket | `version`, `required` |
 | `subscription_prices.json` | Preco das assinaturas para custo por ticket. | `core/usage/ticket_cost.py`, `hub/backend/service_usage.py` | edicao via ticket | `status`, `plans` |
 | `complexity_baseline.json` | Baseline do ratchet de complexidade. | `scripts/complexity_ratchet.py` | `scripts/complexity_ratchet.py` | `functions`, `limit` |
 | `model_id_baseline.json` | Baseline do censo de ids de modelo fora do registry. | `scripts/model_id_census.py` | `scripts/model_id_census.py` | `total`, `files` |

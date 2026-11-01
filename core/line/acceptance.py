@@ -1,8 +1,11 @@
-"""HF-27 Acceptance Probe: Autonomous Verification of Criteria V1-V4 (USR-93).
+"""HF-27 Acceptance Probe: Autonomous Verification of Criteria V0-V4 (USR-93, USR-279).
 
-Verifies the four core production-line acceptance criteria from Section 8 of
-`docs/PRODUCTION_LINE_PLAN_2026-09-22.md` and updates the roadmap manifest:
+Verifies the core production-line acceptance criteria from Section 8 of
+`docs/PRODUCTION_LINE_PLAN_2026-09-22.md` plus the V0 proof (`docs/plans/PLANO_V0_2026-10-24.md`,
+section 1), and updates the roadmap manifest:
 
+- V0: Prova da V0 -- 5 demandas reais seguidas sem toque do owner, >=1 de produto real
+  (`core.line.v0_proof`, USR-279).
 - V1: End-to-end autonomous delivery (intake -> grill -> plan -> build -> review -> integration -> release/smoke).
 - V2: Continuous green canary streak (daily canary HF-27-10 meets threshold, default 7 consecutive green days).
 - V3: Capacity failover & graceful degradation (multi-host capability dispatch, quota cooldown wait, fallback).
@@ -363,6 +366,80 @@ def verify_v3(routing_config_path: Path | None = None, store: Any | None = None)
         )
 
 
+def _v0_action_text(missing: list[str]) -> str:
+    if not missing:
+        return ""
+    return (
+        "Sem acao do owner: a fabrica segue recebendo e entregando demandas reais pelos canais "
+        "Telegram, Hub e chat (core.line.owner_intake.submit_owner_demand); a sequencia qualificada "
+        "avanca sozinha a cada entrega que cumprir learning pack, pagina de manual, SHA de merge e "
+        f"smoke verde (core.line.v0_proof.evaluate_v0_proof). Falta: {'; '.join(missing)}."
+    )
+
+
+def verify_v0(
+    *,
+    store: Any | None = None,
+    demands_store: Any | None = None,
+    owner_actions_store: Any | None = None,
+    project_registry: Any | None = None,
+    learning_packs_dir: Path | None = None,
+    repo_root: Path | None = None,
+    now: datetime | None = None,
+) -> CriterionResult:
+    """V0: prova da V0 (USR-279) -- 5 demandas reais seguidas sem toque do owner.
+
+    Delegates the rule and evidence collection entirely to `core.line.v0_proof`
+    (`collect_v0_proof_evidence` / `evaluate_v0_proof`); this probe only adapts
+    `V0ProofReport` to the `CriterionResult` shape shared with V1-V4.
+    """
+    title = "Prova da V0: 5 demandas reais seguidas sem toque do owner, incluindo 1 produto real"
+    try:
+        from core.line.v0_proof import collect_v0_proof_evidence
+
+        report = collect_v0_proof_evidence(
+            store=store,
+            demands_store=demands_store,
+            owner_actions_store=owner_actions_store,
+            project_registry=project_registry,
+            learning_packs_dir=learning_packs_dir,
+            repo_root=repo_root,
+            now=now,
+        )
+        evidence = (
+            f"Streak qualificado de {report.current_streak}/5 entregas reais atinge a meta "
+            f"(canais {report.channels_covered}, projetos {report.projects_involved})"
+            if report.criterion_met
+            else f"Streak qualificado atual: {report.current_streak}/5 (canais ate aqui: {report.channels_covered})"
+        )
+        return CriterionResult(
+            id="V0",
+            title=title,
+            verified=report.criterion_met,
+            evidence=evidence,
+            details={
+                "current_streak": report.current_streak,
+                "channels_covered": report.channels_covered,
+                "projects_involved": report.projects_involved,
+                "degraded_sources": report.degraded_sources,
+                "missing": "; ".join(report.missing),
+                "next_step": _v0_action_text(report.missing),
+            },
+        )
+    except Exception as exc:
+        logger.warning("Error checking V0 acceptance: %s", exc)
+        return CriterionResult(
+            id="V0",
+            title=title,
+            verified=False,
+            evidence=f"Falha ao avaliar a prova da V0: {exc}",
+            details={
+                "missing": "Nao foi possivel coletar a evidencia da prova da V0.",
+                "next_step": _v0_action_text(["coleta de evidencia indisponivel no momento"]),
+            },
+        )
+
+
 def verify_v4(roadmap_path: Path | None = None, store: Any | None = None) -> CriterionResult:
     """V4: Greenfield adoption & milestone breakdown via core.adoption."""
     title = "Adocao greenfield e decomposicao de marcos (core.adoption)"
@@ -403,10 +480,16 @@ def run_acceptance_verification(
     reports_dir: Path | None = None,
     roadmap_path: Path | None = None,
     min_streak: int = 7,
+    v0_override: bool | None = None,
     v1_override: bool | None = None,
     v2_override: bool | None = None,
 ) -> AcceptanceReport:
-    """Execute all four acceptance probes and compile the structured report."""
+    """Execute all acceptance probes (V0-V4) and compile the structured report."""
+    c0 = verify_v0(store=store)
+    if v0_override is not None:
+        c0.verified = v0_override
+        c0.evidence = f"[override={v0_override}] {c0.evidence}"
+
     c1 = verify_v1(store=store)
     if v1_override is not None:
         c1.verified = v1_override
@@ -420,7 +503,7 @@ def run_acceptance_verification(
     c3 = verify_v3(store=store)
     c4 = verify_v4(roadmap_path=roadmap_path, store=store)
 
-    criteria = [c1, c2, c3, c4]
+    criteria = [c0, c1, c2, c3, c4]
     verified_count = sum(1 for c in criteria if c.verified)
     all_verified = verified_count == len(criteria)
     now_iso = datetime.now(UTC).isoformat()
@@ -556,13 +639,14 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-    parser = argparse.ArgumentParser(description="DarkFac HF-27 Acceptance Probe (USR-93)")
+    parser = argparse.ArgumentParser(description="DarkFac HF-27 Acceptance Probe (USR-93, V0: USR-279)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     verify_p = sub.add_parser("verify", help="Run V1-V4 acceptance verification and update roadmap manifest")
     verify_p.add_argument("--reports-dir", type=Path, default=REPORTS_DIR, help="Path to canary reports directory")
     verify_p.add_argument("--roadmap-path", type=Path, default=ROADMAP_PATH, help="Path to roadmap manifest")
     verify_p.add_argument("--min-streak", type=int, default=7, help="Minimum green streak for V2")
+    verify_p.add_argument("--force-v0", action="store_true", help="Force V0 as verified for testing")
     verify_p.add_argument("--force-v1", action="store_true", help="Force V1 as verified for testing")
     verify_p.add_argument("--force-v2", action="store_true", help="Force V2 as verified for testing")
 
@@ -576,6 +660,7 @@ def main(argv: list[str] | None = None) -> int:
             reports_dir=args.reports_dir,
             roadmap_path=args.roadmap_path,
             min_streak=args.min_streak,
+            v0_override=True if args.force_v0 else None,
             v1_override=True if args.force_v1 else None,
             v2_override=True if args.force_v2 else None,
         )

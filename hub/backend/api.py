@@ -69,6 +69,7 @@ from hub.backend.models import (
     LineStatusResponse,
 )
 from core.workflow.line_live import LineLiveSnapshot
+from core.line.v0_proof import V0ProofReport
 from core.owner_actions.sync import SyncEvent
 from hub.backend.service import HubService
 from core.portfolio.models import PortfolioEfficiencyReport
@@ -1461,6 +1462,16 @@ def get_line_status(service: HubService = Depends(get_hub_service)) -> LineStatu
 def get_line_live(service: HubService = Depends(get_hub_service)) -> LineLiveSnapshot:
     """Stage-by-stage projection of every recent autonomous run (read-only)."""
     return service.get_line_live()
+
+
+@router.get("/line/v0-proof", response_model=V0ProofReport)
+def get_v0_proof(service: HubService = Depends(get_hub_service)) -> V0ProofReport:
+    """Prova da V0 (USR-279): 5 slots da sequencia real de demandas sem toque do owner.
+
+    Always 200: an unreachable control store or any other collection failure degrades to a typed
+    report with `degraded_sources` filled in instead of a 500 (`HubService.get_v0_proof`).
+    """
+    return service.get_v0_proof()
 
 
 @router.get("/line/live/stream")
