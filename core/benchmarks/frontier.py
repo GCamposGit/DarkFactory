@@ -598,7 +598,7 @@ def select_best_model_for_task(
         if not candidates:
             candidates = sorted(cloud_frontier, key=lambda m: m.cost_per_task)[:3]
 
-        best = max(candidates, key=lambda m: m.output_speed_tps)
+        best = max(candidates, key=lambda m: (m.output_speed_tps or 0.0))
         return (
             best,
             f"Fast-economy Pareto leader: {best.output_speed_tps} tps throughput, ${best.cost_per_task}/task."

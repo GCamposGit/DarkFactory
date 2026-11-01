@@ -72,8 +72,10 @@ Tabela gerada de `.factory/config/model_registry.json` por `python scripts/gener
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
+| `development.openrouter` | `gpt-sol` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
 | `planning.codex` | `gpt-sol` | active |
+| `planning.openrouter` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |
@@ -82,7 +84,7 @@ Tabela gerada de `.factory/config/model_registry.json` por `python scripts/gener
 
 Pares implementador -> revisor (familias distintas): `development.claude` -> `review.codex`; `development.codex` -> `review.grok`; `development.grok` -> `review.codex`
 
-3 papel(is) de gateway omitido(s); lista completa em `docs/MODEL_SELECTION_GUIDE.md`.
+1 papel(is) de gateway omitido(s); lista completa em `docs/MODEL_SELECTION_GUIDE.md`.
 
 Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fable`, `astra`, `gpt-6-astra`.
 <!-- END model-registry:roles_skill -->

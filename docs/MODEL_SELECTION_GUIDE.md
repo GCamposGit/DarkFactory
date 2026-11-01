@@ -67,11 +67,11 @@ Gerado de `.factory/config/model_registry.json` por `python scripts/generate_mod
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
-| `development.openrouter` | `qwen/qwen-2.5-coder-32b-instruct` | active |
+| `development.openrouter` | `gpt-sol` | active |
 | `distill.openrouter` | `deepseek/deepseek-v4.1-flash` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
 | `planning.codex` | `gpt-sol` | active |
-| `planning.openrouter` | `openai/gpt-4o` | active |
+| `planning.openrouter` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |

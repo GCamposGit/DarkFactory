@@ -291,7 +291,7 @@ def test_planning_elects_openrouter_when_claude_codex_grok_all_critical(tmp_path
         openrouter_balance_lookup=lambda: 10.0,
     )
     assert choice == ("openrouter", config.stages["planning"].openrouter_model)
-    assert choice == ("openrouter", "openai/gpt-4o")
+    assert choice == ("openrouter", "gpt-sol")
 
 
 def test_planning_elects_openrouter_when_all_three_cooling_or_absent(tmp_path: Path) -> None:
@@ -316,7 +316,7 @@ def test_planning_elects_openrouter_when_all_three_cooling_or_absent(tmp_path: P
         openrouter_balance_lookup=lambda: 10.0,
     )
     assert choice == ("openrouter", config.stages["planning"].openrouter_model)
-    assert choice == ("openrouter", "openai/gpt-4o")
+    assert choice == ("openrouter", "gpt-sol")
 
     # Also absent from host_caps
     choice_absent = _pick(
