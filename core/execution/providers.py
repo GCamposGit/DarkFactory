@@ -378,6 +378,16 @@ class OllamaModelProvider:
             raise RuntimeError(f"Ollama generation failed: {exc}") from exc
 
 
+def _resolve_openrouter_wire_model(model: str) -> str:
+    """Resolve internal alias or registry entry to provider gateway wire id."""
+    try:
+        from core.models.registry import gateway_id
+
+        return gateway_id(model)
+    except Exception:
+        return model
+
+
 class OpenRouterModelProvider:
     """OpenRouter cloud gateway model provider with token and cost tracking."""
 
@@ -420,7 +430,7 @@ class OpenRouterModelProvider:
         messages.append({"role": "user", "content": prompt})
 
         payload: dict[str, Any] = {
-            "model": model,
+            "model": _resolve_openrouter_wire_model(model),
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens or 1024,

@@ -207,3 +207,14 @@ def test_check_openrouter_monthly_budget_triggers_alert_when_exceeding_threshold
     assert "Alerta de Orcamento OpenRouter" in event["title"]
     assert "8.50" in event["message"]
     assert "10.00" in event["message"]
+
+
+def test_openrouter_model_wire_resolution() -> None:
+    from core.execution.providers import _resolve_openrouter_wire_model
+    from core.models.registry import gateway_id
+
+    # Internal alias resolves to live OpenRouter wire id with provider prefix
+    assert gateway_id("gpt-sol") == "openai/gpt-5.6-sol"
+    assert _resolve_openrouter_wire_model("gpt-sol") == "openai/gpt-5.6-sol"
+    assert _resolve_openrouter_wire_model("openai/gpt-5.6-sol") == "openai/gpt-5.6-sol"
+

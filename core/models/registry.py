@@ -188,7 +188,7 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
         _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-5-6-luna-high"]),
         _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True, gateway_ids=["openai/gpt-6-astra"]),
-        _fb("gpt-sol", "openai", "openai", "high", ["sol"], gateway_ids=["gpt-5.6-sol", "openai/gpt-5-6-sol"]),
+        _fb("gpt-sol", "openai", "openai", "high", ["sol"], gateway_ids=["openai/gpt-5.6-sol", "gpt-5.6-sol", "openai/gpt-5-6-sol"]),
         _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["xai/grok-4.6"]),
         _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"]),
         _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"], gateway_ids=["google/gemini-3.8-flash"]),
