@@ -55,7 +55,7 @@ def missing_artifact(cwd: Path) -> str | None:
 def main() -> int:
     try:
         data = json.loads(sys.stdin.read() or "{}")
-        if data.get("stop_hook_active"):
+        if data.get("stop_hook_active") or data.get("permission_mode") in ("plan", "read_only", "read"):
             return 0
         reason = missing_artifact(Path(data.get("cwd") or "."))
     except Exception as exc:  # noqa: BLE001 - o hook nunca pode travar o owner
