@@ -65,3 +65,11 @@ Antes/depois operacional sinaliza utilidade, mas sozinho não estabelece efeito 
 O owner participa apenas das decisões e aceites que a política atual reserva a ele. A autorização de cadastro e desenvolvimento foi dada nesta conversa, inclusive a diretriz de capacidade máxima dentro do orçamento; não reapresentar essas mesmas decisões como perguntas pendentes.
 
 Registrar as três entregas na fila/roadmap existentes, reaproveitando USR-446, com dependências reais, contratos autocontidos e todos os tickets em horizonte `now`. A esteira planeja as fatias pequenas, executa, revisa e entrega usando a capacidade disponível. O registro de IDs e a prova de leitura persistente acompanham este plano.
+
+## Cobertura integral no roadmap
+
+O owner confirmou que 100% deste plano deve constar no roadmap e autorizou seu encaminhamento enquanto estiver ausente. A composicao `CQ-20261101` agrupa USR-449, USR-450 e USR-451, reaproveita USR-446 e relaciona USR-452/USR-453 como suporte de validacao/publicacao. O epico e uma projecao de acompanhamento, sem outra execucao ou fila concorrente.
+
+`COBERTURA_PLANO.json` liga os 20 grupos de requisitos aos tickets, aos criterios de aceite e a evidencias observaveis. Cobertura de cadastro nao significa implementacao concluida. Lacuna descoberta continua em ticket/fatia formal, sem apagar requisito, inventar sucesso ou marcar a composicao concluida antes das entregas verificadas.
+
+A cobertura inclui seguranca de software e agentes, desempenho/recursos e custos, refatoracao, qualidade dos testes, confiabilidade e recuperacao, documentacao, interface, missao/valor, novas features, grill e experimentacao de modelos/produto, alem da infraestrutura comum e da aprendizagem. Pre-requisitos de A/B online permanecem rastreados e nao podem ser ocultados com simulacao ou significancia sem amostra.

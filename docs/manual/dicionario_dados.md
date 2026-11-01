@@ -59,3 +59,5 @@ Autorizacoes assinadas pelo owner para alterar paths protegidos. Le: `core/gover
 ## Implantacao de qualidade continua
 
 Em `.factory/research/20261101_continuous_quality_loops/`, `ledger.json` guarda fontes e decisao do owner; `LOCAL_AUDIT.json` registra arquivos e hashes inspecionados; `TICKETS_IMPLANTACAO.json` guarda os tres contratos; `REGISTRO_IMPLANTACAO.json` registra IDs, dependencias e comprovacao de persistencia. A fila persistente continua sendo a fonte de status operacional.
+
+`COBERTURA_PLANO.json` vincula os vinte grupos de requisitos da implantacao a tickets, criterios de aceite e provas observaveis; nao e evidencia de implementacao concluida.
