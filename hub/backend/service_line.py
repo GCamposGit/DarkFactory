@@ -244,6 +244,34 @@ class LineDemandsMixin:
             acceptance=acceptance_data,
         )
 
+    def get_v0_proof(self) -> Any:
+        """Prova da V0 (USR-279 T3): report for the DarkHub /live 5-slot panel.
+
+        Never raises: an unreachable control store falls back to `collect_v0_proof_evidence`'s
+        own degraded path (it records a structured code in `degraded_sources`, never 500s), and an
+        unexpected failure elsewhere still returns a typed, empty `V0ProofReport` with a
+        `v0_proof_collect_failed` degraded source instead of propagating.
+        """
+        from core.line.v0_proof import collect_v0_proof_evidence, evaluate_v0_proof
+
+        try:
+            store = self._line_control_store()
+        except Exception as exc:
+            logger.warning("v0-proof: control store da linha indisponivel para o painel: %s", type(exc).__name__)
+            store = None
+        try:
+            return collect_v0_proof_evidence(
+                store=store,
+                demands_store=self.demands_service,
+                owner_actions_store=self.owner_action_store,
+                project_registry=self.project_registry,
+            )
+        except Exception:
+            logger.warning("v0-proof: coleta de evidencia falhou de forma inesperada", exc_info=True)
+            return evaluate_v0_proof(
+                [], now=datetime.now(timezone.utc), degraded_sources=["v0_proof_collect_failed"]
+            )
+
     @staticmethod
     def _control_dashboard_row(entry: JobBoardEntry, titles: dict[str, str]) -> dict[str, Any]:
         """Project one canonical control-store entry onto the dashboard row shape (USR-42)."""

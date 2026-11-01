@@ -694,6 +694,10 @@ def submit_owner_demand(
     canonical queue and, when `autosubmit_enabled()`, pushes it to the line via `submit_to_line`
     (a callable `ticket_id -> LineSubmission`). The backlog feeder then picks any ticket the
     direct push did not take, so a redeploy loses nothing.
+
+    `source` is stamped onto the ticket as a `channel:<source>` tag (USR-279): the V0 proof
+    collector (`core.line.v0_proof`) reads it back from `UserTicket.tags` to tell a Telegram,
+    Hub or chat demand apart without a second channel store.
     """
     from core.demands.models import DemandInput
 
@@ -702,6 +706,7 @@ def submit_owner_demand(
             title=f"{title_prefix}{text[:60].strip()}",
             problem_statement=text,
             project_id=project_id,
+            extra_tags=[f"channel:{source}"] if source.strip() else [],
         ),
         force_heuristic=True,
     )

@@ -16,6 +16,7 @@ from core.line.acceptance import (
     reconcile_roadmap_manifest,
     run_acceptance_verification,
     save_acceptance_reports,
+    verify_v0,
     verify_v1,
     verify_v2,
     verify_v3,
@@ -40,6 +41,25 @@ def _fake_ticket(ticket_id: str) -> UserTicket:
         acceptance_criteria=["Works"],
         created_at=datetime.now(UTC),
     )
+
+
+def test_verify_v0_without_deliveries_explains_what_the_factory_does_next(tmp_path: Path) -> None:
+    from core.owner_actions.store import OwnerActionStore
+    from core.projects.registry import ProjectRegistry
+
+    result = verify_v0(
+        store=SQLiteControlStore(db_path=tmp_path / "control.db"),
+        demands_store=DemandsStore(tmp_path / "demands.json"),
+        owner_actions_store=OwnerActionStore(tmp_path / "owner_actions.json", remote_ref=None),
+        project_registry=ProjectRegistry(tmp_path / "projects.json"),
+        learning_packs_dir=tmp_path / "learning_packs",
+    )
+    assert isinstance(result, CriterionResult)
+    assert result.id == "V0"
+    assert result.verified is False
+    assert result.details["missing"]
+    assert "Sem acao do owner" in result.details["next_step"]
+    assert "?" not in result.details["next_step"]
 
 
 def test_verify_v1_without_runs(tmp_path: Path) -> None:
@@ -138,11 +158,13 @@ def test_verify_v4_adoption() -> None:
 def test_run_acceptance_verification_and_save(tmp_path: Path) -> None:
     out_dir = tmp_path / "reports" / "line-acceptance"
     report = run_acceptance_verification(
+        store=SQLiteControlStore(db_path=tmp_path / "control.db"),
+        v0_override=True,
         v1_override=True,
         v2_override=True,
     )
     assert report.all_verified is True
-    assert report.verified_count == 4
+    assert report.verified_count == 5
 
     json_path, md_path = save_acceptance_reports(report, out_dir=out_dir)
     assert json_path.exists()
@@ -150,9 +172,10 @@ def test_run_acceptance_verification_and_save(tmp_path: Path) -> None:
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
     assert data["all_verified"] is True
-    assert len(data["criteria"]) == 4
+    assert len(data["criteria"]) == 5
 
     md_content = md_path.read_text(encoding="utf-8")
+    assert "V0: Prova da V0" in md_content
     assert "V1: Demanda autonoma ponta a ponta" in md_content
     assert "VERIFICADO (APROVADO)" in md_content
 
@@ -172,7 +195,12 @@ def test_reconcile_roadmap_manifest(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    report = run_acceptance_verification(v1_override=True, v2_override=True)
+    report = run_acceptance_verification(
+        store=SQLiteControlStore(db_path=tmp_path / "control.db"),
+        v0_override=True,
+        v1_override=True,
+        v2_override=True,
+    )
     updated = reconcile_roadmap_manifest(report, roadmap_path=roadmap_file)
     assert updated is True
 

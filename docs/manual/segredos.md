@@ -1,4 +1,4 @@
-<!-- covers: scripts/bootstrap_secrets.py -->
+<!-- covers: scripts/bootstrap_secrets.py, core/line/pilot_secrets.py -->
 # Segredos: cofre SOPS + age (passo a passo, Windows)
 
 1. Instale as ferramentas no PowerShell: `winget install FiloSottile.age` e `winget install Mozilla.SOPS`. Feche e reabra o PowerShell.
@@ -22,3 +22,27 @@ O processo de um agente de desenvolvimento (Claude, Codex, Grok) e o de verifica
 Existe tambem `FAKE_CLI_RESPONSE_*` (CLIs falsos dos testes). Qualquer outra variavel (GITHUB_TOKEN, DOKPLOY_*, TELEGRAM_*, qualquer `*_SECRET`, variaveis desconhecidas) e descartada. Padroes de negacao (`deny_names`, `deny_patterns`, incluindo `DARKFAC_*TOKEN/KEY/SECRET/PASSWORD`) vencem as allowlists; `SOPS_*`, `AGE_*` e `GH_APP_*` nunca passam, nem por capacidade. Um `env` explicito passado a `run_shell_commands` (ambiente do produto) continua sem filtro. Os nomes descartados so aparecem em log nivel debug (nunca valores).
 
 Se um CLI de harness quebrar por falta de variavel, acrescente o NOME em `allow_names` (ou um padrao em `allow_patterns`) no JSON acima, via PR.
+
+## Segredos de piloto: mansaodolago.com (USR-279 T4)
+
+O piloto do gestor de SEO e redes sociais da mansaodolago.com usa tres chaves no mesmo cofre, com
+prefixo `MANSAODOLAGO_` em `.factory/config/secrets_required.json`:
+
+| Chave | Para que serve | Fase que usa |
+| --- | --- | --- |
+| `MANSAODOLAGO_SEARCH_CONSOLE_CREDENTIALS_JSON` | Credencial (JSON) de leitura do Search Console de www.mansaodolago.com, para a auditoria de SEO | M1 |
+| `MANSAODOLAGO_INSTAGRAM_GRAPH_ACCESS_TOKEN` | Token de acesso da Graph API para publicar posts aprovados pelo owner | M2 (adiado: a empresa ainda nao tem Instagram/Facebook, ver `docs/FASE_ATUAL.md`) |
+| `MANSAODOLAGO_GOOGLE_ADS_REFRESH_TOKEN` | Refresh token OAuth para leitura/recomendacoes do Google Ads (sem developer token, Google dispensou a exigencia em 27/10) | M3 |
+
+Cadastro pelo mesmo fluxo acima (`bootstrap_secrets.py` pergunta so as que faltam). Prontidao do
+piloto, sem nunca expor valor: `core.line.pilot_secrets.mansaodolago_readiness()` filtra
+`core.infra.secrets_vault.required_keys()` pelo prefixo e devolve presente/ausente por chave.
+
+```powershell
+python -m core.line.pilot_secrets
+```
+
+Imprime `presente`/`ausente` por chave e sai `0` quando as tres estao cadastradas, `1` caso
+contrario -- nunca imprime o valor. O codigo do piloto (quando implementado) so pode obter um
+segredo via `core.line.pilot_secrets.require_pilot_secret(chave)`, que levanta
+`PilotSecretMissingError` em vez de assumir um valor ou seguir com mock quando a chave falta.

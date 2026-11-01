@@ -348,6 +348,24 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--bo
 .off-title { font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
 .off-age { font-size: 11.5px; color: var(--dim); }
 
+/* Prova da V0 (USR-279 T3): 5 slots da sequência real sem toque do owner. */
+.count-pill-success { color: var(--success); background: var(--success-bg); }
+.v0proof-slots { display: flex; flex-direction: column; gap: 6px; }
+.v0slot { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.v0slot-empty { flex-direction: row; align-items: center; gap: 8px; border-style: dashed; border-color: var(--border-strong); background: transparent; color: var(--dim); }
+.v0slot-idx { font-family: var(--font-mono); font-size: 11px; color: var(--muted); flex: none; }
+.v0slot-waiting { font-size: 12px; color: var(--dim); }
+.v0slot-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.v0slot-ticket .ticket-id { font-size: 12.5px; }
+.v0slot-chan { font-size: 11.5px; color: var(--muted); }
+.v0slot-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.v0chk { font-size: 10.5px; color: var(--dim); position: relative; padding-left: 12px; }
+.v0chk::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); }
+.v0chk.ok { color: var(--success); }
+.v0chk.ok::before { background: var(--success); }
+.v0slot-evidence { align-self: flex-start; font-size: 11.5px; color: var(--info); }
+.v0slot-evidence.mono { color: var(--muted); }
+
 .foot { margin-top: 20px; font-size: 11.5px; color: var(--dim); text-align: center; }
 
 /* ---------- Gaveta ---------- */
