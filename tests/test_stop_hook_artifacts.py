@@ -56,6 +56,8 @@ def test_allows_without_code_or_when_active(tmp_path):
     other.mkdir()
     _repo(other, True)
     assert _run(other, stop_hook_active=True).returncode == 0
+    assert _run(other, permission_mode="plan").returncode == 0
+    assert _run(other, permission_mode="read_only").returncode == 0
 
 
 def test_allows_on_unexpected_failure(tmp_path):
