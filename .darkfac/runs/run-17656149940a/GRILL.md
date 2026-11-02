@@ -13,7 +13,4 @@
 - A entrega posterior incluirá os portões oficiais vinculados ao candidato, revisão de outra família, CI, merge, deploy, smoke, rechecagem real e atualização documental; ausência de evidência manterá o aceite pendente.
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] Quais são os três domínios que a qualificação deve integrar? As premissas não os nomeiam e os componentes inspecionados não estabelecem essa tríade. (id=q1)
+- [intent] Quais são os três domínios que a qualificação deve integrar? As premissas não os nomeiam e os componentes inspecionados não estabelecem essa tríade. -> **Segurança, qualidade de código e operação da fábrica** (respondida pelo owner)
