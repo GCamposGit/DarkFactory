@@ -1,0 +1,111 @@
+[
+  {
+    "id": "T1",
+    "title": "Persistir o contrato do ciclo de qualidade",
+    "goal": "Definir e implementar no control store o modelo durável de rodadas, resultados por domínio, achados, remediações e rechecagens.",
+    "files_hint": [
+      "core/workflow/control_contracts.py",
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "tests/test_quality_cycle_store.py"
+    ],
+    "acceptance": [
+      "Cada resultado distingue covered, insufficient, disabled, unavailable, deferred_quota e deferred_capacity.",
+      "Custo observado aceita valor conhecido ou estado unknown; ausência de medição nunca é gravada como custo zero.",
+      "Rodadas registram projeto, janelas abrangidas, SHA observado, versões dos checks e referências de evidência.",
+      "Replay da mesma chave e digest retorna o mesmo registro; payload divergente falha com conflito e duas aquisições concorrentes têm um único vencedor.",
+      "Achado, ticket de remediação e rechecagem ficam ligados por identificadores estáveis sem apagar o histórico.",
+      "Os contratos funcionam com SQLite e PostgreSQL, e python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Testes de contrato e migração para os dois backends.",
+      "Teste concorrente de aquisição de janela e replay idempotente.",
+      "Teste de conflito por digest divergente.",
+      "Teste de custo unknown versus zero medido.",
+      "Teste de persistência e recarga do vínculo achado-remediação-rechecagem."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Executar e consolidar os três domínios",
+    "goal": "Após T1, implementar o ciclo headless diário para o projeto darkfac, reutilizando ProjectRegistry e checks existentes sem introduzir limiares novos.",
+    "files_hint": [
+      "core/line/quality_cycle.py",
+      ".factory/config/quality_cycle.json",
+      "tests/test_quality_cycle.py"
+    ],
+    "acceptance": [
+      "Os domínios documental, segurança e eficiência executam adaptadores determinísticos dos checks existentes e produzem o contrato persistido em T1.",
+      "Rodadas atrasadas são consolidadas em uma execução com todas as janelas abrangidas, sem repetir evidência ou achado.",
+      "Desativar um domínio impede novas verificações e achados desse domínio, registra disabled e preserva histórico e tickets já admitidos.",
+      "Falha de ferramenta registra unavailable; piso de cota e falta de capacidade registram adiamentos distintos sem alegar cobertura.",
+      "Cada execução registra duração, custo conhecido ou unknown, SHA, comando ou versão do check e saída sanitizada.",
+      "Reexecutar a mesma janela não repete efeitos, e python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Teste parametrizado dos seis estados de domínio.",
+      "Teste de consolidação de múltiplas janelas atrasadas.",
+      "Teste de domínio desativado com histórico preservado.",
+      "Teste de sanitização de saída e custo desconhecido.",
+      "Teste de replay sem nova execução nem duplicação de evidência."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Encaminhar achados reais e fechar por rechecagem",
+    "goal": "Após T2, transformar somente violações reais dos adaptadores em demandas idempotentes e acompanhar sua correção pela fila canônica.",
+    "files_hint": [
+      "core/line/quality_findings.py",
+      "core/demands/service.py",
+      "core/line/backlog_feeder.py",
+      "tests/test_quality_findings.py"
+    ],
+    "acceptance": [
+      "Somente resultado insufficient com evidência concreta cria demanda; unavailable, disabled e adiamentos não são apresentados como achados.",
+      "O fingerprint domínio-regra-recurso-candidato impede tickets duplicados em replay ou janelas consolidadas.",
+      "A demanda criada contém critérios verificáveis, referências sanitizadas e entra pelo DemandsService para posterior admissão exclusiva pelo BacklogFeeder.",
+      "Desativar o domínio não cancela uma remediação já admitida.",
+      "Conclusão do ticket agenda rechecagem; o achado só muda para resolved quando a verificação passa no SHA corrigido.",
+      "Falha da rechecagem mantém o achado aberto com nova evidência, e python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Teste de criação de ticket a partir de achado concreto.",
+      "Teste de deduplicação entre replay, concorrência e janelas sobrepostas.",
+      "Teste de não criação para estados sem achado.",
+      "Teste de domínio desativado após admissão do ticket.",
+      "Teste de rechecagem verde e rechecagem ainda insuficiente."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Vincular o ciclo ao CloudCoordinator",
+    "goal": "Após T1-T3, acionar o ciclo no loop operacional existente e expor seu último estado sem criar um segundo scheduler.",
+    "files_hint": [
+      "core/orchestrator/cloud_coordinator.py",
+      "core/line/quality_cycle.py",
+      "tests/test_quality_cycle_binding.py",
+      "tests/test_cloud_coordinator_api.py"
+    ],
+    "acceptance": [
+      "O CloudCoordinator constrói e chama uma única instância do QualityCycle no mesmo loop de supervisão usado pelo FeederCycle.",
+      "Dois coordenadores concorrentes não executam a mesma janela duas vezes.",
+      "Reinício do processo retoma rodada pendente pelo store; erro do store não derruba o loop nem produz sucesso falso.",
+      "O status do coordenador expõe última rodada, janelas abrangidas, estado por domínio e motivo de adiamento sem revelar payload sensível.",
+      "A ausência ou desativação configurada do ciclo mantém o comportamento atual do alimentador.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Teste estrutural de um único binding no loop.",
+      "Teste com dois coordenadores disputando a mesma janela.",
+      "Teste de retomada após reinício e lease expirado.",
+      "Teste de degradação por indisponibilidade do store.",
+      "Teste HTTP do resumo sanitizado do ciclo."
+    ],
+    "smoke": [
+      "/healthz"
+    ]
+  }
+]
