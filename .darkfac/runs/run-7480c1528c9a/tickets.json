@@ -1,0 +1,130 @@
+[
+  {
+    "id": "T1",
+    "title": "Reconciliar fila persistente e leitura do DarkHub",
+    "goal": "Fazer Hub, DemandsStore e BacklogFeeder observarem a mesma fila canônica e distinguir ticket ausente de store indisponível.",
+    "files_hint": [
+      "core/demands/queue_store.py",
+      "core/demands/store.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py"
+    ],
+    "acceptance": [
+      "A inicialização do Hub resolve explicitamente o control store configurado, registra backend e SHA sanitizados e não depende de snapshot de demands.json quando o Postgres canônico está configurado.",
+      "Um ticket presente somente na fila persistente, inclusive USR-449 no ambiente real, é retornado por GET /api/demands/tickets/{id} e é observado pelo BacklogFeeder conectado ao mesmo store.",
+      "ID realmente ausente continua HTTP 404; falha de conexão, permissão ou leitura do store retorna erro estruturado HTTP 503 e nunca vira lista vazia, ausência ou sucesso em memória.",
+      "Leituras e atualizações continuam compatíveis com o fallback local explícito de desenvolvimento, sem criar adapter ou fila concorrente.",
+      "python scripts/line_validate.py passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "Consolidar em tests/test_demands.py casos comportamentais para ticket queue-only retornado pela API, ausência real 404 e StoreUnavailableError convertido em 503.",
+      "Parametrizar um contrato compartilhado em tests/test_line_backlog_feeder.py provando que Hub e feeder, com a mesma configuração, leem a mesma linha sem snapshot de arquivo.",
+      "Cobrir configuração divergente ou ausente sem vazar DSN e sem fallback silencioso; remover casos redundantes para não aumentar a contagem líquida da suíte."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health",
+      "https://darkhub.ggcampos.com/api/demands/tickets/USR-449"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Persistir contratos do ciclo de qualidade no control store",
+    "goal": "Adicionar ao store existente o estado transacional mínimo para execuções, leases, evidências e deduplicação de achados.",
+    "files_hint": [
+      "core/workflow/control_contracts.py",
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "tests/test_quality_cycle_store.py"
+    ],
+    "acceptance": [
+      "SQLite e PostgreSQL implementam o mesmo contrato para iniciar, renovar, concluir e retomar uma execução identificada por projeto, domínio e due_key, com índice único e fencing token.",
+      "Cada conclusão persiste estado success_no_findings, partial, failed, waiting_resource ou not_applicable, além de cobertura efetiva, custo observado, evidências, fingerprint e motivo de adiamento quando aplicável.",
+      "Evidence cache e finding_key são persistidos no mesmo control store; a operação de reservar um achado é idempotente sob replay e concorrência.",
+      "Lease expirado torna a mesma execução retomável sem criar segunda execução, e histórico concluído permanece consultável.",
+      "Migrações são retrocompatíveis e python scripts/line_validate.py passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "Criar contrato parametrizado SQLite/PostgreSQL para unicidade de due_key, fencing, retomada após lease expirado e transições válidas de resultado.",
+      "Executar duas admissões concorrentes do mesmo finding_key e provar uma única reserva persistida.",
+      "Consolidar testes de schema e persistência redundantes para manter a contagem líquida da suíte."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Ligar QualityCycle ao coordenador existente",
+    "goal": "Calcular trabalho devido por projeto e acioná-lo no CloudCoordinator sem criar outro scheduler.",
+    "files_hint": [
+      "core/projects/models.py",
+      "core/line/quality_cycle.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_feeder_cycle.py"
+    ],
+    "acceptance": [
+      "ProjectDescriptor aceita política tipada por domínio com enable, cadência, eventos relevantes e validade de evidência, mantendo projetos antigos compatíveis.",
+      "CloudCoordinator chama QualityCycle no mesmo loop de supervisão e o ciclo usa o control store de T2; não nasce daemon, cron ou fila adicional.",
+      "Cadências diária e semanal, eventos e vencimento tornam uma rotina devida; várias janelas perdidas são consolidadas em uma execução e não geram avalanche.",
+      "Queda ou falta de host registra waiting_resource e preserva o trabalho para retomada; replay e dois coordenadores não duplicam execução.",
+      "Desabilitar um domínio por projeto impede novas admissões sem apagar execuções, evidências ou tickets existentes e sem afetar FeederCycle.",
+      "python scripts/line_validate.py passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "Expandir e consolidar tests/test_feeder_cycle.py com relógio determinístico para cadência, evento, vencimento, catch-up consolidado, replay e concorrência.",
+      "Simular host indisponível seguido de recuperação e provar retomada da mesma execução sem burst atrasado.",
+      "Provar que domínio desabilitado não admite trabalho novo e que o feeder regular permanece operacional."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Reusar evidência e admitir achados sem duplicação",
+    "goal": "Implementar cache por fingerprint, qualificação verificável e criação ou atualização atômica de ticket na fila única.",
+    "files_hint": [
+      "core/line/quality_cycle.py",
+      "core/demands/models.py",
+      "core/demands/service.py",
+      "tests/test_demands.py"
+    ],
+    "acceptance": [
+      "O fingerprint inclui revisões relevantes de código, lockfiles ou dependências, regras, versão do coletor e revisão externa informada; igualdade e validade reutilizam evidência sem nova inferência.",
+      "Mudança em qualquer componente relevante invalida o cache, inclusive revisão externa sem novo commit; a causa de invalidação fica persistida.",
+      "Achado apto cria ou atualiza exatamente um UserTicket de origem agente com projeto, domínio, finding_key, referências verificáveis e critérios de aceite mensuráveis, usando a fila canônica de T1.",
+      "Repetição, concorrência e retomada do mesmo achado preservam um único ticket; achado resolvido pode ser rechecado sem apagar seu histórico.",
+      "Evidência ausente ou insuficiente produz partial ou not_applicable com cobertura explícita e nunca cria resultado ou ticket inventado.",
+      "Toda inferência registra contexto limitado e custo, respeita o roteador e piso de cota, e python scripts/line_validate.py passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "Usar coletor e analisador espiões para provar cache hit sem chamada de modelo e cache miss por mudança de código, dependência, regra, versão do coletor e advisory_revision.",
+      "Executar admissões concorrentes e retomadas do mesmo finding_key e verificar um único ticket com atualização idempotente.",
+      "Parametrizar ausência de evidência, parcial e não aplicável, removendo sobreposição com testes de demanda existentes."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Entregar o domínio documental recorrente",
+    "goal": "Usar docs-sync e probes determinísticos para confrontar procedimentos documentados com comportamento e demonstrar uma rotina real acionada pelo coordenador.",
+    "files_hint": [
+      "core/harness/docs_sync.py",
+      "core/line/quality_cycle.py",
+      "docs/manual/qualidade_continua.md",
+      "docs/FASE_ATUAL.md"
+    ],
+    "acceptance": [
+      "O coletor documental reutiliza covers e verificações existentes, confronta procedimentos selecionados com probes headless permitidos e emite referências de arquivo, comando e resultado; texto de documentação nunca é executado como shell arbitrário.",
+      "Mudança coberta sem atualização, procedimento divergente e evidência incompleta resultam respectivamente em achado verificável, partial ou not_applicable conforme a cobertura, sem afirmar saúde indevida.",
+      "No projeto darkfac implantado, o CloudCoordinator aciona uma rotina documental sem pedido manual, e o control store preserva due_key, estado final, cobertura, custo e referências da execução.",
+      "Uma segunda rodada com a mesma evidência reutiliza o cache; uma alteração relevante ou vencimento produz nova avaliação sem duplicar ticket.",
+      "Manual e FASE_ATUAL descrevem operação, política por projeto, estados, desativação e rechecagem; o learning pack é produzido pelo fluxo normal.",
+      "python scripts/line_validate.py e as checagens oficiais de lint-imports, complexity_ratchet e docs_sync passam ao final do ticket."
+    ],
+    "tests_to_add": [
+      "Consolidar tests/test_docs_sync.py para cobrir procedimento versus probe, referência verificável, cobertura parcial e proibição de comando arbitrário vindo do Markdown.",
+      "Adicionar ao teste de ciclo um cenário de darkfac com achado documental, admissão única, cache hit e invalidação por mudança relevante.",
+      "Preservar ou reduzir a contagem líquida de testes por parametrização dos casos atuais de docs-sync."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Avisos de segurança aplicáveis",
+    "demand_text": "Sobre o QualityCycle e o control store já entregues, implementar o domínio de segurança. Resolver manifestos e lockfiles para identificar pacote, versão e ambiente realmente usados; consultar fonte primária de advisory com revisão persistida; determinar aplicabilidade de forma determinística antes de qualquer análise por modelo; executar consolidação diária, eventos de dependência e mudança externa de advisory; invalidar evidência mesmo sem commit; registrar partial ou waiting_resource quando a fonte estiver indisponível; e admitir um único ticket verificável por vulnerabilidade aplicável. Demonstrar pacote afetado e não afetado, advisory alterado, cache, deduplicação, custo, cobertura e rechecagem após correção."
+  },
+  {
+    "title": "Telemetria recorrente de eficiência",
+    "demand_text": "Adicionar ao mesmo ciclo o domínio de eficiência reutilizando ModelUsageLedger, ticket_cost, telemetria e estados da linha. Consolidar diariamente custo, duração e retries por projeto e ticket, estabelecer baseline técnico a partir de histórico observável e política configurada, detectar desvios reproduzíveis sem inventar limiar de negócio, registrar cobertura e dados ausentes, e admitir um único ticket com amostras e comparação verificáveis. Cobrir eventos relevantes, cache e invalidação, falhas e tentativas no custo, deduplicação, desativação por projeto e rechecagem após remediação."
+  },
+  {
+    "title": "Prova integrada, robustez e aceite automático",
+    "demand_text": "Integrar os domínios documental, segurança e eficiência em uma prova operacional no darkfac. Fazer um achado real, não semeado nem inventado, atravessar a fila canônica até correção com revisão de família diferente, CI, merge, deploy e smoke, e persistir a rechecagem que demonstra resolução. Exercitar concorrência, replay, retomada, queda de host, janelas atrasadas consolidadas, piso de cota e desativação de domínio; confirmar que cada estado diferencia cobertura, custo e adiamento. Consolidar a suíte, atualizar manual e FASE_ATUAL, gerar learning pack e executar na worktree imutável runner --quick, lint-imports, complexity_ratchet e docs_sync antes do aceite automático."
+  }
+]
