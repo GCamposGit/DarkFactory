@@ -1,0 +1,133 @@
+[
+  {
+    "id": "T1",
+    "title": "Persistir contratos da prova operacional",
+    "goal": "Criar contratos Pydantic e persistência canônica para rodadas, evidências por domínio, achados, vínculo com ticket e rechecagens append-only.",
+    "files_hint": [
+      "core/workflow/control_contracts.py",
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "tests/test_control_store.py"
+    ],
+    "acceptance": [
+      "SQLite e PostgreSQL expõem operações equivalentes para iniciar rodada, registrar evidência, abrir achado, vincular ticket e anexar rechecagem.",
+      "Cada rodada exige projeto, timestamp, origem, domínios avaliados e SHA candidato imutável quando disponível; dados incompletos produzem estado pending, nunca passed.",
+      "Fingerprint único por projeto, domínio e evidência normalizada impede duplicação concorrente sem sobrescrever histórico.",
+      "Rechecagens preservam todas as observações anteriores e só fecham o achado quando vinculadas ao mesmo candidato corrigido.",
+      "Migração é idempotente sobre stores existentes e não altera tickets, leases, fencing ou outbox.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Consolidar em tests/test_control_store.py cenários de migração idempotente, paridade SQLite/PostgreSQL mock, fingerprint concorrente e histórico append-only.",
+      "Cobrir rejeição de fechamento com candidato diferente, evidência ausente ou origem sintética."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Detectar divergências nos três domínios",
+    "goal": "Implementar probes normalizados para versão implantada, configuração efetiva e control store, incluindo reconciliação fail-closed de USR-449.",
+    "files_hint": [
+      "core/line/operational_proof.py",
+      ".factory/config/operational_proof.json",
+      "tests/test_feeder_cycle.py",
+      "docs/manual/fila.md"
+    ],
+    "acceptance": [
+      "A configuração versionada define exatamente os domínios deployment, effective_config e control_store, seus limites, baselines e estado habilitado.",
+      "O probe de deployment registra endpoint, horário e git_sha observado; o de configuração registra somente valores sanitizados e digest; o de store registra presença, status e digest canônico do ticket.",
+      "A reconciliação de USR-449 compara as três fontes e retorna reconciled, divergent ou pending com causas por fonte; ausência local isolada nunca resulta em absent ou reconciled.",
+      "Achado elegível exige proveniência live e evidência observável; fixtures, fault injection e resultados sintéticos são marcados complementary e não satisfazem o aceite.",
+      "Desabilitar um domínio impede novos probes e achados dessa origem, preservando evidências e tickets já existentes.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Estender e consolidar os testes do feeder para divergência de SHA, digest de configuração, ticket ausente apenas em uma fonte, indisponibilidade parcial e sanitização de segredos.",
+      "Cobrir habilitação e desabilitação de domínio sem apagar histórico ou alterar ticket já admitido."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Integrar achados à fila canônica com resiliência",
+    "goal": "Acoplar a prova ao FeederCycle e transformar cada achado real em um único UserTicket completo, admitido pelo BacklogFeeder existente.",
+    "files_hint": [
+      "core/line/feeder_cycle.py",
+      "core/line/operational_proof.py",
+      "tests/test_feeder_cycle.py",
+      "tests/test_line_backlog_feeder.py"
+    ],
+    "acceptance": [
+      "CloudCoordinator continua iniciando um único FeederCycle; não surge scheduler nem fila paralela.",
+      "Uma rodada devida executa os probes, persiste o achado e registra um ticket G1-completo pela DemandsStore/queue_store antes da avaliação do BacklogFeeder.",
+      "Dois coordenadores, replay ou reinício produzem no máximo um ticket por fingerprint e retomam o mesmo vínculo após queda.",
+      "Rodadas perdidas são consolidadas em uma rodada com quantidade e intervalo perdidos registrados, sem rajada de tickets.",
+      "Testes isolados exercitam concorrência, lease expirado, fencing, retomada, falha de host e store indisponível sem causar indisponibilidade em produção.",
+      "O relatório do FeederCycle diferencia ausência de achado, evidência insuficiente, ticket já vinculado, quota bloqueada e erro de store.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Consolidar em tests/test_feeder_cycle.py cenários com dois coordenadores, replay, consolidação de janelas atrasadas e recuperação depois de falha entre persistência e admissão.",
+      "Adicionar ao teste do BacklogFeeder o percurso achado persistido -> ticket canônico -> run único, mantendo o saldo total de testes não crescente."
+    ],
+    "smoke": [
+      "/health",
+      "/api/line/live"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Expor estado e reconciliar USR-449 em ambiente real",
+    "goal": "Disponibilizar consulta operacional sanitizada e executar a primeira reconciliação real de USR-449 contra deployment, configuração efetiva e store.",
+    "files_hint": [
+      "hub/backend/api.py",
+      "hub/backend/service_line.py",
+      "core/line/operational_proof.py",
+      "docs/manual/fila.md"
+    ],
+    "acceptance": [
+      "GET /api/line/operational-proof/latest responde 2xx e informa estado, candidato, cobertura por domínio, causas pendentes, achados e ticket vinculado sem expor segredos.",
+      "A execução real persiste observações independentes das três fontes para USR-449 e registra reconciled, divergent ou pending com causa verificável por fonte.",
+      "Indisponibilidade de qualquer fonte, SHA inválido ou configuração sem proveniência mantém USR-449 pending; ausência no checkout não é usada como prova.",
+      "Manual documenta configuração, operação, estados, desativação de domínio, recuperação e leitura do endpoint.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Cobrir resposta 2xx sem rodadas, rodada pendente e rodada divergente, incluindo redação de tokens, URLs com credenciais e valores de configuração sensíveis.",
+      "Cobrir que o endpoint projeta o estado persistido sem disparar probes nem mutar a fila."
+    ],
+    "smoke": [
+      "/health",
+      "/api/line/live",
+      "/api/line/operational-proof/latest"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Concluir a prova com achado real e rechecagem",
+    "goal": "Executar ciclos reais até qualificar um achado não semeado e acompanhar seu ticket canônico pela correção e entrega; se isso não for possível, encerrar a execução técnica com aceite global pending e causa persistida.",
+    "files_hint": [
+      "core/line/operational_proof.py",
+      "docs/evidence/USR-449-operational-proof.md",
+      "docs/FASE_ATUAL.md",
+      "docs/manual/fila.md"
+    ],
+    "acceptance": [
+      "Quando houver achado real, a evidência relaciona fingerprint, ticket canônico, run, PR, revisão por família diferente, candidato imutável, [HARNESS_PASS] com checagens executadas, lint-imports, complexity ratchet, docs-sync, CI verde, merge SHA, deploy e smoke.",
+      "A correção observada em produção corresponde ao merge SHA, e uma nova rodada live persiste rechecagem closed para o mesmo achado sem apagar as observações anteriores.",
+      "A prova registra que o ticket percorreu a fila canônica, inclusive replay ou retomada ocorridos, sem admissão duplicada.",
+      "Se nenhum achado real surgir ou faltar acesso, cobertura, medição, cota, capacidade ou evidência, o executor permanece tecnicamente verde, mas persiste o aceite global como pending com causas e domínios faltantes; não cria achado artificial nem declara sucesso.",
+      "docs/FASE_ATUAL.md, manual, evidência operacional e learning pack refletem o resultado efetivamente observado.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Cobrir a tabela de decisão do avaliador final: somente achado live não semeado com toda a cadeia e rechecagem vinculada produz accepted.",
+      "Cobrir que evidência sintética, CI ausente, revisão da mesma família, SHA divergente, smoke falho ou rechecagem não persistida produzem pending com causa específica."
+    ],
+    "smoke": [
+      "/health",
+      "/api/line/live",
+      "/api/line/operational-proof/latest"
+    ]
+  }
+]
