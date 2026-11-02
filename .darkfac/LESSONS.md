@@ -1,0 +1,2 @@
+- [review_timeout:harness=claude:duration_s=1800.036:next_~060371ec] Resolver integralmente apontamentos de revisao independente na primeira rodada para evitar esgotamento de iteracoes.
+- [validate_exhausted] Garantir que os testes e comandos de validacao passem localmente antes do estagio 'development'.
