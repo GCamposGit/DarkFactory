@@ -1,0 +1,1 @@
+- [active_pull_request] Analisar causa raiz 'active_pull_request' no estagio 'development' e incluir salvaguardas preventivas determinísticas.
