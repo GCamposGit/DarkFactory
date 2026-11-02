@@ -1,0 +1,17 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "verdict": "changes_required",
+      "sha": null,
+      "forced": false,
+      "candidate_digest": "cc9b4c59ebffd69ab3503dccdf8edbfd46baaac2d8ef4099f44332c3f538b2ad",
+      "policy_digest": "56c853d4374d70d76dda94b39f24af537b4bd56072ce7b04b31d685ae259026d"
+    }
+  ],
+  "agent_error_streak": 0,
+  "timed_out_harnesses": [
+    "claude"
+  ],
+  "invalid_response_routes": []
+}
