@@ -1,0 +1,2 @@
+- [plan_invalid not_before=2026-11-02T12:04:43+00:00] Analisar causa raiz 'plan_invalid not_before=2026-11-02T12:04:43+00:00' no estagio 'planning' e incluir salvaguardas preventivas determinísticas.
+- [active_pull_request] Analisar causa raiz 'active_pull_request' no estagio 'development' e incluir salvaguardas preventivas determinísticas.
