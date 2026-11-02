@@ -1,0 +1,135 @@
+[
+  {
+    "id": "T1",
+    "title": "Contrato da matriz e ativação dos domínios",
+    "goal": "Definir o contrato persistente da qualificação e controlar os três domínios pelo ProjectRegistry.",
+    "files_hint": [
+      "core/line/cycle_qualification.py",
+      "core/projects/models.py",
+      "core/projects/registry.py",
+      "tests/test_cycle_qualification.py"
+    ],
+    "acceptance": [
+      "A matriz valida cenário, domínio, candidate_sha, run_id, janelas, esperado, observado, modo de validação, evidências, custo e motivo de adiamento.",
+      "Custo ausente é serializado como null com origem unknown; quota_floor, capacity_unavailable e domain_disabled permanecem motivos distintos.",
+      "Segurança, qualidade de código e operação da fábrica podem ser ativadas ou desativadas por projeto sem reutilizar ProjectDescriptor.domain.",
+      "Desativar um domínio impede novas verificações e remediações originadas nele, mas preserva linhas históricas e tickets já admitidos.",
+      "Persistência é atômica, UTF-8 e rejeita evidência sem candidato, timestamp ou modo de validação.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Round-trip e rejeições do schema da matriz.",
+      "Custo desconhecido não vira zero e motivos de adiamento não são colapsados.",
+      "Desativação bloqueia somente novas origens do domínio e mantém histórico e fila canônica existente.",
+      "Configuração de domínio sobrevive ao reload do ProjectRegistry."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Consolidação durável de janelas atrasadas",
+    "goal": "Fazer o FeederCycle consolidar intervalos vencidos e retomar do watermark sem duplicar admissões.",
+    "files_hint": [
+      "core/line/feeder_cycle.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_feeder_cycle.py",
+      "docs/manual/fila.md"
+    ],
+    "acceptance": [
+      "Um atraso de várias janelas produz uma única execução com a lista exata de janelas abrangidas, sem disparar uma execução por janela.",
+      "O watermark só avança após persistência bem-sucedida do relatório; erro de store permite retomada posterior da mesma faixa.",
+      "Restart do coordenador retoma do watermark durável e replay do mesmo intervalo não duplica run nem evidência.",
+      "A consolidação mantém intervalo, concorrência e limites existentes, sem introduzir novo limiar.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Salto de relógio cobrindo múltiplas janelas em uma única execução.",
+      "Falha antes e depois da persistência do watermark.",
+      "Restart e replay concorrente de dois coordenadores sobre a mesma janela.",
+      "Nenhuma janela vencida mantém o ciclo ocioso sem alterar o watermark."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Executor isolado dos cenários de robustez",
+    "goal": "Executar deterministicamente os oito cenários contra os componentes integrados e preencher a matriz sintética sem mocks de sucesso.",
+    "files_hint": [
+      "core/line/cycle_qualification.py",
+      "core/line/backlog_feeder.py",
+      "tests/test_cycle_qualification.py",
+      "tests/test_line_fleet_loop.py"
+    ],
+    "acceptance": [
+      "O executor usa diretório, demands store, control store, ids e namespace exclusivos e recusa configuração que aponte para o namespace produtivo.",
+      "Concorrência e replay demonstram uma única admissão por ticket e respeito ao teto de slots.",
+      "Retomada continua do último estágio concluído; perda de host readmite em host saudável com novo fencing token e rejeita publicação tardia do dono antigo.",
+      "Janelas atrasadas são consolidadas, piso de cota não inicia escrita e falta de capacidade não cria reserva.",
+      "Domínio desativado não origina nova verificação ou remediação e não remove histórico ou ticket já admitido.",
+      "Cada cenário gera linha de ValidationMode.SIMULATION com evidências hasheadas; essas linhas não satisfazem o aceite operacional.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Corrida concorrente, replay idempotente e retomada após restart.",
+      "Perda de host, incremento de fencing e rejeição do worker antigo.",
+      "Piso de cota, capacidade zero e domínio desativado com defer_reason distinto.",
+      "Cobertura obrigatória dos oito cenários nos três domínios, sem promover simulação a prova operacional."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Qualificação operacional isolada e reconciliação do USR-449",
+    "goal": "Rodar o candidato implantado em persistência operacional isolada, reconciliar o USR-449 e registrar pelo menos um achado real reproduzível.",
+    "files_hint": [
+      "scripts/qualify_integrated_cycle.py",
+      "core/line/cycle_qualification.py",
+      ".factory/reports/integrated-cycle-qualification/matrix.json",
+      "docs/manual/dicionario_dados.md"
+    ],
+    "acceptance": [
+      "A CLI exige namespace isolado, registra candidate_sha, versão implantada, digest da configuração e identidade sanitizada do store e falha fechada se qualquer vínculo estiver ausente.",
+      "A execução operacional cobre os oito cenários sem derrubar produção e grava ValidationMode.TARGET_ENVIRONMENT separado das linhas sintéticas.",
+      "A consulta do USR-449 distingue ticket ausente, store indisponível e divergência entre versão, configuração e store; indisponibilidade não é registrada como inexistência.",
+      "A matriz contém custo medido com fonte ou unknown e conserva motivos de adiamento distintos.",
+      "Existe pelo menos um achado operacional real, reproduzível e vinculado às evidências persistidas; sua linha permanece failed ou pending até a correção.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "CLI recusa namespace produtivo, candidato divergente e store sem identidade verificável.",
+      "Relatório operacional não pode ser fabricado a partir de linhas de simulação.",
+      "Classificação fail-closed dos estados do USR-449.",
+      "Serialização e atualização idempotente da matriz operacional."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Correção do achado real e requalificação",
+    "goal": "Corrigir a causa comprovada pelo T4 e repetir a qualificação operacional sobre o novo candidato.",
+    "files_hint": [
+      "core/line/cycle_qualification.py",
+      "core/line/feeder_cycle.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_cycle_qualification.py"
+    ],
+    "acceptance": [
+      "A correção altera somente o componente apontado pela evidência do achado, sem relaxar leases, fencing, cotas, capacidade ou isolamento.",
+      "Um teste comportamental reproduz o achado antes da correção e termina verde com a implementação.",
+      "A qualificação operacional é repetida sobre novo candidate_sha; a matriz liga achado, correção e rechecagem e mostra o cenário aprovado.",
+      "Todos os oito cenários e os três domínios têm resultado operacional observado ou adiamento explícito; nenhuma linha sintética substitui evidência real.",
+      "Manual, FASE_ATUAL e learning pack refletem o comportamento entregue.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Regressão específica para a causa comprovada no achado operacional.",
+      "Rechecagem do cenário corrigido com novo candidato e evidência distinta.",
+      "Contra-prova de que evidência antiga ou de outro SHA não fecha o aceite."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  }
+]
