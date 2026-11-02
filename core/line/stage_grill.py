@@ -1,10 +1,10 @@
-"""Single-round Grill stage for the DarkFac production line (HF-27-04).
+"""Owner-decision Grill stage for the DarkFac production line (HF-27-04).
 
 Implements section "Grill" of `docs/handoffs/production-line/HF-27-04.md`
 and the owner decision in `docs/PRODUCTION_LINE_PLAN_2026-09-22.md` (section
-2.4): **one round**, **one Telegram message**, resolved in **12h** with the
-recommended answer, except `secret`/`account` questions which never get a
-default.
+2.4): owner decisions remain pending until explicitly answered. Each
+notification displays up to three unanswered questions; the deadline never
+selects an answer.
 
 Flow (`run_grill`):
 
@@ -20,20 +20,13 @@ Flow (`run_grill`):
      `<run_id>:grill`), push and return `success`.
    - Blocking questions: write a partial `GRILL.md` plus a
      `GRILL_PENDING.json` state file, commit (job key
-     `<run_id>:grill:pending`, distinct from the final key so idempotency
-     does not short-circuit before the questions are resolved), push, send
-     **one** Telegram message bundling every blocking question, and return
-     `waiting_human` with a `deadline` evidence ref.
-4. If a pending grill state already exists (this is the reconciler calling
-   again after `submit_grill_answers()` or after the deadline): finalize
-   every question that has an answer or whose deadline has passed
-   (`recommended`, tagged `default_after_timeout`) — except `secret`/
-   `account` questions, which stay unresolved (a `HumanRequest` is
-   HF-27-08's job) and never receive a default. If at least one non-exempt
-   question is still unanswered and the deadline has not passed, return
-   `waiting_human` again without committing. Otherwise finalize `GRILL.md`,
-   clear the pending state, commit (job key `<run_id>:grill`), push, return
-   `success`.
+     `<run_id>:grill:pending`), push, notify the first three unanswered
+     questions, and return `waiting_human` with a `deadline` evidence ref.
+4. If a pending grill state already exists, apply explicit owner answers.
+   When the current page is answered, notify the next page. Finalize only
+   after all material decisions are answered or an explicitly authorized
+   canary policy resolves eligible questions. The deadline never supplies
+   an answer or clears pending state.
 
 `submit_grill_answers()` is the entry point HF-27-08's Telegram callback
 handler (`cb:grill:<run_id>#<question_id>:<choice>`) is expected to call; it
@@ -67,18 +60,14 @@ logger = logging.getLogger(__name__)
 STAGE = "grill"
 GRILL_DEADLINE_HOURS = 12
 MAX_QUESTIONS = 3
-_NO_DEFAULT_KINDS = frozenset({"secret", "account"})
+_NO_DEFAULT_KINDS = frozenset({"secret", "account", "new_secret"})
 # Owner questions live in a closed coded set (USR-375 S6); legacy kinds map onto it and
 # anything else is technical: decided by the factory and recorded as an ADR in GRILL.md.
 _KIND_TO_CATEGORY = {"intent": "objective", "secret": "new_secret", "account": "new_secret"}
 _OWNER_CATEGORIES = frozenset({"objective", "success", "business", "new_secret", "acceptance"})
 _BLOCKING_KINDS = frozenset({"business", "intent", "secret", "account", "objective", "success", "new_secret", "acceptance"})
-# Canary demands must never wait for a human: their intent/business questions are resolved
-# immediately with the recommended answer (tag `auto_canary`). A run is a canary run when its
-# payload says `grill_policy: "auto"` (set by core.line.canary) or when it belongs to one of these
-# projects (covers runs accepted before the flag existed, e.g. an already-pending grill).
+# Canary auto-resolution is enabled only by the explicit run payload policy.
 AUTO_GRILL_POLICY = "auto"
-AUTO_GRILL_PROJECT_IDS = frozenset({"darkfac-canary"})
 AUTO_CANARY_NOTE = "auto_canary"
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
@@ -136,6 +125,13 @@ class PendingGrill(BaseModel):
     deadline: datetime
     answers: dict[str, str] = Field(default_factory=dict)
     notified: bool = False
+    # Empty on legacy state means `notified` refers to the original first page.
+    notified_question_ids: list[str] = Field(default_factory=list)
+    round_pages: list[list[str]] = Field(default_factory=list)
+    round_index: int = 0
+    round_visit: int = 0
+    notified_round_visit: int = -1
+    round_answer_snapshot: list[str] = Field(default_factory=list)
     # Canary auto-resolutions decided at grill time (kept so a later reconcile still renders them).
     auto_resolved: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -394,7 +390,7 @@ def _render_grill_markdown(
         for question in technical:
             lines.append(
                 f"- (technical) {question.text} -> **{question.recommended}** "
-                f"({question.why or 'recomendacao automatica'})"
+                f"(auto_technical; {question.why or 'decisao tecnica reversivel'})"
             )
     else:
         lines.append("- (nenhuma)")
@@ -417,10 +413,9 @@ def _render_grill_markdown(
 
 
 def is_auto_grill(project: ProjectDescriptor, payload: Optional[dict[str, Any]] = None) -> bool:
-    """True when this run's grill must never wait for a human (canary demands)."""
-    if (payload or {}).get("grill_policy") == AUTO_GRILL_POLICY:
-        return True
-    return project.id in AUTO_GRILL_PROJECT_IDS
+    """True only when this run explicitly carries the authorized canary policy."""
+    del project  # Kept in the public signature for callers and compatibility.
+    return (payload or {}).get("grill_policy") == AUTO_GRILL_POLICY
 
 
 def _auto_answer(question: _PendingQuestion) -> Optional[str]:
@@ -430,6 +425,49 @@ def _auto_answer(question: _PendingQuestion) -> Optional[str]:
     if question.recommended:
         return question.recommended
     return question.options[0] if question.options else None
+
+
+def _legacy_timeout_questions(markdown: str) -> list[_PendingQuestion]:
+    """Recover owner decisions that older runs finalized from silence."""
+    item_pattern = re.compile(
+        r"^\s*-\s+\[(?P<kind>[^\]]+)\]\s+(?P<body>[\s\S]*?)"
+        r"(?=^\s*-\s+\[[^\]]+\]|\Z)",
+        re.MULTILINE,
+    )
+    questions: list[_PendingQuestion] = []
+    items = list(item_pattern.finditer(markdown))
+    for item in items:
+        if "default_after_timeout" not in item.group("body"):
+            continue
+        decision = re.search(
+            r"^(?P<text>[\s\S]*?)\s*->\s+\*\*(?P<chosen>[\s\S]*?)\*\*"
+            r"\s+\(default_after_timeout\)\s*$",
+            item.group("body").strip(),
+        )
+        if decision is None:
+            continue
+        chosen = decision.group("chosen").strip()
+        questions.append(
+            _PendingQuestion(
+                id=f"legacy_timeout_{len(questions) + 1}",
+                text=decision.group("text").strip(),
+                kind=item.group("kind").strip(),
+                recommended=chosen or None,
+                why="Escolha registrada por prazo em versao antiga; requer confirmacao explicita.",
+            )
+        )
+    if markdown.count("default_after_timeout") > len(questions):
+        questions.append(
+            _PendingQuestion(
+                id="legacy_timeout_unparsed",
+                text=(
+                    "Confirme explicitamente uma decisao material registrada por prazo em uma versao antiga. "
+                    "Informe a escolha manualmente para a fabrica prosseguir."
+                ),
+                kind="business",
+            )
+        )
+    return questions
 
 
 def _split_auto_resolvable(
@@ -459,7 +497,28 @@ def _load_pending(ws: workspace.RunWorkspace) -> Optional[PendingGrill]:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return PendingGrill.model_validate(data)
+        pending = PendingGrill.model_validate(data)
+        # Older versions moved owner decisions after the first three into
+        # `technical`. Restore those decisions to the material queue.
+        legacy_material = []
+        technical = []
+        question_ids = {question.id for question in pending.questions}
+        for question in pending.technical:
+            category = _KIND_TO_CATEGORY.get(question.kind, question.kind)
+            if category in _OWNER_CATEGORIES and question.id not in question_ids:
+                legacy_material.append(question)
+                question_ids.add(question.id)
+            else:
+                technical.append(question)
+        if legacy_material:
+            pending.questions.extend(legacy_material)
+            pending.technical = technical
+        if not pending.round_pages:
+            pending.round_pages = [
+                [question.id for question in pending.questions[index:index + MAX_QUESTIONS]]
+                for index in range(0, len(pending.questions), MAX_QUESTIONS)
+            ]
+        return pending
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
         logger.warning("Failed to load pending grill state %s: %s", path, exc)
         return None
@@ -699,19 +758,28 @@ def run_grill(
     current_time = _now(now)
     ws = workspace.checkout(project, run_id)
 
-    existing = workspace.find_commit_by_job(ws, _job_key(run_id))
-    if existing:
-        missing = grill_artifacts_missing(ws)
-        if not missing:
-            return StageResult(outcome="success", output_refs=[existing])
-        # A grill is only `succeeded` with recoverable artifacts: a job commit whose context files are
-        # gone from the tree is not trusted, so the grill runs again instead of feeding planning nothing.
-        logger.warning(
-            "grill job commit %s of run %s has no %s on branch %s; running the grill again",
-            existing, run_id, ", ".join(missing), ws.branch,
-        )
-
     pending = _load_pending(ws)
+    legacy_timeout_questions: list[_PendingQuestion] = []
+    existing = workspace.find_commit_by_job(ws, _job_key(run_id))
+    if existing and pending is None:
+        missing = grill_artifacts_missing(ws)
+        grill_text = ""
+        if not missing:
+            grill_text = (workspace.context_dir(ws) / GRILL_FILE).read_text(encoding="utf-8")
+        if not missing and "default_after_timeout" not in grill_text:
+            return StageResult(outcome="success", output_refs=[existing])
+        if missing:
+            logger.warning(
+                "grill job commit %s of run %s has no %s on branch %s; running the grill again",
+                existing, run_id, ", ".join(missing), ws.branch,
+            )
+        else:
+            logger.warning(
+                "grill job commit %s of run %s contains a legacy timeout choice; rerunning the grill",
+                existing, run_id,
+            )
+            legacy_timeout_questions = _legacy_timeout_questions(grill_text)
+
     if pending is not None:
         return _reconcile_pending(
             ws, run_id, pending, current_time, send_message, auto_policy=auto_policy, answers=answers
@@ -757,12 +825,18 @@ def run_grill(
     for q in plan.questions:
         pq = _PendingQuestion(**q.model_dump())
         category = _KIND_TO_CATEGORY.get(q.kind, q.kind)
-        if category in _OWNER_CATEGORIES and len(blocking) < MAX_QUESTIONS:
+        if category in _OWNER_CATEGORIES:
             if not pq.recommended and pq.options:
                 pq.recommended = pq.options[0]
             blocking.append(pq)
         else:
             technical.append(pq)
+
+    blocking_texts = {question.text.strip().casefold() for question in blocking}
+    blocking.extend(
+        question for question in legacy_timeout_questions
+        if question.text.strip().casefold() not in blocking_texts
+    )
 
     auto_resolved: list[dict[str, Any]] = []
     if auto_policy and blocking:
@@ -785,6 +859,10 @@ def run_grill(
         questions=blocking,
         deadline=deadline,
         auto_resolved=auto_resolved,
+        round_pages=[
+            [question.id for question in blocking[index:index + MAX_QUESTIONS]]
+            for index in range(0, len(blocking), MAX_QUESTIONS)
+        ],
     )
     markdown = _render_grill_markdown(
         assumptions=plan.assumptions, technical=technical, resolved=auto_resolved, pending=blocking
@@ -831,7 +909,7 @@ def _adopt_previous_grill(ws: workspace.RunWorkspace, run_id: str, previous_run_
         if workspace.find_commit_by_job(ws, _job_key(previous_run_id), ref=ref) is None:
             return None
         text = workspace.read_file_at(ws, ref, f".darkfac/runs/{previous_run_id}/{GRILL_FILE}")
-        if not text or not text.strip() or _PENDING_SECTION in text:
+        if not text or not text.strip() or _PENDING_SECTION in text or "default_after_timeout" in text:
             return None
         body = text.lstrip("﻿").strip("\n")
         first, _, rest = body.partition("\n")
@@ -873,14 +951,29 @@ def _notify_owner(
     pending: PendingGrill,
     send_message: Optional[TelegramSender],
 ) -> Optional[str]:
-    """Send the single grill message once; record `notified` so a crash or a
-    failed send is retried on the next reconcile instead of silently lost."""
-    if pending.notified:
+    """Notify the current page once; failed sends remain eligible for retry."""
+    page_ids = pending.round_pages[pending.round_index] if pending.round_pages else [
+        q.id for q in pending.questions[:MAX_QUESTIONS]
+    ]
+    by_id = {question.id: question for question in pending.questions}
+    current_page = [by_id[question_id] for question_id in page_ids if question_id in by_id and question_id not in pending.answers]
+    if not current_page:
         return None
+    current_ids = [q.id for q in current_page]
+    previously_notified = pending.notified_question_ids
+    if pending.notified and not previously_notified:
+        # Legacy pending files had one notification containing the first page.
+        previously_notified = [q.id for q in pending.questions[:MAX_QUESTIONS]]
+    same_legacy_page = pending.notified_round_visit < 0 and set(current_ids).issubset(previously_notified)
+    same_round = pending.notified_round_visit == pending.round_visit
+    if pending.notified and (same_legacy_page or same_round):
+        return None
+    if pending.notified_round_visit != pending.round_visit:
+        pending.notified = False
     sender = send_message if send_message is not None else default_telegram_sender()
     if sender is None:
         return None
-    text, buttons = _build_message(run_id, pending.questions)
+    text, buttons = _build_message(run_id, current_page)
     try:
         sent = bool(sender(text, buttons))
     except Exception as exc:  # notification must never break the stage
@@ -895,6 +988,9 @@ def _notify_owner(
         _alert_owner_bot(alert_msg)
         return None
     pending.notified = True
+    pending.notified_question_ids = current_ids
+    pending.notified_round_visit = pending.round_visit
+    pending.round_answer_snapshot = list(pending.answers)
     _save_pending(ws, pending)
     sha = workspace.commit(ws, "grill: owner notified", _pending_job_key(run_id))
     workspace.push(ws)
@@ -915,10 +1011,10 @@ def resend_unnotified_grill(
         pending = _load_pending(ws)
         if pending is None:
             return True
-        if pending.notified:
+        if pending.notified and pending.notified_round_visit == pending.round_visit:
             return True
         sha = _notify_owner(ws, run_id, pending, send_message)
-        return sha is not None
+        return sha is not None or (pending.notified and pending.notified_round_visit < 0)
     except Exception as exc:
         logger.warning("resend_unnotified_grill failed for run %s: %s", run_id, exc)
         return False
@@ -940,14 +1036,25 @@ def _reconcile_pending(
         if question is not None and question_id not in pending.answers:
             pending.answers[question_id] = resolve_callback_choice(question, choice)
 
-    deadline = pending.deadline
-    if deadline.tzinfo is None:
-        deadline = deadline.replace(tzinfo=timezone.utc)
-    deadline_passed = current_time >= deadline
+    if pending.round_pages:
+        current_round = pending.round_pages[pending.round_index]
+        newly_answered = set(pending.answers) - set(pending.round_answer_snapshot)
+        if newly_answered.intersection(current_round):
+            for next_index in range(pending.round_index + 1, len(pending.round_pages)):
+                next_page = pending.round_pages[next_index]
+                if any(
+                    question_id not in pending.answers
+                    and not (auto_policy and _auto_answer(by_id[question_id]) is not None)
+                    for question_id in next_page
+                    if question_id in by_id
+                ):
+                    pending.round_index = next_index
+                    pending.round_visit += 1
+                    pending.notified = False
+                    break
 
     resolvable: list[dict[str, Any]] = list(pending.auto_resolved)
     still_pending: list[_PendingQuestion] = []
-    auto_ids: set[str] = set()
     for question in pending.questions:
         answer = pending.answers.get(question.id)
         auto_answer = _auto_answer(question) if auto_policy else None
@@ -957,35 +1064,33 @@ def _reconcile_pending(
             )
         elif auto_answer is not None:
             # Canary: never wait for the 12h deadline, resolve now with the recommended answer.
-            auto_ids.add(question.id)
             resolvable.append(
                 {"id": question.id, "text": question.text, "kind": question.kind, "chosen": auto_answer, "note": AUTO_CANARY_NOTE}
             )
-        elif deadline_passed:
-            if question.kind in _NO_DEFAULT_KINDS:
-                still_pending.append(question)
-            else:
-                resolvable.append(
-                    {
-                        "id": question.id,
-                        "text": question.text,
-                        "kind": question.kind,
-                        "chosen": question.recommended,
-                        "note": "default_after_timeout",
-                    }
-                )
         else:
             still_pending.append(question)
 
-    ready_to_finalize = deadline_passed or all(
-        q.id in pending.answers or q.id in auto_ids for q in pending.questions
-    )
+    ready_to_finalize = not still_pending
 
     if not ready_to_finalize:
+        workspace.write_context(
+            ws,
+            GRILL_FILE,
+            _render_grill_markdown(
+                assumptions=pending.assumptions,
+                technical=pending.technical,
+                resolved=resolvable,
+                pending=still_pending,
+            ),
+        )
+        _save_pending(ws, pending)
+        workspace.commit(ws, "grill: awaiting owner decisions", _pending_job_key(run_id))
+        workspace.push(ws)
         _notify_owner(ws, run_id, pending, send_message)
+        _save_pending(ws, pending)
         return StageResult(
             outcome="waiting_human",
-            evidence_refs=[f"grill_deadline:{deadline.isoformat()}"],
+            evidence_refs=[f"grill_deadline:{pending.deadline.isoformat()}"],
         )
 
     markdown = _render_grill_markdown(
@@ -999,10 +1104,7 @@ def _reconcile_pending(
     sha = workspace.commit(ws, "grill: resolved", _job_key(run_id))
     workspace.push(ws)
 
-    evidence = []
-    if still_pending:
-        evidence = [f"blocked_no_default:{q.id}" for q in still_pending]
-    return StageResult(outcome="success", output_refs=[sha], evidence_refs=evidence)
+    return StageResult(outcome="success", output_refs=[sha])
 
 
 def _render_demand_markdown(project: ProjectDescriptor, channel: str, demand_text: str) -> str:

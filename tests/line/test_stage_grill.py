@@ -1,10 +1,10 @@
-"""Tests for the single-round Grill stage (HF-27-04).
+"""Tests for the owner-decision Grill stage (HF-27-04).
 
 The agent CLI itself is faked by monkeypatching `stage_grill.run_read_agent`
 (the same seam `stage_planning` shares) so these tests focus on the Grill
-stage's own contract: technical questions resolved immediately, a single
-bundled Telegram-style message for blocking questions, the 12h
-default-after-timeout rule, `secret`/`account` never getting a default, and
+stage's own contract: technical questions resolved automatically, pages of
+three owner decisions, strict waiting after the deadline, `secret`/`account`
+never getting a default, and
 idempotent replay via the `DarkFac-Job:` trailer. No network and no real git
 remote beyond a local `git init --bare` "origin" under `tmp_path`.
 """
@@ -110,6 +110,7 @@ def test_no_blocking_questions_immediate_success(project, monkeypatch):
     grill_md = (ws_mod.context_dir(ws) / "GRILL.md").read_text(encoding="utf-8")
     assert "Usar Python 3.12" in grill_md
     assert "pytest" in grill_md
+    assert "auto_technical" in grill_md
     assert "Aguardando decisao" not in grill_md
     assert not sent  # no Telegram message when nothing blocks
 
@@ -134,11 +135,11 @@ def test_no_blocking_questions_is_idempotent_on_replay(project, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# Blocking business question -> waiting_human -> default after timeout
+# Blocking business question remains pending after timeout
 # --------------------------------------------------------------------------
 
 
-def test_business_question_waits_then_defaults_after_timeout(project, monkeypatch):
+def test_business_question_stays_waiting_after_deadline_without_owner_choice(project, monkeypatch):
     reply = _fake_agent_reply(
         {
             "questions": [
@@ -174,18 +175,193 @@ def test_business_question_waits_then_defaults_after_timeout(project, monkeypatc
     still_waiting = run_grill(project, "run-3", "Nova feature de billing", now=start + timedelta(hours=1))
     assert still_waiting.outcome == "waiting_human"
 
-    # After the 12h deadline with no answer: resolves with the recommended default.
+    # A deadline never chooses the owner's business decision.
     after_deadline = run_grill(
         project, "run-3", "Nova feature de billing", now=start + timedelta(hours=13)
     )
-    assert after_deadline.outcome == "success"
+    assert after_deadline.outcome == "waiting_human"
 
     from core.line import workspace as ws_mod
+    from core.line.stage_grill import _load_pending, _job_key
 
     ws = ws_mod.checkout(project, "run-3")
     grill_md = (ws_mod.context_dir(ws) / "GRILL.md").read_text(encoding="utf-8")
-    assert "default_after_timeout" in grill_md
-    assert "nao" in grill_md
+    pending = _load_pending(ws)
+    assert pending is not None and [q.id for q in pending.questions] == ["q1"]
+    assert "default_after_timeout" not in grill_md
+    assert "Aguardando decisao do owner" in grill_md
+    assert ws_mod.find_commit_by_job(ws, _job_key("run-3")) is None
+
+
+def test_legacy_timeout_commit_cannot_short_circuit_a_recreated_pending_grill(project, monkeypatch):
+    reply = _fake_agent_reply(_BLOCKING_REPLY)
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    assert run_grill(project, "run-legacy-timeout", "Demanda", now=start).outcome == "waiting_human"
+
+    from core.line import workspace as ws_mod
+    from core.line.stage_grill import _clear_pending, _load_pending
+
+    ws = ws_mod.checkout(project, "run-legacy-timeout")
+    _clear_pending(ws)
+    ws_mod.write_context(
+        ws,
+        "GRILL.md",
+        "# GRILL\n\n- [objective] Qual objetivo?\nPara que produto? -> **A** (default_after_timeout)\n",
+    )
+    ws_mod.commit(ws, "legacy timeout resolution", "run-legacy-timeout:grill")
+    ws_mod.push(ws)
+
+    first = run_grill(project, "run-legacy-timeout", "Demanda", now=start + timedelta(hours=13))
+    second = run_grill(project, "run-legacy-timeout", "Demanda", now=start + timedelta(hours=14))
+
+    assert first.outcome == "waiting_human"
+    assert second.outcome == "waiting_human"
+    pending = _load_pending(ws)
+    assert pending is not None
+    assert any(question.id == "legacy_timeout_1" for question in pending.questions)
+    assert any(question.text == "Qual objetivo?\nPara que produto?" for question in pending.questions)
+
+
+def test_unparseable_legacy_timeout_marker_still_creates_a_blocking_question():
+    questions = stage_grill._legacy_timeout_questions("# GRILL\n\nlegado default_after_timeout\n")
+    assert len(questions) == 1
+    assert questions[0].id == "legacy_timeout_unparsed"
+
+
+def test_legacy_timeout_parser_does_not_absorb_an_explicitly_answered_decision():
+    markdown = (
+        "- [business] Q1 -> **A** (respondida pelo owner)\n"
+        "- [success] Q2 -> **B** (default_after_timeout)\n"
+    )
+    questions = stage_grill._legacy_timeout_questions(markdown)
+    assert len(questions) == 1
+    assert questions[0].kind == "success"
+    assert questions[0].text == "Q2"
+    assert questions[0].recommended == "B"
+
+
+def test_material_decisions_are_preserved_and_notified_in_three_question_rounds(project, monkeypatch):
+    questions = [
+        {"id": f"q{i}", "text": f"Decisão de negócio {i}?", "kind": "business",
+         "options": ["A", "B"], "recommended": "A"}
+        for i in range(1, 6)
+    ]
+    reply = _fake_agent_reply({"questions": questions, "assumptions": [], "is_product_scale": False})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    sent = []
+
+    first = run_grill(
+        project, "run-many", "Demanda com cinco decisoes",
+        send_message=lambda text, buttons: sent.append((text, buttons)) or True, now=start,
+    )
+    assert first.outcome == "waiting_human"
+    assert len(sent) == 1
+    assert all(f"Decisão de negócio {i}?" in sent[0][0] for i in range(1, 4))
+    assert "Decisão de negócio 4?" not in sent[0][0]
+
+    from core.line import workspace as ws_mod
+    from core.line.stage_grill import _load_pending
+
+    ws = ws_mod.checkout(project, "run-many")
+    pending = _load_pending(ws)
+    assert pending is not None and [q.id for q in pending.questions] == [f"q{i}" for i in range(1, 6)]
+    persisted = json.loads((ws_mod.context_dir(ws) / "GRILL_PENDING.json").read_text(encoding="utf-8"))
+    assert [q["id"] for q in persisted["questions"]] == [f"q{i}" for i in range(1, 6)]
+
+    # A partial answer advances to the next page without silently filling q2/q3.
+    assert submit_grill_answers(project, "run-many", {"q1": "1"})
+    second = run_grill(
+        project, "run-many", "Demanda com cinco decisoes",
+        send_message=lambda text, buttons: sent.append((text, buttons)) or True,
+        now=start + timedelta(hours=13),
+    )
+    assert second.outcome == "waiting_human"
+    assert len(sent) == 2
+    assert "Decisão de negócio 4?" in sent[1][0] and "Decisão de negócio 5?" in sent[1][0]
+    assert "Decisão de negócio 1?" not in sent[1][0]
+    assert "Decisão de negócio 2?" not in sent[1][0]
+    pending_after = _load_pending(ws)
+    assert pending_after is not None
+    assert [q.id for q in pending_after.questions] == [f"q{i}" for i in range(1, 6)]
+    assert set(pending_after.answers) == {"q1"}
+
+    assert submit_grill_answers(project, "run-many", {"q4": "1", "q5": "1"})
+    third = run_grill(
+        project, "run-many", "Demanda com cinco decisoes",
+        send_message=lambda text, buttons: sent.append((text, buttons)) or True,
+        now=start + timedelta(hours=14),
+    )
+    assert third.outcome == "waiting_human"
+    assert len(sent) == 2  # q2/q3 were already delivered in the first message
+    assert set(_load_pending(ws).answers) == {"q1", "q4", "q5"}
+
+
+def test_legacy_overflow_material_decisions_are_restored_from_technical(project):
+    from core.line import workspace as ws_mod
+    from core.line.stage_grill import _load_pending
+
+    ws = ws_mod.checkout(project, "run-legacy-overflow")
+    legacy = {
+        "assumptions": [],
+        "technical": [{"id": "q4", "text": "Decisão de negócio 4?", "kind": "business",
+                       "options": ["A", "B"], "recommended": "A"}],
+        "questions": [
+            {"id": f"q{i}", "text": f"Decisão de negócio {i}?", "kind": "business",
+             "options": ["A", "B"], "recommended": "A"}
+            for i in range(1, 4)
+        ],
+        "deadline": "2026-09-23T00:00:00+00:00",
+        "answers": {},
+        "notified": True,
+        "auto_resolved": [],
+    }
+    ws_mod.write_context(ws, "GRILL_PENDING.json", json.dumps(legacy))
+
+    pending = _load_pending(ws)
+
+    assert pending is not None
+    assert [question.id for question in pending.questions] == ["q1", "q2", "q3", "q4"]
+    assert pending.technical == []
+    assert pending.round_pages == [["q1", "q2", "q3"], ["q4"]]
+    assert pending.notified_round_visit == -1
+
+
+def test_failed_later_page_can_be_retried_from_another_workspace(project, monkeypatch, tmp_path):
+    from core.line import workspace as ws_mod
+    from core.line.stage_grill import _load_pending, resend_unnotified_grill
+
+    questions = [
+        {"id": f"q{i}", "text": f"Decisão {i}?", "kind": "business",
+         "options": ["A", "B"], "recommended": "A"}
+        for i in range(1, 5)
+    ]
+    reply = _fake_agent_reply({"questions": questions, "assumptions": [], "is_product_scale": False})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    sent = []
+    assert run_grill(
+        project, "run-retry-page", "Demanda", now=start,
+        send_message=lambda text, buttons: sent.append(text) or True,
+    ).outcome == "waiting_human"
+    assert submit_grill_answers(project, "run-retry-page", {"q1": "1"})
+
+    failed = run_grill(
+        project, "run-retry-page", "Demanda", now=start + timedelta(hours=1),
+        send_message=lambda text, buttons: sent.append(text) or False,
+    )
+    assert failed.outcome == "waiting_human"
+    assert len(sent) == 2 and "Decisão 4?" in sent[1]
+
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "other-host-root"))
+    assert resend_unnotified_grill(
+        project, "run-retry-page", send_message=lambda text, buttons: sent.append(text) or True
+    )
+    assert len(sent) == 3 and "Decisão 4?" in sent[2]
+    ws = ws_mod.checkout(project, "run-retry-page")
+    pending = _load_pending(ws)
+    assert pending is not None and pending.notified is True and pending.round_index == 1
 
 
 def test_answers_submitted_before_deadline_finalize_immediately(project, monkeypatch):
@@ -253,9 +429,7 @@ def test_secret_question_never_receives_a_default(project, monkeypatch):
     run_grill(project, "run-5", "Integrar pagamentos", now=start)
     resolved = run_grill(project, "run-5", "Integrar pagamentos", now=start + timedelta(hours=13))
 
-    # The grill stage itself still completes (only dependent jobs block later, per HF-27-08).
-    assert resolved.outcome == "success"
-    assert any(ref.startswith("blocked_no_default:q1") for ref in resolved.evidence_refs)
+    assert resolved.outcome == "waiting_human"
 
     from core.line import workspace as ws_mod
 
@@ -358,7 +532,7 @@ def test_resend_unnotified_grill(project, monkeypatch):
     first = run_grill(project, "run-resend", "demanda", send_message=lambda t, b: False)
     assert first.outcome == "waiting_human"
 
-    from core.line.stage_grill import _load_pending, resend_unnotified_grill
+    from core.line.stage_grill import _load_pending, _pending_job_key, _save_pending, resend_unnotified_grill
     from core.line import workspace
 
     ws = workspace.checkout(project, "run-resend")
@@ -379,6 +553,17 @@ def test_resend_unnotified_grill(project, monkeypatch):
     # Idempotent: resend does not duplicate when already notified
     res2 = resend_unnotified_grill(project, "run-resend", send_message=lambda t, b: sent_messages.append(t) or True)
     assert res2 is True
+    assert len(sent_messages) == 1
+
+    # Legacy files marked only `notified`, without tracking a page visit.
+    pending_after.notified_round_visit = -1
+    pending_after.notified_question_ids = []
+    _save_pending(ws, pending_after)
+    workspace.commit(ws, "legacy notified state", _pending_job_key("run-resend"))
+    workspace.push(ws)
+    assert resend_unnotified_grill(
+        project, "run-resend", send_message=lambda t, b: sent_messages.append(t) or True
+    ) is True
     assert len(sent_messages) == 1
 
 
@@ -508,19 +693,13 @@ def test_reconcile_of_non_canary_pending_grill_still_waits(project, monkeypatch)
     assert again.outcome == "waiting_human"
 
 
-def test_is_auto_grill_matches_canary_project_and_payload_flag():
+def test_is_auto_grill_requires_explicit_payload_policy():
     canary_project = ProjectDescriptor(id="darkfac-canary", name="Canary", repo_url="https://example.test/c.git")
     other = ProjectDescriptor(id="darkfac", name="DarkFac", repo_url="https://example.test/d.git")
-    assert stage_grill.is_auto_grill(canary_project, {}) is True  # runs accepted before the flag existed
+    assert stage_grill.is_auto_grill(canary_project, {}) is False
     assert stage_grill.is_auto_grill(other, {"grill_policy": "auto"}) is True
     assert stage_grill.is_auto_grill(other, {}) is False
     assert stage_grill.is_auto_grill(other, None) is False
-
-
-def test_canary_project_id_is_in_sync_with_the_canary_module():
-    from core.line import canary
-
-    assert canary.CANARY_PROJECT_ID in stage_grill.AUTO_GRILL_PROJECT_IDS
 
 
 def test_grill_handler_passes_the_auto_policy_through_bindings(project, monkeypatch):
@@ -677,7 +856,7 @@ def test_retry_attempt_does_not_adopt_a_grill_with_unresolved_no_default_questio
     start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
     assert run_grill(project, "run-prev", "Demanda", now=start).outcome == "waiting_human"
     closed = run_grill(project, "run-prev", "Demanda", now=start + timedelta(hours=13))
-    assert closed.outcome == "success" and closed.evidence_refs == ["blocked_no_default:s1"]
+    assert closed.outcome == "waiting_human"
 
     calls = {"n": 0}
 
@@ -689,6 +868,33 @@ def test_retry_attempt_does_not_adopt_a_grill_with_unresolved_no_default_questio
     result = run_grill(project, "run-new", "Demanda", now=start, adopt_from_runs=["run-prev"])
 
     assert result.outcome == "waiting_human"  # the secret still has to be asked
+    assert calls["n"] == 1
+
+
+def test_retry_attempt_does_not_adopt_legacy_timeout_choice(project, monkeypatch):
+    _resolve_previous_grill(project, monkeypatch)
+    from core.line import workspace as ws_mod
+
+    previous = ws_mod.checkout(project, "run-prev")
+    grill_path = ws_mod.context_dir(previous) / "GRILL.md"
+    grill_path.write_text(
+        grill_path.read_text(encoding="utf-8") + "\n- [business] Cobrar? -> **nao** (default_after_timeout)\n",
+        encoding="utf-8",
+    )
+    ws_mod.commit(previous, "legacy timeout decision", "run-prev:grill")
+    ws_mod.push(previous)
+
+    calls = {"n": 0}
+
+    def _agent(*args, **kwargs):
+        calls["n"] += 1
+        return _fake_agent_reply(_BLOCKING_REPLY)
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent)
+    result = run_grill(project, "run-new", "Landing page nova", adopt_from_runs=["run-prev"])
+
+    assert result.outcome == "waiting_human"
+    assert not any(ref.startswith(stage_grill.ADOPTED_EVIDENCE_PREFIX) for ref in result.evidence_refs)
     assert calls["n"] == 1
 
 

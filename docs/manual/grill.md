@@ -18,9 +18,11 @@ Qualquer outra pergunta (arquitetura, biblioteca, teste, resiliencia) e descarta
 ## Regras
 
 - A sessao conserva todas as perguntas materiais, sem reclassificar perguntas excedentes como tecnicas.
-- Cada rodada mostra no maximo 3 perguntas ainda sem resposta. Respostas parciais registram apenas as escolhas explicitas e liberam a proxima rodada.
+- Cada rodada mostra no maximo 3 perguntas. Respostas parciais registram apenas escolhas explicitas e avançam para a proxima pagina ainda nao enviada; decisoes sem resposta continuam persistidas e bloqueantes, e os botoes ja enviados continuam validos.
 - A opcao `recommended` e uma sugestao. Silencio, resposta em branco e o antigo `auto_accept_unanswered` nao escolhem pelo owner; a demanda segue em `waiting_human` ate todas as decisoes materiais terem resposta explicita.
-- Perguntas tecnicas reversiveis continuam sob decisao automatica da fabrica e nao entram na fila de perguntas ao owner.
+- O prazo de 12 horas serve para acompanhamento e notificacao. Vencimento, silencio ou falha de entrega nao escolhem respostas, nao limpam `GRILL_PENDING.json` e nao liberam o planejamento.
+- Perguntas tecnicas reversiveis continuam sob decisao automatica da fabrica, registradas com origem `auto_technical`, e nao entram na fila de perguntas ao owner.
+- A origem `auto_canary` e permitida somente quando a execucao traz explicitamente `grill_policy=auto`. Segredos e novas contas continuam bloqueantes mesmo nessa politica.
 - Correcoes e ajustes pequenos ("corrigir o erro de digitacao no menu") nao geram perguntas.
 - Uma demanda vaga como "Quero um painel que mostre minhas vendas do mes" so segue depois de objetivo, criterio de sucesso verificavel e modo de aceite (`auto` ou `owner`) explicitamente definidos.
 

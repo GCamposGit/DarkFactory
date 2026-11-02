@@ -21,8 +21,8 @@ def test_canary_grill_is_always_auto() -> None:
     cmd = canary.build_intake_command(datetime.now(UTC).date(), "normal")
     assert cmd.payload["grill_policy"] == "auto"
     canary_project = SimpleNamespace(id=canary.CANARY_PROJECT_ID)
-    assert stage_grill.is_auto_grill(canary_project, {})
-    assert stage_grill.is_auto_grill(SimpleNamespace(id="darkfac-canary"), None)
+    assert stage_grill.is_auto_grill(canary_project, cmd.payload)
+    assert not stage_grill.is_auto_grill(SimpleNamespace(id="darkfac-canary"), None)
     # Non-canary projects keep the normal (human) grill.
     assert not stage_grill.is_auto_grill(SimpleNamespace(id="darkfac"), {})
 
