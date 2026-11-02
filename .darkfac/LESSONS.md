@@ -1,0 +1,1 @@
+- [validate_exhausted] Garantir que os testes e comandos de validacao passem localmente antes do estagio 'development'.
