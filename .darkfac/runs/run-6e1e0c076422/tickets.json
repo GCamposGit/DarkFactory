@@ -1,0 +1,121 @@
+[
+  {
+    "id": "T1",
+    "title": "Persistir revisão cruzada e rechecagem real",
+    "goal": "Tornar auditáveis a família revisora, os achados bloqueantes e sua rechecagem após correção, vinculados às versões exatas do candidato.",
+    "files_hint": [
+      "core/line/stage_review.py",
+      "tests/line/test_stage_review.py"
+    ],
+    "acceptance": [
+      "Cada rodada persiste família implementadora e revisora, candidate_digest, policy_digest e achados estruturados com identificador estável.",
+      "Uma rodada aprovada só registra resolução quando outra família rechecou explicitamente um achado bloqueante real de rodada anterior sobre o candidato corrigido.",
+      "Aprovação forçada, mesma família, resposta simulada, ausência de achado anterior ou mudança não revalidada do candidato não satisfazem a rechecagem.",
+      "A retomada é idempotente e preserva o histórico completo das rodadas.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Cobrir bloqueio por mesma família e por aprovação forçada.",
+      "Cobrir changes_required seguido de correção e aprovação com referência explícita ao achado resolvido.",
+      "Cobrir aprovação direta, rechecagem ausente e candidate_digest alterado permanecendo sem prova de resolução."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Criar verificador final fail-closed",
+    "goal": "Avaliar deterministicamente o conjunto completo de evidências e persistir um relatório pending ou accepted vinculado ao candidato.",
+    "files_hint": [
+      "core/line/stages.py",
+      "core/line/ticket_engine.py",
+      "tests/line/test_stages.py"
+    ],
+    "acceptance": [
+      "O contrato tipado distingue candidate_digest revisado, head do PR, merge SHA e SHA observado no artefato implantado.",
+      "O aceite exige revisão cruzada aprovada com rechecagem resolvida, runner --quick com [HARNESS_PASS] único e checagens executadas maiores que zero, lint-imports, complexity_ratchet, docs_sync, CI verde, merge confirmado, deploy, smoke e fechamento documental.",
+      "A correspondência entre candidato, squash merge e artefato implantado é comprovada por recibos e ancestralidade, não por igualdade ingênua de hashes.",
+      "Evidência ausente, inválida, simulada, de outro candidato ou incoerente produz pending com códigos de motivo explícitos e estáveis.",
+      "Projetos com requires_commercial_acceptance permanecem pendentes sem recibo válido do owner; caminhos protegidos permanecem pendentes sem autorização assinada correspondente.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Testar aceite com conjunto completo e coerente dos três domínios de identidade.",
+      "Parametrizar a ausência ou incoerência de cada evidência obrigatória e verificar o motivo pending.",
+      "Testar squash válido, deploy de SHA descendente válido e artefato sem ancestralidade rejeitado.",
+      "Testar exceções comercial e de arquivo protegido sem flexibilizar os demais portões."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Capturar evidências reais antes do deploy",
+    "goal": "Produzir recibos estruturados do runner, verificações estáticas, documentação, learning pack, CI e merge sem inferir sucesso de mensagens livres.",
+    "files_hint": [
+      "core/harness/markers.py",
+      "run_ticket.py",
+      "core/line/ticket_extras.py",
+      "core/git/autonomy.py"
+    ],
+    "acceptance": [
+      "A execução oficial registra candidate_digest, [HARNESS_PASS], ausência de marcador conflitante e número real de checagens executadas.",
+      "lint-imports, complexity_ratchet e docs_sync geram recibos individuais com comando, resultado e vínculo ao candidato.",
+      "O learning pack do ticket é persistido e indexado com vínculo ao candidato; falha de geração deixa o aceite pendente.",
+      "A evidência do GitHub registra head do PR, checks obrigatórios verdes, merge confirmado e merge SHA retornado pelo provedor.",
+      "Após merge e antes do deploy, o verificador retorna pending exclusivamente pelos requisitos pós-merge ainda ausentes, sem emitir aceite antecipado.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Cobrir parsing válido e inválido dos marcadores do runner e rejeição de zero checagens.",
+      "Cobrir persistência separada dos três checks e invalidação quando o candidato muda.",
+      "Cobrir CI verde ligado a outro head, merge sem confirmação e learning pack ausente.",
+      "Cobrir retomada que reutiliza apenas recibos ainda vinculados ao candidato atual."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Fechar deploy, smoke e aceite automático",
+    "goal": "Associar o deploy em lote aos tickets mergeados, persistir a identidade observada em produção e emitir aceite somente após o smoke real.",
+    "files_hint": [
+      "core/line/fleet_dispatcher.py",
+      "scripts/dokploy_redeploy.py",
+      "core/line/ticket_engine.py"
+    ],
+    "acceptance": [
+      "O despachante mantém os tickets e merge SHAs do lote até o deploy terminar, inclusive após reinício.",
+      "O redeploy retorna relatório estruturado por serviço com SHA esperado, SHA observado, resultado do deploy e probes HTTP reais, sem expor segredos.",
+      "Cada ticket recebe prova de que seu merge SHA é igual ou ancestral do SHA implantado; um SHA não relacionado é rejeitado.",
+      "Deploy ou smoke falho, indisponível, sem cobertura ou simulado mantém final_acceptance pending e registra o motivo operacional.",
+      "Somente o relatório completo e coerente muda final_acceptance para accepted; reexecuções são idempotentes e alteração de candidato invalida os vínculos afetados.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Cobrir lote com múltiplos tickets aceitos por um SHA implantado descendente dos respectivos merges.",
+      "Cobrir falha do redeploy, smoke não-2xx, SHA divergente e reinício entre merge e deploy.",
+      "Cobrir emissão única e idempotente do aceite e preservação de pending para projeto comercial sem recibo."
+    ],
+    "smoke": [
+      "/health",
+      "/api/line/status"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Fechar manual, fase atual e learning pack",
+    "goal": "Documentar o contrato efetivamente implementado e garantir que os três artefatos documentais integrem a mesma entrega sem antecipar evidências operacionais.",
+    "files_hint": [
+      "docs/manual/motor.md",
+      "docs/manual/merge_autonomo.md",
+      "docs/FASE_ATUAL.md"
+    ],
+    "acceptance": [
+      "O manual explica evidências obrigatórias, vínculos entre candidato, merge e artefato, motivos pending, retomada e exceções comercial e de governança.",
+      "docs/FASE_ATUAL.md registra somente capacidades comprovadas pela implementação e pelos testes desta entrega.",
+      "O learning pack gerado para a entrega explica o fluxo em níveis leigo e técnico e referencia os resultados reais, sem declarar deploy ou aceite futuro como concluído.",
+      "O verificador exige manual, FASE_ATUAL e learning pack vinculados antes de emitir accepted.",
+      "docs_sync, lint-imports, complexity_ratchet e python scripts/line_validate.py passam na árvore final."
+    ],
+    "tests_to_add": [],
+    "smoke": []
+  }
+]
