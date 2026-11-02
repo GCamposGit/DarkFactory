@@ -1,0 +1,11 @@
+[
+  {
+    "attempt": 1,
+    "harness": "claude",
+    "model": "opus",
+    "error_kind": "invalid_json",
+    "duration_s": 171.507,
+    "note": "invalid_json",
+    "output": "{\"spec\":{\"objective\":\"Construir e executar uma qualificação isolada do ciclo integrado da linha (admissão, claim/lease, fencing, janelas, cota, capacidade) cobrindo oito cenários — concorrência, replay, retomada, perda de host com fencing, consolidação de janelas atrasadas, piso de cota, falta de capacidade e desativação de domínio — sobre os três domínios decididos pelo owner (segurança, qualidade de código e operação da fábrica), persistindo uma matriz que comprove cobertura, custo e motivo de adiamento distintos por cenário, com prova sintética e prova operacional real identificadas separadamente.\",\"out_of_scope\":[\"Criar produto novo, canal novo ou ampliar permissões de agente\",\"Novos limiares de política (piso de 15%, intervalos, capacidade) — a qualificação exercita os existentes\",\"Indisponibilidade deliberada em produção: perda de host é simulada no ambiente isolado (drain/expiração de lease), não derrubando host real\",\"Alterar arquivos protegidos (AGENTS.md, MISSION.md, guard, core/governance, workflows do CI)\",\"Experimento Canaletto\",\"Substituir o portão oficial (core/harness/runner.py --quick) ou criar segundo portão\",\"Trocar o motor de execução de tickets (run_ticket.py) ou o store canônico por um paralelo\"],\"design\":\"Camada nova fina em core/acceptance/, headless e sem UI, reusando o que já existe: ControlStore/SQLiteControlStore (claim, heartbeat, finish, reserve_cycle, heartbeat_reservation, drain_host, reconcile_fleet_reservations, fences em _check_finish_reservation_fence) para concorrência, lease, retomada e fencing; owner_intake.submit_ticket_to_line (external id 'ticket:<id>') e BacklogFeeder para replay/idempotência; FeederCycle.maybe_run + interval_from_env para janelas atrasadas; FeederCycle.default_quota_gate sobre core.line.routing.pick para piso de cota; core.workflow.capacity_policy.rank_eligible para falta de capacidade; core.usage.ticket_cost (implicit_cost_usd / record_ticket_quota_cost) para custo medido. Três peças: (1) core/acceptance/\n... [truncated, 13548 chars total]"
+  }
+]
