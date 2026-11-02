@@ -6,6 +6,7 @@ HubService is composed from per-domain mixins (service_<domain>.py); this module
 construction, the live-line cache and the public re-exports used by routers and tests.
 """
 
+import hashlib
 import logging
 import os
 import secrets
@@ -46,6 +47,26 @@ from hub.backend.service_ai import AiStudioMixin
 from hub.backend.service_integrations import IntegrationsMixin
 
 logger = logging.getLogger("darkhub.service")
+
+
+class _UnavailableDemandsControlStore:
+    """Preserve configured-store failure for demand reads/writes without a local fallback."""
+
+    def __init__(self, cause: Exception) -> None:
+        self.cause = cause
+
+    def _raise(self) -> None:
+        from core.workflow.control_contracts import StoreUnavailableError
+
+        raise StoreUnavailableError("Demand control store is unavailable") from self.cause
+
+    def list_tickets(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        self._raise()
+
+    def upsert_ticket(
+        self, project_id: str, ticket_id: str, status: str, payload: dict[str, Any], now: Any
+    ) -> None:
+        self._raise()
 
 # One control-store read per window, shared by all /api/line/live clients and streams (USR-138).
 LINE_LIVE_CACHE_TTL_SECONDS = 2.5
@@ -145,7 +166,48 @@ class HubService(
             self.demands_dir = self.data_dir / "demands"
         else:
             self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
-        self.demands_store = DemandsStore(self.demands_dir / "demands.json")
+        from core.line.owner_intake import line_database_url, open_line_store
+
+        demand_database_url = (control_database_url or line_database_url() or "").strip()
+        explicit_line_store = line_control_store is not None
+        demands_control_store = line_control_store if explicit_line_store else None
+        canonical_demands_only = False
+        if os.environ.get("DARKFAC_DEMANDS_PATH"):
+            demands_control_store = None
+        elif explicit_line_store:
+            pass
+        else:
+            if demand_database_url:
+                try:
+                    demands_control_store = open_line_store(url=demand_database_url)
+                    self._line_store_cache = demands_control_store
+                except Exception as exc:
+                    demands_control_store = _UnavailableDemandsControlStore(exc)
+                    logger.warning("Hub demands control store unavailable config_sha=%s", hashlib.sha256(
+                        demand_database_url.encode("utf-8")
+                    ).hexdigest()[:12])
+            elif control_store is not None:
+                demands_control_store = control_store
+            else:
+                demands_control_store = open_line_store()
+        # Hub demand reads and writes must use the same durable queue as the line.
+        # Only DARKFAC_DEMANDS_PATH opts into the file-backed development store.
+        canonical_demands_only = not bool(os.environ.get("DARKFAC_DEMANDS_PATH"))
+        if not os.environ.get("DARKFAC_DEMANDS_PATH"):
+            backend_name = (
+                "postgres"
+                if type(demands_control_store).__name__ == "PostgresControlStore"
+                else "sqlite"
+            )
+            config_sha = hashlib.sha256(
+                (demand_database_url or str(state_root() / "control.db")).encode("utf-8")
+            ).hexdigest()[:12]
+            logger.info("Hub demands control store resolved backend=%s config_sha=%s", backend_name, config_sha)
+        self.demands_store = DemandsStore(
+            self.demands_dir / "demands.json",
+            control_store=demands_control_store,
+            canonical_only=canonical_demands_only,
+        )
         self.demands_service = DemandsService(
             store=self.demands_store,
             specifier=DemandSpecifier(ollama_url=ollama_base_url),

@@ -103,10 +103,16 @@ def _make_ticket(
 # ---------------------------------------------------------------------------
 
 
-def test_feeder_two_registered_projects_are_eligible(store, demands, registry) -> None:
+def test_feeder_two_registered_projects_are_eligible(store, demands, registry, tmp_path) -> None:
     """Open tickets from darkfac and proj-b are both admitted without default allowlist blockage."""
+    from hub.backend.service import HubService
+
+    service = HubService(data_dir=tmp_path / "hub", control_store=store, line_control_store=store)
+    demands = service.demands_store
     t_df = _make_ticket(demands, "USR-101", "darkfac", title="DarkFac core demand")
     t_pb = _make_ticket(demands, "PRB-01", "proj-b", title="Project B client demand")
+    assert not demands.path.exists()
+    assert service.get_demand_ticket("USR-101").id == t_df.id
 
     feeder = BacklogFeeder(
         demands_store=demands,

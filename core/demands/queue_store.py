@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from core.demands.models import UserTicket
 
@@ -23,39 +23,49 @@ _TERMINAL = frozenset({"completed", "cancelled", "canceled"})
 
 @functools.lru_cache(maxsize=4)
 def _store(database_url: str, db_path: str):  # noqa: ANN202 - ControlStore, imported lazily
+    from core.line.owner_intake import open_line_store
     from core.line.store_selection import default_control_store
 
+    if database_url:
+        return open_line_store(url=database_url)
     return default_control_store(sqlite_db_path=db_path or None)
 
 
 def control_store():  # noqa: ANN201
     from core.paths import state_root
+    from core.line.owner_intake import line_database_url
 
-    return _store(os.environ.get("DARKFAC_HF02_DATABASE_URL", ""), str(state_root() / "control.db"))
+    database_url = line_database_url() or ""
+    if database_url:
+        return _store(database_url, str(state_root() / "control.db"))
+    return _store("", str(state_root() / "control.db"))
 
 
-def register_ticket(ticket: UserTicket, *, source: str | None = None) -> UserTicket:
+def register_ticket(ticket: UserTicket, *, source: str | None = None, store: Any | None = None) -> UserTicket:
     """Upsert ``ticket`` in the control store (``source`` = intake channel, informational). Raises when the store is unavailable."""
     if source:
         logger.debug("Registering %s in the control store (source=%s)", ticket.id, source)
     payload = ticket.model_dump(mode="json")
-    control_store().upsert_ticket(
+    (store or control_store()).upsert_ticket(
         ticket.project_id, ticket.id, str(payload.get("status") or "planned"), payload, datetime.now(UTC)
     )
     return ticket
 
 
-def list_queue_tickets() -> list[UserTicket]:
-    """Tickets held by the control store; ``[]`` when it does not exist yet or is unreachable."""
+def list_queue_tickets(*, store: Any | None = None) -> list[UserTicket]:
+    """Tickets held by the control store; missing local SQLite means an empty queue."""
     from core.paths import state_root
+    from core.line.owner_intake import line_database_url
+    from core.workflow.control_contracts import StoreUnavailableError
 
-    if not os.environ.get("DARKFAC_HF02_DATABASE_URL") and not (state_root() / "control.db").exists():
+    if store is None and not line_database_url() and not (state_root() / "control.db").exists():
         return []
     try:
-        rows = control_store().list_tickets()
-    except Exception as exc:  # noqa: BLE001 - readers fall back to demands.json
-        logger.warning("Control store unavailable for the ticket queue (%s); using demands.json", exc)
-        return []
+        rows = (store or control_store()).list_tickets()
+    except StoreUnavailableError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - normalize backend failures without hiding them
+        raise StoreUnavailableError("Demand control store is unavailable") from exc
     tickets: list[UserTicket] = []
     for raw in rows:
         try:
@@ -65,7 +75,7 @@ def list_queue_tickets() -> list[UserTicket]:
     return tickets
 
 
-def get_ticket(ticket_id: str) -> UserTicket | None:
+def get_ticket(ticket_id: str, *, store: Any | None = None) -> UserTicket | None:
     """Return the control-store ``UserTicket`` for ``ticket_id``.
 
     ``None`` when the id is absent or the store does not exist yet. Does not
@@ -73,7 +83,7 @@ def get_ticket(ticket_id: str) -> UserTicket | None:
     """
     if not ticket_id:
         return None
-    for ticket in list_queue_tickets():
+    for ticket in list_queue_tickets(store=store):
         if ticket.id == ticket_id:
             return ticket
     return None

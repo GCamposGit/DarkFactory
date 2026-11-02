@@ -141,7 +141,13 @@ def _lock_for(path: Path) -> _PathMutex:
 class DemandsStore:
     """Thread-safe, atomic persistence for user demands in JSON format."""
 
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        *,
+        control_store: Any | None = None,
+        canonical_only: bool = False,
+    ) -> None:
         override = os.environ.get("DARKFAC_DEMANDS_PATH")
         # USR-415: the implicit cwd-relative default never creates files on its own.
         self._implicit_default = path is None and not override
@@ -149,6 +155,8 @@ class DemandsStore:
             self.path = Path(path)
         else:
             self.path = Path(override) if override else DEFAULT_DEMANDS_PATH
+        self.control_store = control_store
+        self.canonical_only = canonical_only
         self._lock = _lock_for(self.path)
         self._ensure_storage()
 
@@ -162,6 +170,8 @@ class DemandsStore:
 
     def _control_only(self) -> bool:
         """USR-415: the shared checkout's tracked ledger is never rewritten; writes go to the control store."""
+        if self.canonical_only:
+            return True
         if os.environ.get("DARKFAC_DEMANDS_PATH"):
             return False
         from core.demands import queue_store
@@ -203,7 +213,7 @@ class DemandsStore:
         status: DeliveryStatus | None = None,
     ) -> list[UserTicket]:
         with self._lock:
-            raw_items = self._read_raw()
+            raw_items = [] if self.canonical_only else self._read_raw()
             tickets: list[UserTicket] = []
             for raw in raw_items:
                 try:
@@ -224,9 +234,11 @@ class DemandsStore:
         """USR-343: the control store is read first for the project ledger; demands.json is the fallback."""
         from core.demands import queue_store
 
-        if os.environ.get("DARKFAC_DEMANDS_PATH") or not queue_store.is_default_ledger(self.path):
+        if self.control_store is None and (
+            os.environ.get("DARKFAC_DEMANDS_PATH") or not queue_store.is_default_ledger(self.path)
+        ):
             return tickets
-        merged = queue_store.merge_tickets(tickets, queue_store.list_queue_tickets())
+        merged = queue_store.merge_tickets(tickets, queue_store.list_queue_tickets(store=self.control_store))
         return [
             t for t in merged
             if (not project_id or t.project_id == project_id) and (not status or t.status == status)
@@ -284,7 +296,8 @@ class DemandsStore:
         """``(file row, queue row)``. The queue read does not create ``control.db``."""
         from core.demands import queue_store
 
-        return self._file_ticket(ticket_id), queue_store.get_ticket(ticket_id)
+        local = None if self.canonical_only else self._file_ticket(ticket_id)
+        return local, queue_store.get_ticket(ticket_id, store=self.control_store)
 
     def _file_ticket(self, ticket_id: str) -> UserTicket | None:
         """The row stored in this ledger file, ignoring the control-store merge."""
@@ -311,7 +324,7 @@ class DemandsStore:
             if self._control_only():
                 from core.demands import queue_store
 
-                queue_store.register_ticket(ticket)
+                queue_store.register_ticket(ticket, store=self.control_store)
                 return ticket
             raw_items = self._read_raw()
             updated = False
@@ -354,12 +367,12 @@ class DemandsStore:
 
         if os.environ.get("DARKFAC_DEMANDS_PATH"):
             return
-        queued = queue_store.get_ticket(ticket.id)
+        queued = queue_store.get_ticket(ticket.id, store=self.control_store)
         pair_present = queued is not None and queued.project_id == ticket.project_id
         if not pair_present and not self._inserts_missing_queue_rows():
             return
         try:
-            queue_store.register_ticket(ticket)
+            queue_store.register_ticket(ticket, store=self.control_store)
         except Exception as exc:  # noqa: BLE001 - the ledger write already succeeded
             logger.warning("Control store not updated for %s: %s", ticket.id, exc)
 

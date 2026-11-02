@@ -69,6 +69,7 @@ from hub.backend.models import (
     LineStatusResponse,
 )
 from core.workflow.line_live import LineLiveSnapshot
+from core.workflow.control_contracts import StoreUnavailableError
 from core.line.v0_proof import V0ProofReport
 from core.owner_actions.sync import SyncEvent
 from hub.backend.service import HubService
@@ -1195,7 +1196,13 @@ def list_demand_tickets(
     service: HubService = Depends(get_hub_service),
 ) -> List[UserTicket]:
     """List user demand tickets in the backlog."""
-    return service.list_demand_tickets(project_id=project_id, status=status)
+    try:
+        return service.list_demand_tickets(project_id=project_id, status=status)
+    except StoreUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "store_unavailable", "message": "Demand store is unavailable"},
+        ) from exc
 
 
 @router.get("/demands/tickets/{ticket_id}", response_model=UserTicket)
@@ -1204,7 +1211,13 @@ def get_demand_ticket(
     service: HubService = Depends(get_hub_service),
 ) -> UserTicket:
     """Retrieve details for a single demand ticket."""
-    ticket = service.get_demand_ticket(ticket_id)
+    try:
+        ticket = service.get_demand_ticket(ticket_id)
+    except StoreUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "store_unavailable", "message": "Demand store is unavailable"},
+        ) from exc
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Demand ticket '{ticket_id}' not found")
     return ticket
@@ -1280,6 +1293,11 @@ def update_demand_ticket_status(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:  # e.g. completed without delivery_evidence (USR-94)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StoreUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "store_unavailable", "message": "Demand store is unavailable"},
+        ) from exc
 
 
 @router.post("/demands/tickets/{ticket_id}/grill", response_model=GrillSession)
@@ -2229,10 +2247,6 @@ def get_autonomy_plan_endpoint(
 ) -> Dict[str, Any]:
     """Returns the compiled Continuous Autonomy Plan and execution DAG (DH-12)."""
     return service.get_autonomy_plan()
-
-
-
-
 
 
 

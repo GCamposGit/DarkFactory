@@ -355,25 +355,83 @@ def _linked_worktree_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     return ledger
 
 
-def test_queue_get_ticket_reads_control_store_or_none(queue_env) -> None:
-    """USR-424: get_ticket returns the queued UserTicket, or None without creating the store."""
+def test_hub_queue_reads_distinguish_present_absent_and_unavailable(queue_env, tmp_path, monkeypatch, caplog) -> None:
+    """The Hub reads queue-only rows and distinguishes absence from store failure."""
+    from core.workflow.control_contracts import StoreUnavailableError
+    from hub.backend.service import HubService
+    from hub.backend.api import get_hub_service
+
     queue = queue_env["queue"]
-    state = queue_env["state"]
-
-    assert queue.get_ticket("USR-404") is None
-    assert queue.get_ticket("") is None
-    assert not (state / "control.db").exists()
-
-    queued = _queued_ticket("USR-413", title="Veio da fila", status=DeliveryStatus.IMPLEMENTING)
+    queued = _queued_ticket("USR-449", title="Somente na fila persistente")
     queue.register_ticket(queued)
+    service = HubService(
+        data_dir=tmp_path / "hub",
+        control_store=queue.control_store(),
+        line_control_store=queue.control_store(),
+    )
+    app.dependency_overrides[get_hub_service] = lambda: service
+    try:
+        client = TestClient(app)
+        found = client.get("/api/demands/tickets/USR-449")
+        absent = client.get("/api/demands/tickets/USR-404")
+        assert found.status_code == 200
+        assert found.json()["title"] == "Somente na fila persistente"
+        assert absent.status_code == 404
 
-    found = queue.get_ticket("USR-413")
-    assert found is not None
-    assert found.id == "USR-413"
-    assert found.title == "Veio da fila"
-    assert found.status == DeliveryStatus.IMPLEMENTING
-    assert queue.get_ticket("USR-404") is None
-    assert [ticket.id for ticket in queue.list_queue_tickets()] == ["USR-413"]
+        class BrokenStore:
+            def list_tickets(self, project_id=None):
+                raise StoreUnavailableError("database credentials must not be exposed")
+
+        unavailable_service = HubService(
+            data_dir=tmp_path / "hub-unavailable",
+            control_store=BrokenStore(),
+            line_control_store=BrokenStore(),
+        )
+        app.dependency_overrides[get_hub_service] = lambda: unavailable_service
+        response = client.get("/api/demands/tickets/USR-449")
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "store_unavailable"
+        assert "credentials" not in response.text
+
+        from core.line import owner_intake
+
+        secret_url = "postgresql://operator@db.invalid/darkfac"
+        state_root = tmp_path / "unavailable-state"
+        monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", secret_url)
+        monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state_root))
+
+        def unavailable_store(*, url=None, fallback=None):
+            assert url == secret_url
+            raise StoreUnavailableError("Canonical demand store is unavailable")
+
+        monkeypatch.setattr(owner_intake, "open_line_store", unavailable_store)
+        unavailable = HubService(data_dir=tmp_path / "configured-but-unavailable")
+        with pytest.raises(StoreUnavailableError, match="Demand control store"):
+            unavailable.get_demand_ticket("USR-449")
+        assert not unavailable.demands_store.path.exists()
+        assert not (state_root / "control.db").exists()
+        assert secret_url not in caplog.text
+    finally:
+        app.dependency_overrides.clear()
+
+    from core.line import owner_intake
+
+    secret_url = "postgresql://operator@db.invalid/darkfac"
+    state_root = tmp_path / "unavailable-state"
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", secret_url)
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state_root))
+
+    def unavailable_store(*, url=None, fallback=None):
+        assert url == secret_url
+        raise StoreUnavailableError("Canonical demand store is unavailable")
+
+    monkeypatch.setattr(owner_intake, "open_line_store", unavailable_store)
+    unavailable = HubService(data_dir=tmp_path / "configured-but-unavailable")
+    with pytest.raises(StoreUnavailableError, match="Demand control store"):
+        unavailable.get_demand_ticket("USR-449")
+    assert not unavailable.demands_store.path.exists()
+    assert not (state_root / "control.db").exists()
+    assert secret_url not in caplog.text
 
 
 def test_worktree_resolve_writes_the_same_id_once(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:

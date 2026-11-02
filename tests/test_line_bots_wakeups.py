@@ -21,7 +21,7 @@ from core.integrations.telegram import TelegramGateway
 from core.line import canary, human, owner_intake, stage_grill
 from core.line.agent_cli import AgentResult
 from core.projects.models import ProjectDescriptor
-from core.workflow.control_contracts import IntakeCommand
+from core.workflow.control_contracts import IntakeCommand, StoreUnavailableError
 from core.workflow.control_store import SQLiteControlStore
 from hub.backend.api import get_hub_service
 from hub.backend.main import app
@@ -152,9 +152,10 @@ def test_unreachable_line_store_is_reported_not_swallowed(monkeypatch, tmp_path,
 
     monkeypatch.setattr(owner_intake, "open_line_store", _boom)
     service = HubService(project_root=tmp_path, data_dir=tmp_path / "hub_data", control_store=local_store)
-    service.demands_store.save_ticket(UserTicket(id="USR-62", title="Menu vertical", problem_statement="Menu no DarkHub"))
-    submission = service.submit_ticket_to_line("USR-62")
-    assert submission.ok is False and "db down" in submission.message
+    with pytest.raises(StoreUnavailableError):
+        service.demands_store.save_ticket(
+            UserTicket(id="USR-62", title="Menu vertical", problem_statement="Menu no DarkHub")
+        )
     assert _run_count(local_store) == 0  # never silently falls back to the local store
 
 

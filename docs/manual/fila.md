@@ -1,8 +1,9 @@
 <!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py -->
 # Fila de tickets (USR-343)
 
-A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
-está definida, senão o SQLite local `.factory/control.db`. Tabelas (criadas com
+A fila de desenvolvimento vive no control store: Postgres quando uma das configurações
+`DARKHUB_LINE_DATABASE_URL`, `DARKFAC_HF02_DATABASE_URL` ou `DARKHUB_CONTROL_DATABASE_URL`
+está definida, senão o SQLite local `<state_root>/control.db`. Tabelas (criadas com
 `CREATE TABLE IF NOT EXISTS`):
 
 - `tickets (project_id, ticket_id, status, payload, updated_at)`
@@ -19,17 +20,22 @@ O comando grava o ticket (status `planned`) no control store e termina. Não cri
 
 ## Leitura
 
-`core.demands.store.DemandsStore` (usado pelo despachante, Hub e `/tickets`) lê o control store
-primeiro e complementa com `.factory/demands/demands.json` (fallback e histórico). Em conflito
-de ID vale o control store, exceto quando o ledger já marca o ticket como `completed` ou
-`cancelled`. Se o control store estiver inacessível, a leitura cai para o `demands.json`.
-Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
+`core.demands.store.DemandsStore` (usado pelo despachante, Hub e `/tickets`) e o
+`BacklogFeeder` recebem a mesma seleção de control store. O Hub resolve essa seleção na
+inicialização e registra apenas backend e SHA curto da configuração, nunca a URL. Com Postgres
+configurado, o Hub lê e atualiza a fila canônica sem depender do snapshot
+`.factory/demands/demands.json`. No fallback local, o control store SQLite é mesclado ao ledger;
+em conflito de ID vale o control store, exceto quando o ledger já marca o ticket como
+`completed` ou `cancelled`. Uma indisponibilidade do control store falha fechada; o Hub responde
+HTTP 503 estruturado e não converte a falha em fila vazia ou ticket ausente. Um ID realmente
+ausente continua HTTP 404. Com `DARKFAC_DEMANDS_PATH` definida, o armazenamento fica somente no
+arquivo indicado para desenvolvimento local explícito.
 
 ## Resolver para entrega (USR-424)
 
-`queue_store.get_ticket(ticket_id)` devolve o `UserTicket` da control store.
-Retorna `None` sem exceção quando o id não existe ou quando o store ainda não
-foi criado, e não cria `control.db` nesse caminho.
+`queue_store.get_ticket(ticket_id)` devolve o `UserTicket` da control store. Retorna `None`
+quando o id não existe ou quando o SQLite local ainda não foi criado; não cria `control.db`
+nesse caminho. Falhas de conexão, permissão ou leitura levantam `StoreUnavailableError`.
 
 `DemandsStore.materialize_ticket(ticket_id)` e `resolve_for_delivery(ticket_id)`
 copiam esse mesmo id para o `demands.json` da worktree, uma única vez, sem

@@ -196,6 +196,7 @@ def test_darkhub_api_multi_project_integration(tmp_path: Path, monkeypatch: pyte
     target = tmp_path / "demands" / "demands.json"
     target.parent.mkdir(parents=True)
     target.write_bytes(source.read_bytes())
+    monkeypatch.setenv("DARKFAC_DEMANDS_PATH", str(target))
     service = HubService(data_dir=tmp_path)
     monkeypatch.setitem(app.dependency_overrides, get_hub_service, lambda: service)
     client = TestClient(app)
