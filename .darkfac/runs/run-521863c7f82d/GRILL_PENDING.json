@@ -1,0 +1,42 @@
+{
+  "assumptions": [
+    "Esta rodada permanece exclusivamente de leitura, sem arquivos, tickets, chamadas a modelos ou operações externas.",
+    "O escopo inicial continua sendo vulnerabilidades de dependências em darkfac, conforme as premissas fornecidas; não inclui novos scanners ou produtos.",
+    "Reutilizar CloudCoordinator, FeederCycle, BacklogFeeder, ProjectRegistry, roteador e control store; reconciliar a base entregue antes de introduzir outro ciclo, pois QualityCycle não foi identificado neste checkout.",
+    "O modelo recebe evidências após o veredito determinístico e produz explicação, prioridade sugerida e proposta rastreável; não altera aplicabilidade, severidade da fonte nem transforma incerteza em ausência de vulnerabilidade.",
+    "Falha ou indisponibilidade do modelo preserva o resultado determinístico e registra a assistência como indisponível, respeitando as rotas, cotas e tetos existentes.",
+    "A validação reutiliza o portão vigente e revisão de família diferente da implementadora, vinculados ao candidato; aprovação textual do modelo não comprova correção.",
+    "O achado somente fecha após reteste determinístico no ambiente afetado com dependências resolvidas e evidências atuais; merge ou teste unitário isolado não bastam.",
+    "Mudanças de candidato, advisory ou ambiente invalidam evidências pertinentes e provocam reavaliação, preservando histórico e deduplicação por projeto e vulnerabilidade canônica.",
+    "Exceções, aceitação de risco e mudanças em governança protegida seguem os mecanismos existentes, sem autorização implícita nesta demanda."
+  ],
+  "technical": [],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Nesta entrega, as propostas de correção devem apenas ser apresentadas ou também executadas?",
+      "kind": "intent",
+      "options": [
+        "Gerar propostas; execução em ticket separado",
+        "Executar automaticamente em darkfac pelo ciclo vigente"
+      ],
+      "recommended": "Gerar propostas; execução em ticket separado",
+      "why": "A demanda pede propostas, mas não define se esta funcionalidade deve iniciar alterações; cadastro de projeto não concede essa autorização."
+    },
+    {
+      "id": "q2",
+      "text": "A prioridade sugerida pelo modelo pode mudar a ordem de execução dos tickets?",
+      "kind": "business",
+      "options": [
+        "Somente recomendação explicada",
+        "Reordenar automaticamente os tickets elegíveis"
+      ],
+      "recommended": "Somente recomendação explicada",
+      "why": "O BacklogFeeder hoje usa ordenação determinística por criação, projeto e ID; alterar essa ordem muda a política de atendimento."
+    }
+  ],
+  "deadline": "2026-11-02T18:58:09.207985Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
