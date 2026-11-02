@@ -380,7 +380,7 @@ def test_hub_queue_reads_distinguish_present_absent_and_unavailable(queue_env, t
 
         class BrokenStore:
             def list_tickets(self, project_id=None):
-                raise StoreUnavailableError("database credentials must not be exposed")
+                raise RuntimeError("database credentials must not be exposed")
 
         unavailable_service = HubService(
             data_dir=tmp_path / "hub-unavailable",
@@ -400,38 +400,35 @@ def test_hub_queue_reads_distinguish_present_absent_and_unavailable(queue_env, t
         monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", secret_url)
         monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state_root))
 
+        opened_urls = []
+
         def unavailable_store(*, url=None, fallback=None):
+            opened_urls.append(url)
             assert url == secret_url
             raise StoreUnavailableError("Canonical demand store is unavailable")
 
         monkeypatch.setattr(owner_intake, "open_line_store", unavailable_store)
+        divergent = HubService(
+            data_dir=tmp_path / "configured-divergent",
+            control_database_url="postgresql://other.invalid/other",
+        )
+        app.dependency_overrides[get_hub_service] = lambda: divergent
+        divergent_response = client.get("/api/demands/tickets/USR-449")
+        assert divergent_response.status_code == 503
+        assert divergent_response.json()["detail"]["code"] == "store_unavailable"
+        assert "other.invalid" not in caplog.text
+        assert opened_urls == []
+        assert not (state_root / "control.db").exists()
+
         unavailable = HubService(data_dir=tmp_path / "configured-but-unavailable")
         with pytest.raises(StoreUnavailableError, match="Demand control store"):
             unavailable.get_demand_ticket("USR-449")
         assert not unavailable.demands_store.path.exists()
         assert not (state_root / "control.db").exists()
+        assert opened_urls == [secret_url]
         assert secret_url not in caplog.text
     finally:
         app.dependency_overrides.clear()
-
-    from core.line import owner_intake
-
-    secret_url = "postgresql://operator@db.invalid/darkfac"
-    state_root = tmp_path / "unavailable-state"
-    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", secret_url)
-    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(state_root))
-
-    def unavailable_store(*, url=None, fallback=None):
-        assert url == secret_url
-        raise StoreUnavailableError("Canonical demand store is unavailable")
-
-    monkeypatch.setattr(owner_intake, "open_line_store", unavailable_store)
-    unavailable = HubService(data_dir=tmp_path / "configured-but-unavailable")
-    with pytest.raises(StoreUnavailableError, match="Demand control store"):
-        unavailable.get_demand_ticket("USR-449")
-    assert not unavailable.demands_store.path.exists()
-    assert not (state_root / "control.db").exists()
-    assert secret_url not in caplog.text
 
 
 def test_worktree_resolve_writes_the_same_id_once(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:

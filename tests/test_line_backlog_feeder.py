@@ -103,7 +103,7 @@ def _make_ticket(
 # ---------------------------------------------------------------------------
 
 
-def test_feeder_two_registered_projects_are_eligible(store, demands, registry, tmp_path) -> None:
+def test_feeder_two_registered_projects_are_eligible(store, demands, registry, tmp_path, monkeypatch) -> None:
     """Open tickets from darkfac and proj-b are both admitted without default allowlist blockage."""
     from hub.backend.service import HubService
 
@@ -133,6 +133,45 @@ def test_feeder_two_registered_projects_are_eligible(store, demands, registry, t
     assert report.submissions[0].ok is True
     assert report.submissions[1].ok is True
     assert {s.project_id for s in report.submissions} == {"darkfac", "proj-b"}
+
+    # The configured Hub and feeder also observe a queue-only ticket from this same
+    # canonical store; the Hub's demands.json snapshot stays absent.
+    from fastapi.testclient import TestClient
+
+    from core.demands.queue_store import register_ticket
+    from hub.backend.api import get_hub_service
+    from hub.backend.main import app
+
+    monkeypatch.delenv("DARKFAC_DEMANDS_PATH", raising=False)
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://reader:secret@db.invalid/canonical")
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(owner_intake, "open_line_store", lambda *, url=None, fallback=None: store)
+
+    ticket = UserTicket(
+        id="USR-449",
+        project_id="darkfac",
+        title="Fila canônica",
+        problem_statement="Presente somente na fila persistente.",
+    )
+    register_ticket(ticket, store=store)
+    configured_hub = HubService(data_dir=tmp_path / "hub-configured")
+    assert configured_hub.demands_store.path.exists() is False
+
+    app.dependency_overrides[get_hub_service] = lambda: configured_hub
+    try:
+        response = TestClient(app).get("/api/demands/tickets/USR-449")
+        feeder = BacklogFeeder(
+            demands_store=configured_hub.demands_store,
+            control_store=store,
+            project_registry=registry,
+            allow_registered_projects=True,
+        )
+        assert response.status_code == 200
+        assert response.json()["title"] == "Fila canônica"
+        assert {candidate.ticket.id for candidate in feeder.list_candidates()} == {"USR-101", "PRB-01", "USR-449"}
+        assert configured_hub.demands_store.path.exists() is False
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_feeder_unregistered_project_is_blocked(store, demands, registry) -> None:

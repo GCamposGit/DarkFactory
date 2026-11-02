@@ -29,7 +29,9 @@ em conflito de ID vale o control store, exceto quando o ledger já marca o ticke
 `completed` ou `cancelled`. Uma indisponibilidade do control store falha fechada; o Hub responde
 HTTP 503 estruturado e não converte a falha em fila vazia ou ticket ausente. Um ID realmente
 ausente continua HTTP 404. Com `DARKFAC_DEMANDS_PATH` definida, o armazenamento fica somente no
-arquivo indicado para desenvolvimento local explícito.
+arquivo indicado para desenvolvimento local explícito. Se o Hub receber `control_database_url`
+divergente da URL configurada para a linha, as leituras de demandas falham com 503 em vez de
+abrir uma segunda fila; os logs expõem somente backend e SHA curto da configuração.
 
 ## Resolver para entrega (USR-424)
 

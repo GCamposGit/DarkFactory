@@ -46,6 +46,10 @@ botão do Telegram, ver `docs/manual/fila.md`), não cria `OwnerAction`. Por iss
 `OwnerAction` do tipo `action` ligada ao ticket durante o run já desqualifica, e no máximo uma
 `decision` (o aceite, por exemplo aprovar um post antes de publicar) é tolerada.
 
+As rotas `/api/demands/tickets` leem a fila canônica usada pela linha. Elas retornam 404 quando o
+ID não existe e 503 estruturado quando o control store está indisponível; não tratam uma falha
+de leitura como ausência ou como lista vazia.
+
 ## O coletor (`collect_v0_proof_evidence`)
 
 Reaproveita as stores que a linha já escreve, sem criar uma fonte de verdade paralela:

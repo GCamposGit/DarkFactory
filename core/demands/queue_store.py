@@ -31,13 +31,22 @@ def _store(database_url: str, db_path: str):  # noqa: ANN202 - ControlStore, imp
     return default_control_store(sqlite_db_path=db_path or None)
 
 
-def control_store():  # noqa: ANN201
+def control_store(*, database_url: str | None = None, fallback: Any | None = None):  # noqa: ANN201
+    """Resolve the canonical demand queue store used by both Hub and line readers.
+
+    ``database_url=None`` follows the line's configured environment precedence;
+    an explicit empty URL selects the persistent local store. An injected fallback
+    is honored only when no URL is configured.
+    """
     from core.paths import state_root
     from core.line.owner_intake import line_database_url
 
-    database_url = line_database_url() or ""
+    if database_url is None:
+        database_url = line_database_url() or ""
     if database_url:
         return _store(database_url, str(state_root() / "control.db"))
+    if fallback is not None:
+        return fallback
     return _store("", str(state_root() / "control.db"))
 
 

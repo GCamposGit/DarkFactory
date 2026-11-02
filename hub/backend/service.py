@@ -68,6 +68,72 @@ class _UnavailableDemandsControlStore:
     ) -> None:
         self._raise()
 
+
+def _resolve_hub_demands_store(
+    *,
+    configured_database_url: str,
+    hub_database_url: str | None,
+    control_store: Any | None,
+    line_control_store: Any | None,
+) -> tuple[Any | None, bool, Any | None]:
+    """Resolve the Hub's demand queue and return (store, canonical_only, cached_line_store)."""
+    if os.environ.get("DARKFAC_DEMANDS_PATH"):
+        return None, False, None
+    if line_control_store is not None:
+        return line_control_store, True, None
+
+    from core.demands import queue_store
+
+    selected_url = (hub_database_url or configured_database_url).strip()
+    config_sha = hashlib.sha256(
+        (selected_url or str(state_root() / "control.db")).encode("utf-8")
+    ).hexdigest()[:12]
+    try:
+        if hub_database_url is not None and selected_url != configured_database_url.strip():
+            from core.workflow.control_contracts import StoreUnavailableError
+
+            raise StoreUnavailableError("Demand control store configuration is inconsistent")
+        store = queue_store.control_store(
+            database_url=selected_url if hub_database_url is not None else None,
+            fallback=control_store,
+        )
+    except Exception as exc:
+        store = _UnavailableDemandsControlStore(exc)
+        backend = "postgres" if selected_url else "sqlite"
+        logger.warning("Hub demands control store unavailable backend=%s config_sha=%s", backend, config_sha)
+        return store, True, None
+
+    backend = "postgres" if selected_url or type(store).__name__ == "PostgresControlStore" else "sqlite"
+    logger.info("Hub demands control store resolved backend=%s config_sha=%s", backend, config_sha)
+    return store, True, store
+
+
+def _build_hub_demands(
+    *,
+    data_dir: Path | None,
+    ollama_base_url: str,
+    configured_database_url: str,
+    hub_database_url: str | None,
+    control_store: Any | None,
+    line_control_store: Any | None,
+) -> tuple[Path, DemandsStore, DemandsService, Any | None]:
+    demands_dir = (
+        data_dir / "demands" if data_dir is not None else Path(__file__).resolve().parents[2] / ".factory" / "demands"
+    )
+    queue, canonical_only, cached_store = _resolve_hub_demands_store(
+        configured_database_url=configured_database_url,
+        hub_database_url=hub_database_url,
+        control_store=control_store,
+        line_control_store=line_control_store,
+    )
+    store = DemandsStore(demands_dir / "demands.json", control_store=queue, canonical_only=canonical_only)
+    service = DemandsService(store=store, specifier=DemandSpecifier(ollama_url=ollama_base_url))
+    return demands_dir, store, service, cached_store
+
+
+def _hub_data_dir(data_dir: Path | None) -> Path:
+    return Path(data_dir) if data_dir is not None else Path(__file__).resolve().parent.parent / "data"
+
 # One control-store read per window, shared by all /api/line/live clients and streams (USR-138).
 LINE_LIVE_CACHE_TTL_SECONDS = 2.5
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -101,12 +167,7 @@ class HubService(
         # Injected store for the production LINE (tests/embedded use). Never inferred from the
         # local control store above: that one is the Hub's own SQLite, which no worker reads.
         self._line_store_override = line_control_store
-        self._line_store_cache: Optional[Any] = None
-        if data_dir is None:
-            # Default to hub/data relative to this file
-            self.data_dir = Path(__file__).resolve().parent.parent / "data"
-        else:
-            self.data_dir = Path(data_dir)
+        self.data_dir = _hub_data_dir(data_dir)
 
         # v2: the v1 token was served by the public /api/session; a new file name rotates it on deploy.
         self.session_file = self.data_dir / "session_token.v2.txt"
@@ -162,55 +223,19 @@ class HubService(
         except Exception:
             pass
 
-        if data_dir is not None:
-            self.demands_dir = self.data_dir / "demands"
-        else:
-            self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
-        from core.line.owner_intake import line_database_url, open_line_store
-
-        demand_database_url = (control_database_url or line_database_url() or "").strip()
-        explicit_line_store = line_control_store is not None
-        demands_control_store = line_control_store if explicit_line_store else None
-        canonical_demands_only = False
-        if os.environ.get("DARKFAC_DEMANDS_PATH"):
-            demands_control_store = None
-        elif explicit_line_store:
-            pass
-        else:
-            if demand_database_url:
-                try:
-                    demands_control_store = open_line_store(url=demand_database_url)
-                    self._line_store_cache = demands_control_store
-                except Exception as exc:
-                    demands_control_store = _UnavailableDemandsControlStore(exc)
-                    logger.warning("Hub demands control store unavailable config_sha=%s", hashlib.sha256(
-                        demand_database_url.encode("utf-8")
-                    ).hexdigest()[:12])
-            elif control_store is not None:
-                demands_control_store = control_store
-            else:
-                demands_control_store = open_line_store()
-        # Hub demand reads and writes must use the same durable queue as the line.
-        # Only DARKFAC_DEMANDS_PATH opts into the file-backed development store.
-        canonical_demands_only = not bool(os.environ.get("DARKFAC_DEMANDS_PATH"))
-        if not os.environ.get("DARKFAC_DEMANDS_PATH"):
-            backend_name = (
-                "postgres"
-                if type(demands_control_store).__name__ == "PostgresControlStore"
-                else "sqlite"
-            )
-            config_sha = hashlib.sha256(
-                (demand_database_url or str(state_root() / "control.db")).encode("utf-8")
-            ).hexdigest()[:12]
-            logger.info("Hub demands control store resolved backend=%s config_sha=%s", backend_name, config_sha)
-        self.demands_store = DemandsStore(
-            self.demands_dir / "demands.json",
-            control_store=demands_control_store,
-            canonical_only=canonical_demands_only,
-        )
-        self.demands_service = DemandsService(
-            store=self.demands_store,
-            specifier=DemandSpecifier(ollama_url=ollama_base_url),
+        from core.line.owner_intake import line_database_url
+        (
+            self.demands_dir,
+            self.demands_store,
+            self.demands_service,
+            self._line_store_cache,
+        ) = _build_hub_demands(
+            data_dir=data_dir,
+            ollama_base_url=ollama_base_url,
+            configured_database_url=line_database_url() or "",
+            hub_database_url=control_database_url,
+            control_store=control_store,
+            line_control_store=line_control_store,
         )
         self._autonomous_intake_service: Optional[Any] = None
 
