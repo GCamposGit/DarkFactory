@@ -1,0 +1,103 @@
+[
+  {
+    "id": "T1",
+    "title": "Instrumentar timeout e fallback do portao para classificar a causa por medida",
+    "goal": "Tornar o registro de timeout do passo suficiente para distinguir capacidade insuficiente, teste lento/travado e perda de transporte, sem inferencia: capacidade medida (GiB livres e workers possiveis), workers xdist efetivos, progresso e node ids em voo, motivo do caminho local e um timeout_cause de valores fechados.",
+    "files_hint": [
+      "core/harness/runner.py",
+      "core/line/gate_ram.py",
+      "tests/test_runner_fallback_diagnostics.py",
+      "tests/test_runner_failure_report.py"
+    ],
+    "acceptance": [
+      "_record_step_timeout grava, no log de .factory/test_logs/step-timeouts/, bloco estruturado com host, candidate_sha, tree_hash, available_gib, workers_possiveis (via core.line.gate_ram.measure_workers), workers xdist observados no output, ultimo progresso percentual e os node ids em voo extraidos do tail.",
+      "O registro [RUN_TIMING] passa a carregar timeout_cause com um de insufficient_capacity | slow_or_hung_test | transport_loss | unknown, e o motivo do caminho local (remote_lost | local_only | no_remote_configured).",
+      "Classificacao e derivada apenas da evidencia coletada; ausencia de evidencia resulta em unknown e nunca aponta teste ou candidato.",
+      "Telemetria continua best effort: nenhuma excecao da instrumentacao altera verdict ou exit code (contrato de _finish_run_timing preservado).",
+      "Leitura de RAM e injetavel nos testes; nenhum teste mede o host real.",
+      "python scripts/line_validate.py verde."
+    ],
+    "tests_to_add": [
+      "Teste comportamental: timeout com 1 worker e RAM baixa produz timeout_cause=insufficient_capacity e grava available_gib/workers no log.",
+      "Teste comportamental: timeout com capacidade apta e progresso parado em um node id produz timeout_cause=slow_or_hung_test com o node id registrado.",
+      "Teste comportamental: excecao na coleta da instrumentacao nao muda o exit code nem o marcador do passo (consolidar com os casos ja existentes em test_runner_failure_report.py)."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Fallback local do portao exige capacidade apta e produz estado retomavel",
+    "goal": "Impedir que o runner inicie passos de teste localmente com menos de MIN_GATE_WORKERS workers possiveis (caso do fallback AI_Notebook com 5.6 GiB), reutilizando core.line.gate_ram, e emitir estado estruturado e retomavel em vez de HARNESS_FAIL atribuido ao candidato.",
+    "files_hint": [
+      "core/harness/runner.py",
+      "core/line/gate_ram.py",
+      "run_ticket.py",
+      "tests/test_runner_fallback_diagnostics.py",
+      "tests/test_gate_ram_wait.py"
+    ],
+    "acceptance": [
+      "Antes do primeiro step kind=test executado localmente (inclusive no fallback apos perda do worker remoto), o runner mede capacidade com gate_ram e, abaixo de MIN_GATE_WORKERS, espera a janela com wait_for_gate_ram e so entao desiste.",
+      "Ao desistir, nao inicia o passo paralelo: imprime estado estruturado com cause=gate_insufficient_ram, available_gib, workers, host, candidate_sha e tree_hash, sai com codigo distinto de reprovacao de candidato e NAO imprime HARNESS_PASS.",
+      "Nenhum verdict negativo e gravado no cache do candidato nesse estado; suite_lock e liberado sem vazamento e o run e retomavel sem perder binding ao candidato.",
+      "run_ticket trata esse estado como retomavel (mesma semantica de gate_insufficient_ram ja usada no pre-gate), nunca reinvocando o agente de desenvolvimento para 'corrigir' o candidato.",
+      "Caminho remoto e o caminho local com capacidade apta permanecem com comportamento identico ao atual (nenhuma espera nova quando ja cabem 2+ workers).",
+      "Nenhum aumento de timeout, nenhum override de numero de workers, nenhuma reducao de descoberta.",
+      "python scripts/line_validate.py verde."
+    ],
+    "tests_to_add": [
+      "Teste comportamental: fallback local com workers medidos < MIN_GATE_WORKERS nao executa subprocess de pytest, emite cause=gate_insufficient_ram e exit code de estado retomavel.",
+      "Teste comportamental: capacidade apta mantem a execucao normal do passo paralelo (nenhuma espera nem marcador novo).",
+      "Teste comportamental: no estado sem capacidade o cache nao recebe verdict e o suite_lock e liberado.",
+      "Consolidar os casos de espera de RAM em tests/test_gate_ram_wait.py reaproveitando o fake de leitura existente, sem duplicar suite nova."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Perda de worker remoto e teardown pos-cancelamento terminam em estado limpo e retomavel",
+    "goal": "Corrigir o heartbeat remoto perdido e o OSError 'cannot send already closed' observados no teardown apos cancelamento, de modo que worker remoto instavel gere outcome estruturado em remote_attempts e retomada do mesmo job, sem ruido de excecao e sem engolir erro real.",
+    "files_hint": [
+      "core/harness/remote_dispatch.py",
+      "core/harness/remote_worker.py",
+      "core/harness/runner.py",
+      "tests/test_remote_dispatch_resilience.py",
+      "tests/test_remote_job_recovery.py"
+    ],
+    "acceptance": [
+      "O fechamento do stream/heartbeat apos cancelamento ou perda do worker nao propaga OSError 'cannot send already closed'; o encerramento e tratado no ponto de fechamento com erro estruturado registrado, sem except vazio e sem mascarar falha externa diferente.",
+      "A thread de heartbeat encerra deterministicamente no cancelamento (join com limite ja existente) e o motivo da perda aparece em remote_attempts com outcome fechado (lost | busy_timeout | not_dispatched | resumed).",
+      "Worker que volta durante a janela continua retomando o mesmo job (resume_job_id), sem novo submit e sem perder o binding ao candidato.",
+      "Nenhuma credencial ou URL com segredo aparece nos logs novos.",
+      "python scripts/line_validate.py verde."
+    ],
+    "tests_to_add": [
+      "Teste comportamental: cancelamento com stream ja fechado encerra sem excecao propagada e registra o outcome estruturado.",
+      "Teste comportamental: heartbeat perdido seguido do retorno do worker retoma o mesmo job (sem submit novo) e preserva candidate_sha.",
+      "Consolidar casos redundantes de perda/retomada hoje espalhados entre test_remote_dispatch_resilience.py e test_remote_job_recovery.py em um unico conjunto comportamental."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Portao completo em host elegivel, evidencia vinculada ao candidato e documentacao",
+    "goal": "Fechar o ciclo com execucao do portao oficial completo em host elegivel, HARNESS_PASS com descoberta e checagens positivas vinculadas ao candidato, e registrar a causa medida, o novo estado de capacidade e a reconciliacao de tickets na documentacao.",
+    "files_hint": [
+      "docs/manual/portao.md",
+      "docs/manual/testes.md",
+      "docs/FASE_ATUAL.md",
+      ".factory/test_logs/"
+    ],
+    "acceptance": [
+      "python core/harness/runner.py --quick executado em host elegivel (capacidade >= MIN_GATE_WORKERS, suite_lock livre) termina com [HARNESS_PASS], discovered_count > 0 e ao menos uma checagem executada, com candidate_sha e tree_hash do candidato efetivamente validado.",
+      "docs/manual/portao.md e docs/manual/testes.md descrevem o estado 'sem capacidade' (cause gate_insufficient_ram), como ele difere de reprovacao do candidato, como retomar e onde ler o diagnostico de timeout.",
+      "docs/FASE_ATUAL.md registra a causa medida desta ocorrencia (candidato 2d3a56ca, arvore 652d10cc, fallback AI_Notebook com 1 worker e 5.6 GiB) e o estado do desbloqueio do PR 821.",
+      "Reconciliacao explicita com os tickets anteriores de timeout/instabilidade de worker: cada causa ja coberta e citada; defeito remanescente nao coberto vira ticket formal via python C:\\dev\\DarkFac\\run_ticket.py --create --queue-only, nunca apenas mencionado.",
+      "python -m core.harness.docs_sync --base origin/main --head HEAD, lint-imports e python scripts/complexity_ratchet.py passam antes do PR.",
+      "python scripts/line_validate.py verde."
+    ],
+    "tests_to_add": [
+      "Nenhum teste de forma (contagem de linhas ou presenca de string em doc). A verificacao desta entrega e a evidencia comportamental do portao oficial mais os testes de T1-T3; docs_sync cobre a sincronia de documentacao."
+    ],
+    "smoke": []
+  }
+]
