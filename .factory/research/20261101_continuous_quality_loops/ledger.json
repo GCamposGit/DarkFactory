@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "topic": "continuous_quality_value_and_experimentation",
+  "status": "owner_authorized_for_factory_intake",
+  "owner_direction": "Abrir os tickets no roadmap de implantacao e deixar a esteira em andamento assumir. Usar capacidade maxima elegivel dentro do orcamento vigente, sem prazos estimados no plano.",
+  "execution_contract": "PLANO_IMPLANTACAO.md",
+  "ticket_handoffs": "TICKETS_IMPLANTACAO.json",
+  "requested_by": "owner",
+  "research_date": "2026-11-01",
+  "timezone": "America/Sao_Paulo",
+  "baseline_sha": "b585a191addce4be54a4abd0f051d8e587949e02",
+  "method": {
+    "primary_sources_only": true,
+    "production_probed": false,
+    "vendor_tests_executed": false,
+    "packages_installed": false,
+    "source_code_copied": false,
+    "roadmap_modified": false,
+    "cadences": "Local proposals, not universal sourced rules",
+    "source_content_hashes": null,
+    "source_content_hashes_note": "Páginas consultadas pelo navegador de pesquisa, sem arquivamento dos bytes integrais; nenhum hash de página foi inventado."
+  },
+  "existing_research": [
+    ".factory/research/20260905_autonomous_factory_review/INSIGHTS.md",
+    "docs/plans/security-quality-2026-10-08/RESEARCH.md",
+    "docs/plans/security-quality-2026-10-08/roadmap.json",
+    ".factory/reports/security-quality-usr-191-reconciliation.md"
+  ],
+  "sources": [
+    {
+      "id": "S01",
+      "title": "Building effective agents",
+      "url": "https://www.anthropic.com/research/building-effective-agents",
+      "type": "engineering_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; princípios de simplicidade, feedback e parada; aviso de evolução de ferramentas observado."
+    },
+    {
+      "id": "S02",
+      "title": "Demystifying evals for AI agents",
+      "url": "https://www.anthropic.com/research/demystifying-evals-for-ai-agents",
+      "type": "engineering_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto e seções de avaliadores consultados; sem execução de framework."
+    },
+    {
+      "id": "S03",
+      "title": "DORA software delivery performance metrics",
+      "url": "https://dora.dev/guides/dora-metrics/",
+      "type": "research_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Modelo atual de cinco métricas consultado."
+    },
+    {
+      "id": "S04",
+      "title": "DORA Customer feedback",
+      "url": "https://dora.dev/capabilities/customer-feedback/",
+      "type": "research_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; vincular produto a problemas e uso."
+    },
+    {
+      "id": "S05",
+      "title": "DORA Documentation quality",
+      "url": "https://dora.dev/capabilities/documentation-quality/",
+      "type": "research_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; evitar atribuir causalidade universal ou metas numéricas locais."
+    },
+    {
+      "id": "S06",
+      "title": "Google SRE Eliminating Toil",
+      "url": "https://sre.google/workbook/eliminating-toil/",
+      "type": "engineering_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; medir esforço e retorno da automação."
+    },
+    {
+      "id": "S07",
+      "title": "Google SRE Example Error Budget Policy",
+      "url": "https://sre.google/workbook/error-budget-policy/",
+      "type": "engineering_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Exemplo consultado; números do serviço de exemplo não adotados."
+    },
+    {
+      "id": "S08",
+      "title": "NIST SSDF Publications",
+      "url": "https://csrc.nist.gov/projects/ssdf/publications",
+      "type": "standards_catalog",
+      "consulted_on": "2026-11-01",
+      "scope": "Catálogo consultado: SSDF 1.1 final e 1.2 draft; não houve leitura integral das normas nesta sessão."
+    },
+    {
+      "id": "S09",
+      "title": "OWASP AI Agent Security Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html",
+      "type": "security_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto e matriz de abuso consultados; exemplos não copiados."
+    },
+    {
+      "id": "S10",
+      "title": "W3C WAI Evaluating Web Accessibility",
+      "url": "https://www.w3.org/WAI/test-evaluate/",
+      "type": "standards_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; automação não comprova conformidade completa."
+    },
+    {
+      "id": "S11",
+      "title": "Web Vitals",
+      "url": "https://web.dev/articles/vitals",
+      "type": "official_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; diferenciar laboratório e campo."
+    },
+    {
+      "id": "S12",
+      "title": "Diátaxis",
+      "url": "https://diataxis.fr/",
+      "type": "author_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; quatro necessidades documentais."
+    },
+    {
+      "id": "S13",
+      "title": "Is High Quality Software Worth the Cost?",
+      "url": "https://martinfowler.com/articles/is-quality-worth-cost.html",
+      "type": "author_engineering_guidance",
+      "consulted_on": "2026-11-01",
+      "scope": "Texto consultado; qualidade interna e evolução, sem obrigação de reescrita."
+    },
+    {
+      "id": "S14",
+      "title": "Agentless: Demystifying LLM-based Software Engineering Agents",
+      "url": "https://arxiv.org/abs/2407.01489",
+      "type": "original_research",
+      "consulted_on": "2026-11-01",
+      "scope": "Metadados/resumo consultados; resultado histórico de SWE-bench Lite, sem replicação.",
+      "arxiv": "2407.01489"
+    },
+    {
+      "id": "S15",
+      "title": "Efficient Agents: Building Effective Agents While Reducing Cost",
+      "url": "https://arxiv.org/abs/2508.02694",
+      "type": "original_research",
+      "consulted_on": "2026-11-01",
+      "scope": "Metadados/resumo consultados; preprint/work in progress em GAIA; sem extrapolar economia.",
+      "arxiv": "2508.02694"
+    },
+    {
+      "id": "S16",
+      "title": "When Can LLMs Actually Correct Their Own Mistakes?",
+      "url": "https://arxiv.org/abs/2406.01297",
+      "type": "original_research",
+      "consulted_on": "2026-11-01",
+      "scope": "Metadados/resumo consultados; TACL 2024; escopo dos estudos anteriores, sem impossibilidade universal.",
+      "arxiv": "2406.01297"
+    },
+    {
+      "id": "S17",
+      "title": "Patterns of Trustworthy Experimentation: Pre-Experiment Stage",
+      "url": "https://www.microsoft.com/en-us/research/articles/patterns-of-trustworthy-experimentation-pre-experiment-stage/",
+      "type": "original_engineering_research",
+      "consulted_on": "2026-11-01",
+      "scope": "Hipótese, métricas, potência e randomização consultadas."
+    },
+    {
+      "id": "S18",
+      "title": "Patterns of Trustworthy Experimentation: During-Experiment Stage",
+      "url": "https://www.microsoft.com/en-us/research/articles/patterns-of-trustworthy-experimentation-during-experiment-stage/",
+      "type": "original_engineering_research",
+      "consulted_on": "2026-11-01",
+      "scope": "Guardrails, qualidade dos dados e peeking consultados; não copiar duração padrão da Microsoft."
+    },
+    {
+      "id": "S19",
+      "title": "Diagnosing Sample Ratio Mismatch in Online Controlled Experiments",
+      "url": "https://www.microsoft.com/en-us/research/publication/diagnosing-sample-ratio-mismatch-in-online-controlled-experiments-a-taxonomy-and-rules-of-thumb-for-practitioners/",
+      "type": "original_research",
+      "consulted_on": "2026-11-01",
+      "scope": "Página dos autores/resumo consultados; KDD 2019."
+    },
+    {
+      "id": "S20",
+      "title": "Kubernetes CronJob",
+      "url": "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/",
+      "type": "official_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Seção Job creation consultada; idempotência; não recomendar adoção de Kubernetes."
+    },
+    {
+      "id": "S21",
+      "title": "OSV-Scanner documentation",
+      "url": "https://google.github.io/osv-scanner/",
+      "type": "official_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Candidato; não instalado ou executado."
+    },
+    {
+      "id": "S22",
+      "title": "OSV-Scanner repository",
+      "url": "https://github.com/google/osv-scanner",
+      "type": "official_repository",
+      "consulted_on": "2026-11-01",
+      "scope": "Apache-2.0 indicado; suíte/artefato não homologados."
+    },
+    {
+      "id": "S23",
+      "title": "Playwright Accessibility testing",
+      "url": "https://playwright.dev/docs/accessibility-testing",
+      "type": "official_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Integração axe e limites de automação consultados; sem execução."
+    },
+    {
+      "id": "S24",
+      "title": "Playwright repository",
+      "url": "https://github.com/microsoft/playwright",
+      "type": "official_repository",
+      "consulted_on": "2026-11-01",
+      "scope": "Apache-2.0 indicado; suíte/artefato não homologados."
+    },
+    {
+      "id": "S25",
+      "title": "GrowthBook documentation",
+      "url": "https://docs.growthbook.io/",
+      "type": "official_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Candidato a adapter, não seleção de plataforma."
+    },
+    {
+      "id": "S26",
+      "title": "GrowthBook repository",
+      "url": "https://github.com/growthbook/growthbook",
+      "type": "official_repository",
+      "consulted_on": "2026-11-01",
+      "scope": "Open core: MIT majoritário e diretórios comerciais; suíte/artefato não homologados."
+    },
+    {
+      "id": "S27",
+      "title": "Unleash documentation",
+      "url": "https://docs.getunleash.io/",
+      "type": "official_documentation",
+      "consulted_on": "2026-11-01",
+      "scope": "Alternativa consultada superficialmente; licença e suíte não homologadas."
+    }
+  ]
+}

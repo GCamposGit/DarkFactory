@@ -88,3 +88,9 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 27/10/2026: OA-066 encerrada (Google dispensou o developer token; acesso via Google Cloud); OA-067 cancelada (sem Instagram/Facebook), redes sociais fora do piloto por ora.
 - 26/10/2026: Desktop fora da frota por DARKFAC_FLEET_DISABLED_HOSTS=desktop (pedido do owner).
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
+
+## Implantacao autorizada: qualidade, valor e experimentacao
+
+Owner autorizou encaminhamento para a esteira existente, com capacidade maxima elegivel dentro do orcamento vigente e sem prazos estimados. USR-449 conecta o ciclo recorrente de documentacao, seguranca e eficiencia; USR-450 aprimora grill e experimentacao e depende do defeito existente USR-446; USR-451 cobre refatoracao, interface, objetivos, resultado e expansao e depende de USR-449 e USR-450. Contratos e fontes: [plano de implantacao](../.factory/research/20261101_continuous_quality_loops/PLANO_IMPLANTACAO.md). Os registros estao no horizonte `now`; esta publicacao documenta o planejamento e nao afirma implementacao.
+
+A composicao `CQ-20261101` garante rastreabilidade de 100% do plano por vinte grupos de requisitos em `COBERTURA_PLANO.json`. USR-446, USR-449 e USR-452 foram admitidos pelo alimentador existente; USR-450/USR-451 aguardam dependencias, e USR-453 acompanha a publicacao com revisao e portao validos. Admitido nao significa implementado.

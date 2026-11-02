@@ -1,0 +1,228 @@
+{
+  "baseline_sha": "b585a191addce4be54a4abd0f051d8e587949e02",
+  "research_date": "2026-11-01",
+  "production_evidence_collected": false,
+  "behavioral_tests_run": false,
+  "files": [
+    {
+      "path": "core/projects/models.py",
+      "sha256": "ae8ef3014d2161b78480457e243b984cf513f75810bd9d7c6060d490a5645f97",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": [
+        {
+          "symbol": "ProjectDescriptor",
+          "line": 130
+        }
+      ]
+    },
+    {
+      "path": "core/orchestrator/cloud_coordinator.py",
+      "sha256": "3d3f8f6170e6ec554c9bd418831056a5ec6e7373b5e81f24f971885907da08ab",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/feeder_cycle.py",
+      "sha256": "4fb0c678e5c067d32eeec9ca72b820d6db3415d9627adb8b89196a546ddf8e6c",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/backlog_feeder.py",
+      "sha256": "10174076b16c3fa1e8139343a64709da917ae70d287728b01f5f401936549896",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/owner_intake.py",
+      "sha256": "c7ce77d8180c06bb98ab22955b30c7a6ef3e42832823ff7a609f76e09cbd5a6e",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/canary.py",
+      "sha256": "227e76eb434dbb730ad08c13716455ac74920703d60014e0bab5614c25050c05",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/sentinel.py",
+      "sha256": "80c4819a0039018e97a662ef7ebde863d440ce73277626ab078eebd39ec595c9",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/dogfood.py",
+      "sha256": "fa2960e32175e906a210b69bbb484915fe7cd2918577ec8bf8b06ab316b17052",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/harness/docs_sync.py",
+      "sha256": "66cfe182bb877c1455db91463f401509fde17ff09b1d8f7c82235a4830dd6f88",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/harness/runner.py",
+      "sha256": "5b8e87c0e5889753f0e27b5ea2adb329f56f98bae9c2f9959a523a4d4dfb018b",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/harness/affected.py",
+      "sha256": "ec4f6525cbe9d13fd55465378221cffffdd66010ac69d3109a5add757d1a81e9",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "scripts/typecheck.py",
+      "sha256": "a7cd56250704223d2f71dd4b7f74daa02c5eac1f23b7108eef1a9483c46b52dd",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "scripts/complexity_ratchet.py",
+      "sha256": "83fefe6a40ff40b7410ff00edb7d68a0ce190c6b8242e9bf4eec4fbcc6ccbfae",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/bindings.py",
+      "sha256": "ae2fe99bfdd30de636546b130020857e6bba2317bbf1adc2630247be706bf34f",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/retrospective.py",
+      "sha256": "44c2b826b54720356655db2f1282919c055eb0e749a0e0bcd6ec4322b0b945a8",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": [
+        {
+          "symbol": "record_retrospective_lessons",
+          "line": 205
+        }
+      ]
+    },
+    {
+      "path": "core/line/stage_grill.py",
+      "sha256": "93b28f7b886868e4d3d2d9b8e7ae3a0d792e80533e61a505045ed62b3add4dae",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": [
+        {
+          "symbol": "run_grill",
+          "line": 658
+        }
+      ]
+    },
+    {
+      "path": "core/demands/grill.py",
+      "sha256": "fc38e197caf9a4d955a6d05f22f67422b112740547b03bf164b30174b04f2475",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/learning/promotion.py",
+      "sha256": "b0856a1c1b4061e544991704c5aebb9cc88061e58a47be23115ae89eabaa168e",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/learning/service.py",
+      "sha256": "4cab07168bbe6b4ac919c590a188a673b0cc5ce3394c3d343863cb4390e0d883",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/line/routing.py",
+      "sha256": "f2c0cf7d7d02df4981b67a8aaf185977e1972328cf9ae57e96b6df8ee8bf046a",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": [
+        {
+          "symbol": "pick",
+          "line": 1016
+        }
+      ]
+    },
+    {
+      "path": "core/usage/ticket_cost.py",
+      "sha256": "336cb9c00b797d22727d582329b6fd3181992160d50743860864b28f7f8eda30",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/portfolio/scheduler.py",
+      "sha256": "17d4f6c6f39e951f2641be6119310888a699766c65bb7b5baac2cb613e53204b",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/portfolio/budget_manager.py",
+      "sha256": "741710ae2d728027f18faf3a6f7e88371f54fa284f32f9885a514102f56fbab6",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "core/benchmarks/racing.py",
+      "sha256": "58534fe148d58f4ed49eac54959a256247988307aa694df1b8b3415481f4c704",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": [
+        {
+          "symbol": "execute_speculative_race",
+          "line": 221
+        },
+        {
+          "symbol": "run_empirical_tournament",
+          "line": 452
+        }
+      ]
+    },
+    {
+      "path": "core/benchmarks/cli.py",
+      "sha256": "a1652122bc3ba28b7c381d810db7ed2b4d87fc0ddc66958df2d3f7663f3f1387",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": [
+        {
+          "symbol": "cmd_race",
+          "line": 270
+        },
+        {
+          "symbol": "cmd_tournament",
+          "line": 299
+        }
+      ]
+    },
+    {
+      "path": "core/benchmarks/router.py",
+      "sha256": "d145f72c94ec17bcda332f1fd68d53e5697c47d45d34682d781e380eb6de3d40",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "run_ticket.py",
+      "sha256": "1503d7cc1ec07dc20d5b29a5c345d9770b7c1ad6da28f5c94114526f5f35881e",
+      "inspection": "selected_content_and_call_sites_not_full_audit",
+      "referenced_symbols": []
+    },
+    {
+      "path": "docs/manual/docs_sync.md",
+      "sha256": "053cf6a3e0a9f9c07045c49ef845be8963cda699f381be4e0a8c0d5ade0fa9ef",
+      "inspection": "selected_content_and_call_sites_not_full_audit"
+    },
+    {
+      "path": "docs/manual/grill.md",
+      "sha256": "d09912226f4519c6f7f4a1bbd955a8abf9b598f50696023cd9703be43ae054e4",
+      "inspection": "selected_content_and_call_sites_not_full_audit"
+    },
+    {
+      "path": "docs/plans/security-quality-2026-10-08/RESEARCH.md",
+      "sha256": "490f6af3eff2a88f365019343c77de67e66b0605324bb086b39879938732dcf1",
+      "inspection": "selected_content_and_call_sites_not_full_audit"
+    },
+    {
+      "path": "docs/plans/security-quality-2026-10-08/roadmap.json",
+      "sha256": "24d8fda99d683ed503d8ef83b1c9e660c42cbf9ee165a09598aa9c857b9af09f",
+      "inspection": "selected_content_and_call_sites_not_full_audit"
+    }
+  ]
+}
