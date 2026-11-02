@@ -278,11 +278,6 @@ def main() -> int:
             except Exception as e:
                 print(f"[ERRO] Formato de answers inválido (JSON esperado): {e}", file=sys.stderr)
                 return 1
-        elif args.auto_accept:
-            for q in session.questions:
-                rec = next((opt for opt in q.options if opt.is_recommended), q.options[0] if q.options else None)
-                if rec:
-                    answers[q.id] = rec.label
         else:
             print(f"\n🔥 === Sessão de Grill: [{session.ticket_id}] ===")
             if session.doc_insights:
@@ -291,7 +286,7 @@ def main() -> int:
                     print(f"  * {ins}")
 
             print("\nPerguntas de Esclarecimento:")
-            for i, q in enumerate(session.questions, 1):
+            for i, q in enumerate(session.current_round_questions, 1):
                 print(f"\n[{i}] {q.question}")
                 if q.context_reason:
                     print(f"    (Motivo: {q.context_reason})")
@@ -300,11 +295,13 @@ def main() -> int:
                     print(f"    {o_idx}. {opt.label}{rec_tag}")
 
                 try:
-                    choice = input("\n    Escolha o número ou digite resposta personalizada [Padrão: 1]: ").strip()
+                    choice = input("\n    Escolha o número ou digite resposta personalizada [Enter mantém pendente]: ").strip()
                 except (EOFError, KeyboardInterrupt):
-                    choice = "1"
+                    choice = ""
 
-                if not choice or choice == "1":
+                if not choice:
+                    continue
+                elif choice == "1":
                     rec = next((opt for opt in q.options if opt.is_recommended), q.options[0] if q.options else None)
                     answers[q.id] = rec.label if rec else ""
                 elif choice.isdigit() and 1 <= int(choice) <= len(q.options):

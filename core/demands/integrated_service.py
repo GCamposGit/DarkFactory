@@ -175,7 +175,7 @@ class IntegratedIntakeService:
         session: GrillSession,
         *,
         runtime: WorkflowRuntime | None = None,
-        auto_accept_unanswered: bool = True,
+        auto_accept_unanswered: bool = False,
     ) -> dict[str, Any]:
         """Apply answers to a pending Grill session, resume run, and finalize GrillRecord (Scenario G1)."""
         ticket = self.store.get_ticket(ticket_id)
@@ -190,9 +190,11 @@ class IntegratedIntakeService:
         )
         self.store.save_ticket(refined_ticket)
 
+        status = "ready_for_spec" if completed_grill.ready_for_spec else "waiting_human"
+
         run_id = f"run_{ticket.id.lower().replace('-', '_')}"
         run_record: RunRecord | None = None
-        if runtime is not None:
+        if runtime is not None and completed_grill.ready_for_spec:
             # Resume run from WAITING_HUMAN -> PLANNING_HIGH
             try:
                 runtime.transition_run(
@@ -210,7 +212,8 @@ class IntegratedIntakeService:
             "run_record": run_record,
             "grill_record": completed_grill,
             "refinement_result": refinement,
-            "status": "ready_for_spec",
+            "grill_session": session,
+            "status": status,
         }
 
     def plan_and_resolve_dependencies(

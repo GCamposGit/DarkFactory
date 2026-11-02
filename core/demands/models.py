@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 from core.roadmap.models import (
     DeliveryStatus,
@@ -19,6 +19,7 @@ from core.roadmap.models import (
 TAG_USER_DEMAND = "user-demand"
 TAG_CODE_REVIEW = "code-review"
 TAG_AGENT_FEATURE = "agent-feature"
+GRILL_QUESTIONS_PER_ROUND = 3
 
 
 class DemandOrigin(str, Enum):
@@ -140,13 +141,41 @@ class GrillSession(BaseModel):
 
     ticket_id: str = Field(..., description="Target ticket ID (e.g. USR-09)")
     project_id: str = Field(default="darkfac")
-    status: str = Field(default="pending", description="Session status: pending, answered, skipped, refined")
+    status: str = Field(default="pending", description="Session status: pending, waiting_human, answered, skipped, refined")
     doc_insights: list[str] = Field(default_factory=list, description="High-signal insights gathered from project docs")
-    questions: list[GrillQuestion] = Field(default_factory=list, description="2 to 4 essential clarifying questions")
-    answers: dict[str, str] = Field(default_factory=dict, description="Answers supplied or auto-accepted")
+    questions: list[GrillQuestion] = Field(default_factory=list, description="Full queue of material owner decisions")
+    question_queue: list[GrillQuestion] = Field(
+        default_factory=list,
+        description="Full serialized queue; questions contains only the currently displayed round",
+    )
+    auto_technical_questions: list[GrillQuestion] = Field(
+        default_factory=list,
+        description="Reversible technical questions resolved automatically with source auto_technical",
+    )
+    answers: dict[str, str] = Field(default_factory=dict, description="Explicit answers supplied by the owner")
+    round_size: int = Field(default=GRILL_QUESTIONS_PER_ROUND, ge=1, description="Maximum number of unanswered questions shown per round")
     engine_used: str = Field(default="heuristic_script")
     created_at: datetime = Field(default_factory=utc_now)
     completed_at: datetime | None = Field(default=None)
+
+    @property
+    def all_questions(self) -> list[GrillQuestion]:
+        """Return the complete question queue, including sessions serialized by older versions."""
+        return self.question_queue or self.questions
+
+    @property
+    def current_round_questions(self) -> list[GrillQuestion]:
+        """Return the next unanswered questions without truncating the durable queue."""
+        unanswered = [question for question in self.all_questions if not self.answers.get(question.id, "").strip()]
+        return unanswered[: self.round_size]
+
+    @model_serializer(mode="wrap")
+    def serialize_current_round(self, handler: Any) -> dict[str, Any]:
+        """Expose at most one page while retaining the complete queue for workflow resumption."""
+        payload = handler(self)
+        payload["questions"] = [question.model_dump(mode="json") for question in self.current_round_questions]
+        payload["question_queue"] = [question.model_dump(mode="json") for question in self.all_questions]
+        return payload
 
 
 class GrillAnswersPayload(BaseModel):
@@ -155,7 +184,7 @@ class GrillAnswersPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answers: dict[str, str] = Field(..., description="Mapping of question_id to chosen option label or custom text")
-    auto_accept_unanswered: bool = Field(default=True, description="Whether to adopt recommended options for unanswered questions")
+    auto_accept_unanswered: bool = Field(default=False, description="Deprecated; unanswered material decisions remain pending")
 
 
 class GrillRefinementResult(BaseModel):
@@ -168,3 +197,6 @@ class GrillRefinementResult(BaseModel):
     refined_ticket: UserTicket
     applied_answers: dict[str, str]
     summary_of_changes: list[str]
+    grill_session: GrillSession | None = None
+    ready_for_spec: bool = False
+    status: str = "refined"

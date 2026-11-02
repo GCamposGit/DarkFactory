@@ -30,7 +30,9 @@ def missing_artifact(cwd: Path) -> str | None:
     """Retorna o motivo do bloqueio ou None se a sessao pode encerrar (USR-431)."""
     try:
         from core.ops.turn_guard import check_learning_pack
-        return check_learning_pack(cwd)
+        reason = check_learning_pack(cwd)
+        if reason:
+            return reason
     except Exception:
         pass
     paths = _git(cwd, "diff", "--name-only", "origin/main...HEAD").split()

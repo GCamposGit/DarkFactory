@@ -201,7 +201,8 @@ def test_scenario_g1_ambiguous_demand_suspends_and_resumes_affected_jobs(hf08_en
     # 2. User submits answers
     session = intake_res["grill_session"]
     answers = {
-        session.questions[0].id: session.questions[0].options[0].label,
+        question.id: question.options[0].label
+        for question in session.questions
     }
     resume_res = intake.submit_grill_answers(
         ticket_id=intake_res["ticket"].id,

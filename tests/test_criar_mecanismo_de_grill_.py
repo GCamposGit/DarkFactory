@@ -152,6 +152,164 @@ def test_ticket_refiner_enriches_ticket_and_preserves_id(temp_grill_env):
     assert len(result.summary_of_changes) >= 1
 
 
+def test_grill_partial_answers_leave_recommendations_pending(temp_grill_env):
+    engine: DemandGrillEngine = temp_grill_env["engine"]
+    ticket = UserTicket(
+        id="ZZTEST-PARTIAL",
+        project_id="darkfac",
+        title="Configurar processamento de pagamentos",
+        problem_statement="Definir como o produto processa pagamentos de clientes.",
+    )
+    questions = [
+        GrillQuestion(
+            id=f"q_{index}",
+            question=f"Decisão de negócio {index}",
+            category="business",
+            options=[
+                GrillQuestionOption(id=f"q_{index}_a", label=f"Recomendação {index}", is_recommended=True),
+                GrillQuestionOption(id=f"q_{index}_b", label=f"Alternativa {index}"),
+            ],
+        )
+        for index in range(1, 5)
+    ]
+    kept, dropped = filter_owner_questions(questions)
+    assert len(kept) == 4
+    assert dropped == []
+    session = GrillSession(ticket_id=ticket.id, questions=questions)
+
+    refined, record, refinement = engine.resolve_grill_answers(
+        ticket, session, {"q_1": "q_1_b"}, auto_accept_unanswered=True
+    )
+
+    assert record.ready_for_spec is False
+    assert {q.question_id for q in record.pending_questions} == {"q_2", "q_3", "q_4"}
+    assert refinement.applied_answers == {"q_1": "Alternativa 1"}
+    assert refinement.status == "waiting_human"
+    assert refinement.ready_for_spec is False
+    assert [q.id for q in refinement.grill_session.current_round_questions] == ["q_2", "q_3", "q_4"]
+    assert "Recomendação" not in refined.problem_statement
+    assert [d.decision_source for d in record.decisions if d.decision_id == "dec_q_1"] == ["human_response"]
+    assert session.status == "waiting_human"
+    assert [q.id for q in session.current_round_questions] == ["q_2", "q_3", "q_4"]
+
+
+def test_grill_keeps_all_material_questions_across_rounds_and_serialization(temp_grill_env):
+    engine: DemandGrillEngine = temp_grill_env["engine"]
+    ticket = UserTicket(
+        id="ZZTEST-ROUNDS",
+        project_id="darkfac",
+        title="Definir operação de assinaturas",
+        problem_statement="Definir as regras comerciais de assinatura e cobrança.",
+    )
+    questions = [
+        GrillQuestion(
+            id=f"q_{index}",
+            question=f"Pergunta material {index}",
+            category="business",
+            options=[
+                GrillQuestionOption(id=f"q_{index}_a", label=f"Opção A {index}", is_recommended=True),
+                GrillQuestionOption(id=f"q_{index}_b", label=f"Opção B {index}"),
+            ],
+        )
+        for index in range(1, 6)
+    ]
+    kept_questions, technical_questions = filter_owner_questions(questions)
+    assert len(kept_questions) == 5
+    assert technical_questions == []
+    session = GrillSession(ticket_id=ticket.id, questions=questions)
+
+    first_page = session.current_round_questions
+    _, first_record, _ = engine.resolve_grill_answers(
+        ticket, session, {q.id: f"{q.id}_b" for q in first_page}
+    )
+    assert len(session.questions) == 5
+    assert all(q.category == "business" for q in session.questions)
+    assert first_record.ready_for_spec is False
+    assert [q.id for q in session.current_round_questions] == ["q_4", "q_5"]
+
+    serialized = session.model_dump_json()
+    serialized_data = json.loads(serialized)
+    assert len(serialized_data["questions"]) == 2
+    assert len(serialized_data["question_queue"]) == 5
+    resumed = GrillSession.model_validate_json(serialized)
+    assert len(resumed.all_questions) == 5
+    assert len(resumed.questions) == 2
+    assert [q.id for q in resumed.current_round_questions] == ["q_4", "q_5"]
+    _, final_record, _ = engine.resolve_grill_answers(
+        ticket, resumed, {q.id: f"{q.id}_a" for q in resumed.current_round_questions}
+    )
+    assert final_record.ready_for_spec is True
+    assert final_record.pending_questions == []
+    assert len(final_record.decisions) == 5
+    assert {decision.decision_source for decision in final_record.decisions} == {"human_response"}
+
+
+def test_grill_session_legacy_serialization_and_explicit_answer_sources(temp_grill_env):
+    legacy = GrillSession.model_validate(
+        {"ticket_id": "ZZTEST-LEGACY", "questions": [], "answers": {}}
+    )
+    assert legacy.current_round_questions == []
+    assert GrillSession.model_validate_json(legacy.model_dump_json()).ticket_id == "ZZTEST-LEGACY"
+
+    engine: DemandGrillEngine = temp_grill_env["engine"]
+    ticket = UserTicket(
+        id="ZZTEST-SOURCE",
+        title="Decidir recuperação",
+        problem_statement="Definir as regras de recuperação para clientes.",
+    )
+    question = GrillQuestion(
+        id="q_business",
+        question="Qual regra comercial?",
+        category="business",
+        options=[
+            GrillQuestionOption(id="a", label="Recomendação", is_recommended=True),
+            GrillQuestionOption(id="b", label="Opção escolhida"),
+        ],
+    )
+    technical = GrillQuestion(
+        id="q_database_adapter",
+        question="Qual adaptador técnico usar?",
+        category="technical",
+        options=[
+            GrillQuestionOption(id="sqlite", label="SQLite", is_recommended=True),
+            GrillQuestionOption(id="postgres", label="PostgreSQL"),
+        ],
+    )
+    session = GrillSession(
+        ticket_id=ticket.id,
+        questions=[question],
+        auto_technical_questions=[technical],
+    )
+    _, record, _ = engine.resolve_grill_answers(ticket, session, {"q_business": "b"})
+    assert {decision.decision_id: decision.decision_source for decision in record.decisions} == {
+        "dec_q_business": "human_response",
+        "dec_q_database_adapter": "auto_technical",
+    }
+
+
+def test_integrated_grill_partial_submission_stays_waiting_human(temp_grill_env):
+    service: DemandsService = temp_grill_env["service"]
+    received = service.receive_integrated_demand(
+        DemandInput(
+            title="Criar painel de pedidos",
+            problem_statement="Quero um painel que mostre os pedidos e permita acompanhar seus estados.",
+        ),
+        force_heuristic=True,
+    )
+    session = received["grill_session"]
+    assert session is not None
+
+    result = service.submit_integrated_grill_answers(
+        received["ticket"].id,
+        {session.questions[0].id: "Uma resposta explícita"},
+        session,
+    )
+
+    assert result["status"] == "waiting_human"
+    assert result["grill_record"].ready_for_spec is False
+    assert result["grill_session"].status == "waiting_human"
+
+
 def test_demands_service_grill_flow(temp_grill_env):
     """Verify DemandsService orchestrates the full Q&A flow atomically."""
     service: DemandsService = temp_grill_env["service"]

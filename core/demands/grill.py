@@ -6,8 +6,8 @@ prior to entering the PIV development loop.
 Key capabilities:
 1. ProjectDocScout: Reads repository documentation (MISSION.md, README.md, docs/)
    to educate the engine on existing architecture and inviolable boundaries.
-2. DemandGrillEngine: Formulates 2 to 4 essential, surgical questions with
-   pre-filled recommended alternatives and open write-in text ($0.00 cost guaranteed).
+2. DemandGrillEngine: Preserves the full queue of owner decisions and presents up to
+   three unanswered questions per round with recommended alternatives and write-in text.
 3. TicketRefiner: Applies answers into the UserTicket (problem, non-goals,
    acceptance criteria, reachability) and produces a transparent audit trail.
 """
@@ -52,7 +52,6 @@ logger = logging.getLogger(__name__)
 # Closed set of questions the owner may be asked (USR-375 S6). Anything else is technical:
 # it is decided by the factory and recorded as an ADR in the run workspace.
 OWNER_CATEGORIES: frozenset[str] = frozenset({"objective", "success", "business", "new_secret", "acceptance"})
-MAX_OWNER_QUESTIONS = 3
 
 
 def _owner_question(qid: str, category: str, text: str, reason: str, labels: list[str]) -> GrillQuestion:
@@ -70,12 +69,11 @@ def _owner_question(qid: str, category: str, text: str, reason: str, labels: lis
 
 
 def filter_owner_questions(questions: list[GrillQuestion]) -> tuple[list[GrillQuestion], list[GrillQuestion]]:
-    """Split into (owner questions, dropped technical). Owner ones: allowed category, a
-    recommended option (defaulting to the first), at most MAX_OWNER_QUESTIONS."""
+    """Split owner decisions from technical questions without truncating the owner queue."""
     kept: list[GrillQuestion] = []
     dropped: list[GrillQuestion] = []
     for q in questions:
-        if q.category not in OWNER_CATEGORIES or not q.options or len(kept) >= MAX_OWNER_QUESTIONS:
+        if q.category not in OWNER_CATEGORIES or not q.options:
             dropped.append(q)
             continue
         if not any(o.is_recommended for o in q.options):
@@ -91,6 +89,37 @@ def render_adr(dropped: list[GrillQuestion]) -> str:
         rec = next((o.label for o in q.options if o.is_recommended), q.options[0].label if q.options else "padrao")
         lines.append(f"- {q.question} -> {rec}")
     return "\n".join(lines)
+
+
+def _auto_technical_decision(question: GrillQuestion) -> GrillDecision:
+    alternatives = [
+        GrillAlternative(
+            alternative_id=option.id,
+            label=option.label[:240],
+            consequence=(option.description or option.label)[:240],
+        )
+        for option in question.options
+    ]
+    if len(alternatives) < 2:
+        alternatives.append(
+            GrillAlternative(
+                alternative_id=f"{question.id}_factory_default",
+                label="Padrão técnico conservador da fábrica",
+                consequence="Escolha reversível registrada como premissa técnica",
+            )
+        )
+    recommended = next((option for option in question.options if option.is_recommended), None)
+    selected_id = recommended.id if recommended else alternatives[0].alternative_id
+    selected_label = next(item.label for item in alternatives if item.alternative_id == selected_id)
+    return GrillDecision(
+        decision_id=f"dec_{question.id}",
+        question=question.question[:240],
+        alternatives=alternatives,
+        selected_alternative_id=selected_id,
+        response=selected_label,
+        decision_source="auto_technical",
+        is_material=False,
+    )
 
 
 class ProjectDocScout:
@@ -184,7 +213,7 @@ class DemandGrillEngine:
         return self._generate_heuristic(ticket, doc_insights)
 
     def _generate_heuristic(self, ticket: UserTicket, doc_insights: list[str]) -> GrillSession:
-        """Deterministic owner-only questions (max 3), driven by what readiness finds missing."""
+        """Deterministic owner-only questions, driven by what readiness finds missing."""
         report = evaluate_readiness(ticket.problem_statement, ticket.non_goals, ticket.acceptance_criteria)
         questions: list[GrillQuestion] = []
         if not report.is_clear and not is_small_fix(ticket.problem_statement):
@@ -217,7 +246,7 @@ class DemandGrillEngine:
             project_id=ticket.project_id,
             status="pending",
             doc_insights=doc_insights,
-            questions=questions[:MAX_OWNER_QUESTIONS],
+            questions=questions,
             engine_used="heuristic_script",
             created_at=utc_now(),
         )
@@ -236,7 +265,7 @@ class DemandGrillEngine:
         system_prompt = (
             "Você é o Arquiteto Líder da Dark Factory conduzindo uma sessão de Q&A rápida (Grill) "
             "com o originador da demanda para estressar escopo, non-goals e reachability. "
-            "Formule no maximo 3 perguntas, SOMENTE ao dono do produto (objetivo, sucesso, negocio, segredo novo, aceite); nunca perguntas tecnicas. Cada pergunta DEVE conter de 2 a 3 opções "
+            "Formule todas as perguntas materiais necessárias, SOMENTE ao dono do produto (objetivo, sucesso, negocio, segredo novo, aceite); nunca perguntas tecnicas. A interface mostra no maximo 3 por rodada. Cada pergunta DEVE conter de 2 a 3 opções "
             "prováveis (a melhor marcada com 'is_recommended': true). "
             "Responda APENAS em JSON estrito no formato:\n"
             "{\n"
@@ -312,7 +341,7 @@ class DemandGrillEngine:
             questions, dropped = filter_owner_questions(questions)
             if dropped:
                 logger.info("grill: %d technical question(s) dropped\n%s", len(dropped), render_adr(dropped))
-            if not questions:
+            if not questions and not dropped:
                 return self._generate_heuristic(ticket, doc_insights)
 
             return GrillSession(
@@ -321,6 +350,7 @@ class DemandGrillEngine:
                 status="pending",
                 doc_insights=doc_insights,
                 questions=questions,
+                auto_technical_questions=dropped,
                 engine_used=f"ollama:{model}",
                 created_at=utc_now(),
             )
@@ -335,14 +365,13 @@ class DemandGrillEngine:
         changes: list[str] = []
         applied_answers: dict[str, str] = {}
 
-        # If a session is provided, auto-resolve unanswered questions with recommended options
-        effective_answers = dict(answers)
-        if session:
-            for q in session.questions:
-                if q.id not in effective_answers or not str(effective_answers[q.id]).strip():
-                    rec = next((opt for opt in q.options if opt.is_recommended), None)
-                    if rec:
-                        effective_answers[q.id] = rec.label
+        # Recommendations are suggestions only. Missing or blank answers remain pending.
+        allowed_ids = {question.id for question in session.all_questions} if session else None
+        effective_answers = {
+            question_id: str(answer).strip()
+            for question_id, answer in answers.items()
+            if str(answer).strip() and (allowed_ids is None or question_id in allowed_ids)
+        }
 
         # 1. Process scope / non-goals answers
         non_goals = list(ticket.non_goals)
@@ -390,10 +419,16 @@ class DemandGrillEngine:
                 ).strip()
                 changes.append("Problem statement enriquecido com decisões do Grill")
 
-        # Clean pending grill tags upon successful refinement (USR-58)
-        updated_tags = [t for t in ticket.tags if t not in ("grill-pending", "needs-grill")]
-        if "grill-completed" not in updated_tags:
-            updated_tags.append("grill-completed")
+        has_pending = bool(session and any(q.id not in effective_answers for q in session.all_questions))
+        if has_pending:
+            updated_tags = [tag for tag in ticket.tags if tag != "grill-completed"]
+            if "grill-pending" not in updated_tags:
+                updated_tags.append("grill-pending")
+        else:
+            # Clean pending grill tags only after all material questions have answers.
+            updated_tags = [t for t in ticket.tags if t not in ("grill-pending", "needs-grill")]
+            if "grill-completed" not in updated_tags:
+                updated_tags.append("grill-completed")
 
         refined_ticket = ticket.model_copy(
             update={
@@ -464,7 +499,7 @@ class DemandGrillEngine:
         pending_questions: list[GrillPendingQuestion] = []
         candidate_decisions: list[GrillDecision] = []
 
-        for q in session.questions:
+        for q in session.all_questions:
             pending_questions.append(
                 GrillPendingQuestion(
                     question_id=q.id,
@@ -501,13 +536,26 @@ class DemandGrillEngine:
                 )
             )
 
+        candidate_decisions.extend(
+            _auto_technical_decision(question) for question in session.auto_technical_questions
+        )
+
+        ready = not pending_questions
+        session.status = "answered" if ready else "waiting_human"
+        if ready:
+            session.completed_at = utc_now()
+
         record = build_grill_record(
             ticket,
             doc_insights=doc_insights,
             decisions=candidate_decisions,
             pending_questions=pending_questions,
-            ready_for_spec=False,
-            readiness_justification=f"Demanda aguardando esclarecimento de {len(pending_questions)} questão(ões) pelo owner.",
+            ready_for_spec=ready,
+            readiness_justification=(
+                "Não restam decisões materiais pendentes; escolhas técnicas reversíveis foram registradas automaticamente."
+                if ready
+                else f"Demanda aguardando esclarecimento de {len(pending_questions)} questão(ões) pelo owner."
+            ),
         )
         return record, session
 
@@ -517,14 +565,26 @@ class DemandGrillEngine:
         session: GrillSession,
         answers: dict[str, str],
         *,
-        auto_accept_unanswered: bool = True,
+        auto_accept_unanswered: bool = False,
     ) -> tuple[UserTicket, GrillRecord, GrillRefinementResult]:
-        """Apply answers to session and produce refined ticket and completed GrillRecord."""
-        refinement = self.refine_ticket(ticket, answers, session=session)
+        """Apply explicit answers and keep the session open while material decisions remain."""
+        known_ids = {question.id for question in session.all_questions}
+        for question_id, answer in answers.items():
+            clean_answer = str(answer).strip()
+            if question_id in known_ids and clean_answer:
+                question = next(item for item in session.all_questions if item.id == question_id)
+                option = next((item for item in question.options if item.id == clean_answer), None)
+                if option:
+                    clean_answer = option.label
+                session.answers[question_id] = clean_answer
+
+        effective_answers = dict(session.answers)
+        refinement = self.refine_ticket(ticket, effective_answers, session=session)
         effective_answers = dict(refinement.applied_answers)
 
         decisions: list[GrillDecision] = []
-        for q in session.questions:
+        pending_questions: list[GrillPendingQuestion] = []
+        for q in session.all_questions:
             ans = effective_answers.get(q.id, "").strip()
             matched_opt = next((opt for opt in q.options if opt.id == ans or opt.label == ans), None)
 
@@ -545,8 +605,18 @@ class DemandGrillEngine:
                     )
                 )
 
-            selected_id = matched_opt.id if matched_opt else (alternatives[0].alternative_id if alternatives else None)
-            source = "human_response" if q.id in answers else "auto_recommended"
+            selected_id = matched_opt.id if matched_opt else None
+            source = "human_response" if ans else "pending_grill"
+
+            if not ans:
+                pending_questions.append(
+                    GrillPendingQuestion(
+                        question_id=q.id,
+                        question=q.question[:240],
+                        impact=(q.context_reason or "Define escopo e validação")[:240],
+                        depends_on_human=True,
+                    )
+                )
 
             decisions.append(
                 GrillDecision(
@@ -554,19 +624,32 @@ class DemandGrillEngine:
                     question=q.question[:240],
                     alternatives=alternatives,
                     selected_alternative_id=selected_id,
-                    response=ans or (matched_opt.label if matched_opt else alternatives[0].label),
+                    response=(matched_opt.label if matched_opt else ans) or None,
                     decision_source=source,
                     is_material=True,
                 )
             )
 
+        decisions.extend(_auto_technical_decision(question) for question in session.auto_technical_questions)
+
+        ready = not pending_questions
+        session.status = "answered" if ready else "waiting_human"
+        session.completed_at = utc_now() if ready else None
+        refinement.grill_session = session
+        refinement.ready_for_spec = ready
+        refinement.status = "ready_for_spec" if ready else "waiting_human"
+
         grill_record = build_grill_record(
             refinement.refined_ticket,
             doc_insights=session.doc_insights,
             decisions=decisions,
-            pending_questions=[],
-            ready_for_spec=True,
-            readiness_justification="Grill concluído com todas as decisões materiais respondidas e critérios consolidados.",
+            pending_questions=pending_questions,
+            ready_for_spec=ready,
+            readiness_justification=(
+                "Grill concluído com todas as decisões materiais respondidas e critérios consolidados."
+                if ready
+                else f"Demanda aguardando esclarecimento de {len(pending_questions)} questão(ões) pelo owner."
+            ),
         )
         return refinement.refined_ticket, grill_record, refinement
 

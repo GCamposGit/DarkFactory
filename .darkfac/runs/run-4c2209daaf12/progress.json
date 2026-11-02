@@ -1,0 +1,8 @@
+{
+  "harness": "codex",
+  "model": "gpt-6-luna",
+  "effort": null,
+  "tickets_done": [
+    "T1"
+  ]
+}

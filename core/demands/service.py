@@ -40,6 +40,7 @@ class DemandsService:
             grill_engine=self.grill_engine,
             specifier=self.specifier,
         )
+        self._grill_sessions: dict[str, GrillSession] = {}
 
     def guide_demand(
         self,
@@ -119,9 +120,11 @@ class DemandsService:
         ticket = self.get_ticket(ticket_id)
         if not ticket:
             raise KeyError(f"Ticket '{ticket_id}' not found")
-        return self.grill_engine.start_grill(
+        session = self.grill_engine.start_grill(
             ticket, force_heuristic=force_heuristic, timeout=timeout
         )
+        self._grill_sessions[ticket_id] = session
+        return session
 
     def submit_grill_answers(
         self,
@@ -133,8 +136,15 @@ class DemandsService:
         ticket = self.get_ticket(ticket_id)
         if not ticket:
             raise KeyError(f"Ticket '{ticket_id}' not found")
-        result = self.grill_engine.refine_ticket(ticket, answers, session=session)
+        session = session or self._grill_sessions.get(ticket_id)
+        if session is None:
+            result = self.grill_engine.refine_ticket(ticket, answers)
+        else:
+            _, _, result = self.grill_engine.resolve_grill_answers(ticket, session, answers)
         self.store.save_ticket(result.refined_ticket)
+        if session is not None:
+            if session.status == "answered":
+                self._grill_sessions.pop(ticket_id, None)
         logger.info(f"Refined ticket {ticket_id} with grill answers: {len(result.summary_of_changes)} changes")
         return result
 
