@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Ecossistemas e artefatos adicionais",
+    "demand_text": "Expandir o inventário, as fontes e a aplicabilidade para lockfiles Node, imagens por digest, SBOM e IaC, preservando os contratos de evidência, revisão e deduplicação do marco Python."
+  },
+  {
+    "title": "Operação no portfólio autorizado",
+    "demand_text": "Aplicar o domínio aos projetos que possuam perfil e acesso explicitamente habilitados, com retenção, alertas, métricas de cobertura e custo, painéis operacionais e provas periódicas de reteste."
+  },
+  {
+    "title": "Triagem e remediação assistidas",
+    "demand_text": "Adicionar priorização e explicação assistidas por modelo somente após o veredito determinístico, além de propostas de correção, validação independente e fechamento por reteste."
+  }
+]

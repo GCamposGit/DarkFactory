@@ -1,0 +1,176 @@
+[
+  {
+    "id": "T1",
+    "title": "Resolver inventário Python com identidade de ambiente",
+    "goal": "Descobrir requirements.txt e variantes do darkfac e produzir inventário canônico apenas para versões realmente comprovadas.",
+    "files_hint": [
+      "core/security/models.py",
+      "core/security/dependency_inventory.py",
+      "requirements.txt",
+      "tests/test_security_dependency_inventory.py"
+    ],
+    "acceptance": [
+      "ProjectRegistry delimita projeto, checkout e arquivos elegíveis sem conceder novos acessos.",
+      "Cada pacote resolvido registra nome normalizado, versão exata, origem da evidência, digest do manifesto ou lockfile, Python, plataforma e identidade do ambiente.",
+      "Intervalos sem lockfile ou ambiente observável permanecem unresolved e reduzem a cobertura; nunca são tratados como versão instalada nem como não afetados.",
+      "Includes, variantes live/audio, dependências transitivas e conflitos são reconciliados deterministicamente.",
+      "python scripts/line_validate.py conclui com sucesso."
+    ],
+    "tests_to_add": [
+      "Descoberta de requirements.txt, requirements-live.txt e requirements-audio.txt com includes sem duplicação.",
+      "Versão exata proveniente de lockfile ou inventário instalado e intervalo isolado marcado unresolved.",
+      "Ambientes distintos para o mesmo pacote não são colapsados.",
+      "Conflito, arquivo inválido e ambiente ausente produzem cobertura parcial estruturada."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Persistir advisories, avaliações e findings no control store",
+    "goal": "Adicionar persistência equivalente em SQLite e PostgreSQL para revisões, cache, avaliações e deduplicação transacional.",
+    "files_hint": [
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "core/security/models.py",
+      "tests/test_security_control_store.py"
+    ],
+    "acceptance": [
+      "Revisões de advisory são imutáveis e identificadas por fonte, ID canônico, revisão e digest de conteúdo.",
+      "Avaliações preservam input fingerprint, validade, cobertura, custo, evidências e estados complete, partial ou waiting_resource.",
+      "Uma restrição única por projeto e vulnerabilidade canônica impede dois findings ou tickets concorrentes, mantendo aliases, pacotes e ambientes agregados.",
+      "Repetição ou retomada idempotente não duplica revisão, avaliação, finding nem vínculo de ticket.",
+      "Lookup diferencia registro ausente de store indisponível e cobre a divergência observada em USR-449.",
+      "python scripts/line_validate.py conclui com sucesso."
+    ],
+    "tests_to_add": [
+      "Migração e round-trip SQLite de revisão, avaliação, cache e finding.",
+      "Paridade contratual do adapter PostgreSQL.",
+      "Duas gravações concorrentes convergem para um finding.",
+      "Store indisponível e chave inexistente produzem resultados distintos.",
+      "Nova revisão preserva o histórico anterior."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Consultar fonte de advisory com revisão e cache verificáveis",
+    "goal": "Implementar o adaptador Python da fonte selecionada, preservando a proveniência original mesmo quando houver agregador intermediário.",
+    "files_hint": [
+      "core/security/source_registry.py",
+      "core/security/advisory_sources.py",
+      "core/security/models.py",
+      "tests/test_security_advisory_sources.py"
+    ],
+    "acceptance": [
+      "Cada resposta registra fonte original, URL, ID canônico, aliases, revisão, conteúdo verificável, digest, queried_at e metadados de cache.",
+      "ETag, Last-Modified ou digest detecta mudança externa; conteúdo alterado cria nova revisão mesmo sem commit.",
+      "Cache possui chave e validade determinísticas, mede hits, misses, requests, bytes, duração e custo monetário conhecido.",
+      "Falha parcial preserva dados anteriores com validade explícita; falha que impede avaliação retorna waiting_resource e nunca sucesso vazio.",
+      "Conteúdo externo é tratado como dado não confiável e não executa instruções nem altera política.",
+      "python scripts/line_validate.py conclui com sucesso."
+    ],
+    "tests_to_add": [
+      "Primeira consulta, cache hit e expiração com relógio controlado.",
+      "Mesmo ID com conteúdo alterado persiste nova revisão.",
+      "Aliases diferentes convergem ao ID canônico.",
+      "Timeout, rate limit, resposta inválida e indisponibilidade parcial.",
+      "Métricas de custo e uso não são somadas novamente em replay."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Determinar aplicabilidade e invalidar evidência deterministicamente",
+    "goal": "Calcular afetado, não afetado ou indeterminado por pacote, versão e ambiente antes de qualquer etapa baseada em modelo.",
+    "files_hint": [
+      "core/security/applicability.py",
+      "core/security/evidence.py",
+      "core/security/models.py",
+      "tests/test_security_applicability.py"
+    ],
+    "acceptance": [
+      "Comparação usa identidade normalizada, versão PEP 440, intervalos afetados e condições ambientais documentadas.",
+      "Resultado não afetado exige versão exata e todas as condições relevantes decididas; qualquer lacuna permanece indeterminada e reduz cobertura.",
+      "O fingerprint inclui inventário, ambiente, revisão do advisory e versão da política; mudança em qualquer item invalida cache e evidência sem exigir commit.",
+      "Evidência expirada ou advisory revisado mantém histórico, mas não autoriza reutilização como avaliação atual.",
+      "Relatório agrega afetados, não afetados, indeterminados, cobertura e custo observado sem chamar modelo.",
+      "python scripts/line_validate.py conclui com sucesso."
+    ],
+    "tests_to_add": [
+      "Pacote afetado e não afetado nos limites inclusivos e exclusivos de intervalos.",
+      "Versões pre-release, nomes equivalentes e múltiplos ambientes.",
+      "Condição ambiental ausente nunca vira não afetado.",
+      "Mudança apenas da revisão do advisory invalida evidência.",
+      "Mudança irrelevante mantém cache; mudança relevante força reavaliação."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Executar consolidação e eventos no ciclo canônico",
+    "goal": "Acionar avaliação diária, por mudança de dependência, revisão externa e vencimento, sem criar scheduler concorrente.",
+    "files_hint": [
+      "core/security/cycle.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "core/quality/cycle.py",
+      "tests/test_security_cycle.py"
+    ],
+    "acceptance": [
+      "O ticket reconcilia o SHA de trabalho e registra qual ciclo canônico existe; QualityCycle e CloudCoordinator nunca executam a mesma consolidação em paralelo.",
+      "No baseline atual sem QualityCycle, a supervisão existente do CloudCoordinator chama o serviço de segurança com intervalo diário configurável, sem nova thread ou cron.",
+      "Eventos de manifesto, lockfile, ambiente, advisory revisado e validade vencida geram reavaliação idempotente.",
+      "Execuções concorrentes ou retomadas usam lease/fencing do control store e convergem para uma avaliação.",
+      "Falha da fonte não encerra a supervisão e persiste partial ou waiting_resource com condição de nova tentativa.",
+      "python scripts/line_validate.py conclui com sucesso."
+    ],
+    "tests_to_add": [
+      "Consolidação diária respeita relógio e configuração.",
+      "Cada tipo de evento altera somente o fingerprint aplicável.",
+      "Dois coordenadores não avaliam simultaneamente a mesma chave.",
+      "Falha, reinício e retomada não duplicam trabalho.",
+      "Teste de composição assegura exatamente um binding do ciclo de segurança."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  },
+  {
+    "id": "T6",
+    "title": "Deduplicar ticket e provar o fluxo Python ponta a ponta",
+    "goal": "Materializar um único ticket verificável por vulnerabilidade aplicável e demonstrar o ciclo completo com fonte real.",
+    "files_hint": [
+      "core/security/ticketing.py",
+      "core/line/backlog_feeder.py",
+      "tests/test_security_domain_e2e.py",
+      "docs/manual/seguranca_dependencias.md"
+    ],
+    "acceptance": [
+      "Somente finding determinístico applicable admite ticket planejado; partial, waiting_resource, não afetado e indeterminado não admitem ticket.",
+      "A chave projeto+vulnerabilidade canônica reúne aliases, pacotes e ambientes no mesmo ticket e atualiza sua evidência quando o advisory muda.",
+      "O ticket entra no control store e segue por BacklogFeeder, FeederCycle, CloudCoordinator e roteador existentes; repetição, concorrência e retomada mantêm um único ID.",
+      "Uma prova real, sem mock da fonte, demonstra pacote afetado, pacote não afetado, advisory revisado, cache, deduplicação, custo, cobertura e rechecagem após correção.",
+      "Após a correção, o mesmo finding registra não aplicabilidade atual e evidência do reteste sem criar outro ticket.",
+      "Manual, docs/FASE_ATUAL.md e evidências operacionais distinguem claramente cobertura parcial de ausência de vulnerabilidade.",
+      "python scripts/line_validate.py conclui com sucesso."
+    ],
+    "tests_to_add": [
+      "E2E offline determinístico do inventário até a fila com transport gravado.",
+      "Integração opt-in contra fonte real com advisory conhecido e proveniência validada.",
+      "Concorrência de emissores gera um ticket e uma associação canônica.",
+      "Nova revisão atualiza o ticket existente; alias não cria outro.",
+      "Alteração para versão corrigida encerra o finding após reteste.",
+      "Relatório comprova cache, custo, cobertura e estados de indisponibilidade."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  }
+]
