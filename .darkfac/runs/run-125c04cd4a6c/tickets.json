@@ -1,0 +1,175 @@
+[
+  {
+    "id": "T1",
+    "title": "Normalizar e reconciliar as fontes de eficiência",
+    "goal": "Produzir amostras canônicas por projeto, ticket, execução, tentativa e chamada, preservando unidade, proveniência e valores desconhecidos.",
+    "files_hint": [
+      "core/usage/ticket_cost.py",
+      "core/telemetry/models.py",
+      "core/telemetry/store.py",
+      "tests/test_efficiency_sources.py"
+    ],
+    "acceptance": [
+      "Cada amostra expõe project_id, ticket_id, run_id, attempt_id ou invocation_id quando observável, timestamp UTC, fonte, unidade e estado de conhecimento do valor.",
+      "Um evento do ModelUsageLedger espelhado na telemetria pela mesma invocation_id conta uma única chamada e um único custo de API.",
+      "Tentativas, retries de estágio e chamadas de modelo permanecem categorias distintas; duração da execução não é confundida com latência da chamada.",
+      "Falhas e tentativas malsucedidas contribuem para custo e duração quando observáveis.",
+      "Custos de API, assinatura implícita e consumo de cota permanecem separados; ausência é representada como desconhecida, nunca como zero conhecido.",
+      "Leituras legadas continuam compatíveis e registram os campos que não puderam ser recuperados.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Deduplicação entre ledger e telemetria por invocation_id.",
+      "Tentativa falha com custo e duração observáveis.",
+      "Retry de estágio contendo múltiplas chamadas sem inflar a contagem de retries.",
+      "Custo, duração ou identificadores ausentes preservados como desconhecidos.",
+      "Migração e leitura de registros legados sem project_id."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Consolidar períodos diários com cache rastreável",
+    "goal": "Persistir consolidações UTC por projeto e ticket, retomando dias atrasados e recomputando somente períodos afetados por evidência nova.",
+    "files_hint": [
+      "core/efficiency/models.py",
+      "core/efficiency/store.py",
+      "core/efficiency/service.py",
+      "tests/test_efficiency_daily.py"
+    ],
+    "acceptance": [
+      "A consolidação diária contém custo por unidade e proveniência, duração de execução, chamadas, tentativas, retries, falhas, intervalo UTC, cobertura e dados ausentes.",
+      "A chave do resultado identifica projeto, ticket e período; reprocessar as mesmas fontes produz o mesmo resultado sem duplicação.",
+      "Uma lacuna entre o último período concluído e o dia atual é retomada em ordem UTC após reinício.",
+      "Evidência tardia altera o fingerprint e invalida somente os períodos e tickets afetados.",
+      "Cache é reutilizado quando fontes e versão do normalizador permanecem iguais.",
+      "Falha de uma fonte gera cobertura parcial e erro estruturado sem apagar consolidações válidas das demais fontes.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Agregação de custo, duração, falhas e retries por ticket e projeto.",
+      "Retomada determinística de dois períodos atrasados.",
+      "Reprocessamento idempotente do mesmo período.",
+      "Invalidação seletiva por evento tardio.",
+      "Cache hit com fingerprint estável.",
+      "Cobertura parcial quando uma fonte está indisponível."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Calcular baseline técnico e desvios reproduzíveis",
+    "goal": "Comparar consolidações com histórico realmente comparável usando política versionada, sem criar limiar de negócio implícito.",
+    "files_hint": [
+      "core/efficiency/baseline.py",
+      "core/efficiency/models.py",
+      "core/efficiency/service.py",
+      "tests/test_efficiency_baseline.py"
+    ],
+    "acceptance": [
+      "Cada baseline registra projeto, métrica, coorte comparável definida pela política, janela, amostras, método, parâmetros, versão e fingerprint.",
+      "A comparação registra amostras atuais, baseline usado, valor observado, limite derivado ou configurado e cálculo reproduzível.",
+      "Sem política aplicável, amostras suficientes ou unidade compatível, o resultado fica não qualificado com razão de cobertura; nenhum desvio é inventado.",
+      "Mudança de política, coorte, amostras ou versão do método invalida baseline e comparações dependentes.",
+      "Custos de unidades diferentes nunca são somados nem comparados diretamente.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Baseline determinístico sobre histórico comparável.",
+      "Ausência de política e amostras insuficientes sem desvio qualificado.",
+      "Rejeição de comparação entre unidades incompatíveis.",
+      "Invalidação por nova versão de política e por mudança de amostra.",
+      "Comparação reproduzida a partir das evidências persistidas."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Admitir um único ticket e recheckar remediações",
+    "goal": "Transformar desvios qualificados em um único ticket rastreável por identidade do problema, atualizando evidências nas recorrências.",
+    "files_hint": [
+      "core/efficiency/admission.py",
+      "core/efficiency/service.py",
+      "core/demands/service.py",
+      "tests/test_efficiency_admission.py"
+    ],
+    "acceptance": [
+      "A identidade determinística inclui projeto, métrica, coorte e política relevantes ao problema.",
+      "O primeiro desvio qualificado admite um ticket com amostras, baseline, comparação, cobertura e referências verificáveis.",
+      "Reprocessamentos e recorrências atualizam a evidência vinculada sem criar segundo ticket para a mesma identidade.",
+      "Estados waiting_human, implementing, completed e cancelled não são sobrescritos fora das transições existentes da linha.",
+      "Uma remediação só é rechecada com período e evidência posteriores ao marco de remediação; evidência antiga não a valida.",
+      "Desativação do domínio impede novas admissões e remediações automáticas, preservando consolidações, tickets e trilha histórica.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Admissão única sob chamadas concorrentes ou repetidas.",
+      "Recorrência atualizando evidência do ticket existente.",
+      "Preservação de estados manuais e terminais.",
+      "Rechecagem recusada sem evidência posterior à remediação.",
+      "Projeto desativado sem nova admissão ou remediação automática."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Integrar o domínio ao ciclo e à configuração de projetos",
+    "goal": "Executar eficiência no mesmo ciclo supervisionado pelo CloudCoordinator, com política e habilitação por projeto.",
+    "files_hint": [
+      "core/projects/models.py",
+      "core/line/efficiency_cycle.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_efficiency_cycle.py"
+    ],
+    "acceptance": [
+      "ProjectDescriptor aceita configuração de eficiência com enabled, política referenciada e periodicidade UTC, mantendo compatibilidade com registros atuais.",
+      "O CloudCoordinator aciona exatamente uma instância do EfficiencyCycle no loop existente, sem scheduler paralelo.",
+      "O ciclo respeita periodicidade, retoma períodos vencidos após reinício e processa somente projetos registrados e habilitados.",
+      "Falha do domínio é registrada de forma estruturada e não interrompe feeder, reconciliação ou supervisão da linha.",
+      "Mudanças de habilitação ou política invalidam resultados afetados sem apagar histórico.",
+      "Cadastrar outro projeto não concede permissões nem inicia eficiência quando enabled não estiver explicitamente ativo.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Ligação única do ciclo no CloudCoordinator.",
+      "Controle de periodicidade e retomada após reinício.",
+      "Projeto desativado e projeto não registrado ignorados.",
+      "Falha isolada sem interromper o restante do scan.",
+      "Invalidação após troca de política ou habilitação."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T6",
+    "title": "Expor evidência, provar darkfac e reconciliar USR-449",
+    "goal": "Disponibilizar a leitura operacional, executar uma demonstração real em darkfac e fechar o diagnóstico de USR-449 entre deploy, configuração e control store.",
+    "files_hint": [
+      "hub/backend/service_usage.py",
+      "hub/backend/api.py",
+      "tests/test_efficiency_api.py",
+      "docs/manual/eficiencia.md"
+    ],
+    "acceptance": [
+      "Um endpoint somente leitura retorna consolidações, cobertura, dados ausentes, baseline, comparação, ticket admitido e estado de rechecagem filtráveis por projeto.",
+      "A execução real em darkfac consolida amostras observáveis, produz uma comparação verificável e admite exatamente um ticket para uma identidade qualificada; reexecutar o período não duplica o ticket.",
+      "A prova real inclui chamadas e tentativas falhas quando existentes e demonstra que valores ausentes não foram tratados como zero.",
+      "USR-449 é confrontado com SHA implantado, configuração efetiva e leitura do control store; a causa confirmada e as evidências ficam registradas.",
+      "Indisponibilidade do control store ou da versão implantada retorna source_unavailable e jamais ticket_absent; ticket_absent só é emitido após consulta bem-sucedida de todas as fontes obrigatórias.",
+      "O manual explica configuração, unidades, cobertura, deduplicação, invalidação, desativação e rechecagem; docs/FASE_ATUAL.md registra a nova realidade e a conclusão de USR-449.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Contrato HTTP e filtro por project_id.",
+      "Resposta com cobertura parcial e campos desconhecidos explícitos.",
+      "E2E controlado de consolidação, desvio, admissão e replay sem duplicação.",
+      "Diagnóstico distinguindo source_unavailable de ticket_absent.",
+      "Rechecagem pós-remediação visível no endpoint."
+    ],
+    "smoke": [
+      "/health",
+      "/api/usage/efficiency?project_id=darkfac"
+    ]
+  }
+]
