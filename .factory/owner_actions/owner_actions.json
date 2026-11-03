@@ -3204,6 +3204,40 @@
       "created_at": "2026-10-23T11:29:39Z",
       "created_by": "queue-registration",
       "resolved_at": "2026-10-23T11:34:36Z"
+    },
+    {
+      "id": "OA-082",
+      "kind": "action",
+      "title": "Reinstalar a tarefa DarkFac-Hub-Availability com o instalador novo (USR-448)",
+      "priority": "high",
+      "status": "open",
+      "why": "A tarefa agendada DarkFac-Hub-Availability chamava python -m core.infra.availability_probe, mas o modulo foi apagado por engano numa varredura de codigo morto (USR-377 S2) e a tarefa passou a retornar codigo 1 a cada minuto, sem alertar de verdade sobre o /health do Hub. O modulo foi restaurado e o agendamento manual virou o script idempotente scripts/install_availability_probe.ps1; falta reinstalar a tarefa no Notebook com ele e confirmar que volta a rodar com sucesso.",
+      "blocks": [
+        "USR-448"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Notebook, abra o PowerShell e atualize o checkout principal (fora de worktree) para o commit que traz core/infra/availability_probe.py e scripts/install_availability_probe.ps1:",
+          "command": "cd C:\\dev\\DarkFac; git pull --ff-only"
+        },
+        {
+          "text": "Reinstale a tarefa (idempotente; seguro rodar de novo mesmo se ja existir):",
+          "command": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\dev\\DarkFac\\scripts\\install_availability_probe.ps1"
+        },
+        {
+          "text": "Rode a tarefa uma vez manualmente para nao esperar o minuto do agendador:",
+          "command": "Start-ScheduledTask -TaskName DarkFac-Hub-Availability"
+        },
+        {
+          "text": "Confirme que ela terminou com sucesso (espere alguns segundos antes de verificar):",
+          "command": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\dev\\DarkFac\\scripts\\install_availability_probe.ps1 -Verify"
+        }
+      ],
+      "verify": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\dev\\DarkFac\\scripts\\install_availability_probe.ps1 -Verify imprime LastTaskResult: 0; equivalente manual: (Get-ScheduledTask DarkFac-Hub-Availability | Get-ScheduledTaskInfo).LastTaskResult -eq 0",
+      "created_at": "2026-11-02T00:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

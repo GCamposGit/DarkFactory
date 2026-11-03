@@ -60,16 +60,66 @@ def test_run_hub_only_merge_is_data_only() -> None:
     assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
 
 
-def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments() -> None:
+def test_proposal_directs_to_run_the_install_script_instead_of_a_manual_snippet() -> None:
     proposal = (ROOT / "docs" / "proposals" / "USR-207-zero-downtime.md").read_text(encoding="utf-8")
     section = proposal.split("### Agendar a sonda", maxsplit=1)[1].split("## 2.", maxsplit=1)[0]
-    assert '$py = "C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\pythonw.exe"' in section
-    assert "Test-Path $py" in section and "throw" in section
-    assert "New-ScheduledTaskAction -Execute $py" in section
-    assert 'Register-ScheduledTask -TaskName "DarkFac-Hub-Availability"' in section
-    assert "-WorkingDirectory \"C:\\dev\\DarkFac\"" in section
-    assert "Start-Process" not in section
-    assert "Invoke-Expression" not in section
+    assert "scripts\\install_availability_probe.ps1" in section
+    assert "-Verify" in section
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_dry_run_resolves_pythonw_outside_worktree(tmp_path: Path) -> None:
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    script = ROOT / "scripts" / "install_availability_probe.ps1"
+    copy_dir = tmp_path / "repo" / "scripts"
+    copy_dir.mkdir(parents=True)
+    copy = copy_dir / "install_availability_probe.ps1"
+    shutil.copy(script, copy)
+    proc = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(copy), "-DryRun"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "DRY-RUN" in proc.stdout
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+@pytest.mark.parametrize("parts", [(".worktrees", "x"), (".claude", "worktrees", "x"), (".codex", "worktrees", "X")])
+def test_install_availability_probe_refuses_inside_worktree_dirs(tmp_path: Path, parts: tuple) -> None:
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    script = ROOT / "scripts" / "install_availability_probe.ps1"
+    copy_dir = tmp_path.joinpath(*parts, "scripts")
+    copy_dir.mkdir(parents=True)
+    copy = copy_dir / "install_availability_probe.ps1"
+    shutil.copy(script, copy)
+    proc = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(copy), "-DryRun"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+    )
+    assert proc.returncode != 0
+    assert "RECUSADO" in proc.stderr
+    assert "registrada" not in proc.stdout
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_verify_reports_unregistered_task_and_exits_nonzero() -> None:
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    script = ROOT / "scripts" / "install_availability_probe.ps1"
+    proc = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
+         "-TaskName", "DarkFac-Hub-Availability-Nonexistent-Test-Double", "-Verify"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+    )
+    assert proc.returncode != 0
+    assert "nao esta registrada" in proc.stdout
+
+
+def test_install_availability_probe_never_uses_start_process_or_invoke_expression() -> None:
+    text = (ROOT / "scripts" / "install_availability_probe.ps1").read_text(encoding="utf-8")
+    assert "Start-Process" not in text
+    assert "Invoke-Expression" not in text
+    assert "Register-ScheduledTask" in text and "-Force" in text
+    assert "pythonw.exe" in text
 
 # --------------------------------------------------------------------------- plan
 

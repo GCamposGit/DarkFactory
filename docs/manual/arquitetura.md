@@ -68,8 +68,18 @@ Sem chamador em producao (apenas testes ou documentos historicos), removidos jun
   `discover_models.py`, `model_lifecycle.py`, `qualify_model.py`, `test_openrouter.py`.
 - CLIs sem uso: `core/{archetypes,catalog,evolution,infra,notifications,projects,telemetry,workflow,execution,enterprise,portfolio}/cli.py`,
   `core/integrations/telegram_n8n_cli.py`, `core/harness/live_preflight.py`, `core/git/worktree_gc.py`,
-  `core/infra/availability_probe.py`, `core/workflow/safe_export.py`.
+  `core/workflow/safe_export.py`.
 - Scripts: `backfill_catalog.py`, `download_artworks.py`, `download_expanded_artworks.py`, `probe_production.py`.
+
+**Correcao (USR-448):** `core/infra/availability_probe.py` listado acima foi removido por engano -- a
+varredura so olha importador dentro do repo, mas essa sonda e acionada por uma Tarefa Agendada do
+Windows (`DarkFac-Hub-Availability`, Notebook, 1x/minuto), invisivel a qualquer busca de import.
+O modulo foi restaurado e agora esta registrado em `.factory/config/external_entrypoints.json`
+(verificado por `core/infra/external_entrypoints.py` e `tests/test_usr448_external_entrypoints.py`):
+uma futura varredura de codigo morto deve consultar esse registro antes de apagar algo sem chamador
+visivel. Ver `docs/runbooks/hub_availability_probe.md` para a sonda em si (modos normal e `--check`,
+estado em `hub_availability.json`) e `scripts/install_availability_probe.ps1` para o agendamento
+idempotente da tarefa.
 
 ## Orquestrador
 

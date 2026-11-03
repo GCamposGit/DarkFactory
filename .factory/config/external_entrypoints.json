@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "description": "USR-448: modulos/scripts acionados por agendador ou servico fora do repositorio git. Uma varredura de codigo morto nao pode apagar uma entrada aqui so por nao achar importador dentro do repo -- tests/test_usr448_external_entrypoints.py importa cada uma e falha se ela desaparecer.",
+  "entrypoints": [
+    {
+      "id": "hub-availability-probe",
+      "kind": "module",
+      "target": "core.infra.availability_probe",
+      "trigger_type": "scheduled_task",
+      "trigger_name": "DarkFac-Hub-Availability",
+      "host": "Notebook, fora da VPS (1 execucao por minuto)",
+      "installed_by": [],
+      "reason": "Mede /health do Hub e alerta o Telegram de operacoes quando fica indisponivel por mais de 120s (USR-207). Apagado por engano na varredura de codigo morto do USR-377 S2 por nao ter importador dentro do repo; restaurado no USR-448."
+    },
+    {
+      "id": "usage-cloud-sync",
+      "kind": "script",
+      "target": "scripts/sync_usage_to_cloud.py",
+      "trigger_type": "scheduled_task",
+      "trigger_name": "DarkFac-Usage-Cloud-Sync",
+      "host": "Notebook (logon do usuario, loop de 60s)",
+      "installed_by": [
+        "scripts/install_sync_task.ps1",
+        "scripts/install_usage_sync_task.py"
+      ],
+      "reason": "Sincroniza cota/uso local com o DarkHub na nuvem (USR-236)."
+    },
+    {
+      "id": "fleet-dispatcher",
+      "kind": "module",
+      "target": "core.line.fleet_dispatcher",
+      "trigger_type": "scheduled_task",
+      "trigger_name": "DarkFac-Fleet-Dispatcher",
+      "host": "Maquina de boot da frota (grokbox, notebook ou desktop)",
+      "installed_by": [
+        "scripts/install_fleet_dispatcher.ps1"
+      ],
+      "reason": "Despacha ciclos de demanda da frota distribuida ao ligar a maquina (USR-384)."
+    },
+    {
+      "id": "onprem-test-worker",
+      "kind": "script",
+      "target": "core/harness/remote_worker.py",
+      "trigger_type": "scheduled_task",
+      "trigger_name": "DarkFac Test Worker / DarkFac-OnPrem-Worker",
+      "host": "Desktop (worker primario do portao, porta 8080); opcionalmente Linux/VPS via systemd --user",
+      "installed_by": [
+        "scripts/install_test_worker.ps1",
+        "scripts/install_test_worker_startup.ps1",
+        "scripts/install_test_worker.sh"
+      ],
+      "reason": "Daemon headless do harness de validacao remota (HF-27-11)."
+    },
+    {
+      "id": "onprem-fleet-worker-launcher",
+      "kind": "script",
+      "target": "scripts/start_onprem_worker.ps1",
+      "trigger_type": "startup_folder",
+      "trigger_name": "DarkFacWorker.vbs",
+      "host": "Maquinas da frota sem admin (grokbox, notebook ou desktop)",
+      "installed_by": [
+        "scripts/install_onprem_worker_user_startup.ps1",
+        "scripts/install_onprem_worker_service.ps1"
+      ],
+      "reason": "Inicia o worker de frota (core.orchestrator.cloud_worker) no logon/boot sem privilegio administrativo (USR-286)."
+    }
+  ]
+}

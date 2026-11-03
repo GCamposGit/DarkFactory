@@ -13009,5 +13009,33 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-448",
+    "project_id": "darkfac",
+    "title": "Sonda de disponibilidade agendada aponta para modulo inexistente",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Tarefa Windows DarkFac-Hub-Availability executa python -m core.infra.availability probe e retorna 1; o modulo nao existe no checkout atual.",
+    "core_journey": [
+      "Tarefa Windows DarkFac-Hub-Availability executa python -m core.infra.availability probe e retorna 1; o modulo nao existe no checkout atual."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Restaurar ou remover a tarefa conforme o fluxo vigente e verificar disponibilidade real sem alertas falsos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-01T21:39:58.821273Z",
+    "updated_at": "2026-11-01T21:39:58.821273Z"
   }
 ]
