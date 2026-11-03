@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -81,6 +82,9 @@ def test_install_availability_probe_dry_run_resolves_pythonw_outside_worktree(tm
     )
     assert proc.returncode == 0, proc.stderr
     assert "DRY-RUN" in proc.stdout
+    # DryRun now exits AFTER the pythonw.exe resolution (not before it), so this proves
+    # the resolution actually ran instead of being skipped by an early exit.
+    assert "pythonw.exe resolvido em" in proc.stdout
 
 
 @pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
@@ -114,12 +118,86 @@ def test_install_availability_probe_verify_reports_unregistered_task_and_exits_n
     assert "nao esta registrada" in proc.stdout
 
 
-def test_install_availability_probe_never_uses_start_process_or_invoke_expression() -> None:
-    text = (ROOT / "scripts" / "install_availability_probe.ps1").read_text(encoding="utf-8")
-    assert "Start-Process" not in text
-    assert "Invoke-Expression" not in text
-    assert "Register-ScheduledTask" in text and "-Force" in text
-    assert "pythonw.exe" in text
+_HARNESS = ROOT / "tests" / "ps" / "usr448_probe_mock_harness.ps1"
+_INSTALL_SCRIPT = ROOT / "scripts" / "install_availability_probe.ps1"
+
+
+def _run_probe_harness(tmp_path: Path, env: Dict[str, str], extra_args: Optional[List[str]] = None) -> subprocess.CompletedProcess:
+    """Runs install_availability_probe.ps1 under tests/ps/usr448_probe_mock_harness.ps1, which fakes
+    Get-Command/Register-ScheduledTask/Get-ScheduledTask so the assertions below exercise the real
+    fail-closed and action-wiring logic without touching the real Windows Task Scheduler."""
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    copy_dir = tmp_path / "repo" / "scripts"
+    copy_dir.mkdir(parents=True, exist_ok=True)
+    copy = copy_dir / "install_availability_probe.ps1"
+    shutil.copy(_INSTALL_SCRIPT, copy)
+    full_env = dict(os.environ)
+    full_env.update(env)
+    args = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", str(_HARNESS), "-ScriptPath", str(copy)]
+    args.extend(extra_args or [])
+    return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=120, env=full_env)
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_fails_closed_without_pythonw_or_python(tmp_path: Path) -> None:
+    proc = _run_probe_harness(tmp_path, env={})
+    assert proc.returncode == 1
+    assert "nem pythonw.exe nem python.exe" in proc.stderr
+    assert "CALL:" not in proc.stdout
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_fails_closed_when_pythonw_missing_beside_python(tmp_path: Path) -> None:
+    proc = _run_probe_harness(tmp_path, env={"FAKE_PYTHON_PATH": r"C:\FakePython\python.exe"})
+    assert proc.returncode == 1
+    assert "pythonw.exe nao encontrado em" in proc.stderr
+    assert "CALL:" not in proc.stdout
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_wires_absolute_action_and_registers_with_force(tmp_path: Path) -> None:
+    fake_pythonw = str(tmp_path / "fakepy" / "pythonw.exe")
+    proc = _run_probe_harness(tmp_path, env={"FAKE_PYTHONW_PATH": fake_pythonw}, extra_args=["-TaskName", "Fake-Task"])
+    assert proc.returncode == 0, proc.stderr
+    action_line = next(line for line in proc.stdout.splitlines() if line.startswith("CALL:New-ScheduledTaskAction:"))
+    assert f"Execute={fake_pythonw}" in action_line
+    assert "Argument=-m core.infra.availability_probe" in action_line
+    assert f"WorkingDirectory={tmp_path / 'repo'}" in action_line
+    register_line = next(line for line in proc.stdout.splitlines() if line.startswith("CALL:Register-ScheduledTask:"))
+    assert "TaskName=Fake-Task" in register_line
+    assert "Force=True" in register_line
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_registration_is_idempotent_across_repeated_runs(tmp_path: Path) -> None:
+    env = {"FAKE_PYTHONW_PATH": str(tmp_path / "fakepy" / "pythonw.exe")}
+    first = _run_probe_harness(tmp_path, env=env, extra_args=["-TaskName", "Fake-Task"])
+    second = _run_probe_harness(tmp_path, env=env, extra_args=["-TaskName", "Fake-Task"])
+    for proc in (first, second):
+        assert proc.returncode == 0, proc.stderr
+        register_line = next(line for line in proc.stdout.splitlines() if line.startswith("CALL:Register-ScheduledTask:"))
+        assert "TaskName=Fake-Task" in register_line
+        assert "Force=True" in register_line
+
+
+@pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
+def test_install_availability_probe_verify_reports_registered_task_last_result(tmp_path: Path) -> None:
+    ok_env = {
+        "FAKE_TASK_REGISTERED": "1",
+        "FAKE_PYTHONW_PATH": str(tmp_path / "fakepy" / "pythonw.exe"),
+        "FAKE_LAST_RESULT": "0",
+    }
+    ok_proc = _run_probe_harness(tmp_path, env=ok_env, extra_args=["-TaskName", "Fake-Task", "-Verify"])
+    assert ok_proc.returncode == 0, ok_proc.stderr
+    assert "Tarefa 'Fake-Task' registrada." in ok_proc.stdout
+    assert "LastTaskResult: 0" in ok_proc.stdout
+
+    failing_env = dict(ok_env, FAKE_LAST_RESULT="5")
+    failing_proc = _run_probe_harness(tmp_path, env=failing_env, extra_args=["-TaskName", "Fake-Task", "-Verify"])
+    assert failing_proc.returncode == 1
+    assert "FALHOU" in failing_proc.stdout
 
 # --------------------------------------------------------------------------- plan
 

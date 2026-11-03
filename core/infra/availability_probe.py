@@ -123,7 +123,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[List[str]] = None, path: Optional[Path] = None, url: str = DEFAULT_URL) -> int:
+def main(path: Optional[Path] = None, url: str = DEFAULT_URL, *, argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.check:

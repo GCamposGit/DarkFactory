@@ -70,11 +70,6 @@ if ($isWorktreePath -or $isSecondaryWorktree) {
     exit 2
 }
 
-if ($DryRun) {
-    Write-Output "[DRY-RUN] Guarda de worktree aprovada para $repoRoot; nenhuma tarefa registrada."
-    exit 0
-}
-
 # Pythonw.exe absoluto; falha fechada se nao existir (nunca abre janela via python.exe).
 $pythonwCmd = Get-Command pythonw.exe -ErrorAction SilentlyContinue
 if ($pythonwCmd) {
@@ -91,6 +86,11 @@ if ($pythonwCmd) {
         exit 1
     }
     $pythonwPath = $candidate
+}
+
+if ($DryRun) {
+    Write-Output "[DRY-RUN] Guarda de worktree aprovada para $repoRoot; pythonw.exe resolvido em $pythonwPath; nenhuma tarefa registrada."
+    exit 0
 }
 
 $action = New-ScheduledTaskAction -Execute $pythonwPath -Argument "-m core.infra.availability_probe" -WorkingDirectory $repoRoot
