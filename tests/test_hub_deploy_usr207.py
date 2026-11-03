@@ -106,13 +106,12 @@ def test_install_availability_probe_refuses_inside_worktree_dirs(tmp_path: Path,
 
 
 @pytest.mark.skipif(not shutil.which("powershell") and not shutil.which("pwsh"), reason="PowerShell indisponivel")
-def test_install_availability_probe_verify_reports_unregistered_task_and_exits_nonzero() -> None:
-    shell = shutil.which("powershell") or shutil.which("pwsh")
-    script = ROOT / "scripts" / "install_availability_probe.ps1"
-    proc = subprocess.run(
-        [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
-         "-TaskName", "DarkFac-Hub-Availability-Nonexistent-Test-Double", "-Verify"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+def test_install_availability_probe_verify_reports_unregistered_task_and_exits_nonzero(tmp_path: Path) -> None:
+    # Goes through the mock harness (not the real script) because the real -Verify path calls
+    # Get-ScheduledTask, which belongs to the Windows-only ScheduledTasks module: unavailable
+    # under pwsh on Linux CI runners, so calling it directly fails closed for the wrong reason.
+    proc = _run_probe_harness(
+        tmp_path, env={}, extra_args=["-TaskName", "DarkFac-Hub-Availability-Nonexistent-Test-Double", "-Verify"],
     )
     assert proc.returncode != 0
     assert "nao esta registrada" in proc.stdout
