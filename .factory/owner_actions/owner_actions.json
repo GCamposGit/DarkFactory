@@ -3236,7 +3236,7 @@
       ],
       "verify": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\dev\\DarkFac\\scripts\\install_availability_probe.ps1 -Verify imprime LastTaskResult: 0; equivalente manual: (Get-ScheduledTask DarkFac-Hub-Availability | Get-ScheduledTaskInfo).LastTaskResult -eq 0",
       "created_at": "2026-11-02T00:00:00Z",
-      "created_by": "claude-code",
+      "created_by": "claude",
       "resolved_at": null
     }
   ]
