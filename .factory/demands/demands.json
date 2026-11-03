@@ -13015,8 +13015,8 @@
     "project_id": "darkfac",
     "title": "Sonda de disponibilidade agendada aponta para modulo inexistente",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "6adb5a45f254806e2cea7616f9c451ec9f82cd15",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -13036,6 +13036,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-01T21:39:58.821273Z",
-    "updated_at": "2026-11-01T21:39:58.821273Z"
+    "updated_at": "2026-11-03T03:50:47.515472Z"
   }
 ]
