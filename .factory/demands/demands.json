@@ -13009,5 +13009,35 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-461",
+    "project_id": "darkfac",
+    "title": "Notebook com pool de kernel excessivo bloqueia capacidade da fabrica",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Medicao real em 03/11/2026: RAM total 31.7 GiB, disponivel 4.0 GiB; PoolPagedBytes 15.19 GiB, PoolPagedResidentBytes 12.63 GiB e PoolNonpagedBytes 1.92 GiB. Windows iniciou em 28/10/2026 06:56. Guarda de RAM retorna zero workers e bloqueia Notebook. Investigar driver ou servico por pool tags e tendencia; nao presumir que soma de RSS explica RAM fisica nem reduzir guarda de capacidade para contornar.",
+    "core_journey": [
+      "Medicao real em 03/11/2026: RAM total 31.7 GiB, disponivel 4.0 GiB; PoolPagedBytes 15.19 GiB, PoolPagedResidentBytes 12.63 GiB e PoolNonpagedBytes 1.92 GiB. Windows iniciou em 28/10/2026 06:56. Guarda de RAM retorna zero workers e bloqueia Notebook. Investigar driver ou servico por pool tags e tendencia; nao presumir que soma de RSS explica RAM fisica nem reduzir guarda de capacidade para contornar."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar por evidencia o componente responsavel ou documentar captura de pool tags reproduzivel",
+      "Verificar RAM e pools apos reinicio completo e acompanhar crescimento sob carga normal",
+      "Notebook volta a capacidade elegivel sem desativar protecoes ou perder trabalho ativo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-03T11:42:35.754426Z",
+    "updated_at": "2026-11-03T11:42:35.754426Z"
   }
 ]
