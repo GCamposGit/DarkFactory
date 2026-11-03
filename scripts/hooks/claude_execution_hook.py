@@ -68,13 +68,13 @@ def _worker(event: str, key: str, payload: dict) -> int:
     deadline = time.monotonic() + MAX_LIFETIME_S
     next_beat = time.monotonic() + interval
     while time.monotonic() < deadline:
+        if time.monotonic() >= next_beat:
+            exec_cli.heartbeat(eid)
+            next_beat = time.monotonic() + interval
         if stop_file.exists():
             status = stop_file.read_text(encoding="utf-8").strip() or "succeeded"
             exec_cli.finish(eid, status)
             break
-        if time.monotonic() >= next_beat:
-            exec_cli.heartbeat(eid)
-            next_beat = time.monotonic() + interval
         time.sleep(min(0.2, interval))
     else:
         exec_cli.finish(eid, "cancelled", "hook worker lifetime exceeded")

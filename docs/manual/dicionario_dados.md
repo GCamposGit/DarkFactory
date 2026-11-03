@@ -18,19 +18,19 @@ Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `pyt
 | `.factory/worktrees/manifest.json` | Leases de worktrees ativas. | `core/git/autonomy.py` | `core/git/autonomy.py` | `base_sha`, `leases`, `updated_at` |
 | `.factory/worktrees/autonomy-plan.json` | Plano de autonomia de uma worktree (ticket, branch, fencing). | `core/demands/specifier.py`, `core/roadmap/sources.py` | agente do ticket | `ticket_id`, `branch`, `cwd`, `base_sha`, `fencing_token` |
 
-## Configuracao (`.factory/config/*.json`, 12 arquivos)
+## Configuracao (`.factory/config/*.json`, 9 arquivos)
 
 | Arquivo | Proposito | Le | Escreve | Campos principais |
 |---|---|---|---|---|
 | `model_registry.json` | Unica fonte de ids de modelos, papeis e limiares. | `core/models/registry.py`, `scripts/generate_model_docs.py` | edicao via ticket | `models`, `roles`, `quota_floor_percent`, `grill_thresholds`, `rollback_thresholds` |
 | `line_routing.json` | Roteamento por estagio, pressao de cota e tetos de run. | `core/line/routing.py`, `core/line/bindings.py` | edicao via ticket | `stages`, `pressure_thresholds`, `cooldown_default_minutes`, `run_caps` |
 | `line_fleet.json` | Hosts e slots da frota de workers. | `core/line/fleet_dispatcher.py`, `core/line/fleet_policy.py`, `scripts/start_fleet_worker.py` | edicao via ticket | `max_fleet_slots`, `hosts` |
-| `subagent_model_routing.json` | Politica de modelo por tipo de tarefa de subagente. | `core/line/subagent_routing.py`, `core/models/docgen.py` | edicao via ticket | `limits`, `eligible_task_types`, `forbidden_tags`, `forbidden_stages`, `opus_stages` |
 | `agent_env_policy.json` | Allowlist/denylist de variaveis de ambiente dos agentes. | `core/line/agent_env.py` | edicao via ticket | `keep_names`, `deny_names`, `deny_patterns`, `allow_names`, `network_allowlist` |
 | `secrets_required.json` | Chaves exigidas no cofre SOPS, inclusive as de piloto (prefixo por projeto, ex. `MANSAODOLAGO_`). | `core/infra/secrets_vault.py`, `scripts/bootstrap_secrets.py`, `core/line/pilot_secrets.py` | edicao via ticket | `version`, `required` |
 | `subscription_prices.json` | Preco das assinaturas para custo por ticket. | `core/usage/ticket_cost.py`, `hub/backend/service_usage.py` | edicao via ticket | `status`, `plans` |
 | `complexity_baseline.json` | Baseline do ratchet de complexidade. | `scripts/complexity_ratchet.py` | `scripts/complexity_ratchet.py` | `functions`, `limit` |
 | `model_id_baseline.json` | Baseline do censo de ids de modelo fora do registry. | `scripts/model_id_census.py` | `scripts/model_id_census.py` | `total`, `files` |
+| `external_entrypoints.json` | Modulos/scripts acionados por agendador ou servico fora do repo (travando remocao por varredura de codigo morto). | `core/infra/external_entrypoints.py` | edicao via ticket | `version`, `entrypoints[]` (`id`, `kind`, `target`, `trigger_type`, `trigger_name`, `host`, `installed_by`, `reason`) |
 
 
 ## Governanca (`.factory/governance/authorizations/*.json`, 5 arquivos)

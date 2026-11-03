@@ -21,15 +21,21 @@ Notas:
 
 ### Agendar a sonda (Notebook ou Desktop, NUNCA a VPS)
 
+`scripts\install_availability_probe.ps1` (USR-448) registra a tarefa de forma idempotente,
+resolve o `pythonw.exe` absoluto (falha fechada se nao existir) e nunca usa `Start-Process`
+nem `Invoke-Expression`. Rodar a partir do checkout principal (nao de uma worktree):
+
 ```powershell
-$py = "C:\Users\guigc\AppData\Local\Programs\Python\Python312\pythonw.exe"
-if (-not (Test-Path $py)) { throw "pythonw.exe nao encontrado em $py (confira com: (Get-Command python).Source)" }
-$action = New-ScheduledTaskAction -Execute $py -Argument "-m core.infra.availability_probe" -WorkingDirectory "C:\dev\DarkFac"
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName "DarkFac-Hub-Availability" -Action $action -Trigger $trigger -Force
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\install_availability_probe.ps1
 ```
 
-(`pythonw.exe` nao abre janela. Nao executar a partir de agentes; o owner cola no PowerShell ja feito na OA-044.)
+Verificar depois (existencia da tarefa, caminho executado e ultimo codigo de resultado):
+
+```powershell
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\install_availability_probe.ps1 -Verify
+```
+
+(`pythonw.exe` nao abre janela. Nao executar a partir de agentes; o owner cola no PowerShell ja feito na OA-044/OA-NNN.)
 
 ## 2. Entregue: imagem GHCR e troca blue-green
 
@@ -98,7 +104,8 @@ Se `non200 > 0`: confira a ordem das fases nos logs do script (overlap antes de 
 
 ### 2.3 Estado das acoes do owner
 
-- OA-044: agendamento da sonda no Notebook/Desktop registrado e cumprido; o comando PowerShell da secao 1 e protegido por `test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments`.
+- OA-044: agendamento da sonda no Notebook/Desktop registrado e cumprido; o comando PowerShell original (snippet manual) virou `scripts/install_availability_probe.ps1` (USR-448), com comportamento travado por `tests/test_hub_deploy_usr207.py` (guarda de worktree, resolucao de `pythonw.exe` e ausencia de `Start-Process`/`Invoke-Expression`).
+- OA-NNN (USR-448): reinstalar a tarefa `DarkFac-Hub-Availability` com o script novo e confirmar `LastTaskResult = 0` apos a tarefa apontar para um modulo que deixou de existir (ver `docs/runbooks/hub_availability_probe.md`).
 - OA-052/OA-053: configuracao de ativacao e credencial de leitura GHCR cumpridas para o runner que consulta o manifesto. A credencial de pull usada pela VPS/Dokploy ainda falhou na prova de 23/10 e esta no escopo do USR-363.
 - OA-057: blue-green no Traefik escolhido e implementado.
 - OA-058: prova de sonda de 1 s durante deploy real continua aberta; executar depois da correcao do pull privado pelo USR-363.
