@@ -3196,7 +3196,7 @@ def _stage_preflight(
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
             grokbox_wake.preflight_check(
-                allow_external_communication=args.allow_grokbox_wake_email,
+                allow_external_communication=args.allow_grokbox_wake_email is True,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Grokbox preflight check failed: %s", exc)
