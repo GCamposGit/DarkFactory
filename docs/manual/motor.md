@@ -1,6 +1,22 @@
 <!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
 # Motor da esteira
 
+## Wake do grokbox no preflight (USR-456)
+
+`run_ticket.py` sempre consulta `/health` do grokbox no preflight. O email de wake só é enviado quando a
+execução recebe autorização explícita (`--allow-grokbox-wake-email`); texto livre, variáveis de ambiente e
+autorização de outros canais não concedem essa permissão. Sem autorização, a sonda e o launcher seguem
+normalmente e o log registra `provider=grokbox_wake_email outcome=suppressed` com causa estruturada.
+
+O throttle de 30 minutos usa `.factory/grokbox_wake/state.json` no checkout comum a todas as worktrees
+ligadas ao mesmo repositório. `DARKFAC_STATE_ROOT` explícito continua apontando para a raiz configurada,
+inclusive em testes e execuções isoladas. Um lock entre processos cobre leitura, decisão, reserva do
+intervalo, envio e gravação. A reserva é persistida antes do envio para manter a garantia de no máximo
+uma tentativa por janela mesmo quando o provedor aceita o email e a resposta expira. Raiz compartilhada
+indisponível, estado ilegível, gravação impossível ou lock indisponível suprime o email
+(`shared_state_root_unavailable`, `state_unreadable`, `state_write_failed` ou `lock_unavailable`);
+sondagem e launcher continuam operantes.
+
 ## Sequencia canonica de estagios (USR-375 S2)
 
 `core/line/stages.py` define a ordem: INTAKE, GRILL, PLAN, RESEARCH, BUILD, VALIDATE, REVIEW, MERGE, DEPLOY_SMOKE, DOCS, LEARNING.

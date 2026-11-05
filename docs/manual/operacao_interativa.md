@@ -22,6 +22,16 @@ Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, work
 
 O `run_ticket.py` revalida a cota de `development` antes de cada fatia do plano, com um `pick` fresco sobre a leitura daquele momento. Um plano de uma fatia faz esse pick uma vez. Um plano de várias fatias repete o pick antes de cada agente, e a leitura pode trocar o harness write entre fatias. O pin `--harness` e o `--force` do preflight nao iniciam, numa fatia, um harness com headroom conhecido de 15% ou menos, ou sem leitura. Com `--fleet`, esse pick usa `execution_context` headless: Antigravity nao inicia a fatia mesmo sendo o harness de operacao, com Google acima de 15% e os demais no piso. Sem rota elegivel o processo espera (codigo 75, JSON com `cause` `route_wait`, `stage` `BUILD` e o caminho da worktree), nao chama o agente da fatia, nao comeca a entrega e a worktree permanece, inclusive um arquivo gravado durante o PLAN e o trabalho das fatias anteriores. `_discard_untouched_workspace` e `_report_workspace_fate` nao removem esse diretorio.
 
+### Wake do grokbox e comunicacao externa (USR-456)
+
+No preflight, o launcher consulta a saude do grokbox. Se estiver indisponivel, registra a supressao com a causa `external_communication_not_authorized` e continua a execucao sem enviar email. Prompt, variavel de ambiente e outras opcoes nao concedem autorizacao. O envio exige o opt-in dedicado na propria chamada:
+
+```powershell
+python C:\dev\DarkFac\run_ticket.py USR-XXX --allow-grokbox-wake-email
+```
+
+Esse argumento autoriza somente o email de wake do grokbox. Envios autorizados continuam limitados a uma tentativa por janela compartilhada de 30 minutos entre worktrees; falha no estado do throttle ou no envio suprime o email sem interromper o launcher.
+
 ## Entrega de ticket so na fila (USR-424)
 
 `--resume-delivery` resolve o id antes de exigir o `demands.json` da worktree, nesta ordem: ledger da worktree, fila duravel do control store, arquivo do checkout compartilhado e `origin/main`. A fila materializa o mesmo id no ledger da worktree, sem `next_ticket_id`, sem o agente de correcao e sem copiar o ledger compartilhado. O arquivo do checkout compartilhado segue para a entrega sem gravar a worktree e sem criar linha na fila. Id so em `origin/main` continua encontrado; o rebase posterior traz a linha. Id ausente nos quatro locais encerra com exit 1, `ok=false`, `cause=ticket_absent` e `error` no formato `Ticket <ID> not found in demands store`. O stderr cita o ledger da worktree, a control store, o checkout compartilhado e `origin/main`. O ledger e o `control.db` permanecem como estavam. `run_ticket.py USR-XXX` carrega o id no ledger do checkout (a fila entra nessa leitura) e, se faltar, em `origin/main`.

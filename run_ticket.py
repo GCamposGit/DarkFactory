@@ -309,6 +309,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-push", action="store_true", help="Do not automatically push to remote after validation pass")
     parser.add_argument("--json", action="store_true", help="Output raw JSON result")
     parser.add_argument(
+        "--allow-grokbox-wake-email",
+        action="store_true",
+        help="Explicitly authorize the grokbox preflight to send its wake email",
+    )
+    parser.add_argument(
         "--queue-only",
         action="store_true",
         help="With --create: register the ticket in the development queue (control store, no PR) without running it",
@@ -3183,14 +3188,16 @@ def _stage_preflight(
     progress: ProgressPublisher,
 ) -> Any:
     """Grokbox probe, size estimation, routing and dry run. Returns a route dict, or an int exit code."""
-    # 1a. Grokbox health probe + wake email (USR-310): a dead probe or a failed email
+    # 1a. Grokbox health probe + optionally authorized wake email (USR-310/456): a dead probe or a failed email
     # only logs -- it never blocks or changes this run's outcome. Skipped under pytest
     # (same guard as the delivery subprocess bypass below): the probe/email are already
     # offline-safe on their own, but leaving "down" state in the real .factory of the
     # checkout the suite runs from would make an unrelated test's gate wait for real.
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
-            grokbox_wake.preflight_check()
+            grokbox_wake.preflight_check(
+                allow_external_communication=args.allow_grokbox_wake_email is True,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Grokbox preflight check failed: %s", exc)
 

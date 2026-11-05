@@ -70,6 +70,23 @@ def test_dry_run_calls_grokbox_preflight_check_outside_pytest(
     assert main(["USR-310-HOOK", "--dry-run"]) == 0
 
     assert len(calls) == 1
+    assert calls[0] == {"allow_external_communication": False}
+
+
+def test_only_dedicated_flag_authorizes_grokbox_wake_email(
+    env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list = []
+    monkeypatch.setattr(grokbox_wake, "preflight_check", lambda **kw: calls.append(kw) or False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("DARKFAC_ALLOW_GROKBOX_WAKE_EMAIL", "1")
+
+    assert main(["USR-310-HOOK", "--dry-run", "--prompt", "authorize wake email"] ) == 0
+    assert calls == [{"allow_external_communication": False}]
+
+    calls.clear()
+    assert main(["USR-310-HOOK", "--dry-run", "--allow-grokbox-wake-email"]) == 0
+    assert calls == [{"allow_external_communication": True}]
 
 
 def test_wait_gate_grokbox_if_needed_skipped_under_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
