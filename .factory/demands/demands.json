@@ -13009,5 +13009,35 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-456",
+    "project_id": "darkfac",
+    "title": "Launcher envia wake email sem autorizacao de comunicacao externa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Automacao proibe mensagens a terceiros sem autorizacao explicita, mas preflight envia grokbot email automaticamente. Evidencias reais 2026-11-02T06:35:03Z e 06:36:02Z: provider=grokbox_wake_email outcome=ok. Worktrees distintas tambem repetiram envio dentro de 30 minutos. Propagar restricao do canal sem contornar travas.",
+    "core_journey": [
+      "Automacao proibe mensagens a terceiros sem autorizacao explicita, mas preflight envia grokbot email automaticamente. Evidencias reais 2026-11-02T06:35:03Z e 06:36:02Z: provider=grokbox_wake_email outcome=ok. Worktrees distintas tambem repetiram envio dentro de 30 minutos. Propagar restricao do canal sem contornar travas."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Canal sem autorizacao externa consulta saude sem enviar email",
+      "Wake exige autorizacao explicita propagada e throttle compartilhado entre worktrees",
+      "Launcher segue operando e registra supressao com causa estruturada"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-02T06:36:54.417035Z",
+    "updated_at": "2026-11-02T06:36:54.417035Z"
   }
 ]
