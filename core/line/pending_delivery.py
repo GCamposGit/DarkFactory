@@ -176,10 +176,10 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
 
 def acknowledge_deploy(repo_root: Path, rows: list[dict]) -> None:
     """Close only releases proven included in the healthy deployed main SHA."""
-    from scripts.dokploy_redeploy import fetch_darkhub_health
+    from core.infra.node_sync import VPS_URL, request_json
     from core.line import ticket_engine
     from types import SimpleNamespace
-    health = fetch_darkhub_health()
+    health = request_json("GET", VPS_URL, None, None)
     sha = health.get("git_sha", "")
     if health.get("status") != "ok" or not sha:
         raise RuntimeError("Deployment health identity missing")

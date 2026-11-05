@@ -1079,9 +1079,11 @@ def pick(
        `unknown_quota_last_resort_ok=True`):
        when no candidate has known healthy quota, a subscription harness whose quota is UNKNOWN (never
        one known critical, nor one in cooldown) is elected, in cascade order, before OpenRouter.
-       Default off: unknown quota stays fail-closed.
-    3. Fallback to OpenRouter only for `read` mode, when stage allows it or all cascade accounts
-       are exhausted, provided OpenRouter has confirmed USD credit and spent_usd < cap.
+       Default off: unknown quota stays fail-closed for the subscription itself.
+    3. OpenRouter contingency when it declares the required mode, a model is configured, confirmed
+       credit is positive and spent_usd is under the run cap, and either the stage sets
+       `openrouter_ok` or every evaluated subscription is known-exhausted. Unknown or critical
+       subscription quota never elects that subscription; with credit, OpenRouter is the route.
     """
     cfg = config or load_routing_config()
     stage_cfg = cfg.stages.get(stage)

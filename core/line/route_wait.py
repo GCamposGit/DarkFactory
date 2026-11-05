@@ -211,6 +211,11 @@ def infra_guide(job_stage: str, *, waited_h: float, cap_h: float, writes_code: b
         "A retomada automatica consulta a volta de uma assinatura elegivel ou saldo OpenRouter "
         "dentro do orcamento; nao precisa haver assinatura acima de 15% para usar a contingencia."
     )
+    if writes_code:
+        steps.append(
+            "Esta etapa escreve codigo. A contingencia OpenRouter faz essa escrita com saldo confirmado "
+            "e sem eleger assinatura no piso."
+        )
     steps.append(
         "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha "
         "assim que houver rota."

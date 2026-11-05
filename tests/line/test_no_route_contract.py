@@ -51,6 +51,10 @@ NOT_A_ROUTE_PARK: dict[str, str] = {
         "USR-439: autonomous sentinel inspects whether normal routing can currently elect routes for "
         "development and planning to alert on stalls; it is a read-only probe and never runs or parks a stage."
     ),
+    "pending_delivery.py": (
+        "USR-473: the dispatcher asks pick() whether a persisted route wait can resume. A missing route "
+        "stays on the durable queue and is rechecked; this module never parks a run on a human."
+    ),
 }
 
 
