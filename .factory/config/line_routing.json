@@ -23,7 +23,7 @@
         "codex": {"model": "development.codex", "effort": "high"},
         "grok": {"model": "development.grok", "effort": "high"}
       },
-      "openrouter_ok": false,
+      "openrouter_ok": true,
       "openrouter_model": "development.openrouter"
     },
     "review": {

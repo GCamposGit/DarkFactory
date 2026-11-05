@@ -192,7 +192,7 @@ def _default_routing_config() -> RoutingConfig:
             ),
             "development": StageRoute(
                 cascade=[("claude", "sonnet"), ("codex", None), ("grok", resolve_model("development.grok"))],
-                openrouter_ok=False,
+                openrouter_ok=True,
                 openrouter_model=resolve_model("development.openrouter"),
                 harness_pins={
                     "claude": HarnessPin(model="sonnet"),
@@ -942,11 +942,26 @@ def _elect_openrouter(
 ) -> Optional[tuple[str, str]]:
     if _openrouter_has_credits(balance_lookup):
         _check_openrouter_monthly_budget(cfg)
-        if stage_cfg.openrouter_model in (None, "pareto", "dynamic") or os.environ.get("DARKFAC_OPENROUTER_DYNAMIC_PARETO") == "1":
+        if stage != "review" and (stage_cfg.openrouter_model in (None, "pareto", "dynamic") or os.environ.get("DARKFAC_OPENROUTER_DYNAMIC_PARETO") == "1"):
             return "openrouter", resolve_pareto_openrouter_model(stage, fallback_model=stage_cfg.openrouter_model)
         return "openrouter", stage_cfg.openrouter_model
     logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
     return None
+
+
+def _independent_openrouter(route: Optional[tuple[str, str]], implementing_harness: Optional[str]) -> Optional[tuple[str, str]]:
+    if route is None or implementing_harness is None:
+        return route
+    registry = get_registry()
+    impl_id = registry.roles.get(f"development.{implementing_harness}")
+    impl = next((m for m in registry.models if m.id == impl_id), None)
+    reviewer_id = _resolve_role_ref(route[1])
+    reviewer = next((m for m in registry.models
+                     if reviewer_id in [m.id, *m.aliases, *m.gateway_ids]), None)
+    if impl is None or reviewer is None or impl.family == reviewer.family:
+        logger.warning("OpenRouter review refused: independent model family not verified")
+        return None
+    return route
 
 
 def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float]]]) -> bool:
@@ -1183,6 +1198,7 @@ def pick(
     allow_openrouter = stage_cfg.openrouter_ok or all_exhausted
     if (
         supports("openrouter", required_mode)
+        and "openrouter" not in excluded_harnesses
         and (stage not in HIGH_TIER_ONLY_STAGES or no_local_available or is_high_tier_model(stage_cfg.openrouter_model))
         and (not project_id or _policy_allows(project_id, "openrouter"))
         and stage_cfg.openrouter_model
@@ -1190,7 +1206,8 @@ def pick(
         and allow_openrouter
         and spent_usd < cfg.run_caps.openrouter_usd
     ):
-        return _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
+        route = _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
+        return _independent_openrouter(route, implementing_harness) if stage == "review" else route
 
     return None
 

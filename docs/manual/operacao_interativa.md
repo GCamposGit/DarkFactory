@@ -1,6 +1,12 @@
 <!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, run_ticket.py -->
 # Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
+Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
+confirmados, preservando revisão por outra família. `route_wait` fica persistido
+para o dispatcher retomar automaticamente; o operador não precisa voltar ao chat.
+Durante recuperação manter `--resume-only` ativo, conforme [frota.md](frota.md),
+em vez de desligar o controlador junto com os heartbeats de LLM (USR-473).
+
 ## Inicio e roteamento
 
 Antigravity e Codex atuam como interfaces de operacao interativa para coordenar a fabrica pelo chat. No inicio de uma sessao:

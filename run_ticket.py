@@ -2495,6 +2495,8 @@ def _delivery_route_wait(
 ) -> Any:
     """No other-family reviewer now: keep the worktree, requeue (fleet requeue code), no failure."""
     message = f"estagio REVIEW aguardando revisor de outra familia: {cause}"
+    from core.line.pending_delivery import schedule
+    schedule(ticket.id, target_worktree, "review", resume_delivery=True, cause=cause)
     progress.phase("gate", "skipped", message, cause="route_wait")
     progress.set_outcome(message, "route_wait")
     print(f"[AGUARDANDO] Ticket {ticket.id}: {message} ({ROUTE_WAIT_MARKER}).", file=sys.stderr)
@@ -3292,6 +3294,10 @@ def _stage_wait(
 ) -> int:
     """No route for a stage right now: requeue later (ticket stays planned), never a failure."""
     message = f"estagio {stage.value} aguardando rota elegivel: {cause}"
+    from core.line.pending_delivery import schedule
+    routing_stage = {Stage.PLAN: "planning", Stage.GRILL: "grill", Stage.BUILD: "development"}.get(stage)
+    if routing_stage:
+        schedule(ticket.id, workspace.path if workspace else PROJECT_ROOT, routing_stage, cause=cause)
     progress.phase("agent", "skipped", message, cause="route_wait")
     progress.set_outcome(message, "route_wait")
     print(f"[AGUARDANDO] {message}. Ticket segue planned e volta a fila depois ({ROUTE_WAIT_MARKER}).",
@@ -3611,6 +3617,8 @@ def _stage_development_route_wait(
     exit code before delivery, so those cleanups do not run later either.
     """
     _requeue_after_route_wait(ticket)
+    from core.line.pending_delivery import schedule
+    schedule(ticket.id, workspace.path, "development", cause="development_no_route")
     cause = "development_no_route"
     floor = f"{QUOTA_FLOOR_MIN:g}"
     message = f"development apos o PLAN sem rota com cota acima de {floor}%"

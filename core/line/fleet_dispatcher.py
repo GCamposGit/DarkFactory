@@ -30,12 +30,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
+from core.paths import state_root
 
 logger = logging.getLogger("darkfac.line.fleet_dispatcher")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-STATE_PATH = PROJECT_ROOT / ".factory" / "runs" / "fleet_dispatcher_state.json"
-LOG_DIR = PROJECT_ROOT / ".factory" / "runs" / "fleet_dispatcher_logs"
+STATE_PATH = state_root() / "runs" / "fleet_dispatcher_state.json"
+LOG_DIR = state_root() / "runs" / "fleet_dispatcher_logs"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
@@ -95,6 +96,8 @@ def default_hosts() -> list[HostSpec]:
 
 @dataclass
 class DispatcherConfig:
+    resume_only: bool = False
+    recovery_tickets: tuple[str, ...] = ()
     hosts: list[HostSpec] = field(default_factory=default_hosts)
     cycle_sec: float = 30.0
     stable_probes: int = 3
@@ -452,12 +455,34 @@ class FleetDispatcher:
             return False
         self.pending_deploy = False
         if not self.dry_run:
-            self.deploy()
+            from core.demands.store import _PathMutex, DemandsLockTimeout
+            try:
+                with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
+                    rc = self.deploy()
+            except DemandsLockTimeout:
+                rc = 75
+            if rc != 0:
+                self.pending_deploy = True
+                self.last_merge_at = self.clock()
+                return False
         self.deploys += 1
         return True
 
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
+        from core.line.pending_delivery import tick, acknowledge_deploy
+        resumptions = tick(PROJECT_ROOT) if self.launch is None and not self.dry_run else []
+        awaiting_deploy = any(r["status"] == "merged_awaiting_deploy" for r in resumptions)
+        if awaiting_deploy and not self.pending_deploy:
+            self.pending_deploy, self.last_merge_at = True, self.clock()
+        deployed_resume = self._maybe_deploy() if awaiting_deploy else False
+        if deployed_resume:
+            acknowledge_deploy(PROJECT_ROOT, resumptions)
+        if self.config.resume_only:
+            self.last_cycle = {"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
+                               "resumptions": resumptions, "dispatched": [], "deployed": deployed_resume}
+            self._write_state()
+            return self.last_cycle
         now = self.clock()
         self.cooldown = {t: u for t, u in self.cooldown.items() if u > now}
         try:
@@ -467,8 +492,16 @@ class FleetDispatcher:
             load_error = str(exc)
         else:
             load_error = ""
-        busy = {j.ticket_id for j in self.in_flight.values()} | set(self.busy_ids_loader())
+        busy = ({j.ticket_id for j in self.in_flight.values()} | set(self.busy_ids_loader())
+                | {r["ticket"] for r in resumptions if "ticket" in r})
         queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
+        terminal = {str(d.get("id")) for d in demands if d.get("status") in _TERMINAL_STATUSES}
+        recovery = self.config.recovery_tickets
+        if recovery and not set(recovery).issubset(terminal):
+            allowed = [tid for tid in recovery if tid in queue]
+            skipped.update({tid: "recuperacao_prioritaria" for tid in queue if tid not in allowed})
+            active_resume = any(r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions)
+            queue = [] if active_resume or self.in_flight else allowed[:1]
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
@@ -508,6 +541,7 @@ class FleetDispatcher:
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
         self.last_cycle = {
+            "resumptions": resumptions,
             "ts": datetime.now(timezone.utc).isoformat(),
             "free_hosts": [h.id for h in self.config.hosts if h.id not in self.in_flight],
             "in_flight": {h: j.ticket_id for h, j in self.in_flight.items()},
@@ -565,6 +599,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--loop", action="store_true")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--resume-only", action="store_true",
+                    default=os.environ.get("DARKFAC_FLEET_RESUME_ONLY") == "1",
+                    help="Retoma esperas persistidas sem admitir novos BUILDs")
+    ap.add_argument("--recovery-tickets", default="",
+                    help="Lista ordenada por virgulas: uma correcao por vez; depois libera a fila regular")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     args = ap.parse_args(argv)
     log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
@@ -572,8 +611,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
 
-    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec), dry_run=args.dry_run, digest_hook=maybe_send_due,
-                        sentinel_hook=maybe_run_sentinel,
+    recovery = tuple(t.strip() for t in args.recovery_tickets.split(",") if t.strip())
+    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec, resume_only=args.resume_only and not recovery,
+                                        recovery_tickets=recovery), dry_run=args.dry_run,
+                        digest_hook=None if args.resume_only else maybe_send_due,
+                        sentinel_hook=None if args.resume_only else maybe_run_sentinel,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts)
     if args.loop and not args.once:
         d.run_forever()

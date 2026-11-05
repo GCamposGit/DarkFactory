@@ -18,12 +18,14 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
 
 ## Ambiente e máquinas
+- Recuperação de05/11/2026 (USR-473): testes remotos direcionados ao Desktop saudável (`100.78.181.90:8080`); Grokbox indisponível fica excluído. Modo persistente `DARKFAC_FLEET_RESUME_ONLY=1` mantém retomadas sem novos BUILDs até estabilizar a saída. A exclusão histórica do Desktop descrita abaixo não representa essa configuração de recuperação.
 - Windows é o ambiente principal; Linux roda no CI e na VM do Grok.
 - Hosts da frota, por prioridade de uso (`.factory/config/line_fleet.json`): **grokbox** (VM do Grok, sujeita a quedas constantes já conhecidas: queda é evento normal, o ticket volta para a fila e retoma em outro host), **Notebook** (máquina do owner; RAM limitada decide quantos workers cabem) e **Desktop**.
 - Para tirar um host da frota sem editar o config (ex.: Desktop ocupado com outra carga), o despachante lê `DARKFAC_FLEET_DISABLED_HOSTS` (ids separados por vírgula). Em 26/10 o Desktop está fora (indexação do Segundo Cérebro); Notebook dedicado à fábrica. O harness de teste remoto (`core/harness/remote_dispatch.py`) e a rotação de workers (`run_ticket.py`) também respeitam `DARKFAC_FLEET_DISABLED_HOSTS`, filtrando proativamente e nunca enviando tráfego ou sondas para hosts desabilitados (USR-430).
 - VPS pequena (Dokploy) com o Hub em blue-green; nenhuma imagem é construída na VPS (tudo vem do GHCR).
 
 ## Orçamento
+- 05/11/2026 (USR-473): owner confirmou contingência OpenRouter quando não há assinatura elegível e recarregou US$10. Manter tetos vigentes; crédito disponível não aumenta automaticamente o teto mensal. Esperas de rota são persistidas e retomadas pelo dispatcher, que permanece ativo em modo de recuperação `--resume-only`, sem heartbeat de LLM. Não deixar retomada apenas em comando/log manual.
 - Assinaturas básicas: Claude Pro, ChatGPT Plus (Codex), SuperGrok e Gemini Pro, consideradas 20 USD/mês cada no custo por ticket (`.factory/config/subscription_prices.json`).
 - OpenRouter: perto de US$ 10/mês; pode subir se aumentar a vazão. Hoje o código aplica só um teto por execução de US$ 2 (`run_caps.openrouter_usd` em `.factory/config/line_routing.json`); o teto mensal em código é parte do bloco USR-378.
 - Dentro desses tetos a fábrica decide sozinha; acima deles, pergunta ao owner (MISSION, princípio 2).

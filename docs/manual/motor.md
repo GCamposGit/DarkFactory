@@ -21,6 +21,14 @@ uma tentativa por janela mesmo quando o provedor aceita o email e a resposta exp
 indisponível, estado ilegível, gravação impossível ou lock indisponível suprime o email
 (`shared_state_root_unavailable`, `state_unreadable`, `state_write_failed` ou `lock_unavailable`);
 sondagem e launcher continuam operantes.
+ 
+## Retomada por rota (USR-473)
+
+Em `route_wait`, o launcher grava a etapa e a worktree em
+`.factory/pending_delivery/` antes de sair. O dispatcher existente retoma a entrega
+automaticamente, mesmo depois de reiniciar. REVIEW continua na mesma worktree pelo
+`--resume-delivery`, preservando gate válido para o candidato. A regra de contingência
+OpenRouter e o modo de recuperação sem novos BUILDs estão em [frota.md](frota.md).
 
 ## Sequencia canonica de estagios (USR-375 S2)
 

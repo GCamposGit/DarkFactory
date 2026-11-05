@@ -1,9 +1,48 @@
-<!-- covers: core/line/fleet_dispatcher.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py -->
 # Operação da frota
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
 Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,
 sem forçar processos além da capacidade e sem executar suítes concorrentes.
+## Espera de rota e retomada automática (USR-473)
+
+Sem assinatura elegível, o roteador tenta OpenRouter com saldo confirmado, dentro do
+orçamento vigente e preservando capacidade e revisão por outra família. Sem saldo ou
+rota, o launcher grava a espera em `.factory/pending_delivery/<ticket>.json` antes de
+sair com código75. O dispatcher permanece ativo: espera não depende de um chat ou
+heartbeat de LLM. O serviço verifica snapshots e crédito, sem gerar texto para supervisionar.
+
+A espera registra etapa, worktree, implementador e próximo horário. Cada espera é
+consultada no máximo a cada15 minutos; o estado sobrevive ao reinício. REVIEW usa
+`run_ticket.py --resume-delivery` na mesma worktree; o launcher preserva validação
+vinculada ao candidato. PLAN/BUILD usam a retomada canônica do ticket, com suas reservas.
+Processo vivo não é duplicado, ticket terminal sai da fila e falha diferente de
+`route_wait` fica bloqueada com causa explícita. Decisão material `waiting_human`
+continua dependendo do owner. Nenhuma espera compra créditos nem aumenta o teto.
+
+Durante recuperação, o mesmo serviço admite só retomadas:
+
+```powershell
+Set-Location C:\dev\DarkFac
+python -m core.line.fleet_dispatcher --loop --resume-only
+```
+
+O modo `--resume-only` não admite novos BUILDs e não executa sentinela/digest adicionais.
+A variável persistente `DARKFAC_FLEET_RESUME_ONLY=1` também ativa esse modo no boot.
+A tarefa Windows `DarkFac-Fleet-Dispatcher` mantém boot e reinício em falha; não substitua
+esse serviço por inferência recorrente. Ao sair da recuperação, remover `--resume-only`
+da ação da tarefa e limpar `DARKFAC_FLEET_RESUME_ONLY` libera novamente a fila regular.
+
+Para uma recuperação que não termina em ociosidade, `--recovery-tickets ID1,ID2`
+executa a lista na ordem, uma correção por vez. Retomadas em execução têm precedência.
+Quando todos os IDs estão completed/cancelled, a fila regular volta automaticamente.
+Esse argumento substitui o modo de espera exclusiva; não existe nova pausa a remover
+manualmente no final. Ticket ausente ou pendência material não contam como concluídos.
+
+`completed` no ledger não encerra uma entrega cujo recibo ainda diz `deployed=false`.
+O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só encerra
+a espera após verificar o SHA saudável de produção incluindo o candidato. Falha de
+deploy permanece pendente para nova tentativa, sem chamar um agente para supervisionar.
 
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva

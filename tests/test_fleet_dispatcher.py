@@ -72,9 +72,26 @@ def test_host_lock_no_overlap(tmp_path: Path):
     e.d.run_cycle()
     e.d.run_cycle()
     assert len(e.launched) == 3
+    # Recovery completes one correction at a time, then resumes the regular queue
+    # without requiring the owner to remove a pause flag.
+    demands = [_d("USR-11"), _d("USR-12"), _d("USR-13")]
+    recovery = Env(tmp_path / "recovery", demands)
+    recovery.d.config.recovery_tickets = ("USR-12", "USR-11")
+    recovery.d.run_cycle()
+    assert [tid for tid, _ in recovery.launched] == ["USR-12"]
+    recovery.d.run_cycle()
+    assert len(recovery.launched) == 1
+    recovery.handles["USR-12"].rc = 0
+    demands[1]["status"] = "completed"
+    recovery.d.run_cycle()
+    assert [tid for tid, _ in recovery.launched] == ["USR-12", "USR-11"]
+    recovery.handles["USR-11"].rc = 0
+    demands[0]["status"] = "completed"
+    recovery.d.run_cycle()
+    assert recovery.launched[-1][0] == "USR-13"
 
 
-def test_infra_failure_requeues_with_cooldown(tmp_path: Path):
+def test_infra_failure_requeues_with_cooldown(tmp_path: Path, monkeypatch):
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
     e.d.run_cycle()
     e.handles["USR-01"].rc = 75
@@ -83,6 +100,67 @@ def test_infra_failure_requeues_with_cooldown(tmp_path: Path):
     e.now += 60
     e.d.run_cycle()
     assert e.launched[-1] == ("USR-01", "grokbox")
+
+    # A REVIEW wait survives a dispatcher restart and resumes the same worktree,
+    # without rebuilding or spinning new processes while a route is absent.
+    from core.line import pending_delivery as pd
+    from types import SimpleNamespace
+    import json
+    from core.usage.models import ProviderAccountUsage, QuotaWindow
+    snapshot_root = tmp_path / "snapshots"
+    monkeypatch.setattr(pd, "state_root", lambda: snapshot_root)
+    provider_file = snapshot_root / "usage" / "providers" / "openai.json"
+    provider_file.parent.mkdir(parents=True)
+    usage = ProviderAccountUsage(provider_id="openai", provider_name="OpenAI", family="frontier",
+        status="connected", adapter="fixture", message="synthetic snapshot", quota_supported=True,
+        windows=[QuotaWindow(quota_id="codex:weekly", label="fixture", used_percent=58, remaining_percent=42)])
+    provider_file.write_text(usage.model_dump_json(), encoding="utf-8")
+    assert pd._cached_quota("openai") == 42
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
+    context = tmp_path / "artifacts" / "USR-99" / ".darkfac" / "runs" / "USR-99"
+    context.mkdir(parents=True)
+    (context / "progress.json").write_text('{"harness":"codex"}', encoding="utf-8")
+    directory = tmp_path / "pending"
+    row = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
+    assert row.implementing_harness == "codex"
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "planned"}]))
+    monkeypatch.setattr("core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}])
+    monkeypatch.setattr(pd, "_route", lambda _row: None)
+    calls = []
+    handle = SimpleNamespace(pid=999999, poll=lambda: None)
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw)) or handle)
+    due = row.next_check + 1
+    assert pd.tick(tmp_path, directory=directory, now=due)[0]["status"] == "waiting_route"
+    assert not calls
+    monkeypatch.setattr(pd, "_route", lambda _row: ("openrouter", "distill.openrouter"))
+    assert pd.tick(tmp_path, directory=directory, now=due + 1)[0]["status"] == "waiting"
+    assert not calls  # persisted backoff also applies after restart
+    result = pd.tick(tmp_path, directory=directory, now=due + pd.RECHECK_SECONDS + 1)
+    assert result[0]["status"] == "running"
+    assert calls[0][0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+    assert "--fleet" not in calls[0][0]  # standalone launcher owns its canonical line lock
+    pd.tick(tmp_path, directory=directory, now=due + 2 * pd.RECHECK_SECONDS)
+    assert len(calls) == 1
+    # Lost parent process: live child remains the owner after a service restart.
+    pd._children.clear()
+    monkeypatch.setattr(pd, "_pid_running", lambda _row: True)
+    assert pd.tick(tmp_path, directory=directory, now=due + 3 * pd.RECHECK_SECONDS)[0]["status"] == "running"
+    assert len(calls) == 1
+    monkeypatch.setattr(pd, "_pid_running", lambda _row: False)
+    # A completed ticket is cleared instead of delivered again after reboot.
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}]))
+    release = context / "deploy_report.json"
+    release.write_text(json.dumps({"sha": "a" * 40, "deployed": False}), encoding="utf-8")
+    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "merged_awaiting_deploy"
+    assert list(directory.glob("*.json"))  # completed ledger alone is not production evidence
+    release.write_text(json.dumps({"sha": "a" * 40, "deployed": True}), encoding="utf-8")
+    assert pd.tick(tmp_path, directory=directory, now=due + 5 * pd.RECHECK_SECONDS)[0]["status"] == "terminal"
+    assert not list(directory.glob("*.json"))
 
 
 def test_deploy_deduplicated_per_batch(tmp_path: Path):
@@ -96,6 +174,10 @@ def test_deploy_deduplicated_per_batch(tmp_path: Path):
     e.d.run_cycle()
     e.d.run_cycle()
     assert e.deploys == 1
+    e.d.pending_deploy, e.d.last_merge_at = True, e.now - 101
+    e.d.deploy = lambda: 1
+    assert not e.d._maybe_deploy()
+    assert e.d.pending_deploy and e.deploys == 1
 
 
 def test_line_lock_refusal_is_busy_not_infra(tmp_path: Path):

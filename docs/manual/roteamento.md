@@ -1,6 +1,14 @@
 <!-- covers: core/line/routing.py, core/line/operating_harness.py, core/router/token_budget.py -->
 # Roteamento do estagio de desenvolvimento (USR-378)
 
+Regra operacional confirmada pelo owner em05/11/2026 (USR-473): esgotada a cota das
+assinaturas elegíveis, usar OpenRouter também para desenvolvimento, planejamento e
+revisão, respeitando saldo, orçamento, capacidades e independência do revisor.
+`development.openrouter_ok=true` permite a contingência também quando a telemetria
+das assinaturas está desconhecida; não autoriza consumir a assinatura abaixo do piso.
+Se não houver crédito ou rota, persistir a espera e manter o dispatcher ativo para
+retomar automaticamente. Um `not_before` no log, sozinho, não é um agendamento.
+
 `core/line/routing.pick` e o unico roteador de producao. Para o estagio `development`:
 
 - **Cascata**: `claude/sonnet`, `codex` e `grok` (`development.grok` no registro de modelos).
