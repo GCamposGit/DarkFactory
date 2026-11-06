@@ -3,7 +3,12 @@
 
 No perfil completo, o orçamento da suíte paralela acompanha a capacidade real
 (USR-452): um worker recebe duas parcelas do prazo calibrado para dois workers.
-O watchdog remoto e os deadlines de cache usam a mesma função do subprocesso.
+O watchdog remoto e os deadlines de cache usam o envelope conservador de um
+worker (6.000s para a suíte); o subprocesso mede uma vez e usa o prazo desse
+snapshot. A quantidade segura medida é passada ao pytest, evitando nova eleição
+de workers entre a medição e o início. O limite externo existente de7.200s cobre
+o envelope de6.540s de todas as checagens. Zero capacidade retorna espera75 pela
+mesma regra de elegibilidade, sem chamar modelo nem esperar com a suíte ocupada.
 Essa adaptação não altera timeout por teste, descoberta, trava ou cache por árvore.
 
 O census de IDs de modelos separa configurações e código de seleção dos ledgers

@@ -68,6 +68,9 @@ def test_measure_workers_uses_worker_capacity_math(monkeypatch) -> None:
     assert gate_ram.measure_workers().workers == 0
     monkeypatch.setattr(wc, "get_available_memory_bytes", lambda: int(8.6 * wc.BYTES_PER_GIB))
     assert gate_ram.measure_workers().workers == 3
+    monkeypatch.setenv("DARKFAC_MAX_WORKERS", "8")
+    monkeypatch.setattr(wc, "get_available_memory_bytes", lambda: int(3.4 * wc.BYTES_PER_GIB))
+    assert gate_ram.measure_workers().workers == 0  # override cannot fabricate available RAM
 
 
 def test_gate_not_run_and_cause_explicit_when_ram_never_recovers(tmp_path: Path, capsys) -> None:

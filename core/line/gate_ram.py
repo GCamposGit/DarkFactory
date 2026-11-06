@@ -51,16 +51,17 @@ def measure_workers() -> RamReading:
 
     available = wc.get_available_memory_bytes()
     gib = available / wc.BYTES_PER_GIB
+    by_memory = max(0, available - wc.DEFAULT_SYSTEM_RESERVE_BYTES) // wc.DEFAULT_MIN_WORKER_MEMORY_BYTES
+    capacity = int(min(by_memory, wc.get_physical_cpu_count(), wc.DEFAULT_HARD_CAP_WORKERS))
     for name in ("DARKFAC_MAX_WORKERS", "PYTEST_XDIST_AUTO_NUM_WORKERS"):
         raw = os.environ.get(name)
         if raw:
             try:
                 if int(raw) > 0:
-                    return RamReading(gib, int(raw))
+                    return RamReading(gib, min(int(raw), capacity))
             except ValueError:
                 pass
-    by_memory = max(0, available - wc.DEFAULT_SYSTEM_RESERVE_BYTES) // wc.DEFAULT_MIN_WORKER_MEMORY_BYTES
-    return RamReading(gib, int(min(by_memory, wc.get_physical_cpu_count(), wc.DEFAULT_HARD_CAP_WORKERS)))
+    return RamReading(gib, capacity)
 
 
 def remote_worker_available() -> bool:

@@ -6,9 +6,11 @@
 Um worker real é elegível; zero workers continua bloqueando a execução. O prazo
 configurado da suíte paralela foi calibrado para pelo menos dois workers. Quando
 só um cabe na RAM, `effective_step_timeout` concede as duas parcelas desse prazo,
-sem elevar workers nem alterar o timeout individual dos testes. Runner, deadlines
-de cache e watchdog do worker remoto usam a mesma função. O prazo externo do
-launcher continua cobrindo os 6.000 segundos da suíte e as outras checagens.
+sem elevar workers nem alterar o timeout individual dos testes. O passo mede uma
+vez e fixa essa quantidade segura para o pytest. Deadlines de cache e watchdog
+remoto reservam o pior caso elegível (um worker), cobrindo uma mudança de memória
+entre admissão e início do passo. O prazo externo de7.200s cobre a suíte de6.000s
+mais540s das outras checagens. Overrides não aumentam a capacidade real da RAM.
 
 ## Testes de forma
 

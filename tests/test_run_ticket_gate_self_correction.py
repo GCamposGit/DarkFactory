@@ -941,12 +941,19 @@ def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(
         result = run_ticket.resume_delivery(
             "USR-354", worktree_path=repo, skip_validation=False, return_result=True
         )
+        no_ram = BoundedProcessResult(stdout="[HARNESS_RESULT] " + json.dumps({
+            "discovered_count": 0, "exit_codes": {"unit_and_integration_tests_parallel": 75},
+        }), stderr="", returncode=1, duration_s=0.1)
+        with patch("run_ticket._run_bounded", return_value=no_ram):
+            resource_wait = run_ticket.resume_delivery(
+                "USR-354", worktree_path=repo, skip_validation=False, return_result=True)
 
     assert len(gate_calls) == 1 + run_ticket.GATE_REMOTE_RETRIES  # USR-372 bounded retries
     assert "--remote-required" in gate_calls[0] and "--local" not in gate_calls[0]
     assert fix_calls == []
     assert result["ok"] is False
     assert result["cause"] == run_ticket.GATE_CAUSE_REMOTE_UNAVAILABLE
+    assert resource_wait["exit_code"] == 75 and resource_wait["cause"] == ga.CAUSE_INSUFFICIENT_RAM
     assert "--resume-delivery USR-354" in capsys.readouterr().err
 
 

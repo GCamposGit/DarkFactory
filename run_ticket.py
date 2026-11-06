@@ -1441,6 +1441,10 @@ def _gate_classify_failure(
             print(message, file=sys.stderr)
         return True
 
+    codes = (_parse_harness_result(st.last_output) or {}).get("exit_codes")
+    if isinstance(codes, dict) and 75 in codes.values():
+        st.last_exit_code = 75
+        return _infra(gate_ram.CAUSE_INSUFFICIENT_RAM, "[GATE_RESOURCE_WAIT] Nenhum worker cabe na RAM; aguardar recurso sem reinvocar modelo.")
     if _gate_remote_unavailable(gate_cmd, st.last_output):
         return _infra(
             GATE_CAUSE_REMOTE_UNAVAILABLE,
