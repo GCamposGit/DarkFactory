@@ -104,3 +104,5 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 06/11/2026: USR-468 T4 — a recuperação só libera o teto normal após receipt estruturado, recente e ligado ao mesmo candidato e `run_id`, com gate `[HARNESS_PASS]`, revisão independente, CI, merge SHA alcançável, deploy do SHA, smoke HTTP 2xx e learning pack indexado. O dispatcher transmite `candidate_digest` e valida `run_id`; recusa por evidência ausente/stale/simulada/divergente mantém a trava e persiste a causa específica no fingerprint; replay após reinício é idempotente. Operação e diagnóstico estão em `docs/manual/frota.md`.
 
 - 06/11/2026: recuperacao integrada USR-468/473 em validacao; revisoes recusadas preservadas. Nao ha afirmacao de deploy antes do recibo de producao.
+
+- 06/11/2026: USR-477 corrige retomada de deploy sem report e registra falhas; rota paga independente usa flash, respeitando tetos e registro. Candidato em validacao, sem declarar producao.

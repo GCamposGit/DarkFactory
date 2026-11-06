@@ -300,3 +300,14 @@ O candidato composto exige revisao independente e portao integral proprios;
 rodadas recusadas do USR-473 permanecem preservadas. Completed sem recibo de
 deploy nao remove espera; uma retomada ativa impede readmissao do mesmo ticket
 mesmo que o inventario externo de processos esteja vazio.
+
+## Recuperacao integrada USR-477
+
+O corretivo preserva as revisoes recusadas de USR-473/468. Completed sem report
+de deploy usa merge, gate e revisao coincidentes para retomar o deploy; prova
+ausente ou divergente permanece bloqueada. Falha do deploy fica no historico
+com codigo e proxima tentativa, sem supervisor LLM. Runtime do harness nao entra
+no candidato. O revisor pago usa o alias flash, de familia diferente dos
+implementadores; familias tambem reconhecem os ids de gateway do registro. A
+mudanca responde aos JSONs truncados e achados contraditorios da rota anterior,
+sem aumentar rodadas, cota ou orcamento. Resultado real ainda exige gate e deploy.

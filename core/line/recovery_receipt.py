@@ -48,7 +48,7 @@ def route_family(harness: str, model: str | None) -> str:
         return families[harness]
     from core.models.registry import get_registry
     for entry in get_registry().models:
-        if model and model in (entry.id, *entry.aliases):
+        if model and model in (entry.id, *entry.aliases, *entry.gateway_ids):
             return entry.provider
     raise ValueError("review_execution_family_unknown")
 

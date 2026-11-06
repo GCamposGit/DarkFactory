@@ -124,3 +124,6 @@ hub/data/owner_actions/
 .factory/runs/sentinel_state.json
 .factory/daily_digest_state.json
 .factory/queue_snapshot.json
+
+# Gate runtime: lock and timing observations, never candidate source.
+.factory/harness/

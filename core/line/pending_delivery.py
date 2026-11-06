@@ -143,25 +143,27 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         raise RuntimeError(f"Ticket {row.ticket_id} absent from durable queue")
     from core.line.ticket_engine import artifacts_root
     release = artifacts_root() / row.ticket_id / ".darkfac" / "runs" / row.ticket_id / "deploy_report.json"
-    if release.is_file():
-        report = json.loads(release.read_text(encoding="utf-8"))
-        if report.get("sha") and not report.get("deployed"):
-            try:
-                merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
-                validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
-                review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
-            except (OSError, ValueError, KeyError, IndexError, TypeError):
-                row.status, row.cause = "blocked", "deploy_evidence_missing"
-                _save(path, row)
-                return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
-            if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
-                    or not validation.get("candidate_digest")
-                    or review.get("candidate_digest") != validation["candidate_digest"]
-                    or review.get("verdict") != "approve" or review.get("forced")):
-                row.status, row.cause = "blocked", "deploy_evidence_mismatch"
-                _save(path, row)
-                return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
-            return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
+    report = json.loads(release.read_text(encoding="utf-8")) if release.is_file() else {}
+    merge_path = release.with_name("merge.json")
+    if not report and ticket.get("status") == "completed" and merge_path.is_file():
+        report = {"sha": json.loads(merge_path.read_text(encoding="utf-8")).get("merge_sha"), "deployed": False}
+    if report.get("sha") and not report.get("deployed"):
+        try:
+            merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
+            validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
+            review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            row.status, row.cause = "blocked", "deploy_evidence_missing"
+            _save(path, row)
+            return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
+        if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
+                or not validation.get("candidate_digest")
+                or review.get("candidate_digest") != validation["candidate_digest"]
+                or review.get("verdict") != "approve" or review.get("forced")):
+            row.status, row.cause = "blocked", "deploy_evidence_mismatch"
+            _save(path, row)
+            return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
+        return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     if ticket.get("status") in {"completed", "cancelled", "canceled"}:
         if ticket.get("status") == "completed" and (
                 not release.is_file() or not report.get("deployed") or not report.get("sha")):

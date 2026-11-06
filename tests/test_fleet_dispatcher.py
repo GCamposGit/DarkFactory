@@ -199,7 +199,9 @@ def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_p
     assert not list(directory.glob("*.json"))
     release.unlink()
     again = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
-    assert pd.tick(tmp_path, directory=directory, now=again.next_check + 1)[0]["cause"] == "deploy_evidence_missing"
+    assert pd.tick(tmp_path, directory=directory, now=again.next_check + 1)[0]["status"] == "merged_awaiting_deploy"
+    (context / "merge.json").unlink()
+    assert pd.tick(tmp_path, directory=directory, now=again.next_check + 2)[0]["cause"] == "deploy_evidence_missing"
 
     # Empty external busy inventory cannot erase a resume started in this cycle.
     active = Env(tmp_path / "active-resume", [_d("USR-01")], free=("grokbox",))
@@ -396,6 +398,8 @@ def test_deploy_deduplicated_per_batch(tmp_path: Path):
     e.d.deploy = lambda: 1
     assert not e.d._maybe_deploy()
     assert e.d.pending_deploy and e.deploys == 1
+    assert e.d.failures[-1]["kind"] == "deploy"
+    assert e.d.failures[-1]["exit_code"] == 1
 
 
 def test_line_lock_refusal_is_busy_not_infra(tmp_path: Path):

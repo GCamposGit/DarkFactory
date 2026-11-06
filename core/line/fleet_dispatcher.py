@@ -569,7 +569,13 @@ class FleetDispatcher:
         except DemandsLockTimeout:
             rc = 75
         if rc != 0:
+            self.failures = (self.failures + [{
+                "ts": datetime.now(timezone.utc).isoformat(), "ticket": "deploy", "host": "vps",
+                "exit_code": rc, "kind": "deploy", "reason": f"canonical_deploy_exit:{rc}", "log": None,
+            }])[-FAILURE_HISTORY_LIMIT:]
+            logger.error("Canonical deployment deferred: exit_code=%s", rc)
             self.last_merge_at = self.clock()
+            self._write_state()
             return False
         if self.pending_releases and not self._complete_pending_releases():
             self.last_merge_at = self.clock()
