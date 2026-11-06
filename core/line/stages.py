@@ -89,6 +89,7 @@ class MergeReceipt(BaseModel):
 
     pr_url: str = Field(min_length=1)
     merge_sha: str = Field(min_length=1)
+    candidate_digest: Optional[str] = None
 
 
 def _read(stage: Stage, directory: Path, name: str) -> str:

@@ -236,8 +236,10 @@ def write_validation(
 
 
 def write_merge(ws: workspace.RunWorkspace, pr_url: str, merge_sha: str) -> None:
-    receipt = MergeReceipt(pr_url=pr_url, merge_sha=merge_sha)
-    workspace.write_context(ws, MERGE_FILE, receipt.model_dump_json(indent=2))
+    validation_path = workspace.context_dir(ws) / VALIDATION_FILE
+    digest = json.loads(validation_path.read_text(encoding="utf-8")).get("candidate_digest") if validation_path.exists() else None
+    receipt = MergeReceipt(pr_url=pr_url, merge_sha=merge_sha, candidate_digest=digest)
+    workspace.write_context(ws, MERGE_FILE, receipt.model_dump_json(indent=2, exclude_none=True))
 
 
 def write_deploy(

@@ -96,7 +96,14 @@ def test_review_uses_family_different_from_development(
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
     run_id = "run-1"
-    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+    from core.line.recovery_receipt import record_implementation, independent_route, route_family
+    from core.models.registry import resolve
+    record_implementation(ws, "claude", None)
+    record_implementation(ws, "codex", None)
+    ws_mod.write_context(ws, "SPEC.md", "Actual acceptance: persist recovery across restart")
+    paid = independent_route(ws, "openrouter", resolve("planning.codex"), load_routing_config().stages["review"].openrouter_model)
+    assert route_family(*paid) not in {"anthropic", "openai"}
 
     agent = _ScriptedAgent([{"verdict": "approve", "blocking": [], "non_blocking": []}])
     stage = ReviewStage(
@@ -107,8 +114,9 @@ def test_review_uses_family_different_from_development(
 
     assert result.outcome == "success"
     assert len(agent.calls) == 1
-    assert agent.calls[0].harness != "claude"
+    assert agent.calls[0].harness not in {"claude", "codex"}
     assert agent.calls[0].mode == "read"
+    assert "Actual acceptance: persist recovery across restart" in agent.calls[0].prompt
 
 
 def test_changes_required_retries_then_fails_on_exhaustion_without_another_review(

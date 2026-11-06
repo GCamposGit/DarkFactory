@@ -6,12 +6,14 @@ from pathlib import Path
 import pytest
 
 from core.line import fleet_dispatcher as fd
+from core.line.admission_store import AdmissionStore
 
 HOSTS = [fd.HostSpec("grokbox", 1, "http://g"), fd.HostSpec("notebook", 2, None), fd.HostSpec("desktop", 3, "http://d")]
 
 
 def _d(i, status="planned", tags=(), deps=()):
-    return {"id": i, "status": status, "tags": list(tags), "dependencies": list(deps), "created_at": f"2026-01-{int(i[-2:]):02d}"}
+    return {"id": i, "status": status, "tags": list(tags), "dependencies": list(deps),
+            "created_at": f"2026-01-{int(i[-2:]):02d}", "candidate_digest": f"candidate-{i}"}
 
 
 class Handle:
@@ -24,7 +26,8 @@ class Handle:
 
 class Env:
     def __init__(self, tmp, demands, free=("grokbox", "notebook", "desktop")):
-        self.now = 1000.0
+        self.now = datetime.now(timezone.utc).timestamp()
+        self.tmp = tmp
         self.launched: list[tuple[str, str]] = []
         self.handles: dict[str, Handle] = {}
         self.deploys = 0
@@ -32,12 +35,35 @@ class Env:
         cfg = fd.DispatcherConfig(hosts=HOSTS, state_path=tmp / "state.json", deploy_window_sec=100, requeue_cooldown_sec=50)
         self.d = fd.FleetDispatcher(cfg, demands_loader=lambda: demands,
                                     probe=lambda h: fd.HostProbe(h.id in self.free, "x"),
-                                    launch=self._launch, deploy=self._deploy, clock=lambda: self.now)
+                                    launch=self._launch, deploy=self._deploy, clock=lambda: self.now,
+                                    admission_store=AdmissionStore(tmp / "admission.sqlite3"))
 
-    def _launch(self, tid, host):
+    def _launch(self, tid, host, *, run_id=None, recovery=False, candidate_digest="unknown"):
         self.launched.append((tid, host.id))
         h = self.handles[tid] = Handle()
-        return fd.InFlight(tid, host.id, h)
+        return fd.InFlight(tid, host.id, h, run_id=run_id)
+
+    def mark_delivered(self, ticket_id):
+        path = self.tmp / f"{ticket_id}.log"
+        host_id = next(host for host, job in self.d.in_flight.items() if job.ticket_id == ticket_id)
+        job = self.d.in_flight[host_id]
+        stamp = datetime.fromtimestamp(self.now, timezone.utc).isoformat()
+        stages = {
+            "gate": {"passed": True, "marker": "[HARNESS_PASS]"},
+            "review": {"approved": True, "independent": True, "reviewer_family": "claude", "implementer_family": "codex"},
+            "ci": {"green": True},
+            "merge": {"sha": "a" * 40, "reachable": True},
+            "deploy": {"deployed": True, "sha": "a" * 40},
+            "smoke": {"http_status": 200},
+            "learning_pack": {"indexed": True},
+        }
+        for stage, evidence in stages.items():
+            evidence.update(candidate_digest=job.candidate_digest, observed_at=stamp, evidence_ref=f"{stage}://{ticket_id}")
+        receipt = {"schema_version": 1, "simulated": False, "candidate_digest": job.candidate_digest,
+                   "run_id": job.run_id, "implementer_family": "codex", **stages}
+        import json
+        path.write_text("[DELIVERY_MERGED]\n[RECOVERY_RECEIPT] " + json.dumps(receipt), encoding="utf-8")
+        job.log_path = path
 
     def _deploy(self):
         self.deploys += 1
@@ -91,15 +117,253 @@ def test_host_lock_no_overlap(tmp_path: Path):
     assert recovery.launched[-1][0] == "USR-13"
 
 
-def test_infra_failure_requeues_with_cooldown(tmp_path: Path, monkeypatch):
+def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_path: Path, monkeypatch):
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
     e.d.run_cycle()
     e.handles["USR-01"].rc = 75
     cyc = e.d.run_cycle()
     assert cyc["cooldown"] == ["USR-01"] and len(e.launched) == 1
     e.now += 60
+    cyc = e.d.run_cycle()
+    assert len(e.launched) == 1
+    assert cyc["idle_reasons"]["grokbox"] == "identical_failure_open"
+
+    # A REVIEW wait survives a dispatcher restart and resumes the same worktree,
+    # without rebuilding or spinning new processes while a route is absent.
+    from core.line import pending_delivery as pd
+    monkeypatch.setattr(pd, "_children", {})
+    monkeypatch.setattr(pd, "_children", {})
+    from types import SimpleNamespace
+    import json
+    from core.usage.models import ProviderAccountUsage, QuotaWindow
+    snapshot_root = tmp_path / "snapshots"
+    monkeypatch.setattr(pd, "state_root", lambda: snapshot_root)
+    provider_file = snapshot_root / "usage" / "providers" / "openai.json"
+    provider_file.parent.mkdir(parents=True)
+    usage = ProviderAccountUsage(provider_id="openai", provider_name="OpenAI", family="frontier",
+        status="connected", adapter="fixture", message="synthetic snapshot", quota_supported=True,
+        windows=[QuotaWindow(quota_id="codex:weekly", label="fixture", used_percent=58, remaining_percent=42)])
+    provider_file.write_text(usage.model_dump_json(), encoding="utf-8")
+    assert pd._cached_quota("openai") == 42
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
+    context = tmp_path / "artifacts" / "USR-99" / ".darkfac" / "runs" / "USR-99"
+    context.mkdir(parents=True)
+    (context / "progress.json").write_text('{"harness":"codex"}', encoding="utf-8")
+    directory = tmp_path / "pending"
+    row = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
+    assert row.implementing_harness == "codex"
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "planned"}]))
+    monkeypatch.setattr("core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}])
+    monkeypatch.setattr(pd, "_route", lambda _row: None)
+    calls = []
+    handle = SimpleNamespace(pid=999999, poll=lambda: None)
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw)) or handle)
+    due = row.next_check + 1
+    assert pd.tick(tmp_path, directory=directory, now=due)[0]["status"] == "waiting_route"
+    assert not calls
+    monkeypatch.setattr(pd, "_route", lambda _row: ("openrouter", "distill.openrouter"))
+    assert pd.tick(tmp_path, directory=directory, now=due + 1)[0]["status"] == "waiting"
+    assert not calls  # persisted backoff also applies after restart
+    result = pd.tick(tmp_path, directory=directory, now=due + pd.RECHECK_SECONDS + 1)
+    assert result[0]["status"] == "running"
+    assert calls[0][0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+    assert "--fleet" not in calls[0][0]  # standalone launcher owns its canonical line lock
+    pd.tick(tmp_path, directory=directory, now=due + 2 * pd.RECHECK_SECONDS)
+    assert len(calls) == 1
+    # Lost parent process: live child remains the owner after a service restart.
+    pd._children.clear()
+    monkeypatch.setattr(pd, "_pid_running", lambda _row: True)
+    assert pd.tick(tmp_path, directory=directory, now=due + 3 * pd.RECHECK_SECONDS)[0]["status"] == "running"
+    assert len(calls) == 1
+    monkeypatch.setattr(pd, "_pid_running", lambda _row: False)
+    # A completed ticket is cleared instead of delivered again after reboot.
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}]))
+    release = context / "deploy_report.json"
+    release.write_text(json.dumps({"sha": "a" * 40, "deployed": False}), encoding="utf-8")
+    (context / "merge.json").write_text(json.dumps({"merge_sha": "b" * 40}), encoding="utf-8")
+    (context / "validation.json").write_text(json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8")
+    (context / "review_state.json").write_text(json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}), encoding="utf-8")
+    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "check_failed"
+    (context / "merge.json").write_text(json.dumps({"merge_sha": "a" * 40}), encoding="utf-8")
+    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "merged_awaiting_deploy"
+    assert list(directory.glob("*.json"))  # completed ledger alone is not production evidence
+    release.write_text(json.dumps({"sha": "a" * 40, "deployed": True}), encoding="utf-8")
+    assert pd.tick(tmp_path, directory=directory, now=due + 5 * pd.RECHECK_SECONDS)[0]["status"] == "terminal"
+    assert not list(directory.glob("*.json"))
+
+
+def test_verified_resource_change_reopens_breaker(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    resource = {"version": "worker-v1"}
+    e.d.probe = lambda h: fd.HostProbe(h.id in e.free, "ready", resource["version"])
     e.d.run_cycle()
-    assert e.launched[-1] == ("USR-01", "grokbox")
+    e.handles["USR-01"].rc = 75
+    e.d.run_cycle()
+    resource["version"] = "worker-v2"
+    e.now += 60
+    cycle = e.d.run_cycle()
+    assert e.launched == [("USR-01", "grokbox"), ("USR-01", "grokbox")]
+    assert cycle["dispatched"] == [{"ticket": "USR-01", "host": "grokbox"}]
+
+
+def test_new_quota_receipt_reopens_only_that_ticket_scope(tmp_path: Path):
+    demand = _d("USR-01")
+    demand["quota_receipt"] = "window-1"
+    e = Env(tmp_path, [demand], free=("grokbox",))
+    e.d.run_cycle()
+    e.handles["USR-01"].rc = 75
+    e.d.run_cycle()
+    demand["quota_receipt"] = "window-2"
+    e.now += 60
+    cycle = e.d.run_cycle()
+    assert len(e.launched) == 2
+    assert cycle["dispatched"] == [{"ticket": "USR-01", "host": "grokbox"}]
+
+
+def test_admission_store_failure_is_structured_and_fails_closed(tmp_path: Path):
+    class UnavailableStore:
+        def is_failure_open(self, **_kwargs):
+            raise OSError("database unavailable")
+
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.admission_store = UnavailableStore()
+    cycle = e.d.run_cycle()
+    assert e.launched == []
+    assert cycle["idle_reasons"]["grokbox"] == "admission_store_unavailable"
+    assert cycle["skipped"]["USR-01"] == "admission_store_unavailable"
+
+
+def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")])
+    failed = fd.InFlight("USR-99", "grokbox", Handle(), candidate_digest="base",
+                         context_digest="ctx", resource_version="worker-v1")
+    for _ in range(3):
+        e.d._record_failure(failed, 1, "context", "context scanner failed")
+    assert e.d.admission_store.recovery_state()["active"] == 1
+
+    # A fresh dispatcher sees the durable latch and only dispatches one delivery globally.
+    e.d = fd.FleetDispatcher(
+        e.d.config, demands_loader=lambda: [_d("USR-01"), _d("USR-02")],
+        probe=lambda h: fd.HostProbe(True, "ready", "worker-v1"), launch=e._launch,
+        deploy=e._deploy, clock=lambda: e.now, admission_store=e.d.admission_store,
+    )
+    cycle = e.d.run_cycle()
+    assert len(cycle["dispatched"]) == 1
+    assert cycle["recovery"]["active"] is True
+    assert "recovery_single_delivery_reserved" in cycle["idle_reasons"].values()
+    job = next(iter(e.d.in_flight.values()))
+    assert job.run_id and job.recovery_token
+
+    e.handles[job.ticket_id].rc = 0
+    e.d.run_cycle()  # exit zero without a delivery receipt is still not success
+    assert e.d.admission_store.recovery_state()["active"] == 1
+
+
+def test_recovery_success_requires_merge_receipt(tmp_path: Path, monkeypatch):
+    import io
+    import json
+    import subprocess
+    from types import SimpleNamespace
+    from core.line import ticket_engine
+    from core.learning_pack.models import SessionLearningPack
+    from core.learning_pack.storage import LearningPackStore
+
+    demands = [_d("USR-01"), _d("USR-02")]
+    e = Env(tmp_path, demands, free=("grokbox",))
+    e.d.admission_store.set_recovery(active=True, cause="context", fingerprint="fp")
+    e.d.run_cycle()
+    directory = tmp_path / "artifacts" / "USR-01" / ".darkfac" / "runs" / "USR-01"
+    directory.mkdir(parents=True)
+    digest, sha = "c" * 64, "a" * 40
+    artifacts = {
+        "validation.json": {"passed": True, "candidate_digest": digest},
+        "review_state.json": {"rounds": [{"verdict": "approve", "candidate_digest": digest}]},
+        "review_execution.json": {"candidate_digest": digest, "implementer_family": "openai", "reviewer_family": "deepseek"},
+        "merge.json": {"pr_url": "https://github.com/example/repo/pull/1", "merge_sha": sha, "candidate_digest": digest},
+    }
+    for name, value in artifacts.items():
+        (directory / name).write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setattr(ticket_engine, "artifacts_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr("core.git.autonomy._run_git", lambda *a, **k: subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("core.git.ci_checks.query_checks", lambda *a: SimpleNamespace(state="green"))
+    class Health(io.StringIO):
+        status = 200
+    live_health = {"status": "ok", "git_sha": "b" * 40}
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: Health(json.dumps(live_health)))
+    packs = LearningPackStore(tmp_path / "packs")
+    packs.save_pack(SessionLearningPack("lp-usr-01", "USR-01", datetime.now(timezone.utc).isoformat(), "Release", "Validated release", metrics={"candidate_digest": digest}))
+    monkeypatch.setattr("core.learning_pack.storage.LearningPackStore", lambda: packs)
+    job = e.d.in_flight["grokbox"]
+    log = tmp_path / "release.log"
+    log.write_text("[DELIVERY_MERGED]", encoding="utf-8")
+    job.log_path = log
+    e.handles["USR-01"].rc = 0
+    demands[0]["status"] = "completed"
+    cycle = e.d.run_cycle()
+    assert cycle["recovery"]["active"] and e.d.pending_releases
+    assert e.launched == [("USR-01", "grokbox")]
+    # Restart with the durable merge pending. No fabricated production receipt.
+    e.d = fd.FleetDispatcher(e.d.config, demands_loader=lambda: demands, probe=lambda h: fd.HostProbe(True),
+                            launch=e._launch, deploy=e._deploy, clock=lambda: e.now,
+                            admission_store=e.d.admission_store)
+    cycle = e.d.run_cycle()
+    assert cycle["recovery"]["active"] and e.d.pending_releases
+    assert not (directory / "deploy_report.json").exists()
+    assert e.launched == [("USR-01", "grokbox")]
+    live_health["git_sha"] = sha
+    e.now += e.d.config.deploy_window_sec + 1
+    cycle = e.d.run_cycle()
+    assert cycle["recovery"]["active"] is False
+    assert cycle["recovery"]["successes"] == 1
+    assert json.loads((directory / "deploy_report.json").read_text(encoding="utf-8"))["deployed"] is True
+    assert e.deploys == 2 and not e.d.pending_releases
+    assert e.launched == [("USR-01", "grokbox")]
+
+
+def test_recovery_rejects_missing_production_receipt_and_persists_cause(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.admission_store.set_recovery(active=True, cause="context", fingerprint="fp")
+    e.d.run_cycle()
+    host_id = next(iter(e.d.in_flight))
+    log = tmp_path / "USR-01.log"
+    log.write_text("[DELIVERY_MERGED]", encoding="utf-8")
+    e.d.in_flight[host_id].log_path = log
+    e.handles["USR-01"].rc = 0
+
+    cycle = e.d.run_cycle()
+    assert cycle["recovery"]["active"] is True
+    assert cycle["recovery"]["successes"] == 0
+    assert cycle["recovery"]["receipt_cause"] == "awaiting_deploy_proof"
+
+
+def test_launcher_type_error_is_not_retried_without_recovery_identity(tmp_path: Path):
+    calls = []
+
+    def broken(tid, host, *, run_id=None, recovery=False, candidate_digest="unknown"):
+        calls.append((run_id, recovery, candidate_digest))
+        raise TypeError("bug inside launcher")
+
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.launch = broken
+    e.d.run_cycle()
+    assert len(calls) == 1
+    assert calls[0][0] and calls[0][2] == "candidate-USR-01"
+    assert e.d.failures[-1]["kind"] == "launch"
+
+
+def test_recovery_receipt_rejection_cause_is_part_of_failure_fingerprint(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="candidate-USR-01")
+    e.d._record_failure(job, 0, "recovery_receipt", "receipt_ci_stale")
+    first = e.d.admission_store.snapshot()[-1]["fingerprint"]
+    e.d._record_failure(job, 0, "recovery_receipt", "receipt_review_stale")
+    second = e.d.admission_store.snapshot()[-1]["fingerprint"]
+    assert first != second
 
     # A REVIEW wait survives a dispatcher restart and resumes the same worktree,
     # without rebuilding or spinning new processes while a route is absent.
@@ -177,6 +441,8 @@ def test_deploy_deduplicated_per_batch(tmp_path: Path):
     e.d.run_cycle()
     for h in e.handles.values():
         h.rc = 0
+    for ticket in e.handles:
+        e.mark_delivered(ticket)
     e.d.run_cycle()
     assert e.deploys == 0
     e.now += 101
@@ -201,9 +467,10 @@ def test_line_lock_refusal_is_busy_not_infra(tmp_path: Path):
     assert cyc["idle_reasons"]["grokbox"].startswith("host_ocupado_trava")
     text = log.read_text(encoding="utf-8")
     assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
-    e.now += 15  # cooldown curto (10 s), bem abaixo do de infra (50 s)
-    e.d.run_cycle()
-    assert e.launched[-1] == ("USR-01", "grokbox")
+    e.now += 15  # O cooldown passou, mas o host e o contexto continuam iguais.
+    cyc = e.d.run_cycle()
+    assert len(e.launched) == 1
+    assert cyc["idle_reasons"]["grokbox"] == "identical_failure_open"
 
 
 def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
@@ -450,6 +717,7 @@ def test_reap_cleans_operational_checkout_after_job_exits_without_changing_deplo
     job = e.d.in_flight["grokbox"]
     job.operational_checkout = checkout
     e.handles["USR-01"].rc = 0
+    e.mark_delivered("USR-01")
 
     e.d.run_cycle()
     assert calls == [checkout]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -11,7 +11,7 @@ import pytest
 
 from core.demands import DemandsStore, UserTicket
 from core.line import owner_intake
-from core.workflow.control_contracts import TicketAlreadyActiveError
+from core.workflow.control_contracts import StaleLeaseError, TicketAlreadyActiveError
 from core.workflow.control_store import SQLiteControlStore
 
 
@@ -132,3 +132,34 @@ def test_postgres_canonical_ownership_lookup_is_scoped_and_returns_existing_run(
     assert reservation is not None
     assert reservation.run_id == "run-418"
     assert cursor.execute.call_args.args[1] == ("darkfac", "USR-418", now)
+
+
+def test_recovery_reservation_ceiling_is_global_and_expired_lease_is_recoverable(tmp_path: Path) -> None:
+    from core.workflow.control_contracts import FleetCapacityExceededError
+
+    store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    now = datetime.now(UTC)
+    old = store.reserve_cycle(
+        project_id="darkfac", ticket_id="USR-468", run_id="run-old", host_id="notebook",
+        now=now, lease_duration_sec=10, max_fleet_slots=1,
+    )
+    with pytest.raises(FleetCapacityExceededError):
+        store.reserve_cycle(
+            project_id="darkfac", ticket_id="USR-469", run_id="run-second", host_id="desktop",
+            now=now, lease_duration_sec=10, max_fleet_slots=1,
+        )
+
+    later = now + timedelta(seconds=11)
+    replacement = store.reserve_cycle(
+        project_id="darkfac", ticket_id="USR-469", run_id="run-recovered", host_id="desktop",
+        now=later, lease_duration_sec=10, max_fleet_slots=1,
+    )
+    assert replacement.run_id == "run-recovered"
+    # A stale fencing token cannot release the replacement reservation.
+    with pytest.raises(StaleLeaseError):
+        store.release_reservation(
+            reservation_id=replacement.reservation_id, fencing_token=old.fencing_token + 1,
+            status="released", now=later,
+        )
+    active = store.get_active_ticket_reservation("darkfac", "USR-469", now=later)
+    assert active is not None and active.run_id == "run-recovered"

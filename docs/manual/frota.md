@@ -1,4 +1,5 @@
 <!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 # Operação da frota
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
@@ -222,6 +223,21 @@ Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) recon
 
 Quando um `run_ticket` da frota termina com código diferente de zero, ou o checkout operacional não pode ser preparado, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra`, `lock` ou `launch`) e o motivo (últimas linhas do log do ticket ou erro de lançamento, sem segredos; nunca vazio). O histórico guarda as 20 últimas. Erros de lançamento mantêm o ticket em cooldown e não aparecem como despacho concluído.
 
+## Circuit breaker e recuperação (USR-468)
+
+O recibo é produzido pelo dispatcher depois do deploy canônico e da prova HTTP
+do SHA exato. Um marcador escrito pelo processo filho não libera a recuperação.
+A entrega pendente fica em `pending_recovery_releases.json`, ao lado do estado do
+dispatcher, e é retomada após reinício antes de admitir novos tickets. Validação,
+revisão independente, merge e índice de learning packs vêm dos artefatos reais;
+CI e saúde são consultados novamente. Falha no deploy ou na prova mantém a espera.
+
+Cada tentativa é identificada por fingerprint de projeto, ticket, candidato, contexto, classe de erro e versão do recurso. O SQLite durável guarda o backoff, a causa, as reservas e a trava global de recuperação. O mesmo fingerprint permanece aberto mesmo depois do backoff; só uma mudança observável no candidato, contexto, recurso ou janela de cota permite nova tentativa. Causas operacionais aparecem em `idle_reasons`, `skipped` e `recovery.receipt_cause`; ausência de rota, worker zero/ocupado/stale, reserva ativa e receipt incompleto são espera, nunca sucesso.
+
+Na recuperação, há no máximo uma entrega em voo para toda a frota. A concorrência normal só volta após uma linha `[RECOVERY_RECEIPT] {JSON}` no log da entrega. O receipt deve ser real (`simulated: false`), recente (até sete dias), vinculado ao digest do candidato em cada estágio e incluir `[HARNESS_PASS]`, revisão independente aprovada, CI verde, SHA de merge alcançável, deploy desse SHA, smoke HTTP 2xx e learning pack indexado. Evidência ausente, stale, simulada ou de outro candidato deixa a trava ativa e registra a primeira causa recusada. O hash do receipt e o candidato recuperado ficam persistidos, tornando o retorno ao teto normal idempotente após reinício.
+
+Para diagnosticar, consulte o estado do ciclo em `.factory/runs` e o SQLite de admissão em `DARKFAC_STATE_ROOT` (ou a raiz de estado configurada). `recovery.active=true` mantém a frota serializada; `recovery.receipt_cause` aponta o estágio que falta. Corrija a evidência ou altere de modo verificável o candidato/recurso e deixe o despachante retomar com backoff. Não apague reservas nem a trava manualmente.
+
 ## Gancho do sentinela da linha (USR-439)
 
 O despachante contínuo integra o gancho do sentinela (`sentinel_hook`) executado em `self.run_sentinel_hook()` a cada ciclo de 30 segundos, delegando a `maybe_run_sentinel()` com janela de silêncio determinística de 45 minutos (2700s). Isso assegura vigilância contínua da saúde da frota e disparo de alertas ao Telegram caso a linha seja paralisada por esgotamento de cotas de IA ou jobs estagnados.
@@ -234,3 +250,7 @@ o contem, sem substituir identidade do candidato.
 USR-473: identidade de implementacao ausente e provas de deploy ausentes ou
 inconsistentes ficam bloqueadas com causa persistida. Contencao do mutex de
 retomada impede novas admissoes naquele ciclo; nenhuma cota e consumida em espera.
+USR-468: admissao remota combina `/health` (ocupacao) com `/metrics/hardware`
+(RAM, CPUs e instante de coleta). Saude generica nunca vira capacidade; RAM
+insuficiente continua zero. Corretores de falhas tambem registram sua familia
+para impedir revisao pelo mesmo provedor de qualquer implementador.

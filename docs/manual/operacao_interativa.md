@@ -28,6 +28,8 @@ Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, work
 
 O `run_ticket.py` revalida a cota de `development` antes de cada fatia do plano, com um `pick` fresco sobre a leitura daquele momento. Um plano de uma fatia faz esse pick uma vez. Um plano de várias fatias repete o pick antes de cada agente, e a leitura pode trocar o harness write entre fatias. O pin `--harness` e o `--force` do preflight nao iniciam, numa fatia, um harness com headroom conhecido de 15% ou menos, ou sem leitura. Com `--fleet`, esse pick usa `execution_context` headless: Antigravity nao inicia a fatia mesmo sendo o harness de operacao, com Google acima de 15% e os demais no piso. Sem rota elegivel o processo espera (codigo 75, JSON com `cause` `route_wait`, `stage` `BUILD` e o caminho da worktree), nao chama o agente da fatia, nao comeca a entrega e a worktree permanece, inclusive um arquivo gravado durante o PLAN e o trabalho das fatias anteriores. `_discard_untouched_workspace` e `_report_workspace_fate` nao removem esse diretorio.
 
+Antes dessa worktree e do PLAN, a admissao (`core.line.admission`) confirma rota de planning, de development e de review em outra familia, alem de um worker de gate com capacidade explicita (`workers` inteiro maior que zero, `busy` false e leitura com menos de 90 segundos). Falta de rota, capacidade zero, worker ocupado, leitura stale, colecao vazia ou health generico (`status=ok` sem esses campos) encerra com exit 75, JSON `route_wait` e o ticket em `planned`, sem criar worktree. Um `allow` nao substitui o `pick` de cada estagio. Com `--fleet`, a admissao de build tambem e headless e deixa Antigravity fora das caps de escrita.
+
 ### Wake do grokbox e comunicacao externa (USR-456)
 
 No preflight, o launcher consulta a saude do grokbox. Se estiver indisponivel, registra a supressao com a causa `external_communication_not_authorized` e continua a execucao sem enviar email. Prompt, variavel de ambiente e outras opcoes nao concedem autorizacao. O envio exige o opt-in dedicado na propria chamada:
@@ -97,3 +99,4 @@ retoma a entrega pelo portao completo e pela revisao independente do novo candid
 nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
 fica preservada para retomada automatica. Esgotar essa tentativa registra falha
 tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+`run_ticket.py --recovery --run-id <id>` ativa a reserva canonica de uma entrega global e usa a identidade recebida do dispatcher. O launcher verifica o gate antes de iniciar qualquer agente; `gate_busy` retorna como espera estruturada.

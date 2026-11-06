@@ -17,6 +17,7 @@ Uso::
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -104,6 +105,7 @@ class DispatcherConfig:
     requeue_cooldown_sec: float = 600.0
     lock_requeue_cooldown_sec: float = 30.0  # host ocupado/trava: reenfileira quase de imediato
     deploy_window_sec: float = 180.0
+    recovery_failure_threshold: int = 3
     state_path: Path = STATE_PATH
 
 
@@ -115,12 +117,20 @@ class InFlight:
     log_path: Optional[Path] = None
     started_at: float = 0.0
     operational_checkout: Optional[Path] = None
+    project_id: str = "darkfac"
+    candidate_digest: str = "unknown"
+    context_digest: str = "unknown"
+    resource_version: str = "unknown"
+    admission_token: Optional[str] = None
+    run_id: Optional[str] = None
+    recovery_token: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class HostProbe:
     free: bool
     reason: str = ""
+    resource_version: str = ""
 
 
 # --- selecao pura ---------------------------------------------------------------------------------
@@ -201,20 +211,26 @@ def default_probe(host: HostSpec, stable_probes: int = 3) -> HostProbe:
             from core.line import gate_ram, line_lock
 
             if line_lock.is_locked():
-                return HostProbe(False, "line_lock_ativo")
+                return HostProbe(False, "line_lock_ativo", f"{host.id}:line_lock")
             workers = gate_ram.measure_workers().workers
         except Exception as exc:  # noqa: BLE001
-            return HostProbe(False, f"probe_local_falhou:{exc}")
-        return HostProbe(workers >= MIN_NOTEBOOK_WORKERS, f"workers={workers}")
+            return HostProbe(False, f"probe_local_falhou:{type(exc).__name__}", f"{host.id}:probe_error:{type(exc).__name__}")
+        return HostProbe(workers >= MIN_NOTEBOOK_WORKERS, f"workers={workers}", f"{host.id}:workers={workers}")
     from core.harness import remote_dispatch as rd
 
     for _ in range(max(1, stable_probes)):
         health = rd.probe_health(host.worker_url)
         if health is None:
-            return HostProbe(False, "health_indisponivel")
+            return HostProbe(False, "health_indisponivel", f"{host.id}:health_unavailable")
         if health.get("busy"):
-            return HostProbe(False, "worker_ocupado")
-    return HostProbe(True, "saudavel")
+            return HostProbe(False, "worker_ocupado", f"{host.id}:busy")
+    # Exclude observation timestamps: polling a healthy worker must not create a new resource version.
+    identity = {
+        key: health.get(key) for key in ("worker_id", "workers", "busy", "status", "version", "machine_id")
+        if key in health
+    }
+    from core.line.admission_store import safe_digest
+    return HostProbe(True, "saudavel", f"{host.id}:{safe_digest(identity)}")
 
 
 def _git_checked(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -285,7 +301,9 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
         logger.exception("falha ao remover checkout operacional %s", path)
 
 
-def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any]) -> InFlight:
+def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
+                   run_id: Optional[str] = None, recovery: bool = False,
+                   candidate_digest: str = "unknown") -> InFlight:
     env = dict(os.environ)
     # The launcher runs from a temporary operational checkout, but its mutable
     # control store is shared with the dispatcher and the other workers. Resolve
@@ -295,6 +313,11 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any]) ->
 
     env["DARKFAC_STATE_ROOT"] = str(state_root().resolve())
     env["DARKFAC_HOST_ID"] = host.id
+    if run_id:
+        env["DARKFAC_RUN_ID"] = run_id
+    if recovery:
+        env["DARKFAC_RECOVERY_MODE"] = "1"
+    env["DARKFAC_CANDIDATE_DIGEST"] = candidate_digest
     if host.worker_url:
         env["DARKFAC_TEST_WORKERS"] = host.worker_url
         env["DARKFAC_REMOTE_HARNESS"] = "required"
@@ -305,6 +328,10 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any]) ->
     log_path = LOG_DIR / f"{ticket_id}-{host.id}.log"
     operational_checkout = _create_operational_checkout(ticket_id, host.id, demand)
     cmd = [sys.executable, str(operational_checkout / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
+    if run_id:
+        cmd.extend(["--run-id", run_id])
+    if recovery:
+        cmd.append("--recovery")
     try:
         with open(log_path, "ab") as log:
             proc = subprocess.Popen(cmd, cwd=operational_checkout, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -374,6 +401,11 @@ def _tail(path: Optional[Path], n: int = 6000) -> str:
     return ""
 
 
+def _delivery_evidence(log_tail: str) -> bool:
+    """Legacy merge marker used to schedule the ordinary post-merge deploy."""
+    return "merged_awaiting_deploy" in log_tail or "[DELIVERY_MERGED]" in log_tail
+
+
 # --- despachante ----------------------------------------------------------------------------------
 
 
@@ -392,6 +424,7 @@ class FleetDispatcher:
         dry_run: bool = False,
         digest_hook: Optional[Callable[[], Any]] = None,
         sentinel_hook: Optional[Callable[[], Any]] = None,
+        admission_store: Any = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -404,14 +437,31 @@ class FleetDispatcher:
         self.dry_run = dry_run
         self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
         self.sentinel_hook = sentinel_hook  # sentinela da linha a cada 45m (USR-439); idempotente
+        if admission_store is None:
+            from core.line.admission_store import AdmissionStore
+            from core.paths import state_root
+
+            try:
+                admission_store = AdmissionStore(state_root() / "admission.sqlite3")
+            except Exception as exc:  # noqa: BLE001 - run_cycle reports a structured fail-closed cause
+                logger.error("admission store indisponivel na inicializacao (%s)", type(exc).__name__)
+                admission_store = None
+        self.admission_store = admission_store
         self.in_flight: dict[str, InFlight] = {}  # trava por host: no maximo um ticket por host
         self.cooldown: dict[str, float] = {}
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
         self.last_merge_at: Optional[float] = None
         self.pending_deploy = False
+        self.pending_release_path = self.config.state_path.with_name("pending_recovery_releases.json")
+        self.pending_releases = json.loads(self.pending_release_path.read_text(encoding="utf-8")) if self.pending_release_path.exists() else []
+        if self.pending_releases:
+            self.pending_deploy = True
+            self.last_merge_at = self.clock() - self.config.deploy_window_sec
         self.deploys = 0
         self.last_cycle: dict[str, Any] = {}
         self.failures: list[dict[str, Any]] = []  # ultimas falhas: ticket, host, exit_code, motivo, classe
+        self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
+            "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
 
     def _record_failure(self, job: InFlight, rc: int, kind: str, tail: str) -> None:
         reason = failure_reason(rc, tail)
@@ -422,6 +472,45 @@ class FleetDispatcher:
         }])[-FAILURE_HISTORY_LIMIT:]
         logger.error("%s falhou em %s: exit_code=%s kind=%s motivo=%s", job.ticket_id, job.host_id, rc, kind,
                      " | ".join(reason.splitlines()))
+        try:
+            from core.line.admission_store import make_fingerprint
+
+            fingerprint = make_fingerprint(
+                project_id=job.project_id, ticket_id=job.ticket_id,
+                candidate_digest=job.candidate_digest, context_digest=job.context_digest,
+                error=(f"{kind}:{tail}" if kind == "recovery_receipt" and tail else
+                       kind if kind != "failure" else (tail or kind)),
+                resource_version=job.resource_version,
+            )
+            occurrences = self.admission_store.record_failure(
+                fingerprint, initial_backoff_sec=int(self.config.requeue_cooldown_sec))
+            if occurrences >= max(1, self.config.recovery_failure_threshold):
+                state = self.admission_store.set_recovery(
+                    active=True, cause=fingerprint.error_class, fingerprint=fingerprint.sha256)
+                self.recovery = state
+                logger.error("dispatcher recovery ativo: cause=%s fingerprint=%s", state["cause"], state["fingerprint"])
+        except Exception:  # noqa: BLE001 - no admission can be trusted after persistence failure
+            logger.exception("falha ao persistir circuit breaker de %s", job.ticket_id)
+
+    def _release_reservation(self, job: InFlight) -> None:
+        if not job.admission_token:
+            return
+        try:
+            from core.line.admission_store import safe_digest
+
+            self.admission_store.release(
+                project_id=job.project_id, ticket_id=job.ticket_id,
+                candidate_digest=safe_digest(job.candidate_digest),
+                context_digest=safe_digest(job.context_digest),
+                resource_version=safe_digest(job.resource_version), token=job.admission_token,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("falha ao liberar reserva de admissao de %s", job.ticket_id)
+        if job.recovery_token:
+            try:
+                self.admission_store.release_recovery(job.recovery_token)
+            except Exception:  # noqa: BLE001
+                logger.exception("falha ao liberar reserva global de recovery de %s", job.ticket_id)
 
     def _reap(self) -> None:
         for host_id, job in list(self.in_flight.items()):
@@ -432,19 +521,37 @@ class FleetDispatcher:
             _remove_operational_checkout(job.operational_checkout)
             tail = _tail(job.log_path) if rc != 0 else ""
             if rc == 0:
-                self.last_merge_at = self.clock()
-                self.pending_deploy = True
+                tail = _tail(job.log_path)
+                in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
+                if _delivery_evidence(tail):
+                    self._release_reservation(job)
+                    if in_recovery:
+                        pending = {"ticket_id": job.ticket_id, "run_id": job.run_id}
+                        if pending not in self.pending_releases:
+                            self.pending_releases.append(pending)
+                            self._save_pending_releases()
+                        self.recovery = self.admission_store.record_recovery_receipt_cause("awaiting_deploy_proof")
+                    self.last_merge_at = self.clock()
+                    self.pending_deploy = True
+                elif not in_recovery:
+                    self._record_failure(job, rc, "no_delivery_evidence", tail)
+                    self._release_reservation(job)
+                else:
+                    self._release_reservation(job)
             elif is_lock_refusal(tail):
                 self._record_failure(job, rc, "lock", tail)
+                self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.lock_requeue_cooldown_sec
                 self.lock_busy[host_id] = f"host_ocupado_trava:{job.ticket_id}"
                 logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
             elif is_infra_failure(rc, tail):
                 self._record_failure(job, rc, "infra", tail)
+                self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec
                 logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
             else:
                 self._record_failure(job, rc, "failure", tail)
+                self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
 
     def _maybe_deploy(self) -> bool:
@@ -453,20 +560,252 @@ class FleetDispatcher:
             return False
         if self.clock() - self.last_merge_at < self.config.deploy_window_sec:
             return False
+        if self.dry_run:
+            return False
+        from core.demands.store import _PathMutex, DemandsLockTimeout
+        try:
+            with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
+                rc = self.deploy()
+        except DemandsLockTimeout:
+            rc = 75
+        if rc != 0:
+            self.last_merge_at = self.clock()
+            return False
+        if self.pending_releases and not self._complete_pending_releases():
+            self.last_merge_at = self.clock()
+            return False
         self.pending_deploy = False
-        if not self.dry_run:
-            from core.demands.store import _PathMutex, DemandsLockTimeout
-            try:
-                with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
-                    rc = self.deploy()
-            except DemandsLockTimeout:
-                rc = 75
-            if rc != 0:
-                self.pending_deploy = True
-                self.last_merge_at = self.clock()
-                return False
         self.deploys += 1
         return True
+
+    def _save_pending_releases(self) -> None:
+        self.pending_release_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = self.pending_release_path.with_suffix(".tmp")
+        temp.write_text(json.dumps(self.pending_releases), encoding="utf-8")
+        os.replace(temp, self.pending_release_path)
+
+    def _complete_pending_releases(self) -> bool:
+        from core.line.recovery_receipt import build_receipt
+        from core.line.admission import verify_recovery_receipt, RECOVERY_RECEIPT_MARKER
+        from core.line.admission_store import safe_digest
+
+        for pending in list(self.pending_releases):
+            try:
+                receipt = build_receipt(pending["ticket_id"], pending["run_id"], PROJECT_ROOT)
+                valid, cause = verify_recovery_receipt(
+                    receipt, candidate_digest=receipt["candidate_digest"], run_id=pending["run_id"],
+                    now=datetime.now(timezone.utc),
+                )
+                if not valid:
+                    raise ValueError(cause)
+            except Exception as exc:  # external evidence failure must retain the durable wait
+                self.recovery = self.admission_store.record_recovery_receipt_cause(str(exc)[:300])
+                logger.warning("release proof pending for %s: %s", pending["ticket_id"], exc)
+                return False
+            self.recovery = self.admission_store.complete_recovery(
+                receipt_digest=safe_digest(receipt), candidate_digest=receipt["candidate_digest"])
+            logger.info("%s%s", RECOVERY_RECEIPT_MARKER, json.dumps(receipt))
+            self.pending_releases.remove(pending)
+            self._save_pending_releases()
+        return True
+
+    def _dispatch_ticket(
+        self,
+        host: HostSpec,
+        probe: HostProbe,
+        tid: str,
+        demand: dict[str, Any],
+        queue: list[str],
+        idle: dict[str, str],
+        skipped: dict[str, str],
+        dispatched: list[dict[str, str]],
+        now: float,
+    ) -> None:
+        project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
+        candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or "unknown")
+        context = demand.get("context_digest")
+        if not context:
+            from core.line.admission_store import safe_digest
+
+            context = safe_digest({
+                key: demand.get(key)
+                for key in ("title", "problem_statement", "acceptance_criteria", "criteria", "context", "constraints")
+                if demand.get(key) is not None
+            })
+        context = str(context)
+        resource_version = probe.resource_version or f"{host.id}:{probe.reason}"
+        receipt = demand.get("resource_version") or demand.get("quota_receipt") or demand.get("quota_window")
+        if receipt is not None:
+            from core.line.admission_store import safe_digest
+
+            resource_version = f"{resource_version}:receipt:{safe_digest(receipt)}"
+        if self.dry_run:
+            dispatched.append({"ticket": tid, "host": host.id, "dry_run": "1"})
+            return
+        recovery_token = None
+        token = None
+        try:
+            from core.line.admission_store import normalize_error, safe_digest
+
+            candidate_key = safe_digest(candidate)
+            context_key = safe_digest(context)
+            resource_key = safe_digest(resource_version)
+            if self.admission_store.is_failure_open(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                context_digest=context_key, resource_version=resource_key,
+                error_class=normalize_error(demand["error_class"]) if demand.get("error_class") else None,
+            ):
+                idle[host.id] = "identical_failure_open"
+                skipped[tid] = "identical_failure_open"
+                queue.insert(0, tid)
+                return
+            if self.recovery.get("active"):
+                recovery_token = self.admission_store.reserve_recovery()
+                if recovery_token is None:
+                    idle[host.id] = "recovery_delivery_reserved"
+                    skipped[tid] = "recovery_delivery_reserved"
+                    queue.insert(0, tid)
+                    return
+            token = self.admission_store.reserve(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                context_digest=context_key, resource_version=resource_key,
+            )
+            if token is None:
+                if recovery_token:
+                    self.admission_store.release_recovery(recovery_token)
+                idle[host.id] = "admission_reserved"
+                skipped[tid] = "admission_reserved"
+                queue.insert(0, tid)
+                return
+        except Exception as exc:  # noqa: BLE001 - no agent or checkout when state is uncertain
+            if recovery_token:
+                try:
+                    self.admission_store.release_recovery(recovery_token)
+                except Exception:  # noqa: BLE001
+                    logger.exception("falha ao liberar reserva global apos recusa de admissao")
+            if token:
+                try:
+                    self.admission_store.release(
+                        project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                        context_digest=context_key, resource_version=resource_key, token=token,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("falha ao liberar reserva apos recusa de admissao")
+            idle[host.id] = "admission_store_unavailable"
+            skipped[tid] = "admission_store_unavailable"
+            queue.insert(0, tid)
+            logger.error("admission store recusou %s (%s)", tid, type(exc).__name__)
+            return
+        try:
+            run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
+            if self.launch is None:
+                job = default_launch(tid, host, demand, run_id=run_id,
+                                     recovery=bool(self.recovery.get("active")),
+                                     candidate_digest=candidate)
+            else:
+                job = self._launch_with_contract(tid, host, run_id, candidate)
+            self._register_flight(host.id, job, project_id, candidate, context, resource_version, token,
+                                  run_id, recovery_token)
+            dispatched.append({"ticket": tid, "host": host.id})
+        except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
+            self._record_launch_failure(
+                host, tid, project_id, candidate, context, resource_version,
+                candidate_key, context_key, resource_key, token, recovery_token, exc, idle, now,
+            )
+
+    def _launch_with_contract(self, tid: str, host: HostSpec, run_id: str, candidate: str) -> InFlight:
+        kwargs = {"run_id": run_id, "recovery": bool(self.recovery.get("active")),
+                  "candidate_digest": candidate}
+        try:
+            signature = inspect.signature(self.launch)
+        except (TypeError, ValueError):
+            # Opaque callables must obey the current launcher contract. Never
+            # retry a launch after a TypeError from inside its implementation.
+            return self.launch(tid, host, **kwargs)
+        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
+        supported = kwargs if accepts_kwargs else {
+            key: value for key, value in kwargs.items() if key in signature.parameters
+        }
+        return self.launch(tid, host, **supported)
+
+    def _register_flight(
+        self, host_id: str, job: InFlight, project_id: str, candidate: str, context: str,
+        resource_version: str, token: str, run_id: str, recovery_token: str | None,
+    ) -> None:
+        job.project_id = project_id
+        job.candidate_digest = candidate
+        job.context_digest = context
+        job.resource_version = resource_version
+        job.admission_token = token
+        job.run_id = run_id
+        job.recovery_token = recovery_token
+        self.in_flight[host_id] = job
+
+    def _record_launch_failure(
+        self, host: HostSpec, tid: str, project_id: str, candidate: str, context: str,
+        resource_version: str, candidate_key: str, context_key: str, resource_key: str,
+        token: str, recovery_token: str | None, exc: Exception, idle: dict[str, str], now: float,
+    ) -> None:
+        from core.line.agent_cli import redact_secrets
+
+        safe_error = " | ".join(redact_secrets(str(exc)).splitlines())[-800:]
+        idle[host.id] = f"lancamento_falhou:{safe_error}"
+        failed_job = InFlight(
+            tid, host.id, None, project_id=project_id, candidate_digest=candidate,
+            context_digest=context, resource_version=resource_version,
+        )
+        self._record_failure(failed_job, 1, "launch", str(exc))
+        try:
+            self.admission_store.release(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                context_digest=context_key, resource_version=resource_key, token=token,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("falha ao liberar reserva apos erro de launcher %s", tid)
+        if self.recovery.get("active"):
+            try:
+                if recovery_token:
+                    self.admission_store.release_recovery(recovery_token)
+            except Exception:  # noqa: BLE001
+                logger.exception("falha ao liberar reserva global apos erro de launcher %s", tid)
+        self.cooldown[tid] = now + self.config.requeue_cooldown_sec
+
+    def _dispatch_hosts(
+        self,
+        queue: list[str],
+        demands: list[dict[str, Any]],
+        idle: dict[str, str],
+        skipped: dict[str, str],
+        dispatched: list[dict[str, str]],
+        orphan_hosts: set[str],
+        now: float,
+    ) -> None:
+        for host in sorted(self.config.hosts, key=lambda h: h.priority):
+            if self.pending_releases:
+                idle[host.id] = "recovery_awaiting_deploy_proof"
+                continue
+            if host.id in self.in_flight:
+                continue
+            if host.id in orphan_hosts:
+                idle[host.id] = "run_orfao_em_execucao"
+                continue
+            if not queue:
+                idle[host.id] = "sem_ticket_executavel"
+                continue
+            pr = self.probe(host)
+            if not pr.free:
+                idle[host.id] = f"host_indisponivel:{pr.reason}"
+                continue
+            if self.recovery.get("active") and dispatched:
+                idle[host.id] = "recovery_single_delivery_reserved"
+                continue
+            tid = queue.pop(0)
+            demand = next((row for row in demands if str(row.get("id", "")) == tid), None)
+            if demand is None:
+                skipped[tid] = "demand_disappeared"
+                idle[host.id] = "demand_disappeared"
+                continue
+            self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
 
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
@@ -488,6 +827,12 @@ class FleetDispatcher:
                                "resumptions": resumptions, "dispatched": [], "deployed": deployed_resume}
             self._write_state()
             return self.last_cycle
+        self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
+            "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
+        if self.recovery.get("active"):
+            for job in self.in_flight.values():
+                if job.recovery_token and not self.admission_store.heartbeat_recovery(job.recovery_token):
+                    logger.error("reserva global de recovery perdeu fencing para %s", job.ticket_id)
         now = self.clock()
         self.cooldown = {t: u for t, u in self.cooldown.items() if u > now}
         try:
@@ -511,38 +856,7 @@ class FleetDispatcher:
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
         orphan_hosts = self.busy_hosts_loader()
-        for host in sorted(self.config.hosts, key=lambda h: h.priority):
-            if host.id in self.in_flight:
-                continue
-            if host.id in orphan_hosts:
-                idle[host.id] = "run_orfao_em_execucao"
-                continue
-            if not queue:
-                idle[host.id] = "sem_ticket_executavel"
-                continue
-            pr = self.probe(host)
-            if not pr.free:
-                idle[host.id] = f"host_indisponivel:{pr.reason}"
-                continue
-            tid = queue.pop(0)
-            if self.dry_run:
-                dispatched.append({"ticket": tid, "host": host.id, "dry_run": "1"})
-                continue
-            try:
-                if self.launch is None:
-                    demand = next(row for row in demands if str(row.get("id", "")) == tid)
-                    job = default_launch(tid, host, demand)
-                else:
-                    job = self.launch(tid, host)
-                self.in_flight[host.id] = job
-                dispatched.append({"ticket": tid, "host": host.id})
-            except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
-                from core.line.agent_cli import redact_secrets
-
-                safe_error = " | ".join(redact_secrets(str(exc)).splitlines())[-800:]
-                idle[host.id] = f"lancamento_falhou:{safe_error}"
-                self._record_failure(InFlight(tid, host.id, None), 1, "launch", str(exc))
-                self.cooldown[tid] = now + self.config.requeue_cooldown_sec
+        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now)
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
         self.last_cycle = {
@@ -559,6 +873,13 @@ class FleetDispatcher:
             "deployed_this_cycle": deployed,
             "demands_error": load_error,
             "recent_failures": self.failures,
+            "recovery": {"active": bool(self.recovery.get("active")),
+                         "cause": self.recovery.get("cause", ""),
+                         "fingerprint": self.recovery.get("fingerprint", ""),
+                         "successes": self.recovery.get("successes", 0),
+                         "receipt_cause": self.recovery.get("receipt_cause", ""),
+                         "receipt_digest": self.recovery.get("receipt_digest", ""),
+                         "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")},
         }
         self._write_state()
         return self.last_cycle

@@ -50,7 +50,7 @@ from core.line.agent_cli import (
     supports,
 )
 from core.line import (
-    gate_ram, grokbox_wake, stage_planning, stage_review, ticket_engine, ticket_extras, ticket_stages,
+    admission, gate_ram, grokbox_wake, stage_planning, stage_review, ticket_engine, ticket_extras, ticket_stages,
 )
 from core.line.stages import Stage, StageArtifactMissing, require_artifact
 from core.line.diagnostics import failed_test_ids, redacted_head
@@ -356,6 +356,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Identificador do host na frota (grokbox, notebook, desktop)",
     )
+    parser.add_argument("--run-id", type=str, default=None, help="Identidade durável do run da frota")
+    parser.add_argument("--recovery", action="store_true", help="Ativar limite global de uma reserva (recovery)")
     return parser
 
 
@@ -862,7 +864,10 @@ def _invoke_fix_agent(
         timeout_s=int(FIX_AGENT_TIMEOUT_S),
     )
     try:
-        return run_agent(request)
+        result = run_agent(request)
+        from core.line.recovery_receipt import record_implementation
+        record_implementation(ticket_engine.run_workspace(ticket), result.harness, result.model)
+        return result
     except Exception as exc:  # noqa: BLE001 - a crashed correction attempt must not crash the delivery
         logger.warning("Fix agent invocation failed for %s: %s", ticket.id, exc)
         return None
@@ -2252,7 +2257,7 @@ def _deliver_worktree(
         ticket_engine.write_validation(
             rws, True, "skip_validation" if skip_validation else "core/harness/runner.py --quick",
             f"{len(attempts_log)} autocorrecao(oes)",
-            candidate_digest=candidate_digest or "",
+            candidate_digest=_candidate_binding(rws, target_worktree, _review_base_branch(ticket))[0] or "",
         )
 
     docs_outcome = _stage_docs_sync(
@@ -2260,7 +2265,6 @@ def _deliver_worktree(
     )
     if docs_outcome is not None:
         return docs_outcome
-    learning = None if external_project else ticket_extras.build_learning(target_worktree, ticket.id, "origin/main")
 
     # REVIEW by another model family than the implementer; a change request goes back to the agent.
     if _cancelled():
@@ -2271,6 +2275,7 @@ def _deliver_worktree(
     )
     if review_outcome is not None:
         return review_outcome
+    learning = None if external_project else ticket_extras.build_learning(target_worktree, ticket.id, "origin/main")
     try:
         require_artifact(Stage.VALIDATE, rws)
         require_artifact(Stage.REVIEW, rws)
@@ -2592,6 +2597,9 @@ def _stage_review(
             )
             if gate_outcome is not None:
                 return gate_outcome
+            if not skip_validation:
+                ticket_engine.write_validation(rws, True, "core/harness/runner.py --quick",
+                    candidate_digest=_candidate_binding(rws, target_worktree, _review_base_branch(ticket))[0] or "")
     return _delivery_stage_refused(
         ticket, Stage.REVIEW, cause, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
     )
@@ -2742,6 +2750,32 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
     # set on its environment below) instead of trying to acquire it a second time.
     if not _needs_line_lock(args):
         return None
+    recovery = bool(getattr(args, "recovery", False) or os.environ.get("DARKFAC_RECOVERY_MODE") == "1")
+    if recovery:
+        # This admission probe is best-effort: it reserves no slot and another run can
+        # acquire one immediately afterward. The official runner acquires the same lock
+        # again at gate time and remains authoritative if capacity changes meanwhile.
+        from core.harness import suite_lock
+
+        try:
+            probe = suite_lock.SuiteLock(timeout_sec=0)
+            probe.acquire()
+            probe.release()
+        except suite_lock.SuiteLockTimeout as exc:
+            if args.json:
+                print(json.dumps({"status": "wait", "cause": "gate_busy", "stage": "GATE",
+                                  "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            else:
+                print(f"[WAIT] gate_busy: {exc}", file=sys.stderr)
+            return EXIT_ROUTE_WAIT
+        except Exception as exc:  # noqa: BLE001 - unknown probe state is a structured wait
+            cause = f"gate_probe_failed:{type(exc).__name__}"
+            if args.json:
+                print(json.dumps({"status": "wait", "cause": cause, "stage": "GATE"},
+                                 ensure_ascii=False), file=sys.stderr)
+            else:
+                print(f"[WAIT] {cause}", file=sys.stderr)
+            return EXIT_ROUTE_WAIT
     lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
     fleet_mode = getattr(args, "fleet", False) or line_lock.is_fleet_mode()
     host_id = getattr(args, "host_id", None) or line_lock.resolve_host_id()
@@ -2755,6 +2789,8 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
                 fleet_mode=fleet_mode,
                 host_id=host_id,
                 project_id=project_id,
+                run_id=getattr(args, "run_id", None) or os.environ.get("DARKFAC_RUN_ID"),
+                max_fleet_slots=1 if recovery else 3,
                 # USR-330: a manual start reserves ticket/project in the canonical store (the same
                 # unique-active-ticket reservation the line's admission takes) before any effect.
                 require_reservation=bool(resume_target or args.ticket_id),
@@ -3198,6 +3234,58 @@ def _stage_deliver(
     return exit_code, completion_info
 
 
+def evaluate_admission(args: argparse.Namespace, ticket: UserTicket) -> admission.AdmissionDecision:
+    """Read-only proof of planning, build, review and gate capacity.
+
+    The allow decision is not stored and does not replace the ``pick`` each stage runs later.
+    """
+    execution_context = "headless" if getattr(args, "fleet", False) else "interactive"
+    build_caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
+    pinned = str(getattr(args, "harness", "") or "").strip() or None
+    operating = detect_operating_harness() if execution_context == "interactive" else None
+    return admission.admit(
+        build_caps=build_caps,
+        read_caps=list(_DEV_CAPS),
+        execution_context=execution_context,
+        operating_harness=operating,
+        project_id=ticket.project_id,
+        complexity=_routing_complexity(ticket),
+        pinned_harness=pinned,
+    )
+
+
+def _stage_admission(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    progress: ProgressPublisher,
+) -> Optional[int]:
+    """Exit 75 before the worktree and PLAN when a required route or the gate is unusable."""
+    decision = evaluate_admission(args, ticket)
+    if decision.outcome == "allow":
+        return None
+    _requeue_after_route_wait(ticket)
+    message = (
+        f"admissao em espera: {decision.code} "
+        f"(stage={decision.stage}, resource={decision.resource}, not_before={decision.not_before})"
+    )
+    progress.phase("preflight", "skipped", message, cause="route_wait")
+    progress.set_outcome(message, "route_wait")
+    print(
+        f"[AGUARDANDO] {message}. Ticket segue planned e volta a fila depois ({ROUTE_WAIT_MARKER}).",
+        file=sys.stderr,
+    )
+    payload = {
+        "ok": False,
+        "cause": "route_wait",
+        "error": decision.code,
+        "ticket_id": ticket.id,
+        "exit_code": EXIT_ROUTE_WAIT,
+        **decision.public_dict(),
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+    return EXIT_ROUTE_WAIT
+
+
 def _stage_preflight(
     args: argparse.Namespace,
     ticket: UserTicket,
@@ -3205,7 +3293,7 @@ def _stage_preflight(
     override_granted: bool,
     progress: ProgressPublisher,
 ) -> Any:
-    """Grokbox probe, size estimation, routing and dry run. Returns a route dict, or an int exit code."""
+    """Grokbox probe, size estimation, admission, routing and dry run. Returns a route dict, or an int exit code."""
     # 1a. Grokbox health probe + optionally authorized wake email (USR-310/456): a dead probe or a failed email
     # only logs -- it never blocks or changes this run's outcome. Skipped under pytest
     # (same guard as the delivery subprocess bypass below): the probe/email are already
@@ -3223,6 +3311,12 @@ def _stage_preflight(
     ticket_size, size_reasons = estimate_ticket_size(ticket)
     if ticket_size == "large" and not args.json:
         ticket_stages.print_large_ticket_warning(ticket, size_reasons)
+
+    # Admission is read-only and runs before the worktree and PLAN. An allow does not
+    # replace the route revalidation below or the pick each later stage performs.
+    waiting = _stage_admission(args, ticket, progress)
+    if waiting is not None:
+        return waiting
 
     # 2. Routing Decision
     # The harness the owner operates the factory through is the preferred developer while its quota is
@@ -3704,6 +3798,9 @@ def _stage_build(
             args, ticket, workspace, quotas, selected_harness, selected_model, progress,
             extra_prompt=extra, pinned=follow_pin,
         )
+        from core.line.recovery_receipt import record_implementation
+        if report.result is not None:
+            record_implementation(rws, report.result.harness or selected_harness, report.result.model or selected_model)
         early = _stage_agent_early_exit(
             args, ticket, workspace, report, selected_harness, slice_before, ticket_size, progress
         )
@@ -3901,6 +3998,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     delivered = exit_code == 0 and completion_info.get("ok", False)
     if delivered and completion_info.get("status") == "merged_awaiting_deploy":
         progress.set_outcome("mergeado, aguardando deploy pos-merge", "merged_awaiting_deploy")
+        print("[DELIVERY_MERGED]", file=sys.stderr if args.json else sys.stdout)
     if exit_code == EXIT_ROUTE_WAIT:
         pass  # requeue: the outcome was already recorded by the waiting stage
     elif not delivered:

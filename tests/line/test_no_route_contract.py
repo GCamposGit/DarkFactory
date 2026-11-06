@@ -55,6 +55,11 @@ NOT_A_ROUTE_PARK: dict[str, str] = {
         "USR-473: the dispatcher asks pick() whether a persisted route wait can resume. A missing route "
         "stays on the durable queue and is rechecked; this module never parks a run on a human."
     ),
+    "admission.py": (
+        "USR-468: read-only preflight before the worktree. A missing planning, build or review route "
+        "returns a wait decision with not_before; run_ticket exits 75 and leaves the ticket planned. "
+        "It never parks a run on waiting_human."
+    ),
 }
 
 

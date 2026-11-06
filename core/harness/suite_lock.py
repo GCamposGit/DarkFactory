@@ -478,6 +478,30 @@ class SuiteLock:
         self.release()
 
 
+def probe_free_slot(*, slots: int | None = None) -> bool:
+    """Try each configured suite slot briefly; return false when all are held.
+
+    This is a capacity observation only. Callers still need to acquire a lock
+    for their actual work, so the result can become stale immediately.
+    """
+    if is_disabled():
+        return True
+    if is_held_by_ancestor():
+        return False
+    count = _slot_count() if slots is None else max(1, slots)
+    directory = state_dir()
+    handles: list[object] = []
+    try:
+        for slot in range(count):
+            handle = _try_lock_file(directory / f"suite-{slot}.lock")
+            if handle is not None:
+                handles.append(handle)
+        return bool(handles)
+    finally:
+        for handle in handles:
+            _unlock_file(handle)
+
+
 @contextlib.contextmanager
 def suite_lock(*, timeout_sec: float | None = None, slots: int | None = None) -> Iterator[SuiteLock | None]:
     """Acquire the machine-wide suite lock unless disabled or already held.
