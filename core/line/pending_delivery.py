@@ -59,6 +59,8 @@ def schedule(ticket_id: str, worktree: Path, stage: str, *, resume_delivery: boo
     row = PendingDelivery(ticket_id=ticket_id, worktree=str(worktree.resolve()), stage=stage,
                           implementing_harness=harness, resume_delivery=resume_delivery,
                           next_check=time.time() + RECHECK_SECONDS, cause=cause[:500])
+    if stage == "review" and not harness:
+        row.status, row.cause = "blocked", "implementing_family_unknown"
     _save((directory or queue_dir()) / f"{row.ticket_id}.json", row)
     return row
 
@@ -144,14 +146,21 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     if release.is_file():
         report = json.loads(release.read_text(encoding="utf-8"))
         if report.get("sha") and not report.get("deployed"):
-            merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
-            validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
-            review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
+            try:
+                merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
+                validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
+                review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
+            except (OSError, ValueError, KeyError, IndexError, TypeError):
+                row.status, row.cause = "blocked", "deploy_evidence_missing"
+                _save(path, row)
+                return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
             if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
                     or not validation.get("candidate_digest")
                     or review.get("candidate_digest") != validation["candidate_digest"]
                     or review.get("verdict") != "approve" or review.get("forced")):
-                raise RuntimeError("Pending deploy candidate evidence mismatch")
+                row.status, row.cause = "blocked", "deploy_evidence_mismatch"
+                _save(path, row)
+                return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
             return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     if ticket.get("status") in {"completed", "cancelled", "canceled"}:
         path.unlink()
@@ -165,6 +174,10 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     row.next_check = now + RECHECK_SECONDS
     _save(path, row)  # Backoff survives network/probe errors and service restart.
     if _route(row) is None:
+        if row.stage == "review" and not row.implementing_harness:
+            row.status, row.cause = "blocked", "implementing_family_unknown"
+            _save(path, row)
+            return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
         return {"ticket": row.ticket_id, "status": "waiting_route", "next_check": row.next_check}
     env = dict(os.environ, DARKFAC_STATE_ROOT=str(state_root().resolve()))
     env.pop("DARKFAC_OPERATING_HARNESS", None)

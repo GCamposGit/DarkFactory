@@ -472,6 +472,11 @@ class FleetDispatcher:
         self._reap()
         from core.line.pending_delivery import tick, acknowledge_deploy
         resumptions = tick(PROJECT_ROOT) if self.launch is None and not self.dry_run else []
+        if any(r.get("status") == "dispatcher_busy" for r in resumptions):
+            self.last_cycle = {"ts": datetime.now(timezone.utc).isoformat(), "resumptions": resumptions,
+                               "dispatched": [], "deployed": False}
+            self._write_state()
+            return self.last_cycle
         awaiting_deploy = any(r["status"] == "merged_awaiting_deploy" for r in resumptions)
         if awaiting_deploy and not self.pending_deploy:
             self.pending_deploy, self.last_merge_at = True, self.clock()

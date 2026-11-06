@@ -160,7 +160,10 @@ def test_infra_failure_requeues_with_cooldown(tmp_path: Path, monkeypatch):
     (context / "merge.json").write_text(json.dumps({"merge_sha": "b" * 40}), encoding="utf-8")
     (context / "validation.json").write_text(json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8")
     (context / "review_state.json").write_text(json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}), encoding="utf-8")
-    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "check_failed"
+    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["cause"] == "deploy_evidence_mismatch"
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "waiting"
+    pd._save(directory / "USR-99.json", saved)
     (context / "merge.json").write_text(json.dumps({"merge_sha": "a" * 40}), encoding="utf-8")
     assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "merged_awaiting_deploy"
     assert list(directory.glob("*.json"))  # completed ledger alone is not production evidence
