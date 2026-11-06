@@ -11888,8 +11888,8 @@
     "project_id": "darkfac",
     "title": "Circuit breaker de admissao impede repeticao de tickets sem mudanca de recurso ou candidato",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ec612b0f0f3df4ace3654dfa733ea6e01dec35fd",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -11912,7 +11912,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-05T13:08:01.927153Z",
-    "updated_at": "2026-11-05T13:08:01.927153Z"
+    "updated_at": "2026-11-06T09:18:04.237789Z"
   },
   {
     "id": "USR-469",

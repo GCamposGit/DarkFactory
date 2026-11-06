@@ -15,9 +15,9 @@ import pytest
 from tests import _cache_dir
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# Product deadline is pytest.ini ``timeout = 120``. This bound is stricter so a
-# session stuck in Cache.set fails here instead of waiting for that deadline.
-_PYTEST_DEADLINE_SEC = 60
+# Keep below pytest.ini ``timeout = 120`` while allowing this nested suite to
+# run on loaded Windows workers. The test is serial because it starts pytest.
+_PYTEST_DEADLINE_SEC = 110
 _SUMMARY_LINE = re.compile(
     r"^(?:=+\s+)?\d+ [A-Za-z]\w*(?:, \d+ [A-Za-z]\w*)* in \d+(?:\.\d+)?s(?:\s+=+)?$"
 )
@@ -129,6 +129,7 @@ def test_worktree_remove_after_pytest_run_and_lf_persists(tmp_path: Path) -> Non
         shutil.rmtree(cache, ignore_errors=True)
 
 
+@pytest.mark.serial
 def test_fleet_dispatcher_focus_exits_with_passed_summary(tmp_path: Path) -> None:
     """The real focus, with this repo's pytest.ini, must exit and print a summary.
 

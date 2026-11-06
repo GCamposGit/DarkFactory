@@ -25,4 +25,9 @@ SERIAL_ALLOWED: dict[str, str] = {
         "test_dense_graph_500_items_1500_relations_latency_budget asserts a 500 ms compile latency budget "
         "that parallel CPU contention would break."
     ),
+    "test_pytest_cache_dir_worktree.py": (
+        "test_fleet_dispatcher_focus_exits_with_passed_summary launches pytest against the real repository "
+        "root with its configured cache provider; the parent suite and child share that root's external "
+        "pytest cache, so concurrent cache writes under xdist can race."
+    ),
 }

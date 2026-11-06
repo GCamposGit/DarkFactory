@@ -1,4 +1,4 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py -->
 # Motor da esteira
 
 ## Wake do grokbox no preflight (USR-456)
@@ -16,6 +16,39 @@ uma tentativa por janela mesmo quando o provedor aceita o email e a resposta exp
 indisponível, estado ilegível, gravação impossível ou lock indisponível suprime o email
 (`shared_state_root_unavailable`, `state_unreadable`, `state_write_failed` ou `lock_unavailable`);
 sondagem e launcher continuam operantes.
+
+## Admissão antes da worktree (USR-468)
+
+`_stage_preflight` chama `evaluate_admission` (`core.line.admission.admit`) depois da estimativa de
+tamanho e antes de `_stage_route`, do dry run, da worktree e do PLAN. A consulta é somente leitura:
+`pick` com `reserve_quota=False`, sem agente e sem arquivo de candidato.
+
+A decisão traz `outcome` (`allow` ou `wait`), `code`, `stage`, `resource`, `observed_at`,
+`evidence_ref` e `not_before` (`null` quando o outcome é `allow`).
+
+Sem rota de `planning`, de `development` ou de `review`, ou sem worker de gate utilizável, o launcher
+encerra com exit 75 (`EXIT_ROUTE_WAIT`). O stdout recebe um JSON com `ok` false, `cause` `route_wait`,
+`error` igual ao `code`, `ticket_id`, `exit_code` 75 e os campos da decisão. O stderr recebe
+`[AGUARDANDO]` e `harness_infra_error: route_wait`. O ticket volta a `planned` quando estava
+`discovered`, `accepted`, `implementing` ou `validating`. Um ticket que já estava `planned` permanece
+na fila. A worktree não é criada e o dry run não imprime `[DRY RUN]`.
+
+A revisão prospectiva usa outro harness que a rota de build (o nome do harness, sem distinção de
+maiúsculas). A mesma família produz `review_same_family`. O harness que escreveria é o pin `--harness`
+quando ele declara escrita; em contexto headless o pin Antigravity continua fora da escrita e a revisão
+é comparada com o harness que o `pick` de `development` elegeu. Um pin não inventa rota quando esse
+`pick` devolve `None`.
+
+O gate conta como capacidade com `workers` inteiro maior que zero, `busy` false e instante de
+observação com menos de 90 segundos. As causas de espera são `gate_capacity_zero` (`workers` <= 0),
+`gate_worker_busy` (`busy` true), `gate_worker_stale` (90 segundos ou mais), `gate_capacity_absent`
+(coleção vazia) e `gate_health_generic` (faltam `workers`, `busy` ou o instante, inclusive um body
+`{"status": "ok"}`). `status` não entra na conta. Um worker utilizável na coleção libera o gate. Entre
+falhas, a causa segue a ordem zero, busy, stale, genérico: coleção vazia e health genérico permanecem
+espera e não cobrem um zero, um busy ou um stale.
+
+`allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
+novo na leitura daquele momento.
 
 ## Sequencia canonica de estagios (USR-375 S2)
 
@@ -183,7 +216,7 @@ apos o orcamento de relogio). Nunca ha queda para modelo barato e nenhum agente 
 
 `run_ticket.py` e o launcher headless; `_run` agora so orquestra estagios, cada um com no maximo 150 linhas:
 `_stage_line_lock`, `_stage_check_harness`, `_stage_intake`, `_stage_preflight` (sonda do grokbox, tamanho,
-`_stage_route`, dry run), `_stage_workspace`, `_stage_build` (agente + retry), `_stage_deliver` (subprocesso
+admissão de rotas e do gate, `_stage_route`, dry run), `_stage_workspace`, `_stage_build` (agente + retry), `_stage_deliver` (subprocesso
 `--resume-delivery`). O portao de autocorrecao e dividido em `_gate_focal_step`, `_gate_official_step`
 (`_gate_run_official`, `_gate_classify_failure`, `_gate_reinvoke_for_gate`) e `_gate_exhausted_result`, e a
 entrega em `_deliver_sync`, `_deliver_external_project` e `_deliver_worktree`.
@@ -216,3 +249,7 @@ continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_i
 
 Durante a validacao pelo portao oficial, `run_ticket.py` rotaciona os workers remotos quando uma tentativa falha (`_rotate_gate_workers`). Essa rotacao filtra estritamente hosts listados em `DARKFAC_FLEET_DISABLED_HOSTS` (ex.: `desktop` ocupado com indexacao), garantindo que nos desabilitados nao sejam reinseridos no pool ativo de validacao.
 
+
+## Recovery serial do dispatcher (USR-468 T3)
+
+Falhas determinísticas repetidas acima de `recovery_failure_threshold` persistem o estado `recovery` no SQLite de admission, incluindo causa e fingerprint. Nesse modo o dispatcher mantém uma única reserva global durável por `AdmissionStore.reserve_recovery()`, transmite `run_id` e `candidate_digest` ao `run_ticket.py` e limita recovery a uma entrega em voo na frota. A expiração da lease libera o slot pelo reconciliador; tokens de fencing antigos não liberam uma lease substituta. Antes de iniciar um agente, recovery tenta adquirir e liberar o `suite_lock` oficial: gate ocupado retorna espera estruturada `gate_busy`. Só um `[RECOVERY_RECEIPT]` válido, recente e vinculado ao mesmo candidato e `run_id` limpa recovery; `[DELIVERY_MERGED]` é evidência de merge para agendar deploy, não prova de sucesso de recovery. Espera, idle, falha ou receipt recusado mantém o latch ativo.

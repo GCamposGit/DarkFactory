@@ -88,6 +88,27 @@ def _disable_live_pull_request_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(bindings, "find_active_pull_request", lambda *_args, **_kwargs: None)
 
 
+@pytest.fixture(autouse=True)
+def _allow_ticket_admission(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Launcher tests do not read live quotas or gate workers (USR-468).
+
+    The real ``evaluate_admission`` stays on ``run_ticket._admission_impl``. A module that
+    drives the real preflight sets ``REAL_ADMISSION = True``.
+    """
+    if getattr(request.module, "REAL_ADMISSION", False):
+        return
+    import run_ticket
+    from datetime import datetime, timezone
+
+    from core.line.admission import allow_decision
+
+    current = run_ticket.evaluate_admission
+    if getattr(current, "__name__", "") == "evaluate_admission":
+        run_ticket._admission_impl = current
+    decision = allow_decision(datetime.now(timezone.utc), evidence_ref="test:allow")
+    monkeypatch.setattr(run_ticket, "evaluate_admission", lambda *_args, **_kwargs: decision)
+
+
 def _git_for_fixture(repo: Path, *args: str) -> str:
     kwargs: dict[str, Any] = {}
     if sys.platform == "win32":
