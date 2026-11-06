@@ -104,6 +104,7 @@ def test_infra_failure_requeues_with_cooldown(tmp_path: Path, monkeypatch):
     # A REVIEW wait survives a dispatcher restart and resumes the same worktree,
     # without rebuilding or spinning new processes while a route is absent.
     from core.line import pending_delivery as pd
+    monkeypatch.setattr(pd, "_children", {})
     from types import SimpleNamespace
     import json
     from core.usage.models import ProviderAccountUsage, QuotaWindow
@@ -156,6 +157,11 @@ def test_infra_failure_requeues_with_cooldown(tmp_path: Path, monkeypatch):
         mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}]))
     release = context / "deploy_report.json"
     release.write_text(json.dumps({"sha": "a" * 40, "deployed": False}), encoding="utf-8")
+    (context / "merge.json").write_text(json.dumps({"merge_sha": "b" * 40}), encoding="utf-8")
+    (context / "validation.json").write_text(json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8")
+    (context / "review_state.json").write_text(json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}), encoding="utf-8")
+    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "check_failed"
+    (context / "merge.json").write_text(json.dumps({"merge_sha": "a" * 40}), encoding="utf-8")
     assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "merged_awaiting_deploy"
     assert list(directory.glob("*.json"))  # completed ledger alone is not production evidence
     release.write_text(json.dumps({"sha": "a" * 40, "deployed": True}), encoding="utf-8")

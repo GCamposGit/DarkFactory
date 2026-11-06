@@ -144,6 +144,14 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     if release.is_file():
         report = json.loads(release.read_text(encoding="utf-8"))
         if report.get("sha") and not report.get("deployed"):
+            merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
+            validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
+            review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
+            if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
+                    or not validation.get("candidate_digest")
+                    or review.get("candidate_digest") != validation["candidate_digest"]
+                    or review.get("verdict") != "approve" or review.get("forced")):
+                raise RuntimeError("Pending deploy candidate evidence mismatch")
             return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     if ticket.get("status") in {"completed", "cancelled", "canceled"}:
         path.unlink()
@@ -191,7 +199,7 @@ def acknowledge_deploy(repo_root: Path, rows: list[dict]) -> None:
         if proof.returncode:
             raise RuntimeError("Deployed SHA does not include the pending candidate")
         ws = ticket_engine.run_workspace(SimpleNamespace(id=row["ticket"], project_id="darkfac"))
-        ticket_engine.write_deploy(ws, sha, True, True, "Canonical deploy succeeded; production health SHA verified")
+        ticket_engine.write_deploy(ws, row["sha"], True, True, f"Canonical deploy succeeded; production health SHA {sha} verified")
         (queue_dir() / f"{row['ticket']}.json").unlink(missing_ok=True)
 
 

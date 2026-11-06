@@ -225,3 +225,8 @@ Quando um `run_ticket` da frota termina com código diferente de zero, ou o chec
 ## Gancho do sentinela da linha (USR-439)
 
 O despachante contínuo integra o gancho do sentinela (`sentinel_hook`) executado em `self.run_sentinel_hook()` a cada ciclo de 30 segundos, delegando a `maybe_run_sentinel()` com janela de silêncio determinística de 45 minutos (2700s). Isso assegura vigilância contínua da saúde da frota e disparo de alertas ao Telegram caso a linha seja paralisada por esgotamento de cotas de IA ou jobs estagnados.
+
+USR-473: espera de deploy exige SHA do recibo de merge e evidencia coincidente
+do candidato validado e aprovado. Recibo inconsistente permanece visivel como
+falha de verificacao. O smoke registra o SHA do ticket e a versao saudavel que
+o contem, sem substituir identidade do candidato.
