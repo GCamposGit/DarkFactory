@@ -588,29 +588,16 @@ class FleetDispatcher:
         self.deploys += 1
         return True
 
-    def run_cycle(self) -> dict[str, Any]:
-        self._reap()
-        self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
-            "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
-        if self.recovery.get("active"):
-            for job in self.in_flight.values():
-                if job.recovery_token and not self.admission_store.heartbeat_recovery(job.recovery_token):
-                    logger.error("reserva global de recovery perdeu fencing para %s", job.ticket_id)
-        now = self.clock()
-        self.cooldown = {t: u for t, u in self.cooldown.items() if u > now}
-        try:
-            demands = self.demands_loader()
-        except Exception as exc:  # noqa: BLE001
-            demands = []
-            load_error = str(exc)
-        else:
-            load_error = ""
-        busy = {j.ticket_id for j in self.in_flight.values()} | set(self.busy_ids_loader())
-        queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
-        dispatched: list[dict[str, str]] = []
-        idle: dict[str, str] = {}
-        lock_busy, self.lock_busy = self.lock_busy, {}
-        orphan_hosts = self.busy_hosts_loader()
+    def _dispatch_hosts(
+        self,
+        queue: list[str],
+        demands: list[dict[str, Any]],
+        idle: dict[str, str],
+        skipped: dict[str, str],
+        dispatched: list[dict[str, str]],
+        orphan_hosts: set[str],
+        now: float,
+    ) -> None:
         for host in sorted(self.config.hosts, key=lambda h: h.priority):
             if host.id in self.in_flight:
                 continue
@@ -748,6 +735,31 @@ class FleetDispatcher:
                     except Exception:  # noqa: BLE001
                         logger.exception("falha ao liberar reserva global apos erro de launcher %s", tid)
                 self.cooldown[tid] = now + self.config.requeue_cooldown_sec
+
+    def run_cycle(self) -> dict[str, Any]:
+        self._reap()
+        self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
+            "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
+        if self.recovery.get("active"):
+            for job in self.in_flight.values():
+                if job.recovery_token and not self.admission_store.heartbeat_recovery(job.recovery_token):
+                    logger.error("reserva global de recovery perdeu fencing para %s", job.ticket_id)
+        now = self.clock()
+        self.cooldown = {t: u for t, u in self.cooldown.items() if u > now}
+        try:
+            demands = self.demands_loader()
+        except Exception as exc:  # noqa: BLE001
+            demands = []
+            load_error = str(exc)
+        else:
+            load_error = ""
+        busy = {j.ticket_id for j in self.in_flight.values()} | set(self.busy_ids_loader())
+        queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
+        dispatched: list[dict[str, str]] = []
+        idle: dict[str, str] = {}
+        lock_busy, self.lock_busy = self.lock_busy, {}
+        orphan_hosts = self.busy_hosts_loader()
+        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now)
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
         self.last_cycle = {
