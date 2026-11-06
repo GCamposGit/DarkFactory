@@ -245,7 +245,7 @@ def test_past_the_wall_clock_budget_the_waiter_parks_the_run_with_an_infra_reque
     assert request.probe_cmd == "python -m core.line.route_probe development"
     assert "7.0h" in request.guide_md and "6h" in request.guide_md
     assert "python -m core.usage.cli accounts --refresh" in request.guide_md
-    assert "escreve codigo" in request.guide_md  # development: OpenRouter is read-only
+    assert "escreve codigo" in request.guide_md  # development: OpenRouter contingency writes code
 
 
 def test_the_review_request_blocks_the_independent_review_job_and_offers_openrouter(tmp_path: Path) -> None:

@@ -300,6 +300,51 @@ def _delivery_pr_title(kind: str, ticket_id: str, title: str) -> str:
     return f"feat(core): {title.strip()} [{ticket_id}]"
 
 
+def _nul_paths(stdout: str) -> list[str]:
+    return [path for path in stdout.split("\0") if path]
+
+
+def _ignored_staged_deletions(paths: Sequence[str], cwd: Path) -> set[str]:
+    """Staged deletions whose path an ignore rule also matches.
+
+    ``git add`` exits non-zero for those paths while the worktree file still
+    exists. The deletion is already in the index, so the caller must not pass
+    the path to ``git add``.
+    """
+    if not paths:
+        return set()
+    listed = _run_git(["diff", "--cached", "--no-renames", "--name-only", "--diff-filter=D", "-z"], cwd=cwd)
+    if listed.returncode != 0:
+        raise RuntimeError("Cannot list staged deletions")
+    staged = set(_nul_paths(listed.stdout))
+    ignored: set[str] = set()
+    for path in paths:
+        if path not in staged:
+            continue
+        check = _run_git(["check-ignore", "--no-index", "--quiet", "--", path], cwd=cwd)
+        if check.returncode == 0:
+            ignored.add(path)
+        elif check.returncode != 1:
+            raise RuntimeError(f"Cannot check ignore rules for {path}: {check.stderr.strip()}")
+    return ignored
+
+
+def _stage_ticket_paths(paths: Sequence[str], cwd: Path, *, update: bool) -> None:
+    """Stage ``paths``. Leave an already-staged deletion of an ignored path untouched."""
+    if not paths:
+        return
+    kept = _ignored_staged_deletions(paths, cwd)
+    if kept:
+        logger.info("Leaving staged deletion of %d ignored path(s) out of git add", len(kept))
+    stageable = [path for path in paths if path not in kept]
+    for start in range(0, len(stageable), _ADD_CHUNK):
+        chunk = stageable[start : start + _ADD_CHUNK]
+        args = ["--literal-pathspecs", "add", "-A", "--", *chunk] if update else ["add", "--", *chunk]
+        add = _run_git(args, cwd=cwd)
+        if add.returncode != 0:
+            raise RuntimeError(f"Git add failed for {chunk[:3]}: {add.stderr.strip()}")
+
+
 class GitAutonomyManager:
     """Manages autonomous Git operations for the Dark Factory."""
 
@@ -502,7 +547,8 @@ class GitAutonomyManager:
         Repository-root ``.tmp`` delivery scratch is never staged. Paths already
         in the index are removed from it and left on disk with the same bytes
         (USR-429). When that scratch is the only change, the current HEAD is
-        returned.
+        returned. A staged deletion of an ignored path stays in the index:
+        ``git add`` refuses that path while the worktree file still exists.
 
         Returns the new commit SHA, or the current HEAD if working tree is clean.
         """
@@ -515,17 +561,10 @@ class GitAutonomyManager:
         self._check_ignored_staged_additions(target_dir)
         if paths:
             stageable = ticket_workspace.without_delivery_scratch(str(p) for p in paths)
-            if stageable:
-                add = _run_git(["add", "--", *stageable], cwd=target_dir)
-                if add.returncode != 0:
-                    raise RuntimeError(f"Git add failed: {add.stderr.strip()}")
+            _stage_ticket_paths(stageable, target_dir, update=False)
         else:
             changed = ticket_workspace.without_delivery_scratch(self.changed_paths(target_dir))
-            for start in range(0, len(changed), _ADD_CHUNK):
-                chunk = changed[start : start + _ADD_CHUNK]
-                add = _run_git(["--literal-pathspecs", "add", "-A", "--", *chunk], cwd=target_dir)
-                if add.returncode != 0:
-                    raise RuntimeError(f"Git add failed for {chunk[:3]}: {add.stderr.strip()}")
+            _stage_ticket_paths(changed, target_dir, update=True)
         self._drop_delivery_scratch(target_dir)
 
         # 2. Check if anything is staged

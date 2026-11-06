@@ -80,9 +80,11 @@ def test_relative_reset_still_wins() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_repo_config_has_no_openrouter_for_development_and_is_consistent() -> None:
+def test_repo_config_allows_openrouter_write_for_development_and_is_consistent() -> None:
     cfg = load_routing_config()
-    assert cfg.stages["development"].openrouter_ok is False
+    # USR-473: paid contingency may write when no subscription is eligible.
+    assert cfg.stages["development"].openrouter_ok is True
+    assert cfg.stages["development"].openrouter_model
     assert validate_routing_config(cfg) == []
 
 
@@ -123,15 +125,22 @@ def _quota(table: dict[str, float | None]):
 
 
 def _pick(stage: str, table: dict[str, float | None], tmp_path: Path, **kw):
+    balance = kw.pop("openrouter_balance", 5.0)
     return pick(
         stage, ALL_CAPS, config=load_routing_config(), quota_lookup=_quota(table),
-        cooldown_path=tmp_path / "cd.json", openrouter_balance_lookup=lambda: 5.0, **kw,
+        cooldown_path=tmp_path / "cd.json", openrouter_balance_lookup=lambda: balance, **kw,
     )
+
+
+def _openrouter_development() -> tuple[str, str | None]:
+    return ("openrouter", load_routing_config().stages["development"].openrouter_model)
 
 
 def test_unknown_quota_is_fail_closed_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", raising=False)
-    assert _pick("development", {"anthropic": 5.0, "openai": None}, tmp_path) is None
+    table = {"anthropic": 5.0, "openai": None}
+    assert _pick("development", table, tmp_path) == _openrouter_development()
+    assert _pick("development", table, tmp_path, openrouter_balance=0.0) is None
 
 
 def test_last_resort_elects_unknown_codex_when_nothing_is_known_healthy(
@@ -146,8 +155,9 @@ def test_development_unknown_quota_blocks_medium_and_high(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complexity: str
 ) -> None:
     monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
-    assert _pick("development", {"anthropic": None, "openai": None, "xai": None},
-                 tmp_path, complexity=complexity) is None
+    table = {"anthropic": None, "openai": None, "xai": None}
+    assert _pick("development", table, tmp_path, complexity=complexity) == _openrouter_development()
+    assert _pick("development", table, tmp_path, complexity=complexity, openrouter_balance=0.0) is None
 
 
 def test_development_low_allows_unknown_quota_without_bootstrap_setting(tmp_path: Path, monkeypatch) -> None:
@@ -163,7 +173,9 @@ def test_last_resort_prefers_known_healthy_over_unknown(tmp_path: Path, monkeypa
 
 def test_last_resort_never_elects_known_critical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
-    assert _pick("development", {"anthropic": 5.0, "openai": 10.0}, tmp_path) is None
+    table = {"anthropic": 5.0, "openai": 10.0}
+    assert _pick("development", table, tmp_path) == _openrouter_development()
+    assert _pick("development", table, tmp_path, openrouter_balance=0.0) is None
 
 
 def test_last_resort_skips_a_harness_in_cooldown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

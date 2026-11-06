@@ -11,6 +11,14 @@ vez e fixa essa quantidade segura para o pytest. Deadlines de cache e watchdog
 remoto reservam o pior caso elegível (um worker), cobrindo uma mudança de memória
 entre admissão e início do passo. O prazo externo de7.200s cobre a suíte de6.000s
 mais540s das outras checagens. Overrides não aumentam a capacidade real da RAM.
+## Observação de capacidade antes da admissão (USR-468)
+
+`core.harness.suite_lock.probe_free_slot()` verifica brevemente os slots de suíte
+e solta todos os handles adquiridos. Se o processo já descende de um dono da
+trava, a sonda informa ocupado. É somente uma observação: a execução real ainda
+precisa adquirir `suite_lock`, pois outro processo pode ocupar o slot depois da
+sonda. Worker ocupado gera espera de admissão, sem iniciar PLAN/BUILD para produzir
+mais candidatos que não podem ser validados.
 
 ## Testes de forma
 

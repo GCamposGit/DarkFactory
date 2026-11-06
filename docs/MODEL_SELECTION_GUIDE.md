@@ -93,7 +93,7 @@ Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fabl
 | `claude-haiku-5-5` | anthropic | claude | low | `haiku` | active | - | - | - |
 | `claude-opus-5` | anthropic | claude | high | `opus-legacy` | deprecated | 5.0 | 25.0 | 200000 |
 | `claude-opus-5-5` | anthropic | claude | high | `opus` | active | - | - | - |
-| `claude-sonnet-5-5` | anthropic | claude | mid | `sonnet` | active | - | - | - |
+| `claude-sonnet-5-5` | anthropic | claude | mid | `sonnet` | active | 2.0 | 10.0 | - |
 | `deepseek-coder` | deepseek | deepseek | low | `coder-legacy` | deprecated | - | - | - |
 | `deepseek/deepseek-r1` | deepseek | deepseek | high | `deepseek-r1` | deprecated | - | - | 128000 |
 | `deepseek/deepseek-v4-pro` | deepseek | deepseek | high | `deepseek-v4-pro` | candidate | - | - | 256000 |

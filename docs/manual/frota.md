@@ -1,9 +1,49 @@
-<!-- covers: core/line/fleet_dispatcher.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 # Operação da frota
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
 Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,
 sem forçar processos além da capacidade e sem executar suítes concorrentes.
+## Espera de rota e retomada automática (USR-473)
+
+Sem assinatura elegível, o roteador tenta OpenRouter com saldo confirmado, dentro do
+orçamento vigente e preservando capacidade e revisão por outra família. Sem saldo ou
+rota, o launcher grava a espera em `.factory/pending_delivery/<ticket>.json` antes de
+sair com código75. O dispatcher permanece ativo: espera não depende de um chat ou
+heartbeat de LLM. O serviço verifica snapshots e crédito, sem gerar texto para supervisionar.
+
+A espera registra etapa, worktree, implementador e próximo horário. Cada espera é
+consultada no máximo a cada15 minutos; o estado sobrevive ao reinício. REVIEW usa
+`run_ticket.py --resume-delivery` na mesma worktree; o launcher preserva validação
+vinculada ao candidato. PLAN/BUILD usam a retomada canônica do ticket, com suas reservas.
+Processo vivo não é duplicado, ticket terminal sai da fila e falha diferente de
+`route_wait` fica bloqueada com causa explícita. Decisão material `waiting_human`
+continua dependendo do owner. Nenhuma espera compra créditos nem aumenta o teto.
+
+Durante recuperação, o mesmo serviço admite só retomadas:
+
+```powershell
+Set-Location C:\dev\DarkFac
+python -m core.line.fleet_dispatcher --loop --resume-only
+```
+
+O modo `--resume-only` não admite novos BUILDs e não executa sentinela/digest adicionais.
+A variável persistente `DARKFAC_FLEET_RESUME_ONLY=1` também ativa esse modo no boot.
+A tarefa Windows `DarkFac-Fleet-Dispatcher` mantém boot e reinício em falha; não substitua
+esse serviço por inferência recorrente. Ao sair da recuperação, remover `--resume-only`
+da ação da tarefa e limpar `DARKFAC_FLEET_RESUME_ONLY` libera novamente a fila regular.
+
+Para uma recuperação que não termina em ociosidade, `--recovery-tickets ID1,ID2`
+executa a lista na ordem, uma correção por vez. Retomadas em execução têm precedência.
+Quando todos os IDs estão completed/cancelled, a fila regular volta automaticamente.
+Esse argumento substitui o modo de espera exclusiva; não existe nova pausa a remover
+manualmente no final. Ticket ausente ou pendência material não contam como concluídos.
+
+`completed` no ledger não encerra uma entrega cujo recibo ainda diz `deployed=false`.
+O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só encerra
+a espera após verificar o SHA saudável de produção incluindo o candidato. Falha de
+deploy permanece pendente para nova tentativa, sem chamar um agente para supervisionar.
 
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
@@ -183,6 +223,67 @@ Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) recon
 
 Quando um `run_ticket` da frota termina com código diferente de zero, ou o checkout operacional não pode ser preparado, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra`, `lock` ou `launch`) e o motivo (últimas linhas do log do ticket ou erro de lançamento, sem segredos; nunca vazio). O histórico guarda as 20 últimas. Erros de lançamento mantêm o ticket em cooldown e não aparecem como despacho concluído.
 
+## Circuit breaker e recuperação (USR-468)
+
+O recibo é produzido pelo dispatcher depois do deploy canônico e da prova HTTP
+do SHA exato. Um marcador escrito pelo processo filho não libera a recuperação.
+A entrega pendente fica em `pending_recovery_releases.json`, ao lado do estado do
+dispatcher, e é retomada após reinício antes de admitir novos tickets. Validação,
+revisão independente, merge e índice de learning packs vêm dos artefatos reais;
+CI e saúde são consultados novamente. Falha no deploy ou na prova mantém a espera.
+
+Cada tentativa é identificada por fingerprint de projeto, ticket, candidato, contexto, classe de erro e versão do recurso. O SQLite durável guarda o backoff, a causa, as reservas e a trava global de recuperação. O mesmo fingerprint permanece aberto mesmo depois do backoff; só uma mudança observável no candidato, contexto, recurso ou janela de cota permite nova tentativa. Causas operacionais aparecem em `idle_reasons`, `skipped` e `recovery.receipt_cause`; ausência de rota, worker zero/ocupado/stale, reserva ativa e receipt incompleto são espera, nunca sucesso.
+
+Na recuperação, há no máximo uma entrega em voo para toda a frota. A concorrência normal só volta após uma linha `[RECOVERY_RECEIPT] {JSON}` no log da entrega. O receipt deve ser real (`simulated: false`), recente (até sete dias), vinculado ao digest do candidato em cada estágio e incluir `[HARNESS_PASS]`, revisão independente aprovada, CI verde, SHA de merge alcançável, deploy desse SHA, smoke HTTP 2xx e learning pack indexado. Evidência ausente, stale, simulada ou de outro candidato deixa a trava ativa e registra a primeira causa recusada. O hash do receipt e o candidato recuperado ficam persistidos, tornando o retorno ao teto normal idempotente após reinício.
+
+Para diagnosticar, consulte o estado do ciclo em `.factory/runs` e o SQLite de admissão em `DARKFAC_STATE_ROOT` (ou a raiz de estado configurada). `recovery.active=true` mantém a frota serializada; `recovery.receipt_cause` aponta o estágio que falta. Corrija a evidência ou altere de modo verificável o candidato/recurso e deixe o despachante retomar com backoff. Não apague reservas nem a trava manualmente.
+
 ## Gancho do sentinela da linha (USR-439)
 
 O despachante contínuo integra o gancho do sentinela (`sentinel_hook`) executado em `self.run_sentinel_hook()` a cada ciclo de 30 segundos, delegando a `maybe_run_sentinel()` com janela de silêncio determinística de 45 minutos (2700s). Isso assegura vigilância contínua da saúde da frota e disparo de alertas ao Telegram caso a linha seja paralisada por esgotamento de cotas de IA ou jobs estagnados.
+
+USR-473: espera de deploy exige SHA do recibo de merge e evidencia coincidente
+do candidato validado e aprovado. Recibo inconsistente permanece visivel como
+falha de verificacao. O smoke registra o SHA do ticket e a versao saudavel que
+o contem, sem substituir identidade do candidato.
+
+USR-473: identidade de implementacao ausente e provas de deploy ausentes ou
+inconsistentes ficam bloqueadas com causa persistida. Contencao do mutex de
+retomada impede novas admissoes naquele ciclo; nenhuma cota e consumida em espera.
+USR-468: admissao remota combina `/health` (ocupacao) com `/metrics/hardware`
+(RAM, CPUs e instante de coleta). Saude generica nunca vira capacidade; RAM
+insuficiente continua zero. Corretores de falhas tambem registram sua familia
+para impedir revisao pelo mesmo provedor de qualquer implementador.
+
+USR-468 integra o controlador de retomadas USR-473 ao breaker de admissao.
+O candidato composto exige revisao independente e portao integral proprios;
+rodadas recusadas do USR-473 permanecem preservadas. Completed sem recibo de
+deploy nao remove espera; uma retomada ativa impede readmissao do mesmo ticket
+mesmo que o inventario externo de processos esteja vazio.
+
+## Recuperacao integrada USR-477
+
+O corretivo preserva as revisoes recusadas de USR-473/468. Completed sem report
+de deploy usa merge, gate e revisao coincidentes para retomar o deploy; prova
+ausente ou divergente permanece bloqueada. Falha do deploy fica no historico
+com codigo e proxima tentativa, sem supervisor LLM. Runtime do harness nao entra
+no candidato. O revisor pago usa o alias sonnet, de familia diferente dos
+implementadores; familias tambem reconhecem os ids de gateway do registro. A
+mudanca responde aos JSONs truncados e achados contraditorios da rota anterior,
+sem aumentar rodadas, cota ou orcamento. Resultado real ainda exige gate e deploy.
+
+USR-477: saida zero sem entrega em recovery registra falha e causa persistida.
+Retomada de deploy exige prova da familia independente. Se a validacao for
+corrompida apos merge, o recibo preserva SHA/PR reais sem digest autorizado;
+a ausencia desse digest bloqueia release ate a recuperacao da evidencia.
+
+## Encerramento sem entrega e recuperacao de CI (USR-479)
+
+Retorno zero sem prova de merge gera causa persistida e cooldown nos modos
+normal e recovery. O ticket nao ganha uma nova execucao imediatamente.
+A correcao de CI e unica por tentativa: o contador permanece consumido ao
+retomar, inclusive depois de gate e revisao verdes. Retomar a entrega segue
+gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
+comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
+de candidatos anteriores permanecem preservadas; o novo candidato exige suas
+proprias provas de portao, revisao e producao.

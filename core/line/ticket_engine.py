@@ -12,6 +12,7 @@ Only helpers without launcher globals live here; the flow (agents, gate, merge) 
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -236,8 +237,14 @@ def write_validation(
 
 
 def write_merge(ws: workspace.RunWorkspace, pr_url: str, merge_sha: str) -> None:
-    receipt = MergeReceipt(pr_url=pr_url, merge_sha=merge_sha)
-    workspace.write_context(ws, MERGE_FILE, receipt.model_dump_json(indent=2))
+    validation_path = workspace.context_dir(ws) / VALIDATION_FILE
+    try:
+        digest = json.loads(validation_path.read_text(encoding="utf-8")).get("candidate_digest")
+    except (OSError, ValueError, AttributeError):
+        digest = None
+        logging.getLogger(__name__).error("Merge recorded without validation digest: ticket=%s", ws.run_id)
+    receipt = MergeReceipt(pr_url=pr_url, merge_sha=merge_sha, candidate_digest=digest)
+    workspace.write_context(ws, MERGE_FILE, receipt.model_dump_json(indent=2, exclude_none=True))
 
 
 def write_deploy(

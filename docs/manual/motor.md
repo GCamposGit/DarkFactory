@@ -1,10 +1,14 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py -->
 # Motor da esteira
 
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
 (USR-452). Com testes descobertos e saída1 da suíte, mensagens de timeout ou
 worker indisponível citadas dentro de um traceback não autorizam repetir a suíte
 como falha de transporte. Timeout real continua identificado pela saída124.
+Na entrega em recuperação (USR-468), `merge.json` preserva o digest do candidato
+validado. A revisão grava as famílias efetivamente utilizadas em
+`review_execution.json`. O dispatcher usa esses vínculos após o deploy para
+construir o recibo; não aceita um recibo arbitrário emitido em log pelo filho.
 
 ## Wake do grokbox no preflight (USR-456)
 
@@ -21,6 +25,47 @@ uma tentativa por janela mesmo quando o provedor aceita o email e a resposta exp
 indisponível, estado ilegível, gravação impossível ou lock indisponível suprime o email
 (`shared_state_root_unavailable`, `state_unreadable`, `state_write_failed` ou `lock_unavailable`);
 sondagem e launcher continuam operantes.
+ 
+## Retomada por rota (USR-473)
+
+Em `route_wait`, o launcher grava a etapa e a worktree em
+`.factory/pending_delivery/` antes de sair. O dispatcher existente retoma a entrega
+automaticamente, mesmo depois de reiniciar. REVIEW continua na mesma worktree pelo
+`--resume-delivery`, preservando gate válido para o candidato. A regra de contingência
+OpenRouter e o modo de recuperação sem novos BUILDs estão em [frota.md](frota.md).
+
+## Admissão antes da worktree (USR-468)
+
+`_stage_preflight` chama `evaluate_admission` (`core.line.admission.admit`) depois da estimativa de
+tamanho e antes de `_stage_route`, do dry run, da worktree e do PLAN. A consulta é somente leitura:
+`pick` com `reserve_quota=False`, sem agente e sem arquivo de candidato.
+
+A decisão traz `outcome` (`allow` ou `wait`), `code`, `stage`, `resource`, `observed_at`,
+`evidence_ref` e `not_before` (`null` quando o outcome é `allow`).
+
+Sem rota de `planning`, de `development` ou de `review`, ou sem worker de gate utilizável, o launcher
+encerra com exit 75 (`EXIT_ROUTE_WAIT`). O stdout recebe um JSON com `ok` false, `cause` `route_wait`,
+`error` igual ao `code`, `ticket_id`, `exit_code` 75 e os campos da decisão. O stderr recebe
+`[AGUARDANDO]` e `harness_infra_error: route_wait`. O ticket volta a `planned` quando estava
+`discovered`, `accepted`, `implementing` ou `validating`. Um ticket que já estava `planned` permanece
+na fila. A worktree não é criada e o dry run não imprime `[DRY RUN]`.
+
+A revisão prospectiva usa outro harness que a rota de build (o nome do harness, sem distinção de
+maiúsculas). A mesma família produz `review_same_family`. O harness que escreveria é o pin `--harness`
+quando ele declara escrita; em contexto headless o pin Antigravity continua fora da escrita e a revisão
+é comparada com o harness que o `pick` de `development` elegeu. Um pin não inventa rota quando esse
+`pick` devolve `None`.
+
+O gate conta como capacidade com `workers` inteiro maior que zero, `busy` false e instante de
+observação com menos de 90 segundos. As causas de espera são `gate_capacity_zero` (`workers` <= 0),
+`gate_worker_busy` (`busy` true), `gate_worker_stale` (90 segundos ou mais), `gate_capacity_absent`
+(coleção vazia) e `gate_health_generic` (faltam `workers`, `busy` ou o instante, inclusive um body
+`{"status": "ok"}`). `status` não entra na conta. Um worker utilizável na coleção libera o gate. Entre
+falhas, a causa segue a ordem zero, busy, stale, genérico: coleção vazia e health genérico permanecem
+espera e não cobrem um zero, um busy ou um stale.
+
+`allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
+novo na leitura daquele momento.
 
 ## Sequencia canonica de estagios (USR-375 S2)
 
@@ -188,7 +233,7 @@ apos o orcamento de relogio). Nunca ha queda para modelo barato e nenhum agente 
 
 `run_ticket.py` e o launcher headless; `_run` agora so orquestra estagios, cada um com no maximo 150 linhas:
 `_stage_line_lock`, `_stage_check_harness`, `_stage_intake`, `_stage_preflight` (sonda do grokbox, tamanho,
-`_stage_route`, dry run), `_stage_workspace`, `_stage_build` (agente + retry), `_stage_deliver` (subprocesso
+admissão de rotas e do gate, `_stage_route`, dry run), `_stage_workspace`, `_stage_build` (agente + retry), `_stage_deliver` (subprocesso
 `--resume-delivery`). O portao de autocorrecao e dividido em `_gate_focal_step`, `_gate_official_step`
 (`_gate_run_official`, `_gate_classify_failure`, `_gate_reinvoke_for_gate`) e `_gate_exhausted_result`, e a
 entrega em `_deliver_sync`, `_deliver_external_project` e `_deliver_worktree`.
@@ -210,7 +255,7 @@ O fluxo que chama `pick`, `inspect_quotas`, `_run_bounded` etc. fica em `run_tic
 Em `_deliver_sync` o rebase em origin/main deixa o conflito em andamento (`keep_conflict=True`) e `resolve_rebase_conflict`
 o trata: conflito so em ledger (`demands.json`, `owner_actions.json`) fica com a versao de origin/main e o rebase
 continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_invoke_fix_agent`, estagio
-`rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket vai a `waiting_human` e o run sai com rc 1
+`rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket permanece em `validating`, com evidencia de falha tecnica, e o run sai com rc 1
 (causa `rebase_conflict`), sem rc 2 e sem redespacho do despachante.
 
 ## Harness de Operacao Interativo e Restricao Headless (USR-433)
@@ -221,3 +266,74 @@ continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_i
 
 Durante a validacao pelo portao oficial, `run_ticket.py` rotaciona os workers remotos quando uma tentativa falha (`_rotate_gate_workers`). Essa rotacao filtra estritamente hosts listados em `DARKFAC_FLEET_DISABLED_HOSTS` (ex.: `desktop` ocupado com indexacao), garantindo que nos desabilitados nao sejam reinseridos no pool ativo de validacao.
 
+
+## Recuperacao de CI sem repetir BUILD (USR-473)
+
+CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
+`ci_recovery.json` e sobrevive a retomadas. Uma alteracao retorna codigo 75 e
+retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
+nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
+fica preservada para retomada automatica. Esgotar essa tentativa registra falha
+tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+
+USR-473: espera de deploy exige SHA do recibo de merge e evidencia coincidente
+do candidato validado e aprovado. Recibo inconsistente permanece visivel como
+falha de verificacao. O smoke registra o SHA do ticket e a versao saudavel que
+o contem, sem substituir identidade do candidato.
+
+USR-473: identidade de implementacao ausente e provas de deploy ausentes ou
+inconsistentes ficam bloqueadas com causa persistida. Contencao do mutex de
+retomada impede novas admissoes naquele ciclo; nenhuma cota e consumida em espera.
+## Recovery serial do dispatcher (USR-468 T3)
+
+Falhas determinísticas repetidas acima de `recovery_failure_threshold` persistem o estado `recovery` no SQLite de admission, incluindo causa e fingerprint. Nesse modo o dispatcher mantém uma única reserva global durável por `AdmissionStore.reserve_recovery()`, transmite `run_id` e `candidate_digest` ao `run_ticket.py` e limita recovery a uma entrega em voo na frota. A expiração da lease libera o slot pelo reconciliador; tokens de fencing antigos não liberam uma lease substituta. Antes de iniciar um agente, recovery tenta adquirir e liberar o `suite_lock` oficial: gate ocupado retorna espera estruturada `gate_busy`. Só um `[RECOVERY_RECEIPT]` válido, recente e vinculado ao mesmo candidato e `run_id` limpa recovery; `[DELIVERY_MERGED]` é evidência de merge para agendar deploy, não prova de sucesso de recovery. Espera, idle, falha ou receipt recusado mantém o latch ativo.
+
+As familias de todas as fatias ficam em implementation_families.json. A revisao exclui todos esses provedores, recebe DEMAND, GRILL e SPEC no payload e grava as familias efetivas. Apos autocorrecao, o digest do gate e recalculado. O learning pack e gerado depois da revisao e seu indice preserva o digest; um pack de outro candidato nao libera recovery.
+
+USR-468: admissao remota combina `/health` (ocupacao) com `/metrics/hardware`
+(RAM, CPUs e instante de coleta). Saude generica nunca vira capacidade; RAM
+insuficiente continua zero. Corretores de falhas tambem registram sua familia
+para impedir revisao pelo mesmo provedor de qualquer implementador.
+
+USR-468 integra o controlador de retomadas USR-473 ao breaker de admissao.
+O candidato composto exige revisao independente e portao integral proprios;
+rodadas recusadas do USR-473 permanecem preservadas. Completed sem recibo de
+deploy nao remove espera; uma retomada ativa impede readmissao do mesmo ticket
+mesmo que o inventario externo de processos esteja vazio.
+
+## Recuperacao integrada USR-477
+
+O corretivo preserva as revisoes recusadas de USR-473/468. Completed sem report
+de deploy usa merge, gate e revisao coincidentes para retomar o deploy; prova
+ausente ou divergente permanece bloqueada. Falha do deploy fica no historico
+com codigo e proxima tentativa, sem supervisor LLM. Runtime do harness nao entra
+no candidato. O revisor pago usa o alias sonnet, de familia diferente dos
+implementadores; familias tambem reconhecem os ids de gateway do registro. A
+mudanca responde aos JSONs truncados e achados contraditorios da rota anterior,
+sem aumentar rodadas, cota ou orcamento. Resultado real ainda exige gate e deploy.
+
+USR-477: o workaround que desativa raciocinio fica restrito ao DeepSeek.
+Endpoints Anthropic exigem raciocinio; o adaptador usa effort low,
+opcao confirmada no catalogo do provedor, dentro dos 4096 tokens totais. HTTP400 e resposta vazia nao sao
+aprovacao nem entrega. Contrato: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+
+USR-477: saida zero sem entrega em recovery registra falha e causa persistida.
+Retomada de deploy exige prova da familia independente. Se a validacao for
+corrompida apos merge, o recibo preserva SHA/PR reais sem digest autorizado;
+a ausencia desse digest bloqueia release ate a recuperacao da evidencia.
+
+USR-477: quando o revisor pago configurado pertence a uma familia que escreveu
+o candidato, a rota tenta o alias distill.openrouter ja registrado e exige
+independencia novamente. Se nenhuma familia independente estiver disponivel,
+a revisao continua fechada, sem autorizar merge.
+
+## Encerramento sem entrega e recuperacao de CI (USR-479)
+
+Retorno zero sem prova de merge gera causa persistida e cooldown nos modos
+normal e recovery. O ticket nao ganha uma nova execucao imediatamente.
+A correcao de CI e unica por tentativa: o contador permanece consumido ao
+retomar, inclusive depois de gate e revisao verdes. Retomar a entrega segue
+gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
+comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
+de candidatos anteriores permanecem preservadas; o novo candidato exige suas
+proprias provas de portao, revisao e producao.

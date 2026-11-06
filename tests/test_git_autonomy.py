@@ -161,19 +161,37 @@ def _assert_not_ignored(repo: Path, *paths: str) -> None:
 
 @pytest.mark.parametrize("staged", [False, True])
 def test_commit_ticket_publishes_product_and_drops_harness_scratch(test_git_repo: Path, staged: bool) -> None:
+    # Also cover an ignored learning pack already staged for untracking.
+    pack_rel = ".factory/learning_packs/USR-473.md"
+    pack = test_git_repo / pack_rel
+    pack.parent.mkdir(parents=True)
+    pack.write_bytes(b"pack\n")
+    _git(test_git_repo, "add", "-f", "--", pack_rel)
+    _git(test_git_repo, "commit", "--quiet", "-m", "chore: track pack")
+    (test_git_repo / ".gitignore").write_text(".factory/learning_packs/\n", encoding="utf-8")
+    _git(test_git_repo, "add", "--", ".gitignore")
+    _git(test_git_repo, "commit", "--quiet", "-m", "chore: ignore pack")
     _no_global_exclude(test_git_repo)
     timings, lock = _plant_scratch(test_git_repo)
     (test_git_repo / "product.txt").write_text("product\n", encoding="utf-8")
     _assert_not_ignored(test_git_repo, *_SCRATCH)
     if staged:
         _git(test_git_repo, "add", "--", "product.txt", *_SCRATCH)
+    _git(test_git_repo, "rm", "--cached", "--", pack_rel)
+    saved_pack = test_git_repo / "docs" / "learning_packs" / "USR-473.md"
+    saved_pack.parent.mkdir(parents=True)
+    saved_pack.write_bytes(pack.read_bytes())
+    _git(test_git_repo, "add", "--", "docs/learning_packs/USR-473.md")
     head = GitAutonomyManager(test_git_repo).get_current_sha()
 
-    sha = GitAutonomyManager(test_git_repo).commit_ticket("USR-429", "Produto")
+    paths = ["product.txt", pack_rel, *_SCRATCH] if staged else None
+    sha = GitAutonomyManager(test_git_repo).commit_ticket("USR-429", "Produto", paths=paths)
 
     assert sha and sha != head
-    names = _git(test_git_repo, "show", "--name-only", "--format=", "HEAD").stdout.strip().splitlines()
-    assert names == ["product.txt"]
+    names = _git(test_git_repo, "show", "--no-renames", "--name-only", "--format=", "HEAD").stdout.strip().splitlines()
+    assert names == [pack_rel, "docs/learning_packs/USR-473.md", "product.txt"]
+    assert pack.read_bytes() == b"pack\n"
+    assert _git(test_git_repo, "ls-files", "--", pack_rel).stdout.strip() == ""
     assert timings.read_bytes() == _TIMINGS
     assert lock.read_bytes() == _LOCK
     assert _git(test_git_repo, "ls-files", "--", ".tmp").stdout.strip() == ""

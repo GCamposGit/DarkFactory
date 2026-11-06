@@ -11,7 +11,9 @@
   "grill_thresholds": {
     "max_price_input_per_mtok": 15.0,
     "max_price_output_per_mtok": 75.0,
-    "frontier_tiers": ["frontier"],
+    "frontier_tiers": [
+      "frontier"
+    ],
     "require_grill_on_unknown_price": true,
     "min_qualification_steps": 3
   },
@@ -57,11 +59,12 @@
         "sonnet"
       ],
       "gateway_ids": [
+        "anthropic/claude-sonnet-5.5",
         "claude-sonnet"
       ],
       "status": "active",
-      "price_input_per_mtok": null,
-      "price_output_per_mtok": null,
+      "price_input_per_mtok": 2.0,
+      "price_output_per_mtok": 10.0,
       "context_tokens": null,
       "max_output_tokens": null,
       "capabilities": [

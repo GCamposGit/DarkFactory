@@ -201,21 +201,21 @@ def infra_guide(job_stage: str, *, waited_h: float, cap_h: float, writes_code: b
         "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da "
         "propria conta (Claude, ChatGPT, Google AI ou xAI).",
     ]
+    steps.append(
+        "Contingencia paga por uso, inclusive para desenvolvimento: confira o saldo OpenRouter em "
+        "https://openrouter.ai/settings/credits e a configuracao OPENROUTER_API_KEY do worker. "
+        "Com saldo e orcamento confirmados, o roteador usa essa contingencia sem consumir assinatura "
+        "abaixo de 15%; a revisao continua de outra familia."
+    )
+    steps.append(
+        "A retomada automatica consulta a volta de uma assinatura elegivel ou saldo OpenRouter "
+        "dentro do orcamento; nao precisa haver assinatura acima de 15% para usar a contingencia."
+    )
     if writes_code:
         steps.append(
-            "Esta etapa escreve codigo e o OpenRouter e somente leitura: so uma conta de assinatura com "
-            "mais de 15% de cota destrava."
+            "Esta etapa escreve codigo. A contingencia OpenRouter faz essa escrita com saldo confirmado "
+            "e sem eleger assinatura no piso."
         )
-    else:
-        steps.append(
-            "Alternativa paga por uso: adicione credito ao OpenRouter em "
-            "https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel "
-            "OPENROUTER_API_KEY esta definida no worker."
-        )
-    steps.append(
-        "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% "
-        "de cota."
-    )
     steps.append(
         "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha "
         "assim que houver rota."

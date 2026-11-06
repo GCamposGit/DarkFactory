@@ -1,6 +1,14 @@
 <!-- covers: core/line/routing.py, core/line/operating_harness.py, core/router/token_budget.py -->
 # Roteamento do estagio de desenvolvimento (USR-378)
 
+Regra operacional confirmada pelo owner em05/11/2026 (USR-473): esgotada a cota das
+assinaturas elegíveis, usar OpenRouter também para desenvolvimento, planejamento e
+revisão, respeitando saldo, orçamento, capacidades e independência do revisor.
+`development.openrouter_ok=true` permite a contingência também quando a telemetria
+das assinaturas está desconhecida; não autoriza consumir a assinatura abaixo do piso.
+Se não houver crédito ou rota, persistir a espera e manter o dispatcher ativo para
+retomar automaticamente. Um `not_before` no log, sozinho, não é um agendamento.
+
 `core/line/routing.pick` e o unico roteador de producao. Para o estagio `development`:
 
 - **Cascata**: `claude/sonnet`, `codex` e `grok` (`development.grok` no registro de modelos).
@@ -67,3 +75,24 @@ O OpenRouter atua na fabrica com duplo papel: **otimizacao continua de custo-ben
 
 
 
+
+## Recuperacao integrada USR-477
+
+O corretivo preserva as revisoes recusadas de USR-473/468. Completed sem report
+de deploy usa merge, gate e revisao coincidentes para retomar o deploy; prova
+ausente ou divergente permanece bloqueada. Falha do deploy fica no historico
+com codigo e proxima tentativa, sem supervisor LLM. Runtime do harness nao entra
+no candidato. O revisor pago usa o alias sonnet, de familia diferente dos
+implementadores; familias tambem reconhecem os ids de gateway do registro. A
+mudanca responde aos JSONs truncados e achados contraditorios da rota anterior,
+sem aumentar rodadas, cota ou orcamento. Resultado real ainda exige gate e deploy.
+
+USR-477: o workaround que desativa raciocinio fica restrito ao DeepSeek.
+Endpoints Anthropic exigem raciocinio; o adaptador usa effort low,
+opcao confirmada no catalogo do provedor, dentro dos 4096 tokens totais. HTTP400 e resposta vazia nao sao
+aprovacao nem entrega. Contrato: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+
+USR-477: quando o revisor pago configurado pertence a uma familia que escreveu
+o candidato, a rota tenta o alias distill.openrouter ja registrado e exige
+independencia novamente. Se nenhuma familia independente estiver disponivel,
+a revisao continua fechada, sem autorizar merge.

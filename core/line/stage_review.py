@@ -38,6 +38,7 @@ from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.stage_build import fill_template
 from core.line.workspace import RunWorkspace
+from core.line.recovery_receipt import review_capabilities, independent_route, review_context
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageResult
 
@@ -589,7 +590,7 @@ class ReviewStage:
         ]))
         route = self.pick_func(
             "review",
-            self.host_caps,
+            review_capabilities(ws, self.host_caps),
             implementing_harness=implementing_harness,
             config=self.routing_config,
             exclude=excluded_harnesses,
@@ -601,7 +602,7 @@ class ReviewStage:
                 host_caps=self.host_caps, config=self.routing_config, mode="read",
                 implementing_harness=implementing_harness,
             )
-        harness, model = route
+        harness, model = independent_route(ws, *route, self.routing_config.stages["review"].openrouter_model)
 
         diff_text = _get_diff(git_ws, default_branch)
         changed = _changed_paths(git_ws, default_branch)
@@ -615,6 +616,7 @@ class ReviewStage:
             diff_sha256=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
             changed_files="\n".join(f"- `{path}`" for path in changed) or "- (nenhum)",
         )
+        prompt += review_context(ws)
         staged_inputs = _materialize_review_sources(git_ws, ws, run_id, diff_text)
         try:
             agent_result = self.run_agent_func(
@@ -669,6 +671,8 @@ class ReviewStage:
         if approved:
             # USR-375 S4: the stage contract artifact `stages.require_artifact(REVIEW)` validates.
             workspace.write_context(ws, VERDICT_FILE, verdict.model_dump_json(indent=2))
+            from core.line.recovery_receipt import record_review_execution
+            record_review_execution(ws, cur_candidate, implementing_harness or "", harness, agent_result.model or model)
 
         job_key = f"{run_id}:review:{round_num}"
         if publish:

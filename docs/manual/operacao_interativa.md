@@ -1,6 +1,12 @@
 <!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, run_ticket.py -->
 # Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
+Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
+confirmados, preservando revisão por outra família. `route_wait` fica persistido
+para o dispatcher retomar automaticamente; o operador não precisa voltar ao chat.
+Durante recuperação manter `--resume-only` ativo, conforme [frota.md](frota.md),
+em vez de desligar o controlador junto com os heartbeats de LLM (USR-473).
+
 ## Inicio e roteamento
 
 Antigravity e Codex atuam como interfaces de operacao interativa para coordenar a fabrica pelo chat. No inicio de uma sessao:
@@ -21,6 +27,8 @@ python C:\dev\DarkFac\run_ticket.py USR-XXX
 Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, workers, `--fleet` e pump nao podem usa-lo. Esses caminhos seguem a rota de desenvolvimento do despachante. Se harnesses locais de alta capacidade estiverem esgotados para o estagio `planning` ou `development`, o roteador aciona dinamicamente a contingencia OpenRouter via Fronteira de Pareto (`resolve_pareto_openrouter_model`, USR-440/USR-444) sem modelos hard-coded, garantindo classe GPT Sol / Claude Opus para planejamento, resolucao automatica de wire IDs de API e governanca estrita de orcamento.
 
 O `run_ticket.py` revalida a cota de `development` antes de cada fatia do plano, com um `pick` fresco sobre a leitura daquele momento. Um plano de uma fatia faz esse pick uma vez. Um plano de várias fatias repete o pick antes de cada agente, e a leitura pode trocar o harness write entre fatias. O pin `--harness` e o `--force` do preflight nao iniciam, numa fatia, um harness com headroom conhecido de 15% ou menos, ou sem leitura. Com `--fleet`, esse pick usa `execution_context` headless: Antigravity nao inicia a fatia mesmo sendo o harness de operacao, com Google acima de 15% e os demais no piso. Sem rota elegivel o processo espera (codigo 75, JSON com `cause` `route_wait`, `stage` `BUILD` e o caminho da worktree), nao chama o agente da fatia, nao comeca a entrega e a worktree permanece, inclusive um arquivo gravado durante o PLAN e o trabalho das fatias anteriores. `_discard_untouched_workspace` e `_report_workspace_fate` nao removem esse diretorio.
+
+Antes dessa worktree e do PLAN, a admissao (`core.line.admission`) confirma rota de planning, de development e de review em outra familia, alem de um worker de gate com capacidade explicita (`workers` inteiro maior que zero, `busy` false e leitura com menos de 90 segundos). Falta de rota, capacidade zero, worker ocupado, leitura stale, colecao vazia ou health generico (`status=ok` sem esses campos) encerra com exit 75, JSON `route_wait` e o ticket em `planned`, sem criar worktree. Um `allow` nao substitui o `pick` de cada estagio. Com `--fleet`, a admissao de build tambem e headless e deixa Antigravity fora das caps de escrita.
 
 ### Wake do grokbox e comunicacao externa (USR-456)
 
@@ -83,3 +91,12 @@ O monitoramento da fabrica opera de forma agnostica e centralizada em `core/line
 O roteador valida as capacidades com `agent_cli.supports(harness, mode)` antes de ranquear candidatos para o estagio `development`. Com `operating_harness=antigravity` em sessao interativa (fora do modo headless), o Antigravity declara capacidade de escrita para desenvolvimento no chat, viabilizando sua eleicao quando a cota estiver saudavel acima do piso de 15%. Em execucao headless, na frota ou com outro operador, Antigravity permanece estritamente somente-leitura.
 
 Na recuperacao USR-452, uma falha real de teste com contagem no HARNESS_RESULT nao e tratada como worker indisponivel por conter essa mensagem no traceback. O launcher corrige o candidato antes de repetir o portao; nao chama o owner para resolver essa classificacao tecnica.
+## Recuperacao de CI sem repetir BUILD (USR-473)
+
+CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
+`ci_recovery.json` e sobrevive a retomadas. Uma alteracao retorna codigo 75 e
+retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
+nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
+fica preservada para retomada automatica. Esgotar essa tentativa registra falha
+tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+`run_ticket.py --recovery --run-id <id>` ativa a reserva canonica de uma entrega global e usa a identidade recebida do dispatcher. O launcher verifica o gate antes de iniciar qualquer agente; `gate_busy` retorna como espera estruturada.

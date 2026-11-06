@@ -303,6 +303,15 @@ def test_success_reports_merge_and_pending_deploy_without_global_sweep(
     assert (artifact_dir / "merge.json").is_file()
     assert (artifact_dir / "deploy_report.json").is_file()
     assert output["status"] == "merged_awaiting_deploy"
+    # A post-merge damaged validation artifact must retain the actual merge identity,
+    # with no digest that could authorize release.
+    original_merge = json.loads((artifact_dir / "merge.json").read_text(encoding="utf-8"))
+    (artifact_dir / "validation.json").write_text("{broken", encoding="utf-8")
+    run_ticket.ticket_engine.write_merge(run_ticket.ticket_engine.run_workspace(line.ticket),
+                                       original_merge["pr_url"], original_merge["merge_sha"])
+    retained = json.loads((artifact_dir / "merge.json").read_text(encoding="utf-8"))
+    assert retained["merge_sha"] == original_merge["merge_sha"]
+    assert not retained.get("candidate_digest")
     assert output["pr_url"] == "https://github.com/example/repo/pull/42"
     assert output["merge_sha"] == "d" * 40
     assert output["deploy_status"] == "awaiting_deploy"
@@ -365,3 +374,29 @@ def test_ratchet_failure_goes_back_to_agent_once_with_combined_output(
 
     assert len(fixes) == 1 and "falta motor.md" in fixes[0] and "complexity_ratchet reprovou" in fixes[0]
     assert "REVIEW" not in line.calls
+
+
+def test_admission_allow_still_runs_plan_and_fresh_development_pick(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An allow is not a cached route: PLAN and the post-plan development pick still run."""
+    from datetime import datetime, timezone
+    from core.line.admission import allow_decision
+
+    stages: list[str] = []
+
+    def pick(stage: str, *_args: Any, **_kwargs: Any) -> tuple[str, None]:
+        stages.append(stage)
+        return ("codex", None)
+
+    monkeypatch.setattr(run_ticket, "pick", pick)
+    monkeypatch.setattr(
+        run_ticket, "evaluate_admission",
+        lambda *_args, **_kwargs: allow_decision(
+            datetime.now(timezone.utc), evidence_ref="test:explicit_allow"
+        ),
+    )
+    assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
+    assert line.calls[0] == "PLAN"
+    assert "BUILD" in line.calls
+    assert "development" in stages

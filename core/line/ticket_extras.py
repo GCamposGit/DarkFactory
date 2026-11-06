@@ -13,6 +13,7 @@ Helpers without launcher globals, wired by `run_ticket.py`:
 from __future__ import annotations
 
 import logging
+import json
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -162,7 +163,11 @@ def publish_learning(rws: workspace.RunWorkspace, art: Any, store_dir: Optional[
         from core.learning_pack.storage import LearningPackStore
 
         workspace.write_context(rws, LEARNING_FILE, art.model_dump_json(indent=2))
-        LearningPackStore(store_dir).save_pack(_session_pack(art))
+        pack = _session_pack(art)
+        validation = workspace.context_dir(rws) / "validation.json"
+        if validation.is_file():
+            pack.metrics["candidate_digest"] = json.loads(validation.read_text(encoding="utf-8")).get("candidate_digest")
+        LearningPackStore(store_dir).save_pack(pack)
         return True
     except Exception as exc:  # noqa: BLE001 - the delivery is already merged
         logger.warning("learning pack de %s nao gravado: %s", getattr(art, "ticket", "?"), exc)

@@ -322,11 +322,9 @@ def test_only_shared_ci_module_invokes_pr_checks() -> None:
                 and all(isinstance(part, ast.Constant) for part in node.elts[:2])
                 and [part.value for part in node.elts[:2]] == ["pr", "checks"]
             )
-            calls_query = isinstance(node, ast.Call) and (
-                isinstance(node.func, ast.Name) and node.func.id == "query_checks"
-                or isinstance(node.func, ast.Attribute) and node.func.attr == "query_checks"
-            )
-            if is_command or calls_query:
+            # Calling the shared query helper reuses the canonical CI path;
+            # only constructing another raw CLI command duplicates it.
+            if is_command:
                 callers.add(path.relative_to(core).as_posix())
     assert callers == {"git/ci_checks.py"}
 

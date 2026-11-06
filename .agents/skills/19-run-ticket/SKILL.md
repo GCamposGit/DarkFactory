@@ -54,8 +54,9 @@ flowchart TD
 
 1. **Preflight e Erupção de Telemetria**:
    O script `run_ticket.py` ou a linha autônoma inspeciona os 4 provedores em tempo real (`.factory/usage/providers/`).
-   - O roteador só elege harnesses que declaram o modo exigido pelo estágio (`core.line.agent_cli.HARNESS_CAPABILITIES`): o desenvolvimento exige `write`, que Claude, Codex e Grok Build (USR-109) implementam. O Antigravity é somente leitura (grill/planning/review) e nunca é eleito para `development`, mesmo saudável; se nenhum harness com `write` estiver acima de $15\%$, não há rota (fail-closed).
-   - Se todas as contas de assinatura estiverem $\le 15\%$, o fallback é acionado para o OpenRouter (DeepSeek V4.1 Flash) apenas em estágios de leitura (ele não escreve no worktree), desde que haja saldo em dólar confirmado (`available_credit_usd > 0`).
+   - O roteador só elege executores que declaram o modo exigido pelo estágio (`core.line.agent_cli.HARNESS_CAPABILITIES`): desenvolvimento exige `write`, disponível nas assinaturas elegíveis e no adaptador OpenRouter. Antigravity não executa desenvolvimento headless/frota. Sem assinatura acima de15%, tentar a contingência paga autorizada em vez de encerrar a esteira.
+   - Sem assinatura elegível, o roteador deve tentar OpenRouter para planejamento, desenvolvimento e revisão, com modelo vindo do registro, saldo confirmado e orçamento vigente. A revisão continua de família diferente da implementação. Crédito disponível não aumenta o teto de gasto.
+   - Sem crédito ou rota, persistir `route_wait` e manter o dispatcher determinístico ativo. REVIEW retoma por `--resume-delivery` na mesma worktree, sem repetir BUILD e reaproveitando gate válido para o candidato; PLAN/BUILD seguem a retomada canônica. Esperas em `.factory/pending_delivery/` sobrevivem a reinício e são verificadas a cada15 minutos sem LLM supervisor. Durante recuperação usar o serviço existente `python -m core.line.fleet_dispatcher --loop --resume-only`; nunca encerrar deixando apenas um comando de retomada manual ou `not_before` em log (USR-473, decisão explícita do owner de05/11/2026).
 
 2. **Execução Headless ou Assistida**:
    - O executor recebe o ticket, prepara a branch de trabalho isolada (`core.line.workspace`), gera os testes unitários primeiro (TDD) e escreve o código funcional.
