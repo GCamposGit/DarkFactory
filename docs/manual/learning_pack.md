@@ -28,6 +28,18 @@ supressão incluem `external_communication_not_authorized`, `throttle_active`,
 `shared_state_root_unavailable`, `state_unreadable`, `state_write_failed` e `lock_unavailable`; essas
 falhas não interrompem a sondagem nem o launcher.
 
+## Aprendizado da entrega USR-474 T2
+
+O OpenRouter não abre arquivo. A revisão paga só vale se o prompt do `generate` já trouxer os critérios, o trecho sanitizado e os hashes do manifesto. A SPEC sanitizada aparece uma vez. Sem SPEC ou sem tickets, a esteira devolve `review_context_unavailable` e não chama o modelo. A resposta precisa estar completa: saída no teto de 4096 tokens ou `finish_reason` `length` devolve `review_output_truncated` e não aprova. O `ticket_id` sai do `run_id` quando ele é o ticket, ou de `DARKFAC_TICKET_ID`; sem id o evento continua nulo e a revisão segue. Família independente e `validation.json` ficam como estavam. Quem tem filesystem continua com o diff integral e o `candidate.diff`.
+
+## Aprendizado da entrega USR-474 T4
+
+O contrato documentado para OpenRouter exige contexto verificável no próprio payload: critérios, conteúdo sanitizado e manifesto com hashes. Falta de contexto encerra a revisão com `review_context_unavailable`; saída incompleta encerra com `review_output_truncated`. Na recuperação da frota, a lista de tickets é um único argumento separado por vírgulas, como `--recovery-tickets "USR-1,USR-2"`. Consulte `--help` antes de executar; IDs posicionais separados são recusados antes do ciclo. Este registro descreve a documentação do contrato e não afirma recibos de gate, CI, merge ou deploy.
+
+## Aprendizado da entrega USR-474 T1
+
+A revisão precisa do texto da SPEC, dos critérios e do conteúdo dos arquivos, com um manifesto que dá para conferir. `build_review_payload` lê esses arquivos no disco, redacta segredos e registra o sha256 da fonte, quantos bytes entraram e se o texto foi cortado. Se a SPEC ou os tickets faltam, vêm vazios ou não dá para ler, o payload fica incompleto. Contexto vazio não é tratado como pronto. O `line_validate` também deixa de herdar `DARKFAC_PROJECT_ROOT`: o portão do snapshot mede a árvore que acabou de montar.
+
 ## Aprendizado da entrega USR-468 T1
 
 Antes de criar a worktree ou rodar o PLAN, `run_ticket.py` pede uma admissão somente leitura em

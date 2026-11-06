@@ -194,6 +194,58 @@ def test_openrouter_model_provider_mocked_http(tmp_path: Path, monkeypatch: pyte
     assert summary.total_calls >= 1
 
 
+def _openrouter_http(content: str = "ok", finish_reason: str | None = None) -> mock.MagicMock:
+    choice: dict[str, Any] = {"message": {"content": content}}
+    if finish_reason is not None:
+        choice["finish_reason"] = finish_reason
+    fake_resp = mock.MagicMock()
+    fake_resp.read.return_value = json.dumps({
+        "model": "m",
+        "choices": [choice],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+    }).encode("utf-8")
+    fake_resp.__enter__.return_value = fake_resp
+    return fake_resp
+
+
+def test_openrouter_usage_event_ticket_id_stays_null_when_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    provider = OpenRouterModelProvider(api_key="sk-or-v1-mock-key", usage_ledger=ledger)
+    with mock.patch("urllib.request.urlopen", return_value=_openrouter_http()):
+        provider.generate("p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE)
+    events = json.loads((tmp_path / "usage" / "model_usage.json").read_text(encoding="utf-8"))["events"]
+    assert events[-1]["ticket_id"] is None
+
+
+def test_openrouter_usage_event_records_the_ticket_passed_to_generate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    provider = OpenRouterModelProvider(api_key="sk-or-v1-mock-key", usage_ledger=ledger)
+    with mock.patch("urllib.request.urlopen", return_value=_openrouter_http()):
+        provider.generate(
+            "p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE, ticket_id="USR-474",
+        )
+    events = json.loads((tmp_path / "usage" / "model_usage.json").read_text(encoding="utf-8"))["events"]
+    assert events[-1]["ticket_id"] == "USR-474"
+
+
+def test_openrouter_metadata_records_finish_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
+    provider = OpenRouterModelProvider(
+        api_key="sk-or-v1-mock-key", usage_ledger=ModelUsageLedger(tmp_path / "usage"),
+    )
+    with mock.patch("urllib.request.urlopen", return_value=_openrouter_http(finish_reason="length")):
+        response = provider.generate("p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE)
+    assert response.metadata == {"backend": "openrouter", "finish_reason": "length"}
+
+
 def _openrouter_payload(monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> dict[str, Any]:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
     fake_resp = mock.MagicMock()

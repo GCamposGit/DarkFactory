@@ -69,6 +69,11 @@ def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project, run_i
     ws = ws_mod.checkout(project, run_id)
     (ws.path / "feature.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
     ws_mod.write_context(ws, "progress.json", json.dumps({"harness": harness, "tickets_done": ["T1"]}))
+    ws_mod.write_context(ws, "SPEC.md", "# SPEC\naceite da rodada\n")
+    ws_mod.write_context(
+        ws, "tickets.json",
+        json.dumps([{"id": "T1", "acceptance": ["o aceite da rodada permanece verificavel"]}]),
+    )
     if green:
         ws_mod.write_context(
             ws, "validation.json",
@@ -447,7 +452,10 @@ def test_review_prompt_includes_full_diff_file_list_and_candidate_diff(
     ws = ws_mod.checkout(project, run_id)
     ws_mod.write_context(ws, "progress.json", json.dumps({"harness": "claude", "tickets_done": ["T1"]}))
     ws_mod.write_context(ws, "SPEC.md", "# SPEC\naceite do ticket\n")
-    ws_mod.write_context(ws, "tickets.json", "{\"tickets\":[]}\n")
+    ws_mod.write_context(
+        ws, "tickets.json",
+        json.dumps([{"id": "T1", "acceptance": ["o diff integral continua no prompt"]}]),
+    )
     (ws.path / "big.py").write_text("value = 1\n" * 8000, encoding="utf-8")
     ws_mod.commit(ws, "add big", job_key=f"{run_id}:T1")
     ws_mod.push(ws)
@@ -805,4 +813,341 @@ def test_duplicate_json_keys_have_specific_invalid_response_reason() -> None:
 
     assert verdict is None
     assert reason == "duplicate_key"
+
+
+_APPROVE_TEXT = json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []})
+_SPEC_SENTENCE = "FRASE_SPEC_474_UNICA"
+_FILE_MARKER = "MARCADOR_TRECHO_474"
+_CRITERION = "criterio verificavel USR-474 sem filesystem"
+_SECRET = "sk-ant-" + ("Aa1_" * 4)
+
+
+def _paid_model() -> str:
+    from core.models.registry import resolve
+
+    return resolve("distill.openrouter")
+
+
+def _review_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_id: str,
+    *,
+    spec: str | None,
+    tickets: str | None,
+    source: str,
+) -> tuple[object, object]:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = ws_mod.checkout(project, run_id)
+    ws_mod.write_context(ws, "progress.json", json.dumps({"harness": "claude", "tickets_done": ["T1"]}))
+    if spec is not None:
+        ws_mod.write_context(ws, "SPEC.md", spec)
+    if tickets is not None:
+        ws_mod.write_context(ws, "tickets.json", tickets)
+    (ws.path / "feature.py").write_text(source, encoding="utf-8")
+    ws_mod.write_context(ws, "validation.json", "{\"passed\": true, \"marker\": \"gate\"}\n")
+    ws_mod.commit(ws, "feat", job_key=f"{run_id}:T1")
+    ws_mod.push(ws)
+    return project, ws
+
+
+def _install_paid_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    completion: int = 12,
+    finish: str = "stop",
+    text: str = _APPROVE_TEXT,
+) -> dict[str, object]:
+    """Fake OpenRouter transport. While ``generate`` runs it cannot read the disk."""
+    captured: dict[str, object] = {"calls": 0, "prompt": "", "ticket_id": None}
+    reading = {"armed": False}
+    real_bytes = Path.read_bytes
+    real_text = Path.read_text
+
+    def _guard_bytes(self: Path, *args: object, **kwargs: object) -> bytes:
+        if reading["armed"]:
+            raise AssertionError(f"transport read bytes: {self}")
+        return real_bytes(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    def _guard_text(self: Path, *args: object, **kwargs: object) -> str:
+        if reading["armed"]:
+            raise AssertionError(f"transport read text: {self}")
+        return real_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    class _Response:
+        def __init__(self) -> None:
+            self.text = text
+            self.model = "paid-model"
+            self.tokens_prompt = 20
+            self.tokens_completion = completion
+            self.total_tokens = 20 + completion
+            self.measured_cost = 0.0
+            self.estimated_cost = 0.0
+            self.is_measured = True
+            self.metadata = {"backend": "openrouter", "finish_reason": finish}
+
+    class _Transport:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def generate(self, prompt: str, *, model: str, **kwargs: object) -> _Response:
+            reading["armed"] = True
+            try:
+                captured["calls"] = int(captured["calls"]) + 1
+                captured["prompt"] = prompt
+                captured["ticket_id"] = kwargs.get("ticket_id")
+                captured["model"] = model
+                return _Response()
+            finally:
+                reading["armed"] = False
+
+    monkeypatch.setattr(Path, "read_bytes", _guard_bytes)
+    monkeypatch.setattr(Path, "read_text", _guard_text)
+    monkeypatch.setattr("core.execution.providers.OpenRouterModelProvider", _Transport)
+    return captured
+
+
+def _paid_stage(tmp_path: Path, captured_model: str) -> ReviewStage:
+    from core.line.agent_cli import run_agent
+
+    return ReviewStage(
+        run_agent_func=run_agent,
+        pick_func=lambda *_args, **_kwargs: ("openrouter", captured_model),
+        routing_config=load_routing_config(),
+    )
+
+
+def test_openrouter_generate_prompt_carries_sanitized_context_without_reading_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The paid transport proves SPEC, criteria, the redacted excerpt and the manifest hashes."""
+    spec = f"{_SPEC_SENTENCE}\n{_SECRET}\n"
+    tickets = json.dumps([{"id": "T1", "acceptance": [_CRITERION]}])
+    source = f"{_FILE_MARKER} = 1\n"
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "USR-474", spec=spec, tickets=tickets, source=source,
+    )
+    ctx = ws_mod.context_dir(ws)
+    validation = (ctx / "validation.json").read_bytes()
+    spec_hash = hashlib.sha256((ctx / "SPEC.md").read_bytes()).hexdigest()
+    tickets_hash = hashlib.sha256((ctx / "tickets.json").read_bytes()).hexdigest()
+    file_hash = hashlib.sha256((ws.path / "feature.py").read_bytes()).hexdigest()
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    captured = _install_paid_transport(monkeypatch)
+    recorded: list[object] = []
+
+    class _Ledger:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def record(self, event: object) -> None:
+            recorded.append(event)
+
+    monkeypatch.setattr("core.usage.ledger.ModelUsageLedger", _Ledger)
+
+    result = _paid_stage(tmp_path, _paid_model()).run(project, "USR-474")
+
+    prompt = str(captured["prompt"])
+    assert result.outcome == "success"
+    assert captured["calls"] == 1
+    assert _CRITERION in prompt
+    assert _FILE_MARKER in prompt
+    assert _SECRET not in prompt
+    assert "[REDACTED]" in prompt
+    assert prompt.count(_SPEC_SENTENCE) == 1
+    assert spec_hash in prompt
+    assert tickets_hash in prompt
+    assert file_hash in prompt
+    assert captured["ticket_id"] == "USR-474"
+    assert recorded and all(getattr(event, "ticket_id", None) == "USR-474" for event in recorded)
+    assert (ctx / "validation.json").read_bytes() == validation
+    verdict = json.loads((ctx / "review_verdict.json").read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "approve"
+
+
+def test_openrouter_ticket_id_comes_from_the_env_when_run_id_is_not_a_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, _ws = _review_tree(
+        tmp_path, monkeypatch, "run-env-ticket",
+        spec=f"{_SPEC_SENTENCE}\n",
+        tickets=json.dumps([{"id": "T1", "acceptance": [_CRITERION]}]),
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    monkeypatch.setenv("DARKFAC_TICKET_ID", "USR-469")
+    captured = _install_paid_transport(monkeypatch)
+
+    result = _paid_stage(tmp_path, _paid_model()).run(project, "run-env-ticket")
+
+    assert result.outcome == "success"
+    assert captured["ticket_id"] == "USR-469"
+
+
+def test_openrouter_review_without_ticket_id_keeps_a_null_event_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, _ws = _review_tree(
+        tmp_path, monkeypatch, "run-no-ticket",
+        spec=f"{_SPEC_SENTENCE}\n",
+        tickets=json.dumps([{"id": "T1", "acceptance": [_CRITERION]}]),
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    captured = _install_paid_transport(monkeypatch)
+    recorded: list[object] = []
+
+    class _Ledger:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def record(self, event: object) -> None:
+            recorded.append(event)
+
+    monkeypatch.setattr("core.usage.ledger.ModelUsageLedger", _Ledger)
+
+    result = _paid_stage(tmp_path, _paid_model()).run(project, "run-no-ticket")
+
+    assert result.outcome == "success"
+    assert captured["ticket_id"] is None
+    assert recorded
+    assert all(getattr(event, "ticket_id", "missing") is None for event in recorded)
+
+
+@pytest.mark.parametrize(
+    ("completion", "finish"),
+    [(4096, "stop"), (8, "length")],
+)
+def test_truncated_openrouter_review_does_not_approve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completion: int, finish: str
+) -> None:
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "USR-470",
+        spec=f"{_SPEC_SENTENCE}\n",
+        tickets=json.dumps([{"id": "T1", "acceptance": [_CRITERION]}]),
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    ctx = ws_mod.context_dir(ws)
+    validation = (ctx / "validation.json").read_bytes()
+    captured = _install_paid_transport(monkeypatch, completion=completion, finish=finish)
+
+    result = _paid_stage(tmp_path, _paid_model()).run(project, "USR-470")
+
+    assert captured["calls"] == 1
+    assert result.outcome == "failed"
+    assert result.cause_code == "review_output_truncated"
+    assert not (ctx / "review_verdict.json").exists()
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8")) if (ctx / "review_state.json").is_file() else {"rounds": []}
+    assert not any(item.get("verdict") == "approve" for item in state.get("rounds", []))
+    assert (ctx / "validation.json").read_bytes() == validation
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["drop-spec", "drop-tickets", "empty-spec", "empty-tickets"],
+)
+def test_missing_or_empty_spec_or_tickets_do_not_call_the_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    spec = f"{_SPEC_SENTENCE}\n"
+    tickets = json.dumps([{"id": "T1", "acceptance": [_CRITERION]}])
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "run-missing-context", spec=spec, tickets=tickets,
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    ctx = ws_mod.context_dir(ws)
+    if mutation == "drop-spec":
+        (ctx / "SPEC.md").unlink()
+    elif mutation == "drop-tickets":
+        (ctx / "tickets.json").unlink()
+    elif mutation == "empty-spec":
+        (ctx / "SPEC.md").write_text("  \n", encoding="utf-8")
+    else:
+        (ctx / "tickets.json").write_text("[]", encoding="utf-8")
+    captured = _install_paid_transport(monkeypatch)
+    calls: list[AgentRequest] = []
+
+    def _agent(req: AgentRequest) -> AgentResult:
+        calls.append(req)
+        return AgentResult(ok=True, text=_APPROVE_TEXT, harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=_agent,
+        pick_func=lambda *_args, **_kwargs: ("codex", None),
+        routing_config=load_routing_config(),
+    )
+    result = stage.run(project, "run-missing-context")
+
+    assert result.outcome == "failed"
+    assert result.cause_code == "review_context_unavailable"
+    assert calls == []
+    assert captured["calls"] == 0
+    assert not (ctx / "review_verdict.json").exists()
+
+
+def test_review_rejects_the_implementer_family_and_leaves_validation_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.line.recovery_receipt import record_implementation
+
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "run-same-family",
+        spec=f"{_SPEC_SENTENCE}\n",
+        tickets=json.dumps([{"id": "T1", "acceptance": [_CRITERION]}]),
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    record_implementation(ws, "claude", None)
+    ctx = ws_mod.context_dir(ws)
+    validation = (ctx / "validation.json").read_bytes()
+    calls: list[AgentRequest] = []
+
+    def _agent(req: AgentRequest) -> AgentResult:
+        calls.append(req)
+        return AgentResult(ok=True, text=_APPROVE_TEXT, harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=_agent,
+        pick_func=lambda *_args, **_kwargs: ("claude", None),
+        routing_config=load_routing_config(),
+    )
+
+    with pytest.raises(ValueError, match="review_same_implementation_family"):
+        stage.run(project, "run-same-family")
+
+    assert calls == []
+    assert (ctx / "validation.json").read_bytes() == validation
+    assert not (ctx / "review_verdict.json").exists()
+
+
+def test_filesystem_review_keeps_the_full_diff_and_shows_the_spec_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "run-fs-once",
+        spec="FRASE_FS_474_UNICA\n",
+        tickets=json.dumps([{"id": "T1", "acceptance": [_CRITERION]}]),
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    seen: dict[str, object] = {}
+
+    def _agent(req: AgentRequest) -> AgentResult:
+        diff_path = req.cwd / ".darkfac" / "runs" / "run-fs-once" / "candidate.diff"
+        seen["diff"] = diff_path.read_bytes()
+        seen["prompt"] = req.prompt
+        return AgentResult(ok=True, text=_APPROVE_TEXT, harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=_agent,
+        pick_func=lambda *_args, **_kwargs: ("codex", None),
+        routing_config=load_routing_config(),
+    )
+    assert stage.run(project, "run-fs-once").outcome == "success"
+    raw = _candidate_diff(ws.path)
+    prompt = str(seen["prompt"])
+    assert seen["diff"] == raw.encode("utf-8")
+    assert raw in prompt
+    assert prompt.count("FRASE_FS_474_UNICA") == 1
+    assert "Contexto verificavel da revisao" not in prompt
+    assert not (ws.path / ".darkfac" / "runs" / "run-fs-once" / "candidate.diff").exists()
 

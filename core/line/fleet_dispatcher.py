@@ -941,7 +941,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--recovery-tickets", default="",
                     help="Lista ordenada por virgulas: uma correcao por vez; depois libera a fila regular")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
+    ap.add_argument("unexpected_args", nargs="*", metavar="ARG",
+                    help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    if args.unexpected_args:
+        ap.error("argumentos posicionais inesperados; passe --recovery-tickets como um unico valor separado por virgulas")
     log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
     configure_logging(log_dir)
     from core.line.sentinel import maybe_run_sentinel

@@ -41,6 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.git.gate_isolation import SCRUBBED_ENV  # noqa: E402
 from core.git.ticket_workspace import drop_delivery_scratch_commands  # noqa: E402
 from core.harness import runner  # noqa: E402
 
@@ -94,8 +95,15 @@ def sanitized_env(base: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def runner_env(base: dict[str, str] | None = None, *, platform: str | None = None) -> dict[str, str]:
-    """`sanitized_env` plus the xdist worker cap for local runs on non-Windows hosts (see above)."""
+    """`sanitized_env` plus the xdist worker cap for local runs on non-Windows hosts.
+
+    Also drops ``SCRUBBED_ENV`` (``DARKFAC_PROJECT_ROOT`` and the state-dir
+    redirects). A snapshot checkout must bind the runner to itself; an inherited
+    project root would validate another tree and record that tree's SHA.
+    """
     env = sanitized_env(base)
+    for key in SCRUBBED_ENV:
+        env.pop(key, None)
     source = os.environ if base is None else base
     if (platform or sys.platform) != "win32" and not source.get(XDIST_WORKERS_ENV, "").strip():
         env[XDIST_WORKERS_ENV] = LOCAL_XDIST_WORKERS

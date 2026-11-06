@@ -54,12 +54,19 @@ def route_family(harness: str, model: str | None) -> str:
     raise ValueError("review_execution_family_unknown")
 
 
-def review_context(ws: RunWorkspace) -> str:
-    """Paid text adapters receive actual task inputs, not inaccessible file paths."""
+def review_context(ws: RunWorkspace, *, skip: tuple[str, ...] = ()) -> str:
+    """Paid text adapters receive actual task inputs, not inaccessible file paths.
+
+    ``skip`` omits named files. The paid review uses it for ``SPEC.md`` so the
+    sanitized payload, not a second raw copy, is the SPEC the transport sees.
+    """
     from core.line import workspace
     directory = workspace.context_dir(ws)
+    skipped = set(skip)
     parts = []
     for name in ("DEMAND.md", "GRILL.md", "SPEC.md", "REVIEW_CONTEXT.md"):
+        if name in skipped:
+            continue
         path = directory / name
         if path.is_file():
             parts.append(f"\n--- TASK CONTEXT: {name} ---\n{path.read_text(encoding='utf-8')}")

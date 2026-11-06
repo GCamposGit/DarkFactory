@@ -1,4 +1,4 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py -->
 # Motor da esteira
 
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
@@ -213,6 +213,14 @@ Uma falha de formato registra o harness como inelegível para a combinação atu
 independente já aplicados por `pick()`. Se não houver outra rota elegível, REVIEW aguarda a próxima rota;
 nenhum veredito é criado. Uma alteração no candidato ou na política descarta a exclusão anterior e exige
 uma nova revisão independente.
+
+### Payload verificável da revisão (USR-474 T1)
+
+`core.line.review_payload.build_review_payload` lê, sem rede e sem agente, o `SPEC.md`, os critérios de `tickets.json` (`acceptance`, `acceptance_criteria` ou `criteria`) e os bytes dos arquivos alterados dentro da worktree. Cada item do manifesto traz o caminho, o sha256 da fonte, os bytes incluídos depois de `redact_secrets` e se houve corte. O corte acontece só depois da redação, no limite de um caractere UTF-8. SPEC ou tickets ausentes, vazios ou ilegíveis deixam `complete` falso e registram o motivo. Contexto vazio não sai pronto. Um caminho que resolve fora da árvore não é lido.
+
+### Revisão paga sem filesystem (USR-474 T2)
+
+O revisor com filesystem continua recebendo o diff integral no prompt e os mesmos bytes em `candidate.diff` na worktree. O OpenRouter não lê disco: `provider.generate` recebe no prompt os critérios, o trecho sanitizado e os sha256 do manifesto. A SPEC sanitizada entra uma vez; `review_context` deixa de repetir o `SPEC.md` cru nesse transporte. SPEC ou tickets ausentes, vazios ou ilegíveis devolvem `review_context_unavailable`, sem chamar o modelo e sem gravar `review_verdict.json` com approve. A revisão continua recusando a mesma família do implementador e não escreve nem apaga `validation.json`. O `ticket_id` do `generate` é o `run_id` quando ele é um ticket `USR-N`; senão vem de `DARKFAC_TICKET_ID`. Sem id, o evento de uso fica nulo e a revisão segue. A resposta precisa chegar completa: `completion_tokens` no teto de 4096 ou `finish_reason` `length` devolve `review_output_truncated` e nunca aprova. Não trate uma resposta cortada como um veredito aproveitável; uma nova tentativa precisa receber saída completa.
 
 
 ## Planejamento

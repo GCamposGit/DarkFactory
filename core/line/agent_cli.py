@@ -175,6 +175,8 @@ class AgentRequest(BaseModel):
     output_schema: Optional[dict[str, Any]] = None
     # USR-370: ticket-granted env names exempted from the credential scrub (tolerant when absent).
     capabilities: list[str] = Field(default_factory=list)
+    # USR-474: set by review when ``run_id`` is the ticket. Empty falls back to the env.
+    ticket_id: Optional[str] = None
 
 
 class AgentResult(BaseModel):
@@ -188,6 +190,8 @@ class AgentResult(BaseModel):
     effort: Optional[str] = None
     duration_s: float
     usage: Optional[dict[str, Any]] = None
+    # OpenRouter ``finish_reason``. ``length`` means the completion hit the token cap.
+    finish_reason: Optional[str] = None
     cost_usd: Optional[float] = None
     error_kind: ErrorKind = None
     reset_at: Optional[datetime] = None
@@ -1807,6 +1811,25 @@ def _apply_openrouter_write_blocks(text: str, cwd: Path) -> list[str]:
     return modified_paths
 
 
+def resolve_call_ticket_id(req: AgentRequest) -> str | None:
+    """Ticket stamped on the request, else ``DARKFAC_TICKET_ID``. Absent stays null."""
+    direct = (req.ticket_id or "").strip()
+    if direct:
+        return direct
+    return os.environ.get("DARKFAC_TICKET_ID", "").strip() or None
+
+
+def _finish_reason(response: Any) -> str | None:
+    metadata = getattr(response, "metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return None
+    finish = metadata.get("finish_reason")
+    if not isinstance(finish, str):
+        return None
+    text = finish.strip()
+    return text or None
+
+
 def _run_openrouter(req: AgentRequest) -> AgentResult:
     # OpenRouter gateway runner supporting read and write (via patch application) modes
     from core.execution.providers import OpenRouterModelProvider  # local import: keeps agent_cli import-light
@@ -1837,6 +1860,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             model=model,
             max_tokens=_OPENROUTER_MAX_TOKENS,
             reasoning=reasoning,
+            ticket_id=resolve_call_ticket_id(req),
         )
     except Exception as exc:  # network/auth/model errors all surface here
         duration = round(time.perf_counter() - start, 3)
@@ -1867,6 +1891,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     return AgentResult(
         ok=True, text=response.text or "", harness="openrouter", model=response.model,
         duration_s=duration, usage=usage, cost_usd=cost_usd,
+        finish_reason=_finish_reason(response),
     )
 
 
@@ -1968,6 +1993,7 @@ def run_agent(req: AgentRequest) -> AgentResult:
                 latency_ms=round(res.duration_s * 1000, 1),
                 source=f"agent_cli.{harness}",
                 reasoning_effort=effort_name,
+                ticket_id=resolve_call_ticket_id(req),
             )
         )
     except Exception as exc:

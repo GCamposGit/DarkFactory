@@ -34,8 +34,17 @@ A tarefa Windows `DarkFac-Fleet-Dispatcher` mantém boot e reinício em falha; n
 esse serviço por inferência recorrente. Ao sair da recuperação, remover `--resume-only`
 da ação da tarefa e limpar `DARKFAC_FLEET_RESUME_ONLY` libera novamente a fila regular.
 
-Para uma recuperação que não termina em ociosidade, `--recovery-tickets ID1,ID2`
-executa a lista na ordem, uma correção por vez. Retomadas em execução têm precedência.
+Para uma recuperação que não termina em ociosidade, confira primeiro a interface aceita
+pela CLI e passe a lista como um único valor separado por vírgulas:
+
+```powershell
+python -m core.line.fleet_dispatcher --help
+python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"
+```
+
+O dispatcher executa os tickets nessa ordem, uma correção por vez. Não passe os IDs como
+argumentos posicionais separados: a validação de argumentos recusa a chamada com código 2
+antes de iniciar o ciclo. Retomadas em execução têm precedência.
 Quando todos os IDs estão completed/cancelled, a fila regular volta automaticamente.
 Esse argumento substitui o modo de espera exclusiva; não existe nova pausa a remover
 manualmente no final. Ticket ausente ou pendência material não contam como concluídos.

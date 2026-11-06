@@ -378,6 +378,17 @@ class OllamaModelProvider:
             raise RuntimeError(f"Ollama generation failed: {exc}") from exc
 
 
+def _openrouter_metadata(choices: list[Any]) -> dict[str, str]:
+    """Backend tag plus ``finish_reason`` when the provider sent one."""
+    metadata = {"backend": "openrouter"}
+    if not choices or not isinstance(choices[0], dict):
+        return metadata
+    finish = choices[0].get("finish_reason")
+    if isinstance(finish, str) and finish.strip():
+        metadata["finish_reason"] = finish.strip()
+    return metadata
+
+
 def _resolve_openrouter_wire_model(model: str) -> str:
     """Resolve internal alias or registry entry to provider gateway wire id."""
     try:
@@ -552,7 +563,7 @@ class OpenRouterModelProvider:
                     measured_cost=cost_usd,
                     estimated_cost=estimated_cost,
                     is_measured=is_measured,
-                    metadata={"backend": "openrouter"},
+                    metadata=_openrouter_metadata(choices),
                 )
         except Exception as exc:
             latency = max(0.001, time.perf_counter() - start)

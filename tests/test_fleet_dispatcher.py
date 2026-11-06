@@ -78,6 +78,67 @@ def test_selection_filters():
     assert sk["USR-02"].startswith("tag:") and sk["USR-04"] == "dependencia_aberta" and sk["USR-07"] == "em_voo"
 
 
+@pytest.mark.parametrize("loop_args", [[], ["--loop"]])
+def test_main_rejects_split_recovery_ticket_arguments_before_running(loop_args, monkeypatch):
+    calls = []
+
+    class Dispatcher:
+        def __init__(self, *_args, **_kwargs):
+            calls.append("init")
+
+        def run_cycle(self):
+            calls.append("run_cycle")
+
+        def run_forever(self):
+            calls.append("run_forever")
+
+    monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
+    monkeypatch.setattr(fd, "configure_logging", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(SystemExit) as exc:
+        fd.main(["--recovery-tickets", "USR-1", "USR-2", *loop_args])
+
+    assert exc.value.code == 2
+    assert calls == []
+
+
+def test_main_passes_comma_separated_recovery_tickets_in_order(monkeypatch, capsys):
+    captured = {}
+
+    class Dispatcher:
+        def __init__(self, config, **_kwargs):
+            captured["config"] = config
+
+        def run_cycle(self):
+            return {"ok": True}
+
+    monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
+    monkeypatch.setattr(fd, "configure_logging", lambda *_args, **_kwargs: None)
+
+    assert fd.main(["--recovery-tickets", "USR-1,USR-2"]) == 0
+    assert captured["config"].recovery_tickets == ("USR-1", "USR-2")
+    assert capsys.readouterr().out.strip() == '{\n  "ok": true\n}'
+
+
+def test_main_preserves_empty_recovery_and_resume_only_modes(monkeypatch, capsys):
+    captured = {}
+
+    class Dispatcher:
+        def __init__(self, config, **_kwargs):
+            captured["config"] = config
+
+        def run_cycle(self):
+            return {"ok": True}
+
+    monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
+    monkeypatch.setattr(fd, "configure_logging", lambda *_args, **_kwargs: None)
+
+    assert fd.main(["--resume-only", "--recovery-tickets", ""]) == 0
+    assert captured["config"].recovery_tickets == ()
+    assert captured["config"].resume_only is True
+    capsys.readouterr()
+
+
 def test_three_tickets_three_hosts_in_parallel(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03"), _d("USR-04")])
     cyc = e.d.run_cycle()
