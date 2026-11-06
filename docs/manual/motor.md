@@ -218,7 +218,7 @@ O fluxo que chama `pick`, `inspect_quotas`, `_run_bounded` etc. fica em `run_tic
 Em `_deliver_sync` o rebase em origin/main deixa o conflito em andamento (`keep_conflict=True`) e `resolve_rebase_conflict`
 o trata: conflito so em ledger (`demands.json`, `owner_actions.json`) fica com a versao de origin/main e o rebase
 continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_invoke_fix_agent`, estagio
-`rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket vai a `waiting_human` e o run sai com rc 1
+`rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket permanece em `validating`, com evidencia de falha tecnica, e o run sai com rc 1
 (causa `rebase_conflict`), sem rc 2 e sem redespacho do despachante.
 
 ## Harness de Operacao Interativo e Restricao Headless (USR-433)
@@ -229,3 +229,12 @@ continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_i
 
 Durante a validacao pelo portao oficial, `run_ticket.py` rotaciona os workers remotos quando uma tentativa falha (`_rotate_gate_workers`). Essa rotacao filtra estritamente hosts listados em `DARKFAC_FLEET_DISABLED_HOSTS` (ex.: `desktop` ocupado com indexacao), garantindo que nos desabilitados nao sejam reinseridos no pool ativo de validacao.
 
+
+## Recuperacao de CI sem repetir BUILD (USR-473)
+
+CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
+`ci_recovery.json` e sobrevive a retomadas. Uma alteracao retorna codigo 75 e
+retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
+nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
+fica preservada para retomada automatica. Esgotar essa tentativa registra falha
+tecnica em `validating`; nao solicita autorizacao de negocio ao owner.

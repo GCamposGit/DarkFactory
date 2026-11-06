@@ -510,7 +510,7 @@ def _red(ticket_id: str, log: str) -> TicketCompletionReport:
     )
 
 
-def test_red_ci_goes_back_to_the_agent_once_then_delivers(
+def test_red_ci_goes_back_to_the_agent_once_then_revalidates(
     launcher: Callable[[Any], _Launcher], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     launcher(RecordingSink())
@@ -520,8 +520,10 @@ def test_red_ci_goes_back_to_the_agent_once_then_delivers(
     calls = iter([_red("USR-99", "FAILED tests/test_x.py::t\nnoise line"), TicketCompletionReport(ok=True, ticket_id="USR-99", commit_sha="c0ffee")])
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", lambda self, **k: next(calls))
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 0
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 75
     assert len(fixes) == 1 and fixes[0].startswith("ci-vermelho|") and "FAILED tests/test_x.py" in fixes[0]
+    # The second complete_ticket result remains unused: no push/merge of an unreviewed fix.
+    assert next(calls).ok is True
     assert "noise line" not in fixes[0]
     capsys.readouterr()
 
@@ -530,14 +532,21 @@ def test_red_ci_twice_requeues_with_cause_and_log(
     launcher: Callable[[Any], _Launcher], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     sink = RecordingSink()
-    launcher(sink)
+    env = launcher(sink)
     fixes: list[str] = []
     monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda wt, t, stage, fb: fixes.append(fb))
     monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", lambda self, **k: _red("USR-99", "FAILED again"))
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 1
-    assert _Store.parked[-1][:2] == ("USR-99", run_ticket.DeliveryStatus.WAITING_HUMAN)
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 75
+    _, exhausted = run_ticket._retry_red_ci(
+        GitAutonomyManager(env.workspace.main_root), _TICKET, env.workspace.path,
+        _red("USR-99", "FAILED again"), False, _publisher(sink),
+    )
+    assert exhausted.startswith("ci_recovery_budget_exhausted")
+    run_ticket._ci_red_twice_result(_TICKET, exhausted, env.workspace.path, env.workspace.branch,
+                                   "resume", _publisher(sink), True, True)
+    assert _Store.parked[-1][:2] == ("USR-99", run_ticket.DeliveryStatus.VALIDATING)
     assert "FAILED again" in _Store.parked[-1][2]
     assert len(fixes) == 1
     assert sink.events[-1].cause_code == "ci_red_twice"

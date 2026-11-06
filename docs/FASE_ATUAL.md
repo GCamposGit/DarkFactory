@@ -97,3 +97,5 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 27/10/2026: OA-066 encerrada (Google dispensou o developer token; acesso via Google Cloud); OA-067 cancelada (sem Instagram/Facebook), redes sociais fora do piloto por ora.
 - 26/10/2026: Desktop fora da frota por DARKFAC_FLEET_DISABLED_HOSTS=desktop (pedido do owner).
 - 25/10/2026: criado a partir da revisão do MISSION pelo owner (separação longo prazo x fase atual).
+
+- 06/11/2026: USR-473 preserva o candidato em falhas tecnicas. Correcao de CI exige novo portao e revisao antes de publicar; seu orcamento persistido evita repetir inferencia apos restart. Integracao e deploy dependem dos recibos canonicos.

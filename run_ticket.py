@@ -2299,6 +2299,9 @@ def _deliver_worktree(
         completion_report, red_twice = _retry_red_ci(
             git_mgr, ticket, target_worktree, completion_report, no_push, progress
         )
+        if red_twice in {"ci_fix_requires_revalidation", "ci_fix_route_wait"}:
+            return _delivery_route_wait(ticket, red_twice, target_worktree, current_branch,
+                                        resume_cmd, progress, as_json, return_result)
         if red_twice is not None:
             return _ci_red_twice_result(
                 ticket, red_twice, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
@@ -2392,28 +2395,31 @@ def _ci_failure_feedback(message: str) -> str:
 def _retry_red_ci(
     git_mgr: Any, ticket: UserTicket, target_worktree: Path, report: Any, no_push: bool, progress: ProgressPublisher
 ) -> tuple[Any, Optional[str]]:
-    """USR-409: the fleet's own PR went red in CI. Send the log back to the development agent ONCE in the
-    same worktree, then deliver again (push + new CI wait). Returns (report, None) or (report, log) when
-    CI is red a second time."""
+    """Repair CI once, persist the budget, and resume the entire validation path before publishing."""
     feedback = _ci_failure_feedback(report.delivery.message)
+    record = ticket_engine.workspace.context_dir(ticket_engine.run_workspace(ticket)) / "ci_recovery.json"
+    previous = json.loads(record.read_text(encoding="utf-8")) if record.exists() else {}
+    if previous.get("attempts", 0) >= 1:
+        return report, f"ci_recovery_budget_exhausted: {feedback}"
     progress.phase("ci", "running", "CI vermelho: devolvendo o log ao agente (1x)")
-    _invoke_fix_agent(target_worktree, ticket, "ci-vermelho", feedback)
+    result = _invoke_fix_agent(target_worktree, ticket, "ci-vermelho", feedback)
     _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "ci-vermelho")
     if commit_error:
         return report, f"{feedback}\nfix_commit_failed: {commit_error}"
-    second = git_mgr.complete_ticket(
-        ticket_id=ticket.id, cwd=target_worktree, auto_push=not no_push, auto_commit=True,
-    )
-    if _ci_is_red(second):
-        return second, _ci_failure_feedback(second.delivery.message)
-    return second, None
+    if result is None and not _changed:
+        return report, "ci_fix_route_wait"
+    record.parent.mkdir(parents=True, exist_ok=True)
+    temporary = record.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"attempts": 1}), encoding="utf-8")
+    os.replace(temporary, record)
+    return report, "ci_fix_requires_revalidation" if _changed else f"ci_fix_no_changes: {feedback}"
 
 
 def _park_waiting_human(ticket: UserTicket, evidence: str) -> None:
-    """Park the ticket in `waiting_human` with the failure as evidence (no dispatcher requeue)."""
+    """Legacy helper name: technical failure stays validating, never asks for business authorization."""
     try:
         DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json").update_status(
-            ticket.id, DeliveryStatus.WAITING_HUMAN, delivery_evidence=evidence
+              ticket.id, DeliveryStatus.VALIDATING, delivery_evidence=f"technical_failed: {evidence}"
         )
     except Exception as exc:  # noqa: BLE001 - recording the park must not hide the failure itself
         logger.warning("Could not park %s (%s): %s", ticket.id, evidence[:80], exc)
@@ -2423,7 +2429,7 @@ def _ci_red_twice_result(
     ticket: UserTicket, log: str, target_worktree: Path, current_branch: str, resume_cmd: str,
     progress: ProgressPublisher, as_json: bool, return_result: bool,
 ) -> Any:
-    """Second red CI: plain delivery failure (rc 1, no infra requeue); ticket parked in `waiting_human` with the log as evidence."""
+    """Exhausted technical repair stays visible with evidence while independent work continues."""
     message = f"CI vermelho duas vezes no PR: {log}"
     progress.phase("ci", "failed", message, cause="ci_red_twice")
     progress.set_outcome(message, "ci_red_twice")
