@@ -1833,7 +1833,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             prompt,
             model=model,
             max_tokens=_OPENROUTER_MAX_TOKENS,
-            reasoning=None if _openrouter_reasoning_enabled() else {"enabled": False},
+            reasoning={"enabled": False} if model.startswith("deepseek/") and not _openrouter_reasoning_enabled() else None,
         )
     except Exception as exc:  # network/auth/model errors all surface here
         duration = round(time.perf_counter() - start, 3)
