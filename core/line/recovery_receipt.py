@@ -123,7 +123,7 @@ def build_receipt(ticket_id: str, run_id: str, repo_root: Path) -> dict[str, Any
                            implementer_family=review["implementer_family"], reviewer_family=review["reviewer_family"]),
         "ci": evidence(pr_url, green=True),
         "merge": evidence(str(directory / "merge.json"), sha=sha, reachable=True),
-        "deploy": evidence(str(directory / "deploy_report.json"), sha=sha, deployed=True),
+        "deploy": evidence(str(directory / "deploy_report.json"), sha=sha, deployed=True, observed_at=stamp),
         "smoke": evidence(VPS_URL, http_status=status),
         "learning_pack": evidence(str(packs.index_file), indexed=True, observed_at=packs.load_pack(pack_id).timestamp),
     }
