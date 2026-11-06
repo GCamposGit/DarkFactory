@@ -6,6 +6,11 @@ No perfil completo, o orçamento da suíte paralela acompanha a capacidade real
 O watchdog remoto e os deadlines de cache usam a mesma função do subprocesso.
 Essa adaptação não altera timeout por teste, descoberta, trava ou cache por árvore.
 
+O census de IDs de modelos separa configurações e código de seleção dos ledgers
+de evidência histórica de demandas e ações do owner. Esses registros não escolhem
+modelos. A seleção ativa continua usando o registro canônico; não se reescreve
+uma evidência histórica para fazer o portão passar (reparo reutilizado do USR-468).
+
 O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
 
 - `pr`: `syntax_only`, `static_types`, `affected_tests`
