@@ -44,6 +44,7 @@ from core.harness.markers import MARKER_HARNESS_RESULT
 from core.harness.process_identity import proc_start_ticks, same_process
 from core.harness.runner import _selected_steps as _harness_selected_steps
 from core.harness.runner import load_config as _load_harness_config
+from core.harness.runner import effective_step_timeout
 from core.harness.test_subagent import (
     DistilledTestReport,
     TestExecutionInstruction,
@@ -425,7 +426,7 @@ def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool)
         config, _config_hash = _load_harness_config(worktree_path / "harness.config.json")
         steps = _harness_selected_steps(config, quick=quick, include_holdout=include_holdout)
         if steps:
-            return float(sum(step.timeout_sec for step in steps)) + JOB_TIMEOUT_BUFFER_SEC
+            return sum(effective_step_timeout(step) for step in steps) + JOB_TIMEOUT_BUFFER_SEC
     except Exception as exc:  # noqa: BLE001 - never let timeout computation crash a job
         logger.warning("Could not compute job timeout from worktree config: %s", exc)
     return DEFAULT_JOB_TIMEOUT_SEC

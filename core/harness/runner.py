@@ -360,6 +360,18 @@ def check_scope_label(cmd: str) -> str | None:
     return None
 
 
+def effective_step_timeout(step: HarnessStepConfig) -> float:
+    """Keep the full-suite budget calibrated for two workers when only one fits."""
+    if step.name != "unit_and_integration_tests_parallel":
+        return float(step.timeout_sec)
+    from core.line.gate_ram import measure_workers
+
+    workers = measure_workers().workers
+    # The existing 3000s budget covered >=2 workers; one worker needs both shares.
+    # Do not shorten any configured timeout, raise worker counts or test timeouts.
+    return float(step.timeout_sec) * (2 if workers <= 1 else 1)
+
+
 def run_step(step: HarnessStepConfig) -> StepExecution:
     print(f"{MARKER_STEP_START} {step.name}")
     label = check_scope_label(step.cmd)
@@ -371,6 +383,13 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         return time.perf_counter() - started_at
 
     try:
+        if step.name == "unit_and_integration_tests_parallel":
+            from core.line.gate_ram import measure_workers
+            reading = measure_workers()
+            if reading.workers < 1:
+                raise ValueError("gate_insufficient_ram: no pytest worker fits available memory")
+            print(f"[GATE_CAPACITY] workers={reading.workers} available_gib={reading.available_gib:.1f} "
+                  f"timeout_sec={effective_step_timeout(step):.0f}")
         command = resolve_command(step.cmd)
         if not command:
             raise ValueError("empty command")
@@ -395,7 +414,7 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
             encoding="utf-8",
             errors="replace",
             cwd=PROJECT_ROOT,
-            timeout=step.timeout_sec,
+            timeout=effective_step_timeout(step),
             check=False,
             env=child_env,
         )
@@ -838,7 +857,7 @@ def _run_with_cache(
     """
 
     steps = _selected_steps(config, quick=quick, include_holdout=include_holdout)
-    timings.steps_timeout_sum_sec = float(sum(step.timeout_sec for step in steps))
+    timings.steps_timeout_sum_sec = sum(effective_step_timeout(step) for step in steps)
     cache_enabled = bool(steps) and not no_cache and not harness_cache.cache_disabled()
 
     tree_hash: str | None = None
@@ -924,7 +943,7 @@ def _run_with_cache(
                 config_path=config_path,
             )
 
-    total_timeout_sec = float(sum(step.timeout_sec for step in steps))
+    total_timeout_sec = sum(effective_step_timeout(step) for step in steps)
     lease_sec = harness_cache.inflight_lease_sec()
 
     # Cross-host wait for another host's in-flight run, deliberately OUTSIDE

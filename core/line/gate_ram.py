@@ -1,9 +1,8 @@
 """Espera de RAM antes do portao oficial LOCAL (USR-262).
 
-O harness escolhe os workers xdist pela RAM livre no inicio da execucao. Com 1 worker a suite passa
-de 3000 s (4 portoes estouraram em 14/10 com 0 testes contabilizados); com 2 passa em ~1814 s. Este
-modulo mede quantos workers caberiam (reutilizando ``tests/_worker_capacity``, sem edita-lo) e espera
-ate caberem 2+, ou desiste com causa explicita sem rodar o portao.
+O harness escolhe os workers xdist pela RAM livre no inicio da execucao. O runner ajusta o prazo
+da suite ao numero efetivo de workers. Este modulo reutiliza ``tests/_worker_capacity`` sem o piso
+artificial de um worker e espera ate caber pelo menos um, ou desiste com causa explicita.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from typing import Any
 
 ENV_RAM_WAIT_S = "DARKFAC_GATE_RAM_WAIT_S"
 DEFAULT_RAM_WAIT_S = 1800.0
-MIN_GATE_WORKERS = 2
+MIN_GATE_WORKERS = 1
 POLL_INTERVAL_S = 60.0
 CAUSE_INSUFFICIENT_RAM = "gate_insufficient_ram"
 

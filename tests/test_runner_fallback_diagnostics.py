@@ -37,10 +37,13 @@ def test_timeout_saves_and_prints_partial_pytest_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(runner, "PROJECT_ROOT", tmp_path)
+    from core.line import gate_ram
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(4.1, 1))
 
     partial = b"collecting ... collected 42 items\ntests/test_slow.py::test_wait "
 
     def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs["timeout"] == 2  # same suite, one worker gets both calibrated shares
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=1, output=partial)
 
     monkeypatch.setattr(runner.subprocess, "run", timeout)
