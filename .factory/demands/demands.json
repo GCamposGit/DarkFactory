@@ -14265,5 +14265,35 @@
     "dependencies": [],
     "created_at": "2026-09-07T01:46:22.666182Z",
     "updated_at": "2026-09-07T03:45:00Z"
+  },
+  {
+    "id": "USR-479",
+    "project_id": "darkfac",
+    "title": "Aplicar cooldown a encerramento sem entrega e provar ciclo de reparo de CI",
+    "origin": "user",
+    "status": "implementing",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Defeito concreto identificado na revisao USR-477: rc0 sem prova de entrega registra falha mas nao aplica cooldown, permitindo readmissao imediata. Preservar candidato e revisoes recusadas de USR-477; corretivo sucessor deve comprovar todo ciclo de reparo, portao, revisao, CI verde e merge, mantendo uma unica correcao de CI por tentativa e sem resetar esse orcamento. Integrar controlador composto preservado na branch codex/recovery-integrated-477-20261106 somente com novas provas completas.",
+    "core_journey": [
+      "Defeito concreto identificado na revisao USR-477: rc0 sem prova de entrega registra falha mas nao aplica cooldown, permitindo readmissao imediata. Preservar candidato e revisoes recusadas de USR-477; corretivo sucessor deve comprovar todo ciclo de reparo, portao, revisao, CI verde e merge, mantendo uma unica correcao de CI por tentativa e sem resetar esse orcamento. Integrar controlador composto preservado na branch codex/recovery-integrated-477-20261106 somente com novas provas completas."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rc0 sem entrega aplica cooldown tanto em recovery quanto fora dele, com causa persistida e sem declarar deploy",
+      "Teste comportamental cobre CI vermelho, uma correcao, retomada na mesma worktree, novo gate, revisao independente e entrega CI verde; BUILD nao repete e contador de uma correcao nao e zerado",
+      "Candidato composto passa revisao independente e portao integral, CI e deploy reais; recusas anteriores permanecem preservadas e nenhum teto aumenta"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-06T17:04:38.753753Z",
+    "updated_at": "2026-11-06T17:04:38.753753Z"
   }
 ]
