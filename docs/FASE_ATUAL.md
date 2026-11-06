@@ -105,4 +105,4 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 
 - 06/11/2026: recuperacao integrada USR-468/473 em validacao; revisoes recusadas preservadas. Nao ha afirmacao de deploy antes do recibo de producao.
 
-- 06/11/2026: USR-477 corrige retomada de deploy sem report e registra falhas; rota paga independente usa flash, respeitando tetos e registro. Candidato em validacao, sem declarar producao.
+- 06/11/2026: USR-477 corrige retomada de deploy sem report e registra falhas; rota paga independente usa sonnet, respeitando tetos e registro. Candidato em validacao, sem declarar producao.

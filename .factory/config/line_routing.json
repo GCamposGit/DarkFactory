@@ -87,7 +87,7 @@
     "review": {
       "cascade": "other_family_than_development",
       "openrouter_ok": true,
-      "openrouter_model": "flash"
+      "openrouter_model": "sonnet"
     },
     "distill": {
       "cascade": [],
