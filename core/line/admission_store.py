@@ -35,8 +35,9 @@ def normalize_error(error: BaseException | str) -> str:
         name = type(error).__name__.casefold()
         message = str(error).casefold()
     else:
-        name = "error"
         message = str(error).casefold()
+        receipt_error = re.fullmatch(r"recovery_receipt:(receipt_[a-z0-9_]+)", message)
+        name = receipt_error.group(1) if receipt_error else "error"
     categories = (
         ("quota", ("quota", "rate limit", "rate_limit", "429", "no_route_available")),
         ("context", ("context", "scanner", "scan failed", "input too long")),
@@ -115,6 +116,7 @@ class AdmissionStore:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 with self._connection() as db:
                     db.execute("PRAGMA journal_mode=WAL")
+                    db.execute("BEGIN IMMEDIATE")
                     db.execute("""CREATE TABLE IF NOT EXISTS failures (
                         fingerprint TEXT PRIMARY KEY, project_id TEXT NOT NULL, ticket_id TEXT NOT NULL,
                         candidate_digest TEXT NOT NULL, context_digest TEXT NOT NULL,
@@ -139,6 +141,7 @@ class AdmissionStore:
                     for name in ("receipt_cause", "receipt_digest", "recovered_candidate_digest"):
                         if name not in recovery_columns:
                             db.execute(f"ALTER TABLE dispatcher_recovery ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+                    db.commit()
             except (OSError, sqlite3.Error) as exc:
                 raise AdmissionStoreError("admission_store_unavailable") from exc
 

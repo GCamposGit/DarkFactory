@@ -371,6 +371,9 @@ def test_admission_allow_still_runs_plan_and_fresh_development_pick(
     line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An allow is not a cached route: PLAN and the post-plan development pick still run."""
+    from datetime import datetime, timezone
+    from core.line.admission import allow_decision
+
     stages: list[str] = []
 
     def pick(stage: str, *_args: Any, **_kwargs: Any) -> tuple[str, None]:
@@ -378,6 +381,12 @@ def test_admission_allow_still_runs_plan_and_fresh_development_pick(
         return ("codex", None)
 
     monkeypatch.setattr(run_ticket, "pick", pick)
+    monkeypatch.setattr(
+        run_ticket, "evaluate_admission",
+        lambda *_args, **_kwargs: allow_decision(
+            datetime.now(timezone.utc), evidence_ref="test:explicit_allow"
+        ),
+    )
     assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
     assert line.calls[0] == "PLAN"
     assert "BUILD" in line.calls

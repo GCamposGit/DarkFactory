@@ -17,6 +17,7 @@ Uso::
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -298,7 +299,8 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
 
 
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
-                   run_id: Optional[str] = None, recovery: bool = False) -> InFlight:
+                   run_id: Optional[str] = None, recovery: bool = False,
+                   candidate_digest: str = "unknown") -> InFlight:
     env = dict(os.environ)
     # The launcher runs from a temporary operational checkout, but its mutable
     # control store is shared with the dispatcher and the other workers. Resolve
@@ -312,6 +314,7 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
         env["DARKFAC_RUN_ID"] = run_id
     if recovery:
         env["DARKFAC_RECOVERY_MODE"] = "1"
+    env["DARKFAC_CANDIDATE_DIGEST"] = candidate_digest
     if host.worker_url:
         env["DARKFAC_TEST_WORKERS"] = host.worker_url
         env["DARKFAC_REMOTE_HARNESS"] = "required"
@@ -483,7 +486,8 @@ class FleetDispatcher:
             fingerprint = make_fingerprint(
                 project_id=job.project_id, ticket_id=job.ticket_id,
                 candidate_digest=job.candidate_digest, context_digest=job.context_digest,
-                error=kind if kind != "failure" else (tail or kind),
+                error=(f"{kind}:{tail}" if kind == "recovery_receipt" and tail else
+                       kind if kind != "failure" else (tail or kind)),
                 resource_version=job.resource_version,
             )
             occurrences = self.admission_store.record_failure(
@@ -535,6 +539,7 @@ class FleetDispatcher:
                     receipt = _recovery_receipt(tail)
                     valid, cause = verify_recovery_receipt(
                         receipt, candidate_digest=job.candidate_digest,
+                        run_id=job.run_id,
                         now=datetime.fromtimestamp(self.clock(), timezone.utc),
                     )
                     if valid and receipt is not None:
@@ -615,7 +620,11 @@ class FleetDispatcher:
                 idle[host.id] = "recovery_single_delivery_reserved"
                 continue
             tid = queue.pop(0)
-            demand = next(row for row in demands if str(row.get("id", "")) == tid)
+            demand = next((row for row in demands if str(row.get("id", "")) == tid), None)
+            if demand is None:
+                skipped[tid] = "demand_disappeared"
+                idle[host.id] = "demand_disappeared"
+                continue
             project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
             candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or "unknown")
             context = demand.get("context_digest")
@@ -695,13 +704,24 @@ class FleetDispatcher:
                 run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
                 if self.launch is None:
                     job = default_launch(tid, host, demand, run_id=run_id,
-                                         recovery=bool(self.recovery.get("active")))
+                                         recovery=bool(self.recovery.get("active")),
+                                         candidate_digest=candidate)
                 else:
+                    kwargs = {"run_id": run_id, "recovery": bool(self.recovery.get("active")),
+                              "candidate_digest": candidate}
                     try:
-                        job = self.launch(tid, host, run_id=run_id,
-                                          recovery=bool(self.recovery.get("active")))
-                    except TypeError:
-                        job = self.launch(tid, host)
+                        signature = inspect.signature(self.launch)
+                    except (TypeError, ValueError):
+                        # Opaque callables must obey the current launcher contract. Never
+                        # retry a launch after a TypeError from inside its implementation.
+                        job = self.launch(tid, host, **kwargs)
+                    else:
+                        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD
+                                             for p in signature.parameters.values())
+                        supported = kwargs if accepts_kwargs else {
+                            key: value for key, value in kwargs.items() if key in signature.parameters
+                        }
+                        job = self.launch(tid, host, **supported)
                 job.project_id = project_id
                 job.candidate_digest = candidate
                 job.context_digest = context

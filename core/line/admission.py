@@ -378,25 +378,10 @@ def _local_gate_busy() -> bool:
     if suite_lock.is_held_by_ancestor():
         return True
     try:
-        raw_slots = os.environ.get("DARKFAC_SUITE_SLOTS", "").strip()
-        slots = int(raw_slots) if raw_slots else 1
-    except ValueError:
-        slots = 1
-    slots = slots if slots > 0 else 1
-    directory = suite_lock.state_dir()
-    handles: list[Any] = []
-    try:
-        for slot in range(slots):
-            handle = suite_lock._try_lock_file(directory / f"suite-{slot}.lock")
-            if handle is not None:
-                handles.append(handle)
-        return not handles
+        return not suite_lock.probe_free_slot()
     except Exception as exc:  # noqa: BLE001 - fail closed
         logger.warning("gate slot probe failed: %s", type(exc).__name__)
         return True
-    finally:
-        for handle in handles:
-            suite_lock._unlock_file(handle)
 
 
 def _remote_worker_urls() -> list[str]:
@@ -617,6 +602,7 @@ def verify_recovery_receipt(
     receipt: Any,
     *,
     candidate_digest: str,
+    run_id: Optional[str] = None,
     now: datetime,
     max_age: timedelta = RECOVERY_RECEIPT_MAX_AGE,
 ) -> tuple[bool, str]:
@@ -636,6 +622,9 @@ def verify_recovery_receipt(
         return False, "candidate_digest_unavailable"
     if receipt.get("candidate_digest") != expected:
         return False, "receipt_candidate_mismatch"
+    expected_run_id = str(run_id or "").strip()
+    if not expected_run_id or receipt.get("run_id") != expected_run_id:
+        return False, "receipt_run_mismatch"
 
     current = _as_utc(now)
     required = ("gate", "review", "ci", "merge", "deploy", "smoke", "learning_pack")
@@ -663,7 +652,10 @@ def verify_recovery_receipt(
     review = stages["review"]
     if review.get("approved") is not True or review.get("independent") is not True:
         return False, "receipt_review_not_approved"
-    if not review.get("reviewer_family") or review.get("reviewer_family") == review.get("implementer_family"):
+    implementer_family = str(receipt.get("implementer_family") or "").strip().casefold()
+    if (not review.get("reviewer_family") or not implementer_family
+            or str(review.get("implementer_family") or "").strip().casefold() != implementer_family
+            or str(review.get("reviewer_family") or "").strip().casefold() == implementer_family):
         return False, "receipt_review_not_independent"
     if stages["ci"].get("green") is not True:
         return False, "receipt_ci_not_green"

@@ -2728,9 +2728,9 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
         return None
     recovery = bool(getattr(args, "recovery", False) or os.environ.get("DARKFAC_RECOVERY_MODE") == "1")
     if recovery:
-        # Admission check uses the canonical suite lock itself. The runner will acquire this same
-        # lock again when it starts the official gate; a busy gate becomes a structured wait before
-        # worktree creation or any agent invocation.
+        # This admission probe is best-effort: it reserves no slot and another run can
+        # acquire one immediately afterward. The official runner acquires the same lock
+        # again at gate time and remains authoritative if capacity changes meanwhile.
         from core.harness import suite_lock
 
         try:
@@ -2743,6 +2743,14 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
                                   "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
             else:
                 print(f"[WAIT] gate_busy: {exc}", file=sys.stderr)
+            return EXIT_ROUTE_WAIT
+        except Exception as exc:  # noqa: BLE001 - unknown probe state is a structured wait
+            cause = f"gate_probe_failed:{type(exc).__name__}"
+            if args.json:
+                print(json.dumps({"status": "wait", "cause": cause, "stage": "GATE"},
+                                 ensure_ascii=False), file=sys.stderr)
+            else:
+                print(f"[WAIT] {cause}", file=sys.stderr)
             return EXIT_ROUTE_WAIT
     lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
     fleet_mode = getattr(args, "fleet", False) or line_lock.is_fleet_mode()

@@ -38,10 +38,10 @@ class Env:
                                     launch=self._launch, deploy=self._deploy, clock=lambda: self.now,
                                     admission_store=AdmissionStore(tmp / "admission.sqlite3"))
 
-    def _launch(self, tid, host):
+    def _launch(self, tid, host, *, run_id=None, recovery=False, candidate_digest="unknown"):
         self.launched.append((tid, host.id))
         h = self.handles[tid] = Handle()
-        return fd.InFlight(tid, host.id, h)
+        return fd.InFlight(tid, host.id, h, run_id=run_id)
 
     def mark_delivered(self, ticket_id):
         path = self.tmp / f"{ticket_id}.log"
@@ -59,7 +59,8 @@ class Env:
         }
         for stage, evidence in stages.items():
             evidence.update(candidate_digest=job.candidate_digest, observed_at=stamp, evidence_ref=f"{stage}://{ticket_id}")
-        receipt = {"schema_version": 1, "simulated": False, "candidate_digest": job.candidate_digest, **stages}
+        receipt = {"schema_version": 1, "simulated": False, "candidate_digest": job.candidate_digest,
+                   "run_id": job.run_id, "implementer_family": "codex", **stages}
         import json
         path.write_text("[DELIVERY_MERGED]\n[RECOVERY_RECEIPT] " + json.dumps(receipt), encoding="utf-8")
         job.log_path = path
@@ -203,6 +204,31 @@ def test_recovery_rejects_missing_production_receipt_and_persists_cause(tmp_path
     assert cycle["recovery"]["active"] is True
     assert cycle["recovery"]["successes"] == 0
     assert cycle["recovery"]["receipt_cause"] == "receipt_missing"
+
+
+def test_launcher_type_error_is_not_retried_without_recovery_identity(tmp_path: Path):
+    calls = []
+
+    def broken(tid, host, *, run_id=None, recovery=False, candidate_digest="unknown"):
+        calls.append((run_id, recovery, candidate_digest))
+        raise TypeError("bug inside launcher")
+
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.launch = broken
+    e.d.run_cycle()
+    assert len(calls) == 1
+    assert calls[0][0] and calls[0][2] == "candidate-USR-01"
+    assert e.d.failures[-1]["kind"] == "launch"
+
+
+def test_recovery_receipt_rejection_cause_is_part_of_failure_fingerprint(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="candidate-USR-01")
+    e.d._record_failure(job, 0, "recovery_receipt", "receipt_ci_stale")
+    first = e.d.admission_store.snapshot()[-1]["fingerprint"]
+    e.d._record_failure(job, 0, "recovery_receipt", "receipt_review_stale")
+    second = e.d.admission_store.snapshot()[-1]["fingerprint"]
+    assert first != second
 
 
 def test_deploy_deduplicated_per_batch(tmp_path: Path):

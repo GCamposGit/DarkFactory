@@ -431,6 +431,7 @@ def test_recovery_receipt_requires_fresh_candidate_bound_production_chain():
 
     receipt = {
         "schema_version": 1, "simulated": False, "candidate_digest": candidate,
+        "run_id": "fleet-run-468", "implementer_family": "codex",
         "gate": stage(passed=True, marker="[HARNESS_PASS]"),
         "review": stage(approved=True, independent=True, reviewer_family="claude", implementer_family="codex"),
         "ci": stage(green=True),
@@ -439,20 +440,33 @@ def test_recovery_receipt_requires_fresh_candidate_bound_production_chain():
         "smoke": stage(http_status=204),
         "learning_pack": stage(indexed=True),
     }
-    assert admission.verify_recovery_receipt(receipt, candidate_digest=candidate, now=now) == (True, "receipt_valid")
     assert admission.verify_recovery_receipt(
-        {**receipt, "candidate_digest": "other-candidate"}, candidate_digest=candidate, now=now
+        receipt, candidate_digest=candidate, run_id="fleet-run-468", now=now
+    ) == (True, "receipt_valid")
+    assert admission.verify_recovery_receipt(
+        {**receipt, "candidate_digest": "other-candidate"}, candidate_digest=candidate,
+        run_id="fleet-run-468", now=now
     )[1] == "receipt_candidate_mismatch"
     assert admission.verify_recovery_receipt(
-        {**receipt, "simulated": True}, candidate_digest=candidate, now=now
+        {**receipt, "simulated": True}, candidate_digest=candidate, run_id="fleet-run-468", now=now
     )[1] == "receipt_simulation"
     assert admission.verify_recovery_receipt(
         {**receipt, "ci": stage(green=True, observed_at=(now - timedelta(days=8)).isoformat())},
-        candidate_digest=candidate, now=now,
+        candidate_digest=candidate, run_id="fleet-run-468", now=now,
     )[1] == "receipt_ci_stale"
     assert admission.verify_recovery_receipt(
-        {**receipt, "learning_pack": None}, candidate_digest=candidate, now=now
+        {**receipt, "learning_pack": None}, candidate_digest=candidate, run_id="fleet-run-468", now=now
     )[1] == "receipt_learning_pack_missing"
     assert admission.verify_recovery_receipt(
-        {**receipt, "deploy": stage(deployed=True, sha="b" * 40)}, candidate_digest=candidate, now=now
+        {**receipt, "deploy": stage(deployed=True, sha="b" * 40)}, candidate_digest=candidate,
+        run_id="fleet-run-468", now=now
     )[1] == "receipt_deploy_mismatch"
+    assert admission.verify_recovery_receipt(
+        {**receipt, "run_id": "other-run"}, candidate_digest=candidate,
+        run_id="fleet-run-468", now=now,
+    )[1] == "receipt_run_mismatch"
+    bad_review = {**receipt, "review": stage(approved=True, independent=True,
+                                              reviewer_family="claude", implementer_family="grok")}
+    assert admission.verify_recovery_receipt(
+        bad_review, candidate_digest=candidate, run_id="fleet-run-468", now=now,
+    )[1] == "receipt_review_not_independent"

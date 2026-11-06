@@ -82,6 +82,25 @@ def test_recovery_gate_busy_returns_structured_wait_before_line_lock(monkeypatch
         assert run_ticket._stage_line_lock(args, stack, None) == run_ticket.EXIT_ROUTE_WAIT
     payload = json.loads(capsys.readouterr().err)
     assert payload["status"] == "wait" and payload["cause"] == "gate_busy"
+
+
+def test_recovery_unexpected_gate_probe_error_fails_closed(monkeypatch, capsys):
+    monkeypatch.setenv("DARKFAC_FLEET_MODE", "0")
+    args = run_ticket.build_parser().parse_args(["USR-468", "--fleet", "--recovery", "--json"])
+
+    class BrokenGate:
+        def __init__(self, **_kwargs):
+            pass
+
+        def acquire(self):
+            raise OSError("probe unavailable")
+
+    monkeypatch.setattr("core.harness.suite_lock.SuiteLock", BrokenGate)
+    monkeypatch.setattr(run_ticket.line_lock, "guard", lambda *_a, **_k: pytest.fail("must fail closed"))
+    with contextlib.ExitStack() as stack:
+        assert run_ticket._stage_line_lock(args, stack, None) == run_ticket.EXIT_ROUTE_WAIT
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["status"] == "wait" and payload["cause"] == "gate_probe_failed:OSError"
 from core.git.ticket_workspace import TicketWorkspace
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import _HARNESS_TO_PROVIDER
@@ -202,6 +221,7 @@ def test_the_real_router_no_longer_elects_antigravity_for_development(
     """The original defect: Antigravity has the most headroom, but it cannot write."""
     headroom = {"google": 90.0, "xai": 80.0, "anthropic": 40.0, "openai": 30.0}
     monkeypatch.setattr(routing, "_default_quota_headroom", lambda provider: headroom.get(provider))
+    monkeypatch.setattr(routing, "_default_weekly_slack", lambda provider: headroom.get(provider))
 
     assert main(["USR-99", "--dry-run", "--json"]) == 0
 

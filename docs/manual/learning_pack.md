@@ -38,4 +38,4 @@ vazio ou só com health genérico, o processo sai com código 75, JSON `route_wa
 
 ### USR-468 T3 — Recovery com uma entrega por vez
 
-No modo recovery, a esteira trabalha como uma fila de faixa única: o SQLite mantem o latch e a reserva entre reinicios, enquanto `reserve_cycle(max_fleet_slots=1)` impede outra entrega em host diferente. O gate continua sendo o `suite_lock` oficial. Espera por gate, host ou rota nao conta como sucesso; somente um recibo de merge fecha recovery.
+No modo recovery, a esteira trabalha como uma fila de faixa única: o SQLite mantém o latch e `AdmissionStore.reserve_recovery()` guarda a reserva global entre reinícios. O gate continua sendo o `suite_lock` oficial. Espera por gate, host ou rota não conta como sucesso; recovery só fecha quando `verify_recovery_receipt()` aprova um receipt recente, ligado ao candidato e ao `run_id`, com gate, revisão independente, CI, merge, deploy, smoke e learning pack comprovados.
