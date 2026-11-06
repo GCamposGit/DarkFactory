@@ -276,3 +276,14 @@ USR-477: saida zero sem entrega em recovery registra falha e causa persistida.
 Retomada de deploy exige prova da familia independente. Se a validacao for
 corrompida apos merge, o recibo preserva SHA/PR reais sem digest autorizado;
 a ausencia desse digest bloqueia release ate a recuperacao da evidencia.
+
+## Encerramento sem entrega e recuperacao de CI (USR-479)
+
+Retorno zero sem prova de merge gera causa persistida e cooldown nos modos
+normal e recovery. O ticket nao ganha uma nova execucao imediatamente.
+A correcao de CI e unica por tentativa: o contador permanece consumido ao
+retomar, inclusive depois de gate e revisao verdes. Retomar a entrega segue
+gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
+comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
+de candidatos anteriores permanecem preservadas; o novo candidato exige suas
+proprias provas de portao, revisao e producao.

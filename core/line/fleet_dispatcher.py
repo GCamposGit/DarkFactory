@@ -540,6 +540,8 @@ class FleetDispatcher:
                     self._record_failure(job, rc, "no_delivery_evidence", tail)
                     self.recovery = self.admission_store.record_recovery_receipt_cause("no_delivery_evidence")
                     self._release_reservation(job)
+                if not _delivery_evidence(tail):
+                    self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
             elif is_lock_refusal(tail):
                 self._record_failure(job, rc, "lock", tail)
                 self._release_reservation(job)

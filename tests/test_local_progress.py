@@ -513,7 +513,7 @@ def _red(ticket_id: str, log: str) -> TicketCompletionReport:
 def test_red_ci_goes_back_to_the_agent_once_then_revalidates(
     launcher: Callable[[Any], _Launcher], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    launcher(RecordingSink())
+    env = launcher(RecordingSink())
     fixes: list[str] = []
     monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda wt, t, stage, fb: fixes.append(f"{stage}|{fb}"))
     monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
@@ -523,8 +523,26 @@ def test_red_ci_goes_back_to_the_agent_once_then_revalidates(
     assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 75
     assert len(fixes) == 1 and fixes[0].startswith("ci-vermelho|") and "FAILED tests/test_x.py" in fixes[0]
     # The second complete_ticket result remains unused: no push/merge of an unreviewed fix.
-    assert next(calls).ok is True
     assert "noise line" not in fixes[0]
+    capsys.readouterr()
+    phases: list[str] = []
+    original_review = run_ticket._review_candidate
+    monkeypatch.setattr(run_ticket, "_candidate_binding", lambda *a, **k: ("corrected-candidate", "policy"))
+    monkeypatch.setattr(run_ticket, "_run_gate_with_self_correction", lambda *a, **k: phases.append("gate"))
+    def reviewed(*args, **kwargs):
+        phases.append("review")
+        return original_review(*args, **kwargs)
+    monkeypatch.setattr(run_ticket, "_review_candidate", reviewed)
+    def green_delivery(self, **kwargs):
+        phases.append("merge")
+        return next(calls)
+    monkeypatch.setattr(GitAutonomyManager, "complete_ticket", green_delivery)
+    before = env.agent.call_count
+    assert main(["--resume-delivery", "USR-99", "--worktree", str(env.workspace.path), "--json"]) == 0
+    assert phases == ["gate", "review", "merge"]
+    assert env.agent.call_count == before  # no second BUILD or repair
+    record = run_ticket.ticket_engine.workspace.context_dir(run_ticket.ticket_engine.run_workspace(_TICKET)) / "ci_recovery.json"
+    assert json.loads(record.read_text(encoding="utf-8"))["attempts"] == 1
     capsys.readouterr()
 
 

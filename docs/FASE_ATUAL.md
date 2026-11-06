@@ -10,7 +10,7 @@ Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
 
-Última revisão: 06/11/2026 (fábrica; admissão pré-worktree, circuit breaker persistente e recuperação com receipt de produção vinculado ao candidato, USR-468 T1–T4).
+Última revisão: 06/11/2026 (USR-452 implantado, CI completo verde, Notebook/Desktop/VPS convergidos e restauracao de backup verificada; controlador integrado em validacao pelo USR-479).
 
 ## Canais de entrada
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
@@ -106,3 +106,5 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 06/11/2026: recuperacao integrada USR-468/473 em validacao; revisoes recusadas preservadas. Nao ha afirmacao de deploy antes do recibo de producao.
 
 - 06/11/2026: USR-477 corrige retomada de deploy sem report e registra falhas; rota paga independente usa sonnet, respeitando tetos e registro. Candidato em validacao, sem declarar producao.
+
+- 06/11/2026: USR-452 entregue em producao no SHA11366cac48e4cbb5f991ce112c71dc9bcd42f89d, PR826, CI42252777189. Backup snp3t_darkfac_20261106_163829_2ee471 restaurado com sucesso. USR-479 fecha cooldown e prova de retomada do corretivo integrado.

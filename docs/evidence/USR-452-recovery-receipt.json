@@ -1,0 +1,14 @@
+{
+  "ticket": "USR-452",
+  "merge_sha": "11366cac48e4cbb5f991ce112c71dc9bcd42f89d",
+  "pr": 826,
+  "main_ci_run": 42252777189,
+  "health": "ok",
+  "nodes": [
+    "Notebook",
+    "Desktop",
+    "VPS"
+  ],
+  "snapshot_id": "snp3t_darkfac_20261106_163829_2ee471",
+  "drill_verified": true
+}

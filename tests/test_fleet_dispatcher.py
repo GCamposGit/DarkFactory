@@ -277,6 +277,13 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
     e.handles[job.ticket_id].rc = 0
     e.d.run_cycle()  # exit zero without a delivery receipt is still not success
     assert e.d.admission_store.recovery_state()["active"] == 1
+    assert e.d.cooldown[job.ticket_id] > e.now
+    normal = Env(tmp_path / "normal", [_d("USR-01")], free=("grokbox",))
+    normal.d.run_cycle()
+    normal.handles["USR-01"].rc = 0
+    normal.d.run_cycle()
+    assert normal.d.cooldown["USR-01"] > normal.now
+    assert normal.d.failures[-1]["kind"] == "no_delivery_evidence"
 
 
 def test_recovery_success_requires_merge_receipt(tmp_path: Path, monkeypatch):
