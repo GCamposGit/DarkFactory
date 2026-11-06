@@ -2942,6 +2942,225 @@
       "resolved_at": null
     },
     {
+      "id": "OA-082",
+      "kind": "action",
+      "title": "Conceder acesso ao Search Console de mansaodolago.com para o piloto (M1)",
+      "priority": "high",
+      "status": "open",
+      "why": "O M1 do piloto (USR-279) e a auditoria de SEO via Search Console de www.mansaodolago.com; o acesso ficou pendente porque a OA-067 (cancelada em 27/10) juntava isso com o Instagram, que saiu de escopo por falta de conta. Sem essa propriedade verificada e sem a conta da fabrica com acesso de leitura, a fabrica nao consegue extrair os dados do M1.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Entrar em https://search.google.com/search-console com a conta Google que administra o site da Mansao do Lago"
+        },
+        {
+          "text": "Conferir se www.mansaodolago.com aparece na lista de propriedades; se nao aparecer, clicar em Adicionar propriedade, escolher o tipo prefixo de URL e concluir a verificacao pelo metodo sugerido (arquivo HTML ou tag no site)"
+        },
+        {
+          "text": "Em Configuracoes > Usuarios e permissoes, clicar em Adicionar usuario e avisar no chat da fabrica para informar o e-mail exato a adicionar (conta de servico OAuth ainda a criar); conceder permissao Completo"
+        }
+      ],
+      "verify": "Search Console mostra www.mansaodolago.com verificado e a conta informada pela fabrica aparece em Usuarios e permissoes com acesso de leitura",
+      "created_at": "2026-11-01T11:34:51Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-083",
+      "kind": "action",
+      "title": "Criar projeto Google Cloud com API Google Ads ativada e OAuth para o piloto (M3, sem developer token)",
+      "priority": "medium",
+      "status": "open",
+      "why": "A OA-066 (resolvida em 27/10) registrou que o Google dispensou o developer token: o acesso a API Google Ads agora e por projeto no Google Cloud com a API ativada e credencial OAuth, com o proximo passo virando OA nova quando o piloto fosse escolhido -- o piloto da mansaodolago.com foi escolhido agora (USR-279). O M3 (ajustes no Google Ads, so leitura e recomendacoes nesta fase) depende disso; adiantar evita bloqueio quando M3 comecar. Nao bloqueia o M1 (Search Console), que segue por OA separada.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Entrar em https://console.cloud.google.com com a conta Google que administra a Mansao do Lago (ou criar uma) e criar um projeto novo, por exemplo mansaodolago-ads-readonly"
+        },
+        {
+          "text": "Em APIs e servicos > Biblioteca, pesquisar Google Ads API e clicar em Ativar"
+        },
+        {
+          "text": "Em APIs e servicos > Tela de consentimento OAuth, configurar o tipo Externo, preencher nome do app e e-mail de suporte; depois em Credenciais > Criar credenciais > ID do cliente OAuth, escolher o tipo App para computador"
+        },
+        {
+          "text": "Avisar no chat da fabrica quando tiver o ID do cliente e o client secret: a fabrica conduz o fluxo OAuth (autorizar leitura da conta de anuncios da Mansao do Lago) e guarda o refresh token no cofre"
+        }
+      ],
+      "verify": "Google Cloud mostra a API Google Ads ativada no projeto e um ID de cliente OAuth criado",
+      "created_at": "2026-11-01T11:35:11Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-084",
+      "kind": "decision",
+      "title": "Autorizar revisao documental do PR 821 no Claude/Anthropic",
+      "priority": "medium",
+      "status": "done",
+      "why": "A revisao automatica do ambiente rejeitou enviar o diff privado ao Claude/Anthropic sem autorizacao explicita desse destino, mesmo apos limitar arquivos e hash. Bloqueia somente a revisao cruzada e integracao do PR https://github.com/GCamposGit/DarkFactory/pull/821. USR-449, USR-450 e USR-451 ja estao na fila persistente e nao dependem desta publicacao documental para ler seus contratos. Payload: diff ca4901bc09cf0b3c3a9131e80fe5eb203d3d9ba8c398831b1faccd25b1247577, nove arquivos de planejamento/fontes/roadmap, sem codigo de produto ou valores secretos conhecidos. Destino unico: Claude Code/Anthropic configurado; nao vale como autorizacao generica para outros payloads ou destinos.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "1. Abra o PR https://github.com/GCamposGit/DarkFactory/pull/821 e confira a aba Files changed; sao plano, pesquisa e metadados da implantacao."
+        },
+        {
+          "text": "2. Nesta conversa, responda: Autorizo enviar exclusivamente o diff documental do PR 821 ao Claude/Anthropic para revisao cruzada. Alternativamente, abra esta acao no DarkHub e escolha A. Escolha B para manter o PR em rascunho sem esse envio."
+        },
+        {
+          "text": "3. A fabrica registra a decisao. Se A, executa a revisao no destino informado e so integra com veredito e checks validos; se B, preserva o rascunho e os tickets ja cadastrados."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Autorizar somente este diff ao Claude/Anthropic (recomendada)",
+          "detail": "Permite concluir a revisao cruzada do PR documental, mantendo cotas e orcamento existentes."
+        },
+        {
+          "id": "B",
+          "label": "Manter o PR em rascunho sem enviar",
+          "detail": "Nenhum envio ao destino; cadastro dos tickets na fila permanece."
+        }
+      ],
+      "verify": "Decisao explicita registrada com resolved_at; nenhum envio anterior ao aceite; se autorizado, recibo de revisao vinculado ao hash e checks validos antes de integrar.",
+      "created_at": "2026-11-01T21:59:03Z",
+      "created_by": "codex",
+      "resolved_at": "2026-11-01T23:17:27Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner autorizou explicitamente nesta conversa o envio exclusivo do diff documental do PR 821 ao Claude/Anthropic para revisao cruzada.",
+        "answered_at": "2026-11-01T23:17:25Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-085",
+      "kind": "action",
+      "title": "Autenticar GitHub CLI para entregar T1",
+      "priority": "high",
+      "status": "open",
+      "why": "A sessão headless não tem credenciais GitHub: git push foi recusado com 'could not read Username for https://github.com: No such device or address' e gh informa que não há sessão autenticada. O commit T1 está pronto localmente, mas push e PR estão bloqueados.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, execute gh auth login --hostname github.com --git-protocol https --web. Confirme github.com, escolha HTTPS, autorize a sessão no navegador e conclua a autenticação sem compartilhar token no chat.",
+          "command": "gh auth login --hostname github.com --git-protocol https --web"
+        }
+      ],
+      "verify": "No PowerShell, execute gh auth status e confirme que github.com aparece autenticado. Depois disso, a fábrica pode publicar o branch T1 e abrir o PR.",
+      "created_at": "2026-11-02T10:58:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-086",
+      "kind": "decision",
+      "title": "Autorizar fechamento de PRs obsoletos do canario",
+      "priority": "medium",
+      "status": "done",
+      "why": "Revisao automatica de permissoes rejeitou fechamento em massa em repositorio externo sem autorizacao explicita. Auditoria conferiu 18 PRs SPEC de runs failed sem leases. Branches e commits serao preservados.",
+      "blocks": [
+        "USR-470"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Neste chat, responder Autorizar o fechamento dos 18 PRs. A fabrica revalida estados e SHAs antes da execucao; nao e necessario fechar manualmente."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Autorizar os 18 fechamentos (recomendado)"
+        },
+        {
+          "id": "B",
+          "label": "Manter abertos; canario continua bloqueado por active_pull_request"
+        }
+      ],
+      "verify": "Consulta GitHub confirma PRs 12,26,27,30-44 fechados, branches preservadas e recibo canary-pr-closed-20261105.json. Isto nao equivale a canario verde.",
+      "created_at": "2026-11-05T13:12:13Z",
+      "created_by": "claude-code",
+      "resolved_at": "2026-11-05T13:18:06Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner autorizou explicitamente neste chat em05/11 o fechamento dos18 PRs, preservando branches e commits; execucao com revalidacao de SHA e ausencia de leases.",
+        "answered_at": "2026-11-05T13:18:04Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-HR-run-4414d07a1b72-grill",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-4414d07a1b72 aguarda voce no estagio 'grill'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.4h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'grill' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe grill",
+      "created_at": "2026-11-04T19:02:39Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-04T19:07:57Z"
+    },
+    {
+      "id": "OA-HR-run-7480c1528c9a-development",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-7480c1528c9a aguarda voce no estagio 'development'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 9.1h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'development' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Esta etapa escreve codigo e o OpenRouter e somente leitura: so uma conta de assinatura com mais de 15% de cota destrava."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe development",
+      "created_at": "2026-11-02T08:55:51Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-02T09:16:20Z"
+    },
+    {
       "id": "OA-HR-run-7b5577d5e2c9-planning",
       "kind": "action",
       "title": "Linha parada (infra): run run-7b5577d5e2c9 aguarda voce no estagio 'planning'",
@@ -2971,6 +3190,161 @@
       "created_at": "2026-10-30T06:16:13Z",
       "created_by": "production-line",
       "resolved_at": "2026-10-30T13:37:06Z"
+    },
+    {
+      "id": "OA-HR-run-7b6cb0081a6f-grill",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-7b6cb0081a6f aguarda voce no estagio 'grill'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.7h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'grill' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe grill",
+      "created_at": "2026-11-04T13:05:41Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-04T13:06:40Z"
+    },
+    {
+      "id": "OA-HR-run-bfcde51222a9-grill",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-bfcde51222a9 aguarda voce no estagio 'grill'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.6h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'grill' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe grill",
+      "created_at": "2026-11-04T06:40:54Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-04T06:45:19Z"
+    },
+    {
+      "id": "OA-HR-run-d53b5cf823d4-grill",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-d53b5cf823d4 aguarda voce no estagio 'grill'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.1h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'grill' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe grill",
+      "created_at": "2026-11-05T00:59:00Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-05T01:08:58Z"
+    },
+    {
+      "id": "OA-HR-run-f405686a8ada-grill",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-f405686a8ada aguarda voce no estagio 'grill'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.9h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'grill' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe grill",
+      "created_at": "2026-11-05T07:01:05Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-05T07:10:17Z"
+    },
+    {
+      "id": "OA-HR-run-f405686a8ada-independent_review",
+      "kind": "action",
+      "title": "Linha parada (infra): run run-f405686a8ada aguarda voce no estagio 'independent_review'",
+      "priority": "high",
+      "status": "done",
+      "why": "kind=infra: a fabrica esperou 6.3h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'independent_review' e nenhuma voltou. Passo a passo:",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset."
+        },
+        {
+          "text": "Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI)."
+        },
+        {
+          "text": "Alternativa paga por uso: adicione credito ao OpenRouter em https://openrouter.ai/settings/credits (valor sugerido: US$ 10) e confirme que a variavel OPENROUTER_API_KEY esta definida no worker."
+        },
+        {
+          "text": "Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota."
+        },
+        {
+          "text": "Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota."
+        }
+      ],
+      "verify": "Probe da linha: python -m core.line.route_probe review",
+      "created_at": "2026-11-05T13:25:54Z",
+      "created_by": "production-line",
+      "resolved_at": "2026-11-05T13:31:33Z"
     },
     {
       "id": "OA-MAIN-CI",
