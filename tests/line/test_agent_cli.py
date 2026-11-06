@@ -547,7 +547,7 @@ def test_openrouter_disables_reasoning_by_default(tmp_path, monkeypatch):
     assert calls["max_tokens"] == 4096
     # Other endpoints may mandate reasoning: do not send DeepSeek's workaround to them.
     run_agent(AgentRequest(prompt="p", cwd=tmp_path, mode="read", harness="openrouter", model="sonnet"))
-    assert calls["reasoning"] == {"max_tokens": 1024}
+    assert calls["reasoning"] == {"effort": "low"}
 
 
 @pytest.mark.parametrize("value", ["on", "true", "1", "ON"])

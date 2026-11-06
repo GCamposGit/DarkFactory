@@ -313,6 +313,6 @@ mudanca responde aos JSONs truncados e achados contraditorios da rota anterior,
 sem aumentar rodadas, cota ou orcamento. Resultado real ainda exige gate e deploy.
 
 USR-477: o workaround que desativa raciocinio fica restrito ao DeepSeek.
-Endpoints Anthropic exigem raciocinio; o adaptador reserva 1024 dos 4096 tokens
-para isso, deixando espaco para a resposta. HTTP400 e resposta vazia nao sao
+Endpoints Anthropic exigem raciocinio; o adaptador usa effort low,
+opcao confirmada no catalogo do provedor, dentro dos 4096 tokens totais. HTTP400 e resposta vazia nao sao
 aprovacao nem entrega. Contrato: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens

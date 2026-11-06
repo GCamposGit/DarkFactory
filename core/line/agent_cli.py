@@ -1824,7 +1824,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     prompt = req.prompt + _OPENROUTER_WRITE_PROMPT_APPENDIX if req.mode == "write" else req.prompt
-    reasoning = {"max_tokens": 1024} if model.startswith("anthropic/") else None
+    reasoning = {"effort": "low"} if model.startswith("anthropic/") else None
     if model.startswith("deepseek/") and not _openrouter_reasoning_enabled():
         reasoning = {"enabled": False}
     try:
