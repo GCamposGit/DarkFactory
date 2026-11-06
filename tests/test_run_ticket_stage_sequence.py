@@ -303,6 +303,15 @@ def test_success_reports_merge_and_pending_deploy_without_global_sweep(
     assert (artifact_dir / "merge.json").is_file()
     assert (artifact_dir / "deploy_report.json").is_file()
     assert output["status"] == "merged_awaiting_deploy"
+    # A post-merge damaged validation artifact must retain the actual merge identity,
+    # with no digest that could authorize release.
+    original_merge = json.loads((artifact_dir / "merge.json").read_text(encoding="utf-8"))
+    (artifact_dir / "validation.json").write_text("{broken", encoding="utf-8")
+    run_ticket.ticket_engine.write_merge(run_ticket.ticket_engine.run_workspace(line.ticket),
+                                       original_merge["pr_url"], original_merge["merge_sha"])
+    retained = json.loads((artifact_dir / "merge.json").read_text(encoding="utf-8"))
+    assert retained["merge_sha"] == original_merge["merge_sha"]
+    assert not retained.get("candidate_digest")
     assert output["pr_url"] == "https://github.com/example/repo/pull/42"
     assert output["merge_sha"] == "d" * 40
     assert output["deploy_status"] == "awaiting_deploy"

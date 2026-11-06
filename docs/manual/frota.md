@@ -271,3 +271,8 @@ no candidato. O revisor pago usa o alias sonnet, de familia diferente dos
 implementadores; familias tambem reconhecem os ids de gateway do registro. A
 mudanca responde aos JSONs truncados e achados contraditorios da rota anterior,
 sem aumentar rodadas, cota ou orcamento. Resultado real ainda exige gate e deploy.
+
+USR-477: saida zero sem entrega em recovery registra falha e causa persistida.
+Retomada de deploy exige prova da familia independente. Se a validacao for
+corrompida apos merge, o recibo preserva SHA/PR reais sem digest autorizado;
+a ausencia desse digest bloqueia release ate a recuperacao da evidencia.

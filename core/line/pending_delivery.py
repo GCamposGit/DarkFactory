@@ -152,6 +152,7 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
             validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
             review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
+            execution = json.loads(release.with_name("review_execution.json").read_text(encoding="utf-8"))
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             row.status, row.cause = "blocked", "deploy_evidence_missing"
             _save(path, row)
@@ -159,6 +160,10 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
                 or not validation.get("candidate_digest")
                 or review.get("candidate_digest") != validation["candidate_digest"]
+                or merge.get("candidate_digest") != validation["candidate_digest"]
+                or execution.get("candidate_digest") != validation["candidate_digest"]
+                or not execution.get("reviewer_family") or not execution.get("implementer_family")
+                or execution["reviewer_family"] in execution.get("implementation_families", [execution["implementer_family"]])
                 or review.get("verdict") != "approve" or review.get("forced")):
             row.status, row.cause = "blocked", "deploy_evidence_mismatch"
             _save(path, row)
