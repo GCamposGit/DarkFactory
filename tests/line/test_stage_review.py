@@ -22,7 +22,7 @@ from core.line.routing import load_routing_config
 from core.line.routing import pick as real_pick
 from core.line.stage_review import ReviewStage
 from core.projects.models import ProjectDescriptor
-from tests.line.conftest import copy_bare_origin, set_fake_response
+from tests.line.conftest import copy_bare_origin, make_fake_cli, set_fake_response
 
 
 def _isolated_pick(tmp_path: Path):

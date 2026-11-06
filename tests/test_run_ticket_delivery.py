@@ -465,7 +465,7 @@ def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(tm
     assert (repo / "mod.py").read_text(encoding="utf-8") == "a = 3\n"
 
 
-def test_unresolved_rebase_conflict_parks_ticket_waiting_human_with_rc_1(tmp_path: Path) -> None:
+def test_unresolved_rebase_conflict_preserves_technical_failure_with_rc_1(tmp_path: Path) -> None:
     repo = _conflict_repo(tmp_path, {"mod.py": ("a = 1\n", "a = 2\n")})
     ledger = repo / ".factory" / "demands" / "demands.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -474,7 +474,7 @@ def test_unresolved_rebase_conflict_parks_ticket_waiting_human_with_rc_1(tmp_pat
             patch.object(run_ticket, "_invoke_fix_agent", return_value=None) as agent:
         code = run_ticket.resume_delivery("USR-412", worktree_path=repo, skip_validation=True)
     assert code == 1 and agent.call_count == 1
-    assert DemandsStore(ledger).get_ticket("USR-412").status == DeliveryStatus.WAITING_HUMAN
+    assert DemandsStore(ledger).get_ticket("USR-412").status == DeliveryStatus.VALIDATING
     assert not _rebase_in_progress(repo)
 
 

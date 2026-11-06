@@ -34,11 +34,12 @@ def independent_route(ws: RunWorkspace, harness: str, model: str | None, fallbac
     if route_family(harness, model) in families:
         if harness != "openrouter":
             raise ValueError("review_same_implementation_family")
-        if not fallback_model:
-            raise ValueError("review_no_independent_paid_family")
-        model = resolve(fallback_model)
-        if route_family(harness, model) in families:
-            raise ValueError("review_no_independent_paid_family")
+        for candidate in (fallback_model, "distill.openrouter"):
+            if candidate:
+                model = resolve(candidate)
+                if route_family(harness, model) not in families:
+                    return harness, model
+        raise ValueError("review_no_independent_paid_family")
     return harness, model
 
 

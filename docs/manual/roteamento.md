@@ -91,3 +91,8 @@ USR-477: o workaround que desativa raciocinio fica restrito ao DeepSeek.
 Endpoints Anthropic exigem raciocinio; o adaptador usa effort low,
 opcao confirmada no catalogo do provedor, dentro dos 4096 tokens totais. HTTP400 e resposta vazia nao sao
 aprovacao nem entrega. Contrato: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+
+USR-477: quando o revisor pago configurado pertence a uma familia que escreveu
+o candidato, a rota tenta o alias distill.openrouter ja registrado e exige
+independencia novamente. Se nenhuma familia independente estiver disponivel,
+a revisao continua fechada, sem autorizar merge.

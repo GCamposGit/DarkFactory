@@ -24,13 +24,15 @@ def test_embedded_fallback_matches_registry_file() -> None:
     assert emb.forbidden_autonomous_markers == file_reg.forbidden_autonomous_markers
     for entry in file_reg.models:
         twin = next(m for m in emb.models if m.id == entry.id)
-        assert (twin.aliases, twin.gateway_ids, twin.status, twin.family, twin.forbidden_autonomous) == (
+        assert (twin.aliases, twin.status, twin.family, twin.forbidden_autonomous) == (
             entry.aliases,
-            entry.gateway_ids,
             entry.status,
             entry.family,
             entry.forbidden_autonomous,
         )
+        # Snapshot gateway aliases remain valid names; the primary wire id may evolve.
+        for alias in twin.gateway_ids:
+            assert registry.id_of(alias, file_reg) == entry.id
 
 
 def test_resolve_known_accepts_deprecated_but_not_forbidden_or_candidate() -> None:
@@ -61,8 +63,9 @@ def test_line_routing_json_resolves_to_same_values_as_defaults() -> None:
     assert dev.harness_pins["grok"].model == "grok-4.7"
     assert cfg.stages["planning"].openrouter_model == "gpt-sol"
     assert cfg.stages["development"].openrouter_model == "gpt-sol"
-    for stage_name in ("grill", "review", "distill"):
+    for stage_name in ("grill", "distill"):
         assert cfg.stages[stage_name].openrouter_model == "deepseek/deepseek-v4.1-flash"
+    assert registry.resolve(cfg.stages["review"].openrouter_model) == registry.resolve("sonnet")
     assert agent_cli._DEFAULT_OPENROUTER_MODEL == "deepseek/deepseek-v4.1-flash"
 
 

@@ -958,6 +958,11 @@ def _independent_openrouter(route: Optional[tuple[str, str]], implementing_harne
     reviewer_id = _resolve_role_ref(route[1])
     reviewer = next((m for m in registry.models
                      if reviewer_id in [m.id, *m.aliases, *m.gateway_ids]), None)
+    if impl is not None and reviewer is not None and impl.family == reviewer.family:
+        fallback_id = registry.roles.get("distill.openrouter")
+        fallback = next((m for m in registry.models if m.id == fallback_id), None)
+        if fallback is not None and fallback.family != impl.family and not fallback.forbidden_autonomous and fallback.status == "active":
+            return route[0], fallback.id
     if impl is None or reviewer is None or impl.family == reviewer.family:
         logger.warning("OpenRouter review refused: independent model family not verified")
         return None
