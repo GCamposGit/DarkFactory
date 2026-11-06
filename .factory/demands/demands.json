@@ -14271,8 +14271,8 @@
     "project_id": "darkfac",
     "title": "Aplicar cooldown a encerramento sem entrega e provar ciclo de reparo de CI",
     "origin": "user",
-    "status": "implementing",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "0f0657696cb39cd1b7c0f1a9adab1d85e49d1a82",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14294,6 +14294,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-06T17:04:38.753753Z",
-    "updated_at": "2026-11-06T17:04:38.753753Z"
+    "updated_at": "2026-11-06T17:32:11.287188Z"
   }
 ]
