@@ -105,7 +105,7 @@ def _allow_ticket_admission(request: pytest.FixtureRequest, monkeypatch: pytest.
     current = run_ticket.evaluate_admission
     if getattr(current, "__name__", "") == "evaluate_admission":
         run_ticket._admission_impl = current
-    decision = allow_decision(datetime(2026, 11, 6, tzinfo=timezone.utc), evidence_ref="test:allow")
+    decision = allow_decision(datetime.now(timezone.utc), evidence_ref="test:allow")
     monkeypatch.setattr(run_ticket, "evaluate_admission", lambda *_args, **_kwargs: decision)
 
 
