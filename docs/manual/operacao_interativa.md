@@ -81,3 +81,5 @@ O monitoramento da fabrica opera de forma agnostica e centralizada em `core/line
 ## Capacidade de escrita interativa no roteador (USR-436)
 
 O roteador valida as capacidades com `agent_cli.supports(harness, mode)` antes de ranquear candidatos para o estagio `development`. Com `operating_harness=antigravity` em sessao interativa (fora do modo headless), o Antigravity declara capacidade de escrita para desenvolvimento no chat, viabilizando sua eleicao quando a cota estiver saudavel acima do piso de 15%. Em execucao headless, na frota ou com outro operador, Antigravity permanece estritamente somente-leitura.
+
+Na recuperacao USR-452, uma falha real de teste com contagem no HARNESS_RESULT nao e tratada como worker indisponivel por conter essa mensagem no traceback. O launcher corrige o candidato antes de repetir o portao; nao chama o owner para resolver essa classificacao tecnica.
