@@ -1824,6 +1824,9 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     prompt = req.prompt + _OPENROUTER_WRITE_PROMPT_APPENDIX if req.mode == "write" else req.prompt
+    reasoning = {"max_tokens": 1024} if model.startswith("anthropic/") else None
+    if model.startswith("deepseek/") and not _openrouter_reasoning_enabled():
+        reasoning = {"enabled": False}
     try:
         # Reasoning models (deepseek-v4.1-flash) can spend the whole completion
         # budget thinking and return `content: null` (finish_reason=length), even
@@ -1833,7 +1836,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             prompt,
             model=model,
             max_tokens=_OPENROUTER_MAX_TOKENS,
-            reasoning={"enabled": False} if model.startswith("deepseek/") and not _openrouter_reasoning_enabled() else None,
+            reasoning=reasoning,
         )
     except Exception as exc:  # network/auth/model errors all surface here
         duration = round(time.perf_counter() - start, 3)
