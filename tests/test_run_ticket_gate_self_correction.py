@@ -12,6 +12,7 @@ failure reinvokes the agent in the same worktree with the distilled failure, up 
 from __future__ import annotations
 
 import os
+import json
 import logging
 import subprocess
 from pathlib import Path
@@ -871,7 +872,7 @@ def test_fix_commit_failure_ends_the_loop_with_fix_commit_failed(tmp_path: Path,
 def test_gate_requires_remote_when_configured_and_local_ram_cannot_fit_two_workers() -> None:
     """USR-354: busy_timeout on a remote slot must requeue, not fall to a 1-worker local gate."""
     ga = run_ticket.gate_ram
-    low = ga.RamReading(4.0, 1)
+    low = ga.RamReading(3.4, 0)
     ok = ga.RamReading(16.0, 3)
     with patch.object(ga, "remote_workers_configured", return_value=True), \
          patch.object(ga, "measure_workers", return_value=low):
@@ -922,21 +923,37 @@ def test_gate_remote_busy_timeout_requeues_without_agent_or_local_fallback(
         fix_calls.append(stage_label)
         return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
 
+    # A failure traceback may contain exactly the infrastructure marker.
+    real_failure = "--remote-required: all workers busy\n[HARNESS_RESULT] " + json.dumps({
+        "discovered_count": 3, "exit_codes": {"unit_and_integration_tests_parallel": 1},
+    })
+    assert not run_ticket._gate_remote_unavailable(["--remote-required"], real_failure)
+    assert not run_ticket._gate_failure_is_timeout(BoundedProcessResult(
+        stdout=real_failure + "\n(timeout exceeded)", stderr="", returncode=1, duration_s=1.0,
+    ))
+
     ga = run_ticket.gate_ram
     with patch("run_ticket.PROJECT_ROOT", repo), \
          patch.object(ga, "remote_workers_configured", return_value=True), \
-         patch.object(ga, "measure_workers", return_value=ga.RamReading(4.0, 1)), \
+         patch.object(ga, "measure_workers", return_value=ga.RamReading(3.4, 0)), \
          patch("run_ticket._run_bounded", new=fake_run_bounded), \
          patch("run_ticket._invoke_fix_agent", new=fake_fix):
         result = run_ticket.resume_delivery(
             "USR-354", worktree_path=repo, skip_validation=False, return_result=True
         )
+        no_ram = BoundedProcessResult(stdout="[HARNESS_RESULT] " + json.dumps({
+            "discovered_count": 0, "exit_codes": {"unit_and_integration_tests_parallel": 75},
+        }), stderr="", returncode=1, duration_s=0.1)
+        with patch("run_ticket._run_bounded", return_value=no_ram):
+            resource_wait = run_ticket.resume_delivery(
+                "USR-354", worktree_path=repo, skip_validation=False, return_result=True)
 
     assert len(gate_calls) == 1 + run_ticket.GATE_REMOTE_RETRIES  # USR-372 bounded retries
     assert "--remote-required" in gate_calls[0] and "--local" not in gate_calls[0]
     assert fix_calls == []
     assert result["ok"] is False
     assert result["cause"] == run_ticket.GATE_CAUSE_REMOTE_UNAVAILABLE
+    assert resource_wait["exit_code"] == 75 and resource_wait["cause"] == ga.CAUSE_INSUFFICIENT_RAM
     assert "--resume-delivery USR-354" in capsys.readouterr().err
 
 
@@ -974,7 +991,7 @@ def test_gate_remote_unavailable_retries_on_other_host_then_passes(tmp_path: Pat
         return BoundedProcessResult(stdout="[HARNESS_PASS]", stderr="", returncode=0, duration_s=5.0, timed_out=False)
 
     ga = run_ticket.gate_ram
-    with patch("run_ticket.PROJECT_ROOT", repo),          patch.object(ga, "remote_workers_configured", return_value=True),          patch.object(ga, "measure_workers", return_value=ga.RamReading(4.0, 1)),          patch("run_ticket._run_bounded", new=fake_run_bounded):
+    with patch("run_ticket.PROJECT_ROOT", repo),          patch.object(ga, "remote_workers_configured", return_value=True),          patch.object(ga, "measure_workers", return_value=ga.RamReading(3.4, 0)),          patch("run_ticket._run_bounded", new=fake_run_bounded):
         run_ticket.resume_delivery("USR-372", worktree_path=repo, skip_validation=False, return_result=True)
 
     assert len(seen_workers) == 2

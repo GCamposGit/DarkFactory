@@ -1,6 +1,10 @@
 <!-- covers: core/line/fleet_dispatcher.py -->
 # Operação da frota
 
+Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
+Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,
+sem forçar processos além da capacidade e sem executar suítes concorrentes.
+
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
 de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e

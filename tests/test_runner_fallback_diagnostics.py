@@ -37,10 +37,14 @@ def test_timeout_saves_and_prints_partial_pytest_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(runner, "PROJECT_ROOT", tmp_path)
+    from core.line import gate_ram
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(4.1, 1))
 
     partial = b"collecting ... collected 42 items\ntests/test_slow.py::test_wait "
 
     def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs["timeout"] == 2  # same suite, one worker gets both calibrated shares
+        assert kwargs["env"]["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "1"
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=1, output=partial)
 
     monkeypatch.setattr(runner.subprocess, "run", timeout)
@@ -52,6 +56,16 @@ def test_timeout_saves_and_prints_partial_pytest_output(
         timeout_sec=1,
     )
 
+    from core.harness import remote_worker
+    from core.harness.models import HarnessConfig
+    config_path = tmp_path / "harness.config.json"
+    config_path.write_text(HarnessConfig(steps=[step]).model_dump_json(), encoding="utf-8")
+    assert remote_worker._job_timeout_sec(tmp_path, quick=True, include_holdout=False) == (
+        2 + remote_worker.JOB_TIMEOUT_BUFFER_SEC
+    )
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(8.1, 3))
+    assert runner.effective_step_timeout(step, workers=3) == 1
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(4.1, 1))
     execution = runner.run_step(step)
 
     captured = capsys.readouterr().out
@@ -64,3 +78,6 @@ def test_timeout_saves_and_prints_partial_pytest_output(
     assert "elapsed_seconds:" in saved
     assert "collected 42 items" in saved
     assert "test_slow.py::test_wait" in saved
+    assert "timeout_sec=2" in captured
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(2.1, 0))
+    assert runner.run_step(step).returncode == 75  # no subprocess call and no duplicated RAM predicate

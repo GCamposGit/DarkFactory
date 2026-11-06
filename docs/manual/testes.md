@@ -1,6 +1,17 @@
 <!-- covers: core/harness/remote_dispatch.py, core/harness/suite_lock.py, scripts/complexity_ratchet.py -->
 # Testes
 
+## Capacidade e prazo do portão (USR-452)
+
+Um worker real é elegível; zero workers continua bloqueando a execução. O prazo
+configurado da suíte paralela foi calibrado para pelo menos dois workers. Quando
+só um cabe na RAM, `effective_step_timeout` concede as duas parcelas desse prazo,
+sem elevar workers nem alterar o timeout individual dos testes. O passo mede uma
+vez e fixa essa quantidade segura para o pytest. Deadlines de cache e watchdog
+remoto reservam o pior caso elegível (um worker), cobrindo uma mudança de memória
+entre admissão e início do passo. O prazo externo de7.200s cobre a suíte de6.000s
+mais540s das outras checagens. Overrides não aumentam a capacidade real da RAM.
+
 ## Testes de forma
 
 Teste de forma e o que so confere a existencia de um arquivo, um trecho de texto dentro de markdown, skill, docs ou HTML, ou a presenca de chaves em um JSON/YAML de configuracao, sem executar comportamento. Ele passa mesmo que o produto esteja quebrado, entao nao prova nada sobre o produto e nao deve segurar o portao.

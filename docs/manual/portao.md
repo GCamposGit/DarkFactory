@@ -1,6 +1,21 @@
 <!-- covers: core/harness/runner.py, core/harness/affected.py -->
 # Portao em camadas (USR-377 S5)
 
+No perfil completo, o orçamento da suíte paralela acompanha a capacidade real
+(USR-452): um worker recebe duas parcelas do prazo calibrado para dois workers.
+O watchdog remoto e os deadlines de cache usam o envelope conservador de um
+worker (6.000s para a suíte); o subprocesso mede uma vez e usa o prazo desse
+snapshot. A quantidade segura medida é passada ao pytest, evitando nova eleição
+de workers entre a medição e o início. O limite externo existente de7.200s cobre
+o envelope de6.540s de todas as checagens. Zero capacidade retorna espera75 pela
+mesma regra de elegibilidade, sem chamar modelo nem esperar com a suíte ocupada.
+Essa adaptação não altera timeout por teste, descoberta, trava ou cache por árvore.
+
+O census de IDs de modelos separa configurações e código de seleção dos ledgers
+de evidência histórica de demandas e ações do owner. Esses registros não escolhem
+modelos. A seleção ativa continua usando o registro canônico; não se reescreve
+uma evidência histórica para fazer o portão passar (reparo reutilizado do USR-468).
+
 O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
 
 - `pr`: `syntax_only`, `static_types`, `affected_tests`

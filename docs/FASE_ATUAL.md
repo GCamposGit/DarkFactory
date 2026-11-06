@@ -1,5 +1,11 @@
 # Fase atual da DarkFac
 
+Incidente de06/11/2026 (USR-452): a queda de RAM disponível no Desktop reduziu o
+paralelismo de três workers para um; três candidatos expiraram no prazo fixo da
+suíte. A correção ajusta os prazos do runner e worker remoto à capacidade real,
+aceita um worker na elegibilidade e preserva recusa com zero. O encerramento do
+incidente depende de entrega e retomada verificadas, não da existência do processo.
+
 Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A missão de longo prazo está em [`MISSION.md`](../MISSION.md); as regras para agentes em [`AGENTS.md`](../AGENTS.md); o plano de execução vigente em [`docs/plans/PLANO_V0_2026-10-24.md`](plans/PLANO_V0_2026-10-24.md).
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.

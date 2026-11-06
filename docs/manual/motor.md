@@ -1,6 +1,11 @@
 <!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py -->
 # Motor da esteira
 
+O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
+(USR-452). Com testes descobertos e saída1 da suíte, mensagens de timeout ou
+worker indisponível citadas dentro de um traceback não autorizam repetir a suíte
+como falha de transporte. Timeout real continua identificado pela saída124.
+
 ## Wake do grokbox no preflight (USR-456)
 
 `run_ticket.py` sempre consulta `/health` do grokbox no preflight. O email de wake só é enviado quando a

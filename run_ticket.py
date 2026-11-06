@@ -897,6 +897,9 @@ def _gate_failure_is_timeout(gate_res: Any) -> bool:
     if getattr(gate_res, "timed_out", False):
         return True
     combined = f"{gate_res.stdout}\n{gate_res.stderr}"
+    payload = _parse_harness_result(combined)
+    if payload and payload.get("discovered_count", 0) > 0:
+        return 124 in (payload.get("exit_codes") or {}).values()
     if any(marker in combined for marker in _GATE_TIMEOUT_MARKERS):
         return True
     if any(marker in combined for marker in _GATE_REMOTE_INFRA_MARKERS):
@@ -1202,6 +1205,9 @@ _GATE_WORKER_URL_RE = re.compile(r"https?://[\w.\-]+:\d+")
 
 
 def _gate_remote_unavailable(gate_cmd: list[str], output: str) -> bool:
+    payload = _parse_harness_result(output)
+    if payload and payload.get("discovered_count", 0) > 0:
+        return False  # pytest traceback may quote the remote-unavailable marker
     return "--remote-required" in gate_cmd and _GATE_REMOTE_REQUIRED_MARKER in output
 
 
@@ -1435,7 +1441,11 @@ def _gate_classify_failure(
             print(message, file=sys.stderr)
         return True
 
-    if "--remote-required" in gate_cmd and _GATE_REMOTE_REQUIRED_MARKER in st.last_output:
+    codes = (_parse_harness_result(st.last_output) or {}).get("exit_codes")
+    if isinstance(codes, dict) and 75 in codes.values():
+        st.last_exit_code = 75
+        return _infra(gate_ram.CAUSE_INSUFFICIENT_RAM, "[GATE_RESOURCE_WAIT] Nenhum worker cabe na RAM; aguardar recurso sem reinvocar modelo.")
+    if _gate_remote_unavailable(gate_cmd, st.last_output):
         return _infra(
             GATE_CAUSE_REMOTE_UNAVAILABLE,
             "[WORKER REMOTO INDISPONIVEL]: RAM local nao comporta 2+ workers; portao local "

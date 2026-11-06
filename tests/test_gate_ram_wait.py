@@ -1,4 +1,4 @@
-"""Portao local espera RAM para 2+ workers e falha explicito (USR-262)."""
+"""Portao aceita um worker com prazo ajustado e espera quando nenhum cabe."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _fake_measure(workers_seq: list[int]):
 
 def test_enough_ram_proceeds_without_sleeping() -> None:
     sleeps: list[float] = []
-    res = gate_ram.wait_for_gate_ram(measure=_fake_measure([3]), sleep=sleeps.append, limit_s=1800)
+    res = gate_ram.wait_for_gate_ram(measure=_fake_measure([1]), sleep=sleeps.append, limit_s=1800)
     assert res.ok and sleeps == [] and res.waited_s == 0
 
 
@@ -35,19 +35,19 @@ def test_low_ram_that_recovers_proceeds_after_waiting() -> None:
     sleeps: list[float] = []
     msgs: list[str] = []
     res = gate_ram.wait_for_gate_ram(
-        measure=_fake_measure([1, 1, 2]), sleep=sleeps.append, limit_s=1800, announce=msgs.append
+        measure=_fake_measure([0, 0, 1]), sleep=sleeps.append, limit_s=1800, announce=msgs.append
     )
-    assert res.ok and res.reading.workers == 2
+    assert res.ok and res.reading.workers == 1
     assert sleeps == [60.0, 60.0] and len(msgs) == 2
-    assert "[RAM] 3.4 GiB livres, cabem 1 workers; aguardando 2+ (limite 1800 s)" in msgs[0]
+    assert "[RAM] 3.4 GiB livres, cabem 0 workers; aguardando 1+ (limite 1800 s)" in msgs[0]
 
 
 def test_low_ram_until_limit_fails() -> None:
     sleeps: list[float] = []
     res = gate_ram.wait_for_gate_ram(
-        measure=_fake_measure([1]), sleep=sleeps.append, limit_s=150, announce=lambda m: None
+        measure=_fake_measure([0]), sleep=sleeps.append, limit_s=150, announce=lambda m: None
     )
-    assert not res.ok and res.reading.workers == 1
+    assert not res.ok and res.reading.workers == 0
     assert sleeps == [60.0, 60.0, 30.0] and res.waited_s == 150
 
 
@@ -68,6 +68,9 @@ def test_measure_workers_uses_worker_capacity_math(monkeypatch) -> None:
     assert gate_ram.measure_workers().workers == 0
     monkeypatch.setattr(wc, "get_available_memory_bytes", lambda: int(8.6 * wc.BYTES_PER_GIB))
     assert gate_ram.measure_workers().workers == 3
+    monkeypatch.setenv("DARKFAC_MAX_WORKERS", "8")
+    monkeypatch.setattr(wc, "get_available_memory_bytes", lambda: int(3.4 * wc.BYTES_PER_GIB))
+    assert gate_ram.measure_workers().workers == 0  # override cannot fabricate available RAM
 
 
 def test_gate_not_run_and_cause_explicit_when_ram_never_recovers(tmp_path: Path, capsys) -> None:
@@ -94,7 +97,7 @@ def test_gate_not_run_and_cause_explicit_when_ram_never_recovers(tmp_path: Path,
 
     def fake_wait(as_json):
         return gate_ram.wait_for_gate_ram(
-            measure=_fake_measure([1]), sleep=lambda s: None, limit_s=120, announce=lambda m: None
+            measure=_fake_measure([0]), sleep=lambda s: None, limit_s=120, announce=lambda m: None
         )
 
     with patch("run_ticket.PROJECT_ROOT", repo), \
