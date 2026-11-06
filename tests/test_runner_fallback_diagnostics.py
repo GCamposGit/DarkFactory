@@ -55,6 +55,16 @@ def test_timeout_saves_and_prints_partial_pytest_output(
         timeout_sec=1,
     )
 
+    from core.harness import remote_worker
+    from core.harness.models import HarnessConfig
+    config_path = tmp_path / "harness.config.json"
+    config_path.write_text(HarnessConfig(steps=[step]).model_dump_json(), encoding="utf-8")
+    assert remote_worker._job_timeout_sec(tmp_path, quick=True, include_holdout=False) == (
+        2 + remote_worker.JOB_TIMEOUT_BUFFER_SEC
+    )
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(8.1, 3))
+    assert runner.effective_step_timeout(step) == 1
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(4.1, 1))
     execution = runner.run_step(step)
 
     captured = capsys.readouterr().out

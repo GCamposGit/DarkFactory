@@ -1,6 +1,11 @@
 <!-- covers: core/harness/runner.py, core/harness/affected.py -->
 # Portao em camadas (USR-377 S5)
 
+No perfil completo, o orçamento da suíte paralela acompanha a capacidade real
+(USR-452): um worker recebe duas parcelas do prazo calibrado para dois workers.
+O watchdog remoto e os deadlines de cache usam a mesma função do subprocesso.
+Essa adaptação não altera timeout por teste, descoberta, trava ou cache por árvore.
+
 O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
 
 - `pr`: `syntax_only`, `static_types`, `affected_tests`
