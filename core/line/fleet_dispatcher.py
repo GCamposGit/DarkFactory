@@ -593,6 +593,167 @@ class FleetDispatcher:
         self.deploys += 1
         return True
 
+    def _dispatch_ticket(
+        self,
+        host: HostSpec,
+        probe: HostProbe,
+        tid: str,
+        demand: dict[str, Any],
+        queue: list[str],
+        idle: dict[str, str],
+        skipped: dict[str, str],
+        dispatched: list[dict[str, str]],
+        now: float,
+    ) -> None:
+        project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
+        candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or "unknown")
+        context = demand.get("context_digest")
+        if not context:
+            from core.line.admission_store import safe_digest
+
+            context = safe_digest({
+                key: demand.get(key)
+                for key in ("title", "problem_statement", "acceptance_criteria", "criteria", "context", "constraints")
+                if demand.get(key) is not None
+            })
+        context = str(context)
+        resource_version = probe.resource_version or f"{host.id}:{probe.reason}"
+        receipt = demand.get("resource_version") or demand.get("quota_receipt") or demand.get("quota_window")
+        if receipt is not None:
+            from core.line.admission_store import safe_digest
+
+            resource_version = f"{resource_version}:receipt:{safe_digest(receipt)}"
+        if self.dry_run:
+            dispatched.append({"ticket": tid, "host": host.id, "dry_run": "1"})
+            return
+        recovery_token = None
+        token = None
+        try:
+            from core.line.admission_store import normalize_error, safe_digest
+
+            candidate_key = safe_digest(candidate)
+            context_key = safe_digest(context)
+            resource_key = safe_digest(resource_version)
+            if self.admission_store.is_failure_open(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                context_digest=context_key, resource_version=resource_key,
+                error_class=normalize_error(demand["error_class"]) if demand.get("error_class") else None,
+            ):
+                idle[host.id] = "identical_failure_open"
+                skipped[tid] = "identical_failure_open"
+                queue.insert(0, tid)
+                return
+            if self.recovery.get("active"):
+                recovery_token = self.admission_store.reserve_recovery()
+                if recovery_token is None:
+                    idle[host.id] = "recovery_delivery_reserved"
+                    skipped[tid] = "recovery_delivery_reserved"
+                    queue.insert(0, tid)
+                    return
+            token = self.admission_store.reserve(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                context_digest=context_key, resource_version=resource_key,
+            )
+            if token is None:
+                if recovery_token:
+                    self.admission_store.release_recovery(recovery_token)
+                idle[host.id] = "admission_reserved"
+                skipped[tid] = "admission_reserved"
+                queue.insert(0, tid)
+                return
+        except Exception as exc:  # noqa: BLE001 - no agent or checkout when state is uncertain
+            if recovery_token:
+                try:
+                    self.admission_store.release_recovery(recovery_token)
+                except Exception:  # noqa: BLE001
+                    logger.exception("falha ao liberar reserva global apos recusa de admissao")
+            if token:
+                try:
+                    self.admission_store.release(
+                        project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                        context_digest=context_key, resource_version=resource_key, token=token,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("falha ao liberar reserva apos recusa de admissao")
+            idle[host.id] = "admission_store_unavailable"
+            skipped[tid] = "admission_store_unavailable"
+            queue.insert(0, tid)
+            logger.error("admission store recusou %s (%s)", tid, type(exc).__name__)
+            return
+        try:
+            run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
+            if self.launch is None:
+                job = default_launch(tid, host, demand, run_id=run_id,
+                                     recovery=bool(self.recovery.get("active")),
+                                     candidate_digest=candidate)
+            else:
+                job = self._launch_with_contract(tid, host, run_id, candidate)
+            self._register_flight(host.id, job, project_id, candidate, context, resource_version, token,
+                                  run_id, recovery_token)
+            dispatched.append({"ticket": tid, "host": host.id})
+        except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
+            self._record_launch_failure(
+                host, tid, project_id, candidate, context, resource_version,
+                candidate_key, context_key, resource_key, token, recovery_token, exc, idle, now,
+            )
+
+    def _launch_with_contract(self, tid: str, host: HostSpec, run_id: str, candidate: str) -> InFlight:
+        kwargs = {"run_id": run_id, "recovery": bool(self.recovery.get("active")),
+                  "candidate_digest": candidate}
+        try:
+            signature = inspect.signature(self.launch)
+        except (TypeError, ValueError):
+            # Opaque callables must obey the current launcher contract. Never
+            # retry a launch after a TypeError from inside its implementation.
+            return self.launch(tid, host, **kwargs)
+        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
+        supported = kwargs if accepts_kwargs else {
+            key: value for key, value in kwargs.items() if key in signature.parameters
+        }
+        return self.launch(tid, host, **supported)
+
+    def _register_flight(
+        self, host_id: str, job: InFlight, project_id: str, candidate: str, context: str,
+        resource_version: str, token: str, run_id: str, recovery_token: str | None,
+    ) -> None:
+        job.project_id = project_id
+        job.candidate_digest = candidate
+        job.context_digest = context
+        job.resource_version = resource_version
+        job.admission_token = token
+        job.run_id = run_id
+        job.recovery_token = recovery_token
+        self.in_flight[host_id] = job
+
+    def _record_launch_failure(
+        self, host: HostSpec, tid: str, project_id: str, candidate: str, context: str,
+        resource_version: str, candidate_key: str, context_key: str, resource_key: str,
+        token: str, recovery_token: str | None, exc: Exception, idle: dict[str, str], now: float,
+    ) -> None:
+        from core.line.agent_cli import redact_secrets
+
+        safe_error = " | ".join(redact_secrets(str(exc)).splitlines())[-800:]
+        idle[host.id] = f"lancamento_falhou:{safe_error}"
+        failed_job = InFlight(
+            tid, host.id, None, project_id=project_id, candidate_digest=candidate,
+            context_digest=context, resource_version=resource_version,
+        )
+        self._record_failure(failed_job, 1, "launch", str(exc))
+        try:
+            self.admission_store.release(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
+                context_digest=context_key, resource_version=resource_key, token=token,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("falha ao liberar reserva apos erro de launcher %s", tid)
+        if self.recovery.get("active"):
+            try:
+                if recovery_token:
+                    self.admission_store.release_recovery(recovery_token)
+            except Exception:  # noqa: BLE001
+                logger.exception("falha ao liberar reserva global apos erro de launcher %s", tid)
+        self.cooldown[tid] = now + self.config.requeue_cooldown_sec
+
     def _dispatch_hosts(
         self,
         queue: list[str],
@@ -625,136 +786,7 @@ class FleetDispatcher:
                 skipped[tid] = "demand_disappeared"
                 idle[host.id] = "demand_disappeared"
                 continue
-            project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
-            candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or "unknown")
-            context = demand.get("context_digest")
-            if not context:
-                from core.line.admission_store import safe_digest
-
-                context = safe_digest({
-                    key: demand.get(key)
-                    for key in ("title", "problem_statement", "acceptance_criteria", "criteria", "context", "constraints")
-                    if demand.get(key) is not None
-                })
-            context = str(context)
-            resource_version = pr.resource_version or f"{host.id}:{pr.reason}"
-            receipt = demand.get("resource_version") or demand.get("quota_receipt") or demand.get("quota_window")
-            if receipt is not None:
-                from core.line.admission_store import safe_digest
-
-                resource_version = f"{resource_version}:receipt:{safe_digest(receipt)}"
-            if self.dry_run:
-                dispatched.append({"ticket": tid, "host": host.id, "dry_run": "1"})
-                continue
-            recovery_token = None
-            token = None
-            try:
-                from core.line.admission_store import normalize_error, safe_digest
-
-                candidate_key = safe_digest(candidate)
-                context_key = safe_digest(context)
-                resource_key = safe_digest(resource_version)
-                if self.admission_store.is_failure_open(
-                    project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                    context_digest=context_key, resource_version=resource_key,
-                    error_class=normalize_error(demand["error_class"]) if demand.get("error_class") else None,
-                ):
-                    idle[host.id] = "identical_failure_open"
-                    skipped[tid] = "identical_failure_open"
-                    queue.insert(0, tid)
-                    continue
-                if self.recovery.get("active"):
-                    recovery_token = self.admission_store.reserve_recovery()
-                    if recovery_token is None:
-                        idle[host.id] = "recovery_delivery_reserved"
-                        skipped[tid] = "recovery_delivery_reserved"
-                        queue.insert(0, tid)
-                        continue
-                token = self.admission_store.reserve(
-                    project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                    context_digest=context_key, resource_version=resource_key,
-                )
-                if token is None:
-                    if recovery_token:
-                        self.admission_store.release_recovery(recovery_token)
-                    idle[host.id] = "admission_reserved"
-                    skipped[tid] = "admission_reserved"
-                    queue.insert(0, tid)
-                    continue
-            except Exception as exc:  # noqa: BLE001 - no agent or checkout when state is uncertain
-                if recovery_token:
-                    try:
-                        self.admission_store.release_recovery(recovery_token)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("falha ao liberar reserva global apos recusa de admissao")
-                if token:
-                    try:
-                        self.admission_store.release(
-                            project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                            context_digest=context_key, resource_version=resource_key, token=token,
-                        )
-                    except Exception:  # noqa: BLE001
-                        logger.exception("falha ao liberar reserva apos recusa de admissao")
-                idle[host.id] = "admission_store_unavailable"
-                skipped[tid] = "admission_store_unavailable"
-                queue.insert(0, tid)
-                logger.error("admission store recusou %s (%s)", tid, type(exc).__name__)
-                continue
-            try:
-                run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
-                if self.launch is None:
-                    job = default_launch(tid, host, demand, run_id=run_id,
-                                         recovery=bool(self.recovery.get("active")),
-                                         candidate_digest=candidate)
-                else:
-                    kwargs = {"run_id": run_id, "recovery": bool(self.recovery.get("active")),
-                              "candidate_digest": candidate}
-                    try:
-                        signature = inspect.signature(self.launch)
-                    except (TypeError, ValueError):
-                        # Opaque callables must obey the current launcher contract. Never
-                        # retry a launch after a TypeError from inside its implementation.
-                        job = self.launch(tid, host, **kwargs)
-                    else:
-                        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD
-                                             for p in signature.parameters.values())
-                        supported = kwargs if accepts_kwargs else {
-                            key: value for key, value in kwargs.items() if key in signature.parameters
-                        }
-                        job = self.launch(tid, host, **supported)
-                job.project_id = project_id
-                job.candidate_digest = candidate
-                job.context_digest = context
-                job.resource_version = resource_version
-                job.admission_token = token
-                job.run_id = run_id
-                job.recovery_token = recovery_token
-                self.in_flight[host.id] = job
-                dispatched.append({"ticket": tid, "host": host.id})
-            except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
-                from core.line.agent_cli import redact_secrets
-
-                safe_error = " | ".join(redact_secrets(str(exc)).splitlines())[-800:]
-                idle[host.id] = f"lancamento_falhou:{safe_error}"
-                failed_job = InFlight(
-                    tid, host.id, None, project_id=project_id, candidate_digest=candidate,
-                    context_digest=context, resource_version=resource_version,
-                )
-                self._record_failure(failed_job, 1, "launch", str(exc))
-                try:
-                    self.admission_store.release(
-                        project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                        context_digest=context_key, resource_version=resource_key, token=token,
-                    )
-                except Exception:  # noqa: BLE001
-                    logger.exception("falha ao liberar reserva apos erro de launcher %s", tid)
-                if self.recovery.get("active"):
-                    try:
-                        if recovery_token:
-                            self.admission_store.release_recovery(recovery_token)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("falha ao liberar reserva global apos erro de launcher %s", tid)
-                self.cooldown[tid] = now + self.config.requeue_cooldown_sec
+            self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
 
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
