@@ -254,3 +254,9 @@ USR-468: admissao remota combina `/health` (ocupacao) com `/metrics/hardware`
 (RAM, CPUs e instante de coleta). Saude generica nunca vira capacidade; RAM
 insuficiente continua zero. Corretores de falhas tambem registram sua familia
 para impedir revisao pelo mesmo provedor de qualquer implementador.
+
+USR-468 integra o controlador de retomadas USR-473 ao breaker de admissao.
+O candidato composto exige revisao independente e portao integral proprios;
+rodadas recusadas do USR-473 permanecem preservadas. Completed sem recibo de
+deploy nao remove espera; uma retomada ativa impede readmissao do mesmo ticket
+mesmo que o inventario externo de processos esteja vazio.

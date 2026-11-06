@@ -132,7 +132,6 @@ def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_p
     # without rebuilding or spinning new processes while a route is absent.
     from core.line import pending_delivery as pd
     monkeypatch.setattr(pd, "_children", {})
-    monkeypatch.setattr(pd, "_children", {})
     from types import SimpleNamespace
     import json
     from core.usage.models import ProviderAccountUsage, QuotaWindow
@@ -188,13 +187,26 @@ def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_p
     (context / "merge.json").write_text(json.dumps({"merge_sha": "b" * 40}), encoding="utf-8")
     (context / "validation.json").write_text(json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8")
     (context / "review_state.json").write_text(json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}), encoding="utf-8")
-    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "check_failed"
+    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["cause"] == "deploy_evidence_mismatch"
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "waiting"
+    pd._save(directory / "USR-99.json", saved)
     (context / "merge.json").write_text(json.dumps({"merge_sha": "a" * 40}), encoding="utf-8")
     assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "merged_awaiting_deploy"
     assert list(directory.glob("*.json"))  # completed ledger alone is not production evidence
     release.write_text(json.dumps({"sha": "a" * 40, "deployed": True}), encoding="utf-8")
     assert pd.tick(tmp_path, directory=directory, now=due + 5 * pd.RECHECK_SECONDS)[0]["status"] == "terminal"
     assert not list(directory.glob("*.json"))
+    release.unlink()
+    again = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
+    assert pd.tick(tmp_path, directory=directory, now=again.next_check + 1)[0]["cause"] == "deploy_evidence_missing"
+
+    # Empty external busy inventory cannot erase a resume started in this cycle.
+    active = Env(tmp_path / "active-resume", [_d("USR-01")], free=("grokbox",))
+    active.d.launch = None
+    active.d.busy_ids_loader = lambda: set()
+    monkeypatch.setattr(pd, "tick", lambda _root: [{"ticket": "USR-01", "status": "running"}])
+    assert active.d.run_cycle()["dispatched"] == []
 
 
 def test_verified_resource_change_reopens_breaker(tmp_path: Path):

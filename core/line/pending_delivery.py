@@ -163,6 +163,11 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
                 return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
             return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     if ticket.get("status") in {"completed", "cancelled", "canceled"}:
+        if ticket.get("status") == "completed" and (
+                not release.is_file() or not report.get("deployed") or not report.get("sha")):
+            row.status, row.cause = "blocked", "deploy_evidence_missing"
+            _save(path, row)
+            return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
         path.unlink()
         return {"ticket": row.ticket_id, "status": "terminal"}
     if ticket.get("status") == "waiting_human":
