@@ -27,3 +27,15 @@ ambíguas do provedor ficam limitadas a uma tentativa por janela de 30 minutos. 
 supressão incluem `external_communication_not_authorized`, `throttle_active`,
 `shared_state_root_unavailable`, `state_unreadable`, `state_write_failed` e `lock_unavailable`; essas
 falhas não interrompem a sondagem nem o launcher.
+
+## Aprendizado da entrega USR-468 T1
+
+Antes de criar a worktree ou rodar o PLAN, `run_ticket.py` pede uma admissão somente leitura em
+`core.line.admission`. Ela confirma rota de planning, de build e de revisão em outro harness, e um
+worker de gate com capacidade explícita. Se faltar rota, ou se o gate estiver em zero, ocupado, stale,
+vazio ou só com health genérico, o processo sai com código 75, JSON `route_wait` e o ticket segue
+`planned`, sem agente e sem worktree. Um allow não guarda a rota: cada estágio chama `pick` de novo.
+
+### USR-468 T3 — Recovery com uma entrega por vez
+
+No modo recovery, a esteira trabalha como uma fila de faixa única: o SQLite mantem o latch e a reserva entre reinicios, enquanto `reserve_cycle(max_fleet_slots=1)` impede outra entrega em host diferente. O gate continua sendo o `suite_lock` oficial. Espera por gate, host ou rota nao conta como sucesso; somente um recibo de merge fecha recovery.

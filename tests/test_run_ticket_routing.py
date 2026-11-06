@@ -1,5 +1,4 @@
 """run_ticket routing and failure diagnostics (USR-67 / USR-68).
-
 Root cause: `run_ticket.py` asked the router for a harness by name and quota only, so the default path
 elected Antigravity (most headroom, no headless write mode) and then failed with a blank message. The
 launcher now asks for a `write` route, rejects an explicit harness that cannot write before consuming
@@ -11,8 +10,11 @@ tickets, cooldowns and agents are all injected.
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -21,11 +23,65 @@ from unittest.mock import MagicMock
 import pytest
 
 import run_ticket
-from core.line import agent_retry, routing
+from core.line import admission, agent_retry, routing
 from core.git.autonomy import GitAutonomyManager, SweepReport, TicketCompletionReport
 from core.demands.store import DemandsStore
 from core.enterprise import enforcement
 from core.roadmap.models import DeliveryStatus
+
+
+def test_recovery_line_lock_propagates_run_identity_and_single_slot(monkeypatch):
+    monkeypatch.setenv("DARKFAC_FLEET_MODE", "0")
+    args = run_ticket.build_parser().parse_args(
+        ["USR-468", "--fleet", "--recovery", "--run-id", "fleet-run-468"]
+    )
+    observed = {}
+
+    class AvailableGate:
+        def __init__(self, **kwargs):
+            observed["gate_timeout"] = kwargs["timeout_sec"]
+
+        def acquire(self):
+            observed["gate_checked"] = True
+
+        def release(self):
+            observed["gate_released"] = True
+
+    monkeypatch.setattr("core.harness.suite_lock.SuiteLock", AvailableGate)
+
+    @contextlib.contextmanager
+    def fake_guard(ticket_id, **kwargs):
+        observed["ticket_id"] = ticket_id
+        observed.update(kwargs)
+        yield object()
+
+    monkeypatch.setattr(run_ticket.line_lock, "guard", fake_guard)
+    with contextlib.ExitStack() as stack:
+        assert run_ticket._stage_line_lock(args, stack, None) is None
+    assert observed["gate_checked"] and observed["gate_released"]
+    assert observed["run_id"] == "fleet-run-468"
+    assert observed["max_fleet_slots"] == 1
+
+
+def test_recovery_gate_busy_returns_structured_wait_before_line_lock(monkeypatch, capsys):
+    from core.harness import suite_lock
+
+    monkeypatch.setenv("DARKFAC_FLEET_MODE", "0")
+    args = run_ticket.build_parser().parse_args(["USR-468", "--fleet", "--recovery", "--json"])
+
+    class BusyGate:
+        def __init__(self, **_kwargs):
+            pass
+
+        def acquire(self):
+            raise suite_lock.SuiteLockTimeout("occupied")
+
+    monkeypatch.setattr("core.harness.suite_lock.SuiteLock", BusyGate)
+    monkeypatch.setattr(run_ticket.line_lock, "guard", lambda *_a, **_k: pytest.fail("line lock must not be acquired"))
+    with contextlib.ExitStack() as stack:
+        assert run_ticket._stage_line_lock(args, stack, None) == run_ticket.EXIT_ROUTE_WAIT
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["status"] == "wait" and payload["cause"] == "gate_busy"
 from core.git.ticket_workspace import TicketWorkspace
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import _HARNESS_TO_PROVIDER
@@ -732,3 +788,133 @@ def test_retry_report_flags_advance_only_when_timeout_left_changes() -> None:
 
     assert run(True).advance_to_validation is True
     assert run(False).advance_to_validation is False
+
+
+def _wait_decision() -> admission.AdmissionDecision:
+    return admission.AdmissionDecision(
+        outcome="wait",
+        code="no_build_route",
+        stage="build",
+        resource="route:build",
+        observed_at=datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc),
+        evidence_ref="routing://development/none",
+        not_before=datetime(2026, 11, 6, 15, 1, tzinfo=timezone.utc),
+    )
+
+
+def test_admission_wait_exits_75_before_the_worktree(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    order: list[str] = []
+    decision = _wait_decision()
+
+    def evaluate(_args: Any, _ticket: Any) -> admission.AdmissionDecision:
+        order.append("admit")
+        return decision
+
+    real_prepare = run_ticket._prepare_workspace
+
+    def prepare(args: Any, ticket: Any) -> Any:
+        order.append("workspace")
+        return real_prepare(args, ticket)
+
+    monkeypatch.setattr(run_ticket, "evaluate_admission", evaluate)
+    monkeypatch.setattr(run_ticket, "_prepare_workspace", prepare)
+
+    assert main(["USR-99", "--json"]) == run_ticket.EXIT_ROUTE_WAIT
+
+    assert order == ["admit"]
+    assert env["prepared"] == []
+    env["agent"].assert_not_called()
+    captured = capsys.readouterr()
+    payload = json.loads(next(line for line in captured.out.splitlines() if line.startswith("{")))
+    assert payload["ok"] is False
+    assert payload["cause"] == "route_wait"
+    assert payload["error"] == decision.code
+    assert payload["ticket_id"] == "USR-99"
+    assert payload["exit_code"] == 75
+    for field in ("code", "stage", "resource", "observed_at", "evidence_ref", "not_before", "outcome"):
+        assert payload[field] == decision.public_dict()[field]
+    assert "[AGUARDANDO]" in captured.err
+    assert run_ticket.ROUTE_WAIT_MARKER in captured.err
+    assert "[DRY RUN]" not in captured.out
+
+
+def test_admission_wait_requeues_an_implementing_ticket(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    holder: dict[str, Any] = {
+        "ticket": _TICKET.model_copy(update={"status": DeliveryStatus.IMPLEMENTING}),
+        "reasons": [],
+    }
+
+    class _RequeueStore:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def get_ticket(self, ticket_id: str) -> Any:
+            ticket = holder["ticket"]
+            return ticket if ticket_id == ticket.id else None
+
+        def list_tickets(self) -> list[Any]:
+            return [holder["ticket"]]
+
+        def requeue_ticket(self, ticket_id: str, reason: str = "") -> tuple[Any, bool]:
+            assert ticket_id == holder["ticket"].id
+            holder["reasons"].append(reason)
+            holder["ticket"] = holder["ticket"].model_copy(update={"status": DeliveryStatus.PLANNED})
+            return holder["ticket"], True
+
+    monkeypatch.setattr(run_ticket, "DemandsStore", _RequeueStore)
+    monkeypatch.setattr(run_ticket, "evaluate_admission", lambda *_a, **_k: _wait_decision())
+
+    assert main(["USR-99", "--json"]) == 75
+    assert holder["reasons"] == ["development_no_route"]
+    assert holder["ticket"].status == DeliveryStatus.PLANNED
+    assert env["prepared"] == []
+
+
+def test_admission_wait_leaves_an_already_planned_ticket_alone(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reasons: list[str] = []
+
+    class _PlannedStore(_Store):
+        def requeue_ticket(self, ticket_id: str, reason: str = "") -> tuple[Any, bool]:
+            reasons.append(reason)
+            return _TICKET, False
+
+    monkeypatch.setattr(run_ticket, "DemandsStore", _PlannedStore)
+    monkeypatch.setattr(run_ticket, "evaluate_admission", lambda *_a, **_k: _wait_decision())
+
+    assert main(["USR-99", "--json"]) == 75
+    assert reasons == []
+    assert _TICKET.status == DeliveryStatus.PLANNED
+    assert env["prepared"] == []
+
+
+def test_evaluate_admission_forwards_fleet_context_pin_and_caps(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def spy(**kwargs: Any) -> admission.AdmissionDecision:
+        captured.update(kwargs)
+        return admission.allow_decision(datetime(2026, 11, 6, tzinfo=timezone.utc))
+
+    monkeypatch.setattr(run_ticket.admission, "admit", spy)
+    run_ticket._admission_impl(argparse.Namespace(fleet=True, harness="claude"), _TICKET)
+    assert captured["execution_context"] == "headless"
+    assert captured["build_caps"] == ["harness:claude", "harness:codex", "harness:grok"]
+    assert "harness:antigravity" in captured["read_caps"]
+    assert captured["pinned_harness"] == "claude"
+    assert captured["operating_harness"] is None
+    assert captured["project_id"] == _TICKET.project_id
+    assert captured["complexity"] == run_ticket._routing_complexity(_TICKET)
+
+    captured.clear()
+    run_ticket._admission_impl(argparse.Namespace(fleet=False, harness=""), _TICKET)
+    assert captured["execution_context"] == "interactive"
+    assert captured["build_caps"] == [
+        "harness:claude", "harness:codex", "harness:grok", "harness:antigravity",
+    ]
+    assert captured["read_caps"] == captured["build_caps"]
+    assert captured["pinned_harness"] is None
