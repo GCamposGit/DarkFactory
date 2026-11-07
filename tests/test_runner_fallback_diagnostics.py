@@ -48,6 +48,46 @@ def test_non_windows_runner_worker_environment_keeps_detected_capacity(
     assert runner.bounded_xdist_worker_count(7) == 7
 
 
+def test_run_step_caps_windows_gate_workers_before_spawning_pytest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from core.line import gate_ram
+
+    monkeypatch.setattr(runner.os, "name", "nt")
+    monkeypatch.setattr(runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "_xdist_available", lambda: True)
+    monkeypatch.setattr(
+        gate_ram,
+        "wait_for_gate_ram",
+        lambda **_kwargs: gate_ram.RamWaitResult(True, gate_ram.RamReading(16.0, 7), 0.0),
+    )
+    captured_command: list[str] | None = None
+    captured_env: dict[str, str] | None = None
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal captured_command, captured_env
+        captured_command = command
+        captured_env = kwargs["env"]
+        return subprocess.CompletedProcess(command, 0, "1 passed in 0.01s\n")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    step = HarnessStepConfig(
+        name="unit_and_integration_tests_parallel",
+        cmd="python -m pytest tests -q -n auto",
+        quick=True,
+        kind="test",
+        timeout_sec=30,
+    )
+
+    result = runner.run_step(step)
+
+    assert result.returncode == 0
+    assert captured_env is not None
+    assert captured_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "4"
+    assert captured_command is not None and "--maxprocesses=4" in captured_command
+    assert "[GATE_CAPACITY] workers=4" in capsys.readouterr().out
+
+
 def test_timeout_saves_and_prints_partial_pytest_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
