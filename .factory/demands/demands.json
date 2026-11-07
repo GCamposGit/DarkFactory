@@ -12116,7 +12116,8 @@
     "acceptance_criteria": [
       "Payload inclui SPEC criterios e conteudo real relevante limitado e sanitizado, com manifests e hashes verificaveis; ausencia de contexto nao produz aprovacao silenciosa",
       "Teste comportamental consolidado comprova revisao com transporte sem filesystem e preserva familia independente e gate",
-      "Atualizar manual e learning pack; gate oficial revisao cruzada CI merge deploy smoke"
+      "Atualizar manual e learning pack; gate oficial revisao cruzada CI merge deploy smoke",
+      "Paid handoff attempt was truncated at4096 tokens; second script supplied recovery ticket arguments as separate positional tokens instead of one comma-separated value. Require complete output and validate launcher CLI before executing."
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
