@@ -19,6 +19,7 @@ from core.line.review_payload import (
     REASON_CHANGED_UNREADABLE,
     REASON_SPEC_EMPTY,
     REASON_SPEC_MISSING,
+    REASON_SPEC_NOT_INCLUDED,
     REASON_SPEC_UNREADABLE,
     REASON_TICKETS_EMPTY,
     REASON_TICKETS_MISSING,
@@ -274,3 +275,126 @@ def test_negative_budget_is_rejected(tmp_path: Path) -> None:
     root, context, changed = _tree(tmp_path, files={})
     with pytest.raises(ValueError):
         build_review_payload(root, context, changed, item_budget_bytes=-1)
+
+
+def test_changed_paths_follow_sorted_order_for_any_input(tmp_path: Path) -> None:
+    files = {"b.py": "b=1\n", "a.py": "a=1\n", "c/d.py": "d=1\n"}
+    root, context, _changed = _tree(tmp_path, files=files)
+    forward = ["c/d.py", "b.py", "a.py", "b.py", ".\\a.py"]
+    first = build_review_payload(root, context, forward)
+    second = build_review_payload(root, context, list(reversed(forward)))
+    assert first.model_dump() == second.model_dump()
+    assert first.complete is True
+    assert [item.path for item in first.manifest] == [
+        CONTEXT_SPEC_PATH, CONTEXT_TICKETS_PATH, "a.py", "b.py", "c/d.py",
+    ]
+
+
+def test_total_budget_is_utf8_and_stops_on_a_character_boundary(tmp_path: Path) -> None:
+    spec = "SPEC_OK\n"
+    tickets = [{"id": "T1", "acceptance": ["criterio curto"]}]
+    root, context, _changed = _tree(
+        tmp_path, spec=spec, tickets=tickets, files={"wide.py": "ááá"},
+    )
+    spec_size = (context / "SPEC.md").stat().st_size
+    tickets_size = (context / "tickets.json").stat().st_size
+    total = spec_size + tickets_size + 3
+    payload = build_review_payload(
+        root, context, ["wide.py"], item_budget_bytes=1000, total_budget_bytes=total,
+    )
+    text, item = _by_path(payload)["wide.py"]
+    assert payload.complete is True
+    assert text == "á"
+    assert item.truncated is True
+    assert item.bytes_included == 2
+    assert text.encode("utf-8").decode("utf-8") == text
+    assert sum(entry.bytes_included for entry in payload.manifest) <= total
+    assert all(entry.bytes_included <= 1000 for entry in payload.manifest)
+    assert item.sha256 == hashlib.sha256((root / "wide.py").read_bytes()).hexdigest()
+
+
+def test_redaction_runs_before_the_byte_cut(tmp_path: Path) -> None:
+    body = ("A" * 12) + SECRET + "FIM_SECRETO"
+    root, context, changed = _tree(
+        tmp_path,
+        spec="SPEC_OK\n",
+        tickets=[{"id": "T1", "acceptance": ["criterio curto"]}],
+        files={"mod.py": body},
+    )
+    payload = build_review_payload(
+        root, context, changed, item_budget_bytes=16, total_budget_bytes=100_000,
+    )
+    text, item = _by_path(payload)["mod.py"]
+    raw_prefix = body.encode("utf-8")[:16].decode("utf-8")
+    assert "sk-a" in raw_prefix
+    assert "sk-a" not in text
+    assert SECRET not in text
+    assert item.truncated is True
+    assert item.bytes_included <= 16
+    assert item.sha256 == hashlib.sha256(body.encode("utf-8")).hexdigest()
+    redacted = agent_cli.redact_secrets(body)
+    assert text == redacted.encode("utf-8")[: item.bytes_included].decode("utf-8")
+
+
+def test_absolute_and_duplicate_outside_paths_are_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, context, _changed = _tree(tmp_path, files={})
+    outside = tmp_path / "secret.txt"
+    _write(outside, f"fora {SECRET}\n")
+    reads: list[Path] = []
+    real = review_payload._read_bytes
+
+    def _spy(path: Path) -> bytes:
+        reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(review_payload, "_read_bytes", _spy)
+    payload = build_review_payload(root, context, [str(outside), outside.as_posix(), str(outside)])
+    assert payload.complete is False
+    assert sum(reason.startswith(f"{REASON_CHANGED_OUTSIDE}:") for reason in payload.reasons) == 1
+    assert SECRET not in payload.model_dump_json()
+    assert all(path.resolve() != outside.resolve() for path in reads)
+    assert outside.read_bytes() == f"fora {SECRET}\n".encode("utf-8")
+
+
+def test_unreadable_or_invalid_changed_file_is_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, context, changed = _tree(tmp_path)
+    real = review_payload._read_bytes
+
+    def _deny(path: Path) -> bytes:
+        if path.name == "sample.py":
+            raise OSError("denied")
+        return real(path)
+
+    monkeypatch.setattr(review_payload, "_read_bytes", _deny)
+    denied = build_review_payload(root, context, changed)
+    assert denied.complete is False
+    assert f"{REASON_CHANGED_UNREADABLE}:{_FILE}" in denied.reasons
+    assert _FILE not in {item.path for item in denied.manifest}
+
+    monkeypatch.setattr(review_payload, "_read_bytes", real)
+    (root / "bin.dat").write_bytes(b"\xff\xfe nao e utf-8")
+    invalid = build_review_payload(root, context, ["bin.dat"])
+    assert invalid.complete is False
+    assert f"{REASON_CHANGED_UNREADABLE}:bin.dat" in invalid.reasons
+    assert "bin.dat" not in {item.path for item in invalid.manifest}
+    assert invalid.spec_text
+
+
+def test_spec_cut_to_blank_is_not_ready(tmp_path: Path) -> None:
+    root, context, changed = _tree(
+        tmp_path,
+        spec="\n\nCONTEUDO_DA_SPEC",
+        tickets=[{"id": "T1", "acceptance": ["criterio curto"]}],
+        files={},
+    )
+    payload = build_review_payload(
+        root, context, changed, item_budget_bytes=1, total_budget_bytes=1,
+    )
+    assert payload.complete is False
+    assert REASON_SPEC_NOT_INCLUDED in payload.reasons
+    assert payload.spec_text.strip() == ""
+    assert review_payload.context_blocks_review(payload) is True

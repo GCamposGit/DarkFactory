@@ -115,9 +115,27 @@ def test_main_passes_comma_separated_recovery_tickets_in_order(monkeypatch, caps
     monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
     monkeypatch.setattr(fd, "configure_logging", lambda *_args, **_kwargs: None)
 
-    assert fd.main(["--recovery-tickets", "USR-1,USR-2"]) == 0
+    assert fd.main(["--recovery-tickets", " USR-1, , USR-2 ,, "]) == 0
     assert captured["config"].recovery_tickets == ("USR-1", "USR-2")
     assert capsys.readouterr().out.strip() == '{\n  "ok": true\n}'
+
+
+def test_main_help_documents_csv_format_without_operational_side_effects(monkeypatch, capsys):
+    calls = []
+
+    def forbidden(*_args, **_kwargs):
+        calls.append("operational")
+        raise AssertionError("help must not initialize operational services")
+
+    monkeypatch.setattr(fd, "FleetDispatcher", forbidden)
+    monkeypatch.setattr(fd, "configure_logging", forbidden)
+
+    with pytest.raises(SystemExit) as exc:
+        fd.main(["--help"])
+
+    assert exc.value.code == 0
+    assert "ID1,ID2" in capsys.readouterr().out
+    assert calls == []
 
 
 def test_main_preserves_empty_recovery_and_resume_only_modes(monkeypatch, capsys):

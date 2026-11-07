@@ -938,8 +938,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--resume-only", action="store_true",
                     default=os.environ.get("DARKFAC_FLEET_RESUME_ONLY") == "1",
                     help="Retoma esperas persistidas sem admitir novos BUILDs")
-    ap.add_argument("--recovery-tickets", default="",
-                    help="Lista ordenada por virgulas: uma correcao por vez; depois libera a fila regular")
+    ap.add_argument("--recovery-tickets", metavar="ID1,ID2", default="",
+                    help="Um unico valor CSV (IDs separados por virgulas); processa na ordem, uma correcao por vez")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     ap.add_argument("unexpected_args", nargs="*", metavar="ARG",
                     help=argparse.SUPPRESS)

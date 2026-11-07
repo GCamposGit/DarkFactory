@@ -216,7 +216,7 @@ uma nova revisão independente.
 
 ### Payload verificável da revisão (USR-474 T1)
 
-`core.line.review_payload.build_review_payload` lê, sem rede e sem agente, o `SPEC.md`, os critérios de `tickets.json` (`acceptance`, `acceptance_criteria` ou `criteria`) e os bytes dos arquivos alterados dentro da worktree. Cada item do manifesto traz o caminho, o sha256 da fonte, os bytes incluídos depois de `redact_secrets` e se houve corte. O corte acontece só depois da redação, no limite de um caractere UTF-8. SPEC ou tickets ausentes, vazios ou ilegíveis deixam `complete` falso e registram o motivo. Contexto vazio não sai pronto. Um caminho que resolve fora da árvore não é lido.
+`core.line.review_payload.build_review_payload` lê, sem rede e sem agente, o `SPEC.md`, os critérios de `tickets.json` (`acceptance`, `acceptance_criteria` ou `criteria`) e os bytes dos arquivos alterados dentro da worktree. Os arquivos entram em ordem de caminho, independente da ordem recebida. Cada item do manifesto traz o caminho relativo, o sha256 da fonte, os bytes incluídos depois de `redact_secrets` e se houve corte. A redação ocorre antes do corte. O limite por item e o total contam bytes UTF-8 e param num caractere inteiro. SPEC ou tickets ausentes, vazios, inválidos ou ilegíveis deixam `complete` falso e registram o motivo. Se o corte deixar a SPEC só com espaço em branco, o motivo é `spec_not_included`. Contexto vazio não sai pronto. Caminho absoluto, travessia para fora da árvore e duplicata não são lidos fora da raiz.
 
 ### Revisão paga sem filesystem (USR-474 T2)
 

@@ -1,16 +1,20 @@
 """Bounded, verifiable review context (USR-474 T1).
 
 Reads ``SPEC.md``, the acceptance criteria in ``tickets.json`` and the bytes
-of the changed files. No network and no agent. Each manifest item records the
-repo-relative path, the sha256 of the source bytes, how many of those bytes
-were included after redaction, and whether the included text was cut.
+of the changed files. No network and no agent. Changed files are emitted in
+sorted repo-relative order, so the manifest does not depend on the caller's
+order. Each manifest item records the repo-relative path, the sha256 of the
+source bytes, how many of those bytes were included after redaction, and
+whether the included text was cut.
 
 Redaction runs on the full decoded text before the cut, so a secret that
-straddles the limit is not left half visible. ``truncated`` means the redacted
+straddles the limit is not left half visible. Item and total limits count
+UTF-8 bytes and stop on a character boundary. ``truncated`` means the redacted
 text did not fit in the budget. It does not mean redaction shortened the text.
 
-A missing, empty or unreadable SPEC or ticket file yields ``complete=False``.
-An empty context is never reported as ready.
+A missing, empty, invalid or unreadable SPEC or ticket file yields
+``complete=False``. A SPEC whose included text is blank after the cut is not
+ready either. An empty context is never reported as ready.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ DEFAULT_TOTAL_BUDGET_BYTES = 131_072
 REASON_SPEC_MISSING = "spec_missing"
 REASON_SPEC_UNREADABLE = "spec_unreadable"
 REASON_SPEC_EMPTY = "spec_empty"
+REASON_SPEC_NOT_INCLUDED = "spec_not_included"
 REASON_TICKETS_MISSING = "tickets_missing"
 REASON_TICKETS_UNREADABLE = "tickets_unreadable"
 REASON_TICKETS_EMPTY = "tickets_empty"
@@ -48,6 +53,7 @@ _CONTEXT_BLOCKERS = frozenset({
     REASON_SPEC_MISSING,
     REASON_SPEC_UNREADABLE,
     REASON_SPEC_EMPTY,
+    REASON_SPEC_NOT_INCLUDED,
     REASON_TICKETS_MISSING,
     REASON_TICKETS_UNREADABLE,
     REASON_TICKETS_EMPTY,
@@ -292,10 +298,15 @@ def _load_spec(
     except UnicodeDecodeError:
         reasons.append(REASON_SPEC_UNREADABLE)
         return
-    if not decoded.strip():
+    blank_source = not decoded.strip()
+    if blank_source:
         reasons.append(REASON_SPEC_EMPTY)
-    if not _add(slices, manifest, _slice_raw(CONTEXT_SPEC_PATH, raw, budget)):
+    piece = _slice_raw(CONTEXT_SPEC_PATH, raw, budget)
+    if not _add(slices, manifest, piece):
         reasons.append(REASON_SPEC_UNREADABLE)
+        return
+    if piece is not None and not piece[0].text.strip() and not blank_source:
+        reasons.append(REASON_SPEC_NOT_INCLUDED)
 
 
 def _load_tickets(
@@ -350,22 +361,23 @@ def _load_changed(
     slices: list[ReviewFileSlice],
     manifest: list[ReviewManifestItem],
 ) -> None:
-    seen: set[str] = set()
+    files: dict[str, Path] = {}
+    outside: set[str] = set()
     for raw_path in changed_paths:
         located, display = _locate(root, raw_path)
-        label = display or _reason_path(raw_path) or "(vazio)"
         if located is None:
-            reasons.append(f"{REASON_CHANGED_OUTSIDE}:{label}")
+            outside.add(display or _reason_path(raw_path) or "(vazio)")
             continue
-        if display in seen:
-            continue
-        seen.add(display)
-        raw, problem = _read_source(located)
+        files.setdefault(display, located)
+    for display in sorted(files):
+        raw, problem = _read_source(files[display])
         if problem is not None or raw is None:
             reasons.append(f"{REASON_CHANGED_UNREADABLE}:{display}")
             continue
         if not _add(slices, manifest, _slice_raw(display, raw, budget)):
             reasons.append(f"{REASON_CHANGED_UNREADABLE}:{display}")
+    for label in sorted(outside):
+        reasons.append(f"{REASON_CHANGED_OUTSIDE}:{label}")
 
 
 def build_review_payload(
@@ -379,8 +391,9 @@ def build_review_payload(
     """Read the review sources and return a bounded payload or an incomplete one.
 
     ``root`` is the tree of the changed files. ``context_dir`` holds ``SPEC.md``
-    and ``tickets.json`` and may live outside that tree. Paths that resolve
-    outside ``root`` are not read.
+    and ``tickets.json`` and may live outside that tree. Paths that are
+    absolute or resolve outside ``root`` are not read. Changed-file slices and
+    their reasons follow sorted path order, independent of ``changed_paths``.
     """
     if item_budget_bytes < 0 or total_budget_bytes < 0:
         raise ValueError("review payload budget must be zero or positive")
@@ -411,6 +424,7 @@ def context_blocks_review(payload: ReviewPayload) -> bool:
     """True when SPEC or tickets are missing, empty or unreadable.
 
     A changed file that could not be read does not, by itself, hide the SPEC.
+    A SPEC that was cut down to blank text does.
     """
     return any(reason in _CONTEXT_BLOCKERS for reason in payload.reasons)
 

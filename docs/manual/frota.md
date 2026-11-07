@@ -130,6 +130,27 @@ Get-Content C:\dev\DarkFac\.factory\runs\fleet_dispatcher_logs\fleet-dispatcher.
 
 Se `DARKFAC_FLEET_LOG_DIR` apontar a outra pasta, use-a no segundo comando.
 
+## Revisão OpenRouter e evidência de contexto (USR-474)
+
+O payload da revisão inclui a SPEC e os critérios de aceite do ticket, conteúdo real
+relevante da worktree dentro dos limites configurados e sanitizado, além de um manifesto
+com caminhos, tamanhos e hashes para verificar o material enviado. O OpenRouter não lê
+arquivos da worktree por ferramenta; a revisão só pode aprovar o contexto efetivamente
+transportado. Contexto ausente recusa a revisão como `review_context_unavailable`, e uma
+resposta truncada recusa como `review_output_truncated`.
+
+O evento de uso atribui `ticket_id` a partir do contexto da execução/requisição para
+relacionar tokens e custo ao ticket. Se essa identidade não puder ser determinada, a
+atribuição fica ausente e deve ser tratada como lacuna de evidência, sem inferência a
+partir de conteúdo textual.
+
+Para recuperação, `--recovery-tickets` aceita exatamente um argumento CSV, preservando a
+ordem e ignorando espaços e itens vazios. Confira sem iniciar a frota com
+`python -m core.line.fleet_dispatcher --help`; a forma válida é
+`python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"`.
+Passar `USR-1 USR-2` como tokens posicionais separados é erro de CLI (código 2) e é
+recusado antes de inicializar o dispatcher ou executar um ciclo.
+
 ## grokbox (systemd)
 
 O arquivo versionado é [`scripts/fleet-dispatcher.service`](../../scripts/fleet-dispatcher.service).

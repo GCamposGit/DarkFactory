@@ -38,7 +38,7 @@ O contrato documentado para OpenRouter exige contexto verificável no próprio p
 
 ## Aprendizado da entrega USR-474 T1
 
-A revisão precisa do texto da SPEC, dos critérios e do conteúdo dos arquivos, com um manifesto que dá para conferir. `build_review_payload` lê esses arquivos no disco, redacta segredos e registra o sha256 da fonte, quantos bytes entraram e se o texto foi cortado. Se a SPEC ou os tickets faltam, vêm vazios ou não dá para ler, o payload fica incompleto. Contexto vazio não é tratado como pronto. O `line_validate` também deixa de herdar `DARKFAC_PROJECT_ROOT`: o portão do snapshot mede a árvore que acabou de montar.
+A revisão precisa do texto da SPEC, dos critérios e do conteúdo dos arquivos, com um manifesto que dá para conferir. `build_review_payload` lê esses arquivos no disco, redacta segredos antes de cortar e registra o sha256 da fonte, quantos bytes entraram e se o texto foi cortado. Os arquivos alterados saem em ordem de caminho. Os limites contam bytes UTF-8 e não partem um caractere. Se a SPEC ou os tickets faltam, vêm vazios, inválidos ou não dá para ler, o payload fica incompleto. Uma SPEC cortada até sobrar só espaço em branco também não fica pronta. Contexto vazio não é tratado como pronto. O `line_validate` também deixa de herdar `DARKFAC_PROJECT_ROOT`: o portão do snapshot mede a árvore que acabou de montar.
 
 ## Aprendizado da entrega USR-468 T1
 
