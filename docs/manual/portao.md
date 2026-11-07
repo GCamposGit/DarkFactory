@@ -11,6 +11,12 @@ o envelope de6.540s de todas as checagens. Zero capacidade retorna espera75 pela
 mesma regra de elegibilidade, sem chamar modelo nem esperar com a suíte ocupada.
 Essa adaptação não altera timeout por teste, descoberta, trava ou cache por árvore.
 
+O `runner.py` também registra no início da suíte a capacidade medida (`workers`,
+RAM disponível e prazo calculado) e passa a mesma quantidade de workers ao
+subprocesso do pytest. Se o bloqueio de RAM não liberar a execução imediatamente,
+o passo termina com código75; ele não fica aguardando enquanto mantém a trava da
+suíte.
+
 O census de IDs de modelos separa configurações e código de seleção dos ledgers
 de evidência histórica de demandas e ações do owner. Esses registros não escolhem
 modelos. A seleção ativa continua usando o registro canônico; não se reescreve

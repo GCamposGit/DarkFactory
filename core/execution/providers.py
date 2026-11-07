@@ -437,6 +437,43 @@ def _resolve_openrouter_wire_model(model: str) -> str:
         return model
 
 
+def _openrouter_costs(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    unknown_cost_policy: UnknownCostPolicy,
+    provider_id: str,
+) -> tuple[float | None, float, bool]:
+    """Return measured cost, fallback estimate, and whether the cost was measured."""
+    cost_usd: float | None = None
+    try:
+        from core.benchmarks.fetcher import ensure_daily_benchmark
+
+        ledger = ensure_daily_benchmark()
+        model_entry = ledger.models.get(model)
+        if model_entry:
+            cost_usd = round(
+                (
+                    prompt_tokens * model_entry.input_cost_per_m
+                    + completion_tokens * model_entry.output_cost_per_m
+                )
+                / 1_000_000,
+                6,
+            )
+    except Exception:
+        pass
+
+    if cost_usd is not None:
+        return cost_usd, cost_usd, True
+    if unknown_cost_policy == UnknownCostPolicy.REJECT:
+        raise ValueError(
+            f"Provider {provider_id} returned unknown cost for model {model} and policy is REJECT."
+        )
+    multiplier = 1 if unknown_cost_policy == UnknownCostPolicy.ESTIMATE else 2.5
+    return None, round(total_tokens * 0.000002 * multiplier, 6), False
+
+
 class OpenRouterModelProvider:
     """OpenRouter cloud gateway model provider with token and cost tracking."""
 
@@ -521,37 +558,14 @@ class OpenRouterModelProvider:
                 reasoning_tokens = comp_details.get("reasoning_tokens") or 0
                 processing_tokens = cached_tokens + reasoning_tokens
 
-                # Cost lookup in daily benchmarks catalog
-                cost_usd: float | None = None
-                try:
-                    from core.benchmarks.fetcher import ensure_daily_benchmark
-
-                    ledger = ensure_daily_benchmark()
-                    model_entry = ledger.models.get(model)
-                    if model_entry:
-                        cost_usd = round(
-                            (
-                                prompt_tokens * model_entry.input_cost_per_m
-                                + completion_tokens * model_entry.output_cost_per_m
-                            )
-                            / 1_000_000,
-                            6,
-                        )
-                except Exception:
-                    pass
-
-                is_measured = cost_usd is not None
-                if cost_usd is None:
-                    if unknown_cost_policy == UnknownCostPolicy.REJECT:
-                        raise ValueError(
-                            f"Provider {self.provider_id} returned unknown cost for model {model} and policy is REJECT."
-                        )
-                    elif unknown_cost_policy == UnknownCostPolicy.ESTIMATE:
-                        estimated_cost = round(total_tokens * 0.000002, 6)
-                    else:  # CONSERVATIVE_MAX
-                        estimated_cost = round(total_tokens * 0.000002 * 2.5, 6)
-                else:
-                    estimated_cost = cost_usd
+                cost_usd, estimated_cost, is_measured = _openrouter_costs(
+                    model,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    unknown_cost_policy,
+                    self.provider_id,
+                )
 
                 tier_val = infer_model_tier("openrouter", returned_model)
                 if self.usage_ledger is not None:
