@@ -350,6 +350,13 @@ def normalize_xdist_workers(command: list[str]) -> list[str]:
     return capped
 
 
+def bounded_xdist_worker_count(worker_count: int) -> int:
+    """Apply the same Windows process ceiling to the worker count passed by the runner."""
+    if os.name == "nt":
+        return min(worker_count, WINDOWS_XDIST_MAX_WORKERS)
+    return worker_count
+
+
 def check_scope_label(cmd: str) -> str | None:
     """Rotulo honesto do que um passo verifica (USR-173): sintaxe nao e tipos."""
     lowered = cmd.casefold()
@@ -390,8 +397,9 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
                 return StepExecution(step.name, 75, 0, 0, 0)
             reading = ready.reading
             worker_count = reading.workers if _xdist_available() else 1
+            worker_count = bounded_xdist_worker_count(worker_count)
             step_timeout = effective_step_timeout(step, worker_count)
-            print(f"[GATE_CAPACITY] workers={reading.workers} available_gib={reading.available_gib:.1f} "
+            print(f"[GATE_CAPACITY] workers={worker_count} available_gib={reading.available_gib:.1f} "
                   f"timeout_sec={step_timeout:.0f}")
         command = resolve_command(step.cmd)
         if not command:

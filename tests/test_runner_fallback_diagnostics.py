@@ -33,6 +33,21 @@ def test_windows_auto_xdist_is_capped_at_four_workers(
     assert runner.normalize_xdist_workers(command) == expected
 
 
+def test_windows_runner_worker_environment_uses_the_same_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runner.os, "name", "nt")
+
+    assert runner.bounded_xdist_worker_count(7) == 4
+    assert runner.bounded_xdist_worker_count(2) == 2
+
+
+def test_non_windows_runner_worker_environment_keeps_detected_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner.os, "name", "posix")
+
+    assert runner.bounded_xdist_worker_count(7) == 7
+
+
 def test_timeout_saves_and_prints_partial_pytest_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -250,7 +250,11 @@ def pytest_cmdline_main(config: pytest.Config) -> None:
 @pytest.hookimpl(tryfirst=True)
 def pytest_xdist_auto_num_workers(config: pytest.Config) -> int:
     """Provide memory-safe number of workers when --numprocesses=auto is requested (USR-95)."""
-    return _worker_capacity.calculate_safe_worker_cap()
+    safe_cap = _worker_capacity.calculate_safe_worker_cap()
+    configured_cap = getattr(config.option, "maxprocesses", None)
+    if isinstance(configured_cap, int) and configured_cap > 0:
+        return min(safe_cap, configured_cap)
+    return safe_cap
 
 
 def _acquire_session_lock() -> None:
