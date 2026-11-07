@@ -27,18 +27,32 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from core.line import workspace
-from core.line.agent_cli import AgentRequest, AgentResult, redact_secrets, run_agent
+from core.line.agent_cli import (
+    AgentRequest,
+    AgentResult,
+    _OPENROUTER_MAX_TOKENS,
+    redact_secrets,
+    run_agent,
+)
+from core.line.recovery_receipt import independent_route, review_capabilities, review_context
+from core.line.review_payload import (
+    ReviewPayload,
+    build_review_payload,
+    context_blocks_review,
+    render_paid_context,
+)
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.stage_build import fill_template
 from core.line.workspace import RunWorkspace
-from core.line.recovery_receipt import review_capabilities, independent_route, review_context
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageResult
 
@@ -130,6 +144,8 @@ class ReviewRound(BaseModel):
 MAX_REVIEW_AGENT_RETRIES: int = 5
 # Same name as `core.line.stages.VERDICT_FILE` (stages imports this module, so no import back).
 VERDICT_FILE = "review_verdict.json"
+_TICKET_RUN_ID = re.compile(r"^USR-\d+$", re.IGNORECASE)
+_PAID_REVIEW_HARNESS = "openrouter"
 
 
 class ReviewState(BaseModel):
@@ -372,6 +388,41 @@ def _parse_verdict(text: str) -> Optional[ReviewVerdict]:
     return _parse_verdict_with_reason(text)[0]
 
 
+def _review_ticket_id(run_id: str) -> Optional[str]:
+    """``run_id`` when it is a ticket, otherwise ``DARKFAC_TICKET_ID``. No id stays null."""
+    text = run_id.strip()
+    if _TICKET_RUN_ID.fullmatch(text):
+        return text.upper()
+    env = os.environ.get("DARKFAC_TICKET_ID", "").strip()
+    return env or None
+
+
+def _compose_review_prompt(
+    ws: RunWorkspace, harness: str, template_prompt: str, payload: ReviewPayload,
+) -> str:
+    """Filesystem reviewers keep today's prompt. OpenRouter carries the sanitized SPEC once."""
+    if harness != _PAID_REVIEW_HARNESS:
+        return template_prompt + review_context(ws)
+    body = template_prompt + review_context(ws, skip=("SPEC.md",)) + render_paid_context(payload)
+    return redact_secrets(body)
+
+
+def _output_truncated(result: AgentResult) -> bool:
+    """OpenRouter output that hit the token ceiling or stopped for length."""
+    if (result.harness or "").lower() != _PAID_REVIEW_HARNESS:
+        return False
+    if result.truncated:
+        return True
+    if (result.finish_reason or "").strip().lower() == "length":
+        return True
+    raw = (result.usage or {}).get("completion_tokens")
+    try:
+        completion = int(raw)
+    except (TypeError, ValueError):
+        return False
+    return completion >= _OPENROUTER_MAX_TOKENS
+
+
 def _record_invalid_response(ws: RunWorkspace, *, harness: str, text: str, reason: str) -> None:
     """Persist a bounded, sanitized diagnostic without retaining the raw response."""
     encoded = text.encode("utf-8", errors="replace")
@@ -412,6 +463,59 @@ class ReviewStage:
         self.routing_config = routing_config or load_routing_config()
         self.agent_timeout_s = agent_timeout_s
         self.route_waiter = route_waiter or RouteWaiter()
+
+    def _invoke_reviewer(
+        self,
+        ws: RunWorkspace,
+        git_ws: RunWorkspace,
+        run_id: str,
+        default_branch: str,
+        round_num: int,
+        harness: str,
+        model: Optional[str],
+    ) -> AgentResult | StageResult:
+        """Build the prompt, refuse a missing SPEC or tickets, and call the reviewer."""
+        diff_text = _get_diff(git_ws, default_branch)
+        changed = _changed_paths(git_ws, default_branch)
+        payload = build_review_payload(git_ws.path, workspace.context_dir(ws), changed)
+        if context_blocks_review(payload):
+            logger.warning(
+                "Review context unavailable for %s (%s)", run_id, ",".join(payload.reasons),
+            )
+            return StageResult(
+                outcome="failed", cause_code="review_context_unavailable", output_refs=[],
+            )
+        template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
+        prompt = _compose_review_prompt(
+            ws,
+            harness,
+            fill_template(
+                template,
+                round_num=str(round_num),
+                diff_text=diff_text,
+                context_dir=f".darkfac/runs/{run_id}",
+                diff_bytes=str(_utf8_len(diff_text)),
+                diff_sha256=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
+                changed_files="\n".join(f"- `{path}`" for path in changed) or "- (nenhum)",
+            ),
+            payload,
+        )
+        staged_inputs = _materialize_review_sources(git_ws, ws, run_id, diff_text)
+        try:
+            return self.run_agent_func(
+                AgentRequest(
+                    prompt=prompt,
+                    cwd=git_ws.path,
+                    mode="read",
+                    harness=harness,
+                    model=model,
+                    timeout_s=self.agent_timeout_s,
+                    output_schema=ReviewVerdict.model_json_schema(),
+                    ticket_id=_review_ticket_id(run_id),
+                )
+            )
+        finally:
+            _restore_staged(staged_inputs)
 
     def _retry_invalid_response(
         self,
@@ -604,35 +708,16 @@ class ReviewStage:
             )
         harness, model = independent_route(ws, *route, self.routing_config.stages["review"].openrouter_model)
 
-        diff_text = _get_diff(git_ws, default_branch)
-        changed = _changed_paths(git_ws, default_branch)
-        template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
-        prompt = fill_template(
-            template,
-            round_num=str(round_num),
-            diff_text=diff_text,
-            context_dir=f".darkfac/runs/{run_id}",
-            diff_bytes=str(_utf8_len(diff_text)),
-            diff_sha256=hashlib.sha256(diff_text.encode("utf-8")).hexdigest(),
-            changed_files="\n".join(f"- `{path}`" for path in changed) or "- (nenhum)",
+        agent_result = self._invoke_reviewer(
+            ws, git_ws, run_id, default_branch, round_num, harness, model,
         )
-        prompt += review_context(ws)
-        staged_inputs = _materialize_review_sources(git_ws, ws, run_id, diff_text)
-        try:
-            agent_result = self.run_agent_func(
-                AgentRequest(
-                    prompt=prompt,
-                    cwd=git_ws.path,
-                    mode="read",
-                    harness=harness,
-                    model=model,
-                    timeout_s=self.agent_timeout_s,
-                    output_schema=ReviewVerdict.model_json_schema(),
-                )
-            )
-        finally:
-            _restore_staged(staged_inputs)
+        if isinstance(agent_result, StageResult):
+            return agent_result
         record_result(agent_result, config=self.routing_config)
+        if _output_truncated(agent_result):
+            return StageResult(
+                outcome="failed", cause_code="review_output_truncated", output_refs=[],
+            )
 
         if not agent_result.ok:
             return self._handle_agent_failure(

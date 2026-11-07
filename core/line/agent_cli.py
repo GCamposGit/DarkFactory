@@ -175,6 +175,8 @@ class AgentRequest(BaseModel):
     output_schema: Optional[dict[str, Any]] = None
     # USR-370: ticket-granted env names exempted from the credential scrub (tolerant when absent).
     capabilities: list[str] = Field(default_factory=list)
+    # USR-474: set by review when ``run_id`` is the ticket. Empty falls back to the env.
+    ticket_id: Optional[str] = None
 
 
 class AgentResult(BaseModel):
@@ -188,6 +190,10 @@ class AgentResult(BaseModel):
     effort: Optional[str] = None
     duration_s: float
     usage: Optional[dict[str, Any]] = None
+    # OpenRouter ``finish_reason``. ``length`` means the completion hit the token cap.
+    finish_reason: Optional[str] = None
+    # True when that reason is ``length`` or ``completion_tokens`` reached the paid ceiling.
+    truncated: bool = False
     cost_usd: Optional[float] = None
     error_kind: ErrorKind = None
     reset_at: Optional[datetime] = None
@@ -1807,6 +1813,48 @@ def _apply_openrouter_write_blocks(text: str, cwd: Path) -> list[str]:
     return modified_paths
 
 
+def resolve_call_ticket_id(req: AgentRequest) -> str | None:
+    """Ticket stamped on the request, else ``DARKFAC_TICKET_ID``. Absent stays null.
+
+    The prompt and the model text are not read.
+    """
+    from core.execution.providers import explicit_ticket_id
+
+    return explicit_ticket_id(req.ticket_id)
+
+
+def _finish_reason(response: Any) -> str | None:
+    metadata = getattr(response, "metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return None
+    finish = metadata.get("finish_reason")
+    if not isinstance(finish, str):
+        return None
+    text = finish.strip()
+    return text or None
+
+
+def _completion_tokens(response: Any) -> int | None:
+    raw = getattr(response, "tokens_completion", None)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _openrouter_truncated(response: Any) -> bool:
+    """Length stop or a completion at the paid ceiling, including a provider stamp."""
+    from core.execution.providers import completion_truncated
+
+    derived = completion_truncated(
+        finish_reason=_finish_reason(response),
+        completion_tokens=_completion_tokens(response),
+    )
+    return bool(getattr(response, "truncated", False)) or derived
+
+
 def _run_openrouter(req: AgentRequest) -> AgentResult:
     # OpenRouter gateway runner supporting read and write (via patch application) modes
     from core.execution.providers import OpenRouterModelProvider  # local import: keeps agent_cli import-light
@@ -1837,6 +1885,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             model=model,
             max_tokens=_OPENROUTER_MAX_TOKENS,
             reasoning=reasoning,
+            ticket_id=resolve_call_ticket_id(req),
         )
     except Exception as exc:  # network/auth/model errors all surface here
         duration = round(time.perf_counter() - start, 3)
@@ -1853,11 +1902,10 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     }
     cost_usd = response.measured_cost if response.is_measured else response.estimated_cost
     if not (response.text or "").strip():
-        truncated = (response.tokens_completion or 0) >= _OPENROUTER_MAX_TOKENS
         logger.warning(
             "openrouter empty content: model=%s completion_tokens=%s max_tokens=%s%s",
             model, response.tokens_completion, _OPENROUTER_MAX_TOKENS,
-            " (likely finish_reason=length: reasoning consumed the budget)" if truncated else "",
+            " (finish_reason=length or completion at the ceiling)" if _openrouter_truncated(response) else "",
         )
     if req.mode == "write":
         modified_files = _apply_openrouter_write_blocks(response.text or "", req.cwd)
@@ -1867,6 +1915,8 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     return AgentResult(
         ok=True, text=response.text or "", harness="openrouter", model=response.model,
         duration_s=duration, usage=usage, cost_usd=cost_usd,
+        finish_reason=_finish_reason(response),
+        truncated=_openrouter_truncated(response),
     )
 
 
@@ -1968,6 +2018,7 @@ def run_agent(req: AgentRequest) -> AgentResult:
                 latency_ms=round(res.duration_s * 1000, 1),
                 source=f"agent_cli.{harness}",
                 reasoning_effort=effort_name,
+                ticket_id=resolve_call_ticket_id(req),
             )
         )
     except Exception as exc:

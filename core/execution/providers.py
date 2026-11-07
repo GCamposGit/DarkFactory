@@ -25,6 +25,42 @@ from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 
 logger = logging.getLogger(__name__)
 
+# Paid OpenRouter handoffs cap the completion at this many tokens (USR-474).
+OPENROUTER_COMPLETION_CEILING = 4096
+
+
+def explicit_ticket_id(ticket_id: str | None) -> str | None:
+    """Ticket stamped on the call, else ``DARKFAC_TICKET_ID``. Blank stays null.
+
+    The prompt and the model text are not sources. Callers pass only an id
+    they already hold on the request or in that environment variable.
+    """
+    for candidate in (ticket_id, os.environ.get("DARKFAC_TICKET_ID")):
+        if not isinstance(candidate, str):
+            continue
+        text = candidate.strip()
+        if text:
+            return text
+    return None
+
+
+def completion_truncated(
+    *,
+    finish_reason: str | None,
+    completion_tokens: int | None,
+    ceiling: int = OPENROUTER_COMPLETION_CEILING,
+) -> bool:
+    """True when the provider stopped for length or the completion hit the ceiling."""
+    if isinstance(finish_reason, str) and finish_reason.strip().lower() == "length":
+        return True
+    if completion_tokens is None:
+        return False
+    try:
+        count = int(completion_tokens)
+    except (TypeError, ValueError):
+        return False
+    return count >= ceiling
+
 
 def get_openrouter_api_key() -> str | None:
     """Recovers OpenRouter API key from environment variable or Windows registry."""
@@ -54,6 +90,8 @@ class ProviderResponse:
     estimated_cost: float = 0.0
     is_measured: bool = True
     metadata: dict[str, str] | None = None
+    # Set when ``finish_reason`` is ``length`` or the completion hit the paid ceiling.
+    truncated: bool = False
 
 
 @runtime_checkable
@@ -378,6 +416,17 @@ class OllamaModelProvider:
             raise RuntimeError(f"Ollama generation failed: {exc}") from exc
 
 
+def _openrouter_metadata(choices: list[Any]) -> dict[str, str]:
+    """Backend tag plus ``finish_reason`` when the provider sent one."""
+    metadata = {"backend": "openrouter"}
+    if not choices or not isinstance(choices[0], dict):
+        return metadata
+    finish = choices[0].get("finish_reason")
+    if isinstance(finish, str) and finish.strip():
+        metadata["finish_reason"] = finish.strip()
+    return metadata
+
+
 def _resolve_openrouter_wire_model(model: str) -> str:
     """Resolve internal alias or registry entry to provider gateway wire id."""
     try:
@@ -386,6 +435,43 @@ def _resolve_openrouter_wire_model(model: str) -> str:
         return gateway_id(model)
     except Exception:
         return model
+
+
+def _openrouter_costs(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    unknown_cost_policy: UnknownCostPolicy,
+    provider_id: str,
+) -> tuple[float | None, float, bool]:
+    """Return measured cost, fallback estimate, and whether the cost was measured."""
+    cost_usd: float | None = None
+    try:
+        from core.benchmarks.fetcher import ensure_daily_benchmark
+
+        ledger = ensure_daily_benchmark()
+        model_entry = ledger.models.get(model)
+        if model_entry:
+            cost_usd = round(
+                (
+                    prompt_tokens * model_entry.input_cost_per_m
+                    + completion_tokens * model_entry.output_cost_per_m
+                )
+                / 1_000_000,
+                6,
+            )
+    except Exception:
+        pass
+
+    if cost_usd is not None:
+        return cost_usd, cost_usd, True
+    if unknown_cost_policy == UnknownCostPolicy.REJECT:
+        raise ValueError(
+            f"Provider {provider_id} returned unknown cost for model {model} and policy is REJECT."
+        )
+    multiplier = 1 if unknown_cost_policy == UnknownCostPolicy.ESTIMATE else 2.5
+    return None, round(total_tokens * 0.000002 * multiplier, 6), False
 
 
 class OpenRouterModelProvider:
@@ -420,6 +506,7 @@ class OpenRouterModelProvider:
         reasoning: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ProviderResponse:
+        ticket_id = explicit_ticket_id(ticket_id)
         key = self.api_key or get_openrouter_api_key()
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY não encontrada no ambiente ou registro.")
@@ -471,37 +558,14 @@ class OpenRouterModelProvider:
                 reasoning_tokens = comp_details.get("reasoning_tokens") or 0
                 processing_tokens = cached_tokens + reasoning_tokens
 
-                # Cost lookup in daily benchmarks catalog
-                cost_usd: float | None = None
-                try:
-                    from core.benchmarks.fetcher import ensure_daily_benchmark
-
-                    ledger = ensure_daily_benchmark()
-                    model_entry = ledger.models.get(model)
-                    if model_entry:
-                        cost_usd = round(
-                            (
-                                prompt_tokens * model_entry.input_cost_per_m
-                                + completion_tokens * model_entry.output_cost_per_m
-                            )
-                            / 1_000_000,
-                            6,
-                        )
-                except Exception:
-                    pass
-
-                is_measured = cost_usd is not None
-                if cost_usd is None:
-                    if unknown_cost_policy == UnknownCostPolicy.REJECT:
-                        raise ValueError(
-                            f"Provider {self.provider_id} returned unknown cost for model {model} and policy is REJECT."
-                        )
-                    elif unknown_cost_policy == UnknownCostPolicy.ESTIMATE:
-                        estimated_cost = round(total_tokens * 0.000002, 6)
-                    else:  # CONSERVATIVE_MAX
-                        estimated_cost = round(total_tokens * 0.000002 * 2.5, 6)
-                else:
-                    estimated_cost = cost_usd
+                cost_usd, estimated_cost, is_measured = _openrouter_costs(
+                    model,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    unknown_cost_policy,
+                    self.provider_id,
+                )
 
                 tier_val = infer_model_tier("openrouter", returned_model)
                 if self.usage_ledger is not None:
@@ -542,6 +606,7 @@ class OpenRouterModelProvider:
                         success=True,
                     )
 
+                metadata = _openrouter_metadata(choices)
                 return ProviderResponse(
                     text=response_text,
                     model=returned_model,
@@ -552,7 +617,11 @@ class OpenRouterModelProvider:
                     measured_cost=cost_usd,
                     estimated_cost=estimated_cost,
                     is_measured=is_measured,
-                    metadata={"backend": "openrouter"},
+                    metadata=metadata,
+                    truncated=completion_truncated(
+                        finish_reason=metadata.get("finish_reason"),
+                        completion_tokens=completion_tokens,
+                    ),
                 )
         except Exception as exc:
             latency = max(0.001, time.perf_counter() - start)

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from tests import _worker_capacity
+from tests import conftest
 
 pytestmark = [pytest.mark.offline]
 
@@ -99,6 +101,14 @@ def test_env_var_override_pytest_xdist_auto(monkeypatch: pytest.MonkeyPatch) -> 
         cpu_count=20,
     )
     assert cap == 4
+
+
+def test_xdist_auto_worker_override_respects_maxprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dynamic worker override must not bypass pytest's configured process ceiling."""
+    monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", "7")
+    config = SimpleNamespace(option=SimpleNamespace(maxprocesses=4))
+
+    assert conftest.pytest_xdist_auto_num_workers(config) == 4
 
 
 def test_mitigate_windows_wmi_startup() -> None:

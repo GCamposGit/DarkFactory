@@ -1,4 +1,4 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py -->
 # Motor da esteira
 
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
@@ -213,6 +213,14 @@ Uma falha de formato registra o harness como inelegível para a combinação atu
 independente já aplicados por `pick()`. Se não houver outra rota elegível, REVIEW aguarda a próxima rota;
 nenhum veredito é criado. Uma alteração no candidato ou na política descarta a exclusão anterior e exige
 uma nova revisão independente.
+
+### Payload verificável da revisão (USR-474 T1)
+
+`core.line.review_payload.build_review_payload` lê, sem rede e sem agente, o `SPEC.md`, os critérios de `tickets.json` (`acceptance`, `acceptance_criteria` ou `criteria`) e os bytes dos arquivos alterados dentro da worktree. Os arquivos entram em ordem de caminho, independente da ordem recebida. Cada item do manifesto traz o caminho relativo, o sha256 da fonte, os bytes incluídos depois de `redact_secrets` e se houve corte. A redação ocorre antes do corte. O limite por item e o total contam bytes UTF-8 e param num caractere inteiro. SPEC ou tickets ausentes, vazios, inválidos ou ilegíveis deixam `complete` falso e registram o motivo. Se o corte deixar a SPEC só com espaço em branco, o motivo é `spec_not_included`. Contexto vazio não sai pronto. Caminho absoluto, travessia para fora da árvore e duplicata não são lidos fora da raiz.
+
+### Revisão paga sem filesystem (USR-474 T2)
+
+O revisor com filesystem continua recebendo o diff integral no prompt e os mesmos bytes em `candidate.diff` na worktree. O OpenRouter não lê disco: `provider.generate` recebe no prompt os critérios, o trecho sanitizado e os sha256 do manifesto. A SPEC sanitizada entra uma vez; `review_context` deixa de repetir o `SPEC.md` cru nesse transporte. SPEC ou tickets ausentes, vazios ou ilegíveis devolvem `review_context_unavailable`, sem chamar o modelo e sem gravar `review_verdict.json` com approve. A revisão continua recusando a mesma família do implementador e não escreve nem apaga `validation.json`. O `ticket_id` do `generate` é o `run_id` quando ele é um ticket `USR-N`; senão vem de `DARKFAC_TICKET_ID`. Sem um desses dois, o evento de uso fica nulo. O texto do prompt e o corpo da resposta não são lidos para descobrir o ticket. A resposta normalizada guarda `finish_reason`, a contagem `completion_tokens` e `truncated`. `truncated` fica verdadeiro quando `finish_reason` é `length` ou quando `completion_tokens` chega a 4096. Esse caso devolve `review_output_truncated` e nunca aprova. Não trate uma resposta cortada como um veredito aproveitável; uma nova tentativa precisa receber saída completa.
 
 
 ## Planejamento

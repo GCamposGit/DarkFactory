@@ -370,6 +370,22 @@ def test_sanitized_env_drops_routing_operating_harness_and_onprem_backup_config(
     assert line_validate.sanitized_env(base) == {"PATH": "/usr/bin"}
 
 
+def test_runner_env_drops_checkout_redirects(line_validate) -> None:
+    base = {
+        "PATH": "/usr/bin",
+        "DARKFAC_PROJECT_ROOT": r"C:\dev\DarkFac",
+        "DARKFAC_STATE_ROOT": r"C:\dev\DarkFac\.factory",
+        "DARKFAC_HARNESS_STATE_DIR": r"C:\dev\DarkFac\.factory\runtime",
+        "DARKFAC_TEST_WORKERS": "http://w:8080",
+    }
+    env = line_validate.runner_env(base, platform="win32")
+    assert "DARKFAC_PROJECT_ROOT" not in env
+    assert "DARKFAC_STATE_ROOT" not in env
+    assert "DARKFAC_HARNESS_STATE_DIR" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env["DARKFAC_TEST_WORKERS"] == "http://w:8080"
+
+
 def test_runner_env_caps_xdist_workers_off_windows_unless_already_set(line_validate) -> None:
     base = {"PATH": "/usr/bin", "DARKFAC_TEST_WORKERS": "http://w:8080"}
     capped = line_validate.runner_env(base, platform="linux")

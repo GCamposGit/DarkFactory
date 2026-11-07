@@ -34,8 +34,17 @@ A tarefa Windows `DarkFac-Fleet-Dispatcher` mantém boot e reinício em falha; n
 esse serviço por inferência recorrente. Ao sair da recuperação, remover `--resume-only`
 da ação da tarefa e limpar `DARKFAC_FLEET_RESUME_ONLY` libera novamente a fila regular.
 
-Para uma recuperação que não termina em ociosidade, `--recovery-tickets ID1,ID2`
-executa a lista na ordem, uma correção por vez. Retomadas em execução têm precedência.
+Para uma recuperação que não termina em ociosidade, confira primeiro a interface aceita
+pela CLI e passe a lista como um único valor separado por vírgulas:
+
+```powershell
+python -m core.line.fleet_dispatcher --help
+python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"
+```
+
+O dispatcher executa os tickets nessa ordem, uma correção por vez. Não passe os IDs como
+argumentos posicionais separados: a validação de argumentos recusa a chamada com código 2
+antes de iniciar o ciclo. Retomadas em execução têm precedência.
 Quando todos os IDs estão completed/cancelled, a fila regular volta automaticamente.
 Esse argumento substitui o modo de espera exclusiva; não existe nova pausa a remover
 manualmente no final. Ticket ausente ou pendência material não contam como concluídos.
@@ -120,6 +129,31 @@ Get-Content C:\dev\DarkFac\.factory\runs\fleet_dispatcher_logs\fleet-dispatcher.
 ```
 
 Se `DARKFAC_FLEET_LOG_DIR` apontar a outra pasta, use-a no segundo comando.
+
+## Revisão OpenRouter e evidência de contexto (USR-474)
+
+O payload da revisão inclui a SPEC e os critérios de aceite do ticket, conteúdo real
+relevante da worktree dentro dos limites configurados e sanitizado, além de um manifesto
+com caminhos, tamanhos e hashes para verificar o material enviado. O OpenRouter não lê
+arquivos da worktree por ferramenta; a revisão só pode aprovar o contexto efetivamente
+transportado. Contexto ausente recusa a revisão como `review_context_unavailable`, e uma
+resposta truncada recusa como `review_output_truncated`.
+Somente uma resposta completa, com `truncated=false`, pode sustentar aprovação; saída
+truncada não é evidência de revisão concluída.
+
+O evento de uso atribui `ticket_id` a partir da requisição ou de `DARKFAC_TICKET_ID`
+para relacionar tokens e custo ao ticket. Se essa identidade não puder ser determinada, a
+atribuição fica ausente e deve ser tratada como lacuna de evidência, sem inferência a
+partir do prompt ou da resposta. A resposta normalizada preserva `finish_reason` e
+`completion_tokens`; `truncated` identifica `finish_reason` `length` ou uma conclusão
+de 4096 tokens.
+
+Para recuperação, `--recovery-tickets` aceita exatamente um argumento CSV, preservando a
+ordem e ignorando espaços e itens vazios. Confira sem iniciar a frota com
+`python -m core.line.fleet_dispatcher --help`; a forma válida é
+`python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"`.
+Passar `USR-1 USR-2` como tokens posicionais separados é erro de CLI (código 2) e é
+recusado antes de inicializar o dispatcher ou executar um ciclo.
 
 ## grokbox (systemd)
 

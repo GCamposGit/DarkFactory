@@ -12100,8 +12100,8 @@
     "project_id": "darkfac",
     "title": "Revisao OpenRouter deve receber SPEC e contexto verificavel no payload",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c5e85cde34850c9606086e6dd66d4bd0b73bf1c6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -12116,13 +12116,14 @@
     "acceptance_criteria": [
       "Payload inclui SPEC criterios e conteudo real relevante limitado e sanitizado, com manifests e hashes verificaveis; ausencia de contexto nao produz aprovacao silenciosa",
       "Teste comportamental consolidado comprova revisao com transporte sem filesystem e preserva familia independente e gate",
-      "Atualizar manual e learning pack; gate oficial revisao cruzada CI merge deploy smoke"
+      "Atualizar manual e learning pack; gate oficial revisao cruzada CI merge deploy smoke",
+      "Paid handoff attempt was truncated at4096 tokens; second script supplied recovery ticket arguments as separate positional tokens instead of one comma-separated value. Require complete output and validate launcher CLI before executing."
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-05T17:46:50.262125Z",
-    "updated_at": "2026-11-05T17:46:50.262125Z"
+    "updated_at": "2026-11-07T10:05:32.154681Z"
   },
   {
     "id": "USR-475",

@@ -88,6 +88,9 @@ falharia e o run terminaria em `validate_exhausted`. Por isso o projeto declara
   configuracao do container do worker que testes leem do ambiente
   (`DARKFAC_CODEX_SANDBOX_MODE`, `DARKFAC_MAX_CONCURRENT_SLOTS`, `DARKFAC_WORKSPACES`, `DATA_DIR`,
   `FACTORY_DIR`, `OLLAMA_BASE_URL`, `REMOTE_HARNESS_URL(S)`, `DARKFAC_OPENROUTER_CHEAP_MODEL`).
+  `runner_env()` ainda remove `DARKFAC_PROJECT_ROOT`, `DARKFAC_STATE_ROOT` e
+  `DARKFAC_HARNESS_STATE_DIR`, os mesmos redirecionamentos do portao isolado, para o runner
+  do snapshot nao voltar ao checkout compartilhado.
 
 Orcamento de tempo: cada comando de validate tem teto de 1800 s
 (`command_timeout_s`); os passos do harness somam 900 s (paralelo) + 300 s
