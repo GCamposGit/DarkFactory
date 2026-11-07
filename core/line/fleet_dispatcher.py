@@ -938,12 +938,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--resume-only", action="store_true",
                     default=os.environ.get("DARKFAC_FLEET_RESUME_ONLY") == "1",
                     help="Retoma esperas persistidas sem admitir novos BUILDs")
-    ap.add_argument("--recovery-tickets", metavar="ID1,ID2", default="",
+    ap.add_argument("--recovery-tickets", metavar="ID1,ID2", action="append", default=[],
                     help="Um unico valor CSV (IDs separados por virgulas); processa na ordem, uma correcao por vez")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
     ap.add_argument("unexpected_args", nargs="*", metavar="ARG",
                     help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    if len(args.recovery_tickets) > 1:
+        ap.error("informe --recovery-tickets uma unica vez com todos os IDs em um valor CSV")
     if args.unexpected_args:
         ap.error("argumentos posicionais inesperados; passe --recovery-tickets como um unico valor separado por virgulas")
     log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
@@ -951,7 +953,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
 
-    recovery = tuple(t.strip() for t in args.recovery_tickets.split(",") if t.strip())
+    recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
+    recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
     d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec, resume_only=args.resume_only and not recovery,
                                         recovery_tickets=recovery), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,

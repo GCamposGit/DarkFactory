@@ -411,6 +411,8 @@ def _output_truncated(result: AgentResult) -> bool:
     """OpenRouter output that hit the token ceiling or stopped for length."""
     if (result.harness or "").lower() != _PAID_REVIEW_HARNESS:
         return False
+    if result.truncated:
+        return True
     if (result.finish_reason or "").strip().lower() == "length":
         return True
     raw = (result.usage or {}).get("completion_tokens")

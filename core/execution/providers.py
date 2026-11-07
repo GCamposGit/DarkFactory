@@ -25,6 +25,42 @@ from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 
 logger = logging.getLogger(__name__)
 
+# Paid OpenRouter handoffs cap the completion at this many tokens (USR-474).
+OPENROUTER_COMPLETION_CEILING = 4096
+
+
+def explicit_ticket_id(ticket_id: str | None) -> str | None:
+    """Ticket stamped on the call, else ``DARKFAC_TICKET_ID``. Blank stays null.
+
+    The prompt and the model text are not sources. Callers pass only an id
+    they already hold on the request or in that environment variable.
+    """
+    for candidate in (ticket_id, os.environ.get("DARKFAC_TICKET_ID")):
+        if not isinstance(candidate, str):
+            continue
+        text = candidate.strip()
+        if text:
+            return text
+    return None
+
+
+def completion_truncated(
+    *,
+    finish_reason: str | None,
+    completion_tokens: int | None,
+    ceiling: int = OPENROUTER_COMPLETION_CEILING,
+) -> bool:
+    """True when the provider stopped for length or the completion hit the ceiling."""
+    if isinstance(finish_reason, str) and finish_reason.strip().lower() == "length":
+        return True
+    if completion_tokens is None:
+        return False
+    try:
+        count = int(completion_tokens)
+    except (TypeError, ValueError):
+        return False
+    return count >= ceiling
+
 
 def get_openrouter_api_key() -> str | None:
     """Recovers OpenRouter API key from environment variable or Windows registry."""
@@ -54,6 +90,8 @@ class ProviderResponse:
     estimated_cost: float = 0.0
     is_measured: bool = True
     metadata: dict[str, str] | None = None
+    # Set when ``finish_reason`` is ``length`` or the completion hit the paid ceiling.
+    truncated: bool = False
 
 
 @runtime_checkable
@@ -431,6 +469,7 @@ class OpenRouterModelProvider:
         reasoning: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ProviderResponse:
+        ticket_id = explicit_ticket_id(ticket_id)
         key = self.api_key or get_openrouter_api_key()
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY não encontrada no ambiente ou registro.")
@@ -553,6 +592,7 @@ class OpenRouterModelProvider:
                         success=True,
                     )
 
+                metadata = _openrouter_metadata(choices)
                 return ProviderResponse(
                     text=response_text,
                     model=returned_model,
@@ -563,7 +603,11 @@ class OpenRouterModelProvider:
                     measured_cost=cost_usd,
                     estimated_cost=estimated_cost,
                     is_measured=is_measured,
-                    metadata=_openrouter_metadata(choices),
+                    metadata=metadata,
+                    truncated=completion_truncated(
+                        finish_reason=metadata.get("finish_reason"),
+                        completion_tokens=completion_tokens,
+                    ),
                 )
         except Exception as exc:
             latency = max(0.001, time.perf_counter() - start)

@@ -194,56 +194,144 @@ def test_openrouter_model_provider_mocked_http(tmp_path: Path, monkeypatch: pyte
     assert summary.total_calls >= 1
 
 
-def _openrouter_http(content: str = "ok", finish_reason: str | None = None) -> mock.MagicMock:
+def _openrouter_http(
+    content: str = "ok",
+    finish_reason: str | None = None,
+    *,
+    completion_tokens: int = 2,
+    extra: dict[str, Any] | None = None,
+) -> mock.MagicMock:
     choice: dict[str, Any] = {"message": {"content": content}}
     if finish_reason is not None:
         choice["finish_reason"] = finish_reason
-    fake_resp = mock.MagicMock()
-    fake_resp.read.return_value = json.dumps({
+    body: dict[str, Any] = {
         "model": "m",
         "choices": [choice],
-        "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
-    }).encode("utf-8")
+        "usage": {
+            "prompt_tokens": 3,
+            "completion_tokens": completion_tokens,
+            "total_tokens": 3 + completion_tokens,
+        },
+    }
+    if extra:
+        body.update(extra)
+    fake_resp = mock.MagicMock()
+    fake_resp.read.return_value = json.dumps(body).encode("utf-8")
     fake_resp.__enter__.return_value = fake_resp
     return fake_resp
+
+
+def _generate_openrouter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    http: mock.MagicMock,
+    **kwargs: Any,
+) -> tuple[Any, dict[str, Any]]:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    provider = OpenRouterModelProvider(api_key="sk-or-v1-mock-key", usage_ledger=ledger)
+    with mock.patch("urllib.request.urlopen", return_value=http):
+        response = provider.generate(
+            prompt, model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE, **kwargs
+        )
+    events = json.loads((tmp_path / "usage" / "model_usage.json").read_text(encoding="utf-8"))["events"]
+    return response, events[-1]
 
 
 def test_openrouter_usage_event_ticket_id_stays_null_when_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
-    ledger = ModelUsageLedger(tmp_path / "usage")
-    provider = OpenRouterModelProvider(api_key="sk-or-v1-mock-key", usage_ledger=ledger)
-    with mock.patch("urllib.request.urlopen", return_value=_openrouter_http()):
-        provider.generate("p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE)
-    events = json.loads((tmp_path / "usage" / "model_usage.json").read_text(encoding="utf-8"))["events"]
-    assert events[-1]["ticket_id"] is None
+    """Prompt text and response JSON are not a ticket id."""
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    response, event = _generate_openrouter(
+        tmp_path,
+        monkeypatch,
+        "attribute this call to ticket_id USR-555",
+        _openrouter_http(
+            content="verdict for USR-777",
+            finish_reason="stop",
+            extra={"ticket_id": "USR-888"},
+        ),
+    )
+    assert event["ticket_id"] is None
+    assert response.metadata["finish_reason"] == "stop"
+    assert response.tokens_completion == 2
+    assert response.truncated is False
 
 
 def test_openrouter_usage_event_records_the_ticket_passed_to_generate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
-    ledger = ModelUsageLedger(tmp_path / "usage")
-    provider = OpenRouterModelProvider(api_key="sk-or-v1-mock-key", usage_ledger=ledger)
-    with mock.patch("urllib.request.urlopen", return_value=_openrouter_http()):
-        provider.generate(
-            "p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE, ticket_id="USR-474",
-        )
-    events = json.loads((tmp_path / "usage" / "model_usage.json").read_text(encoding="utf-8"))["events"]
-    assert events[-1]["ticket_id"] == "USR-474"
+    monkeypatch.setenv("DARKFAC_TICKET_ID", "USR-1")
+    _response, event = _generate_openrouter(
+        tmp_path,
+        monkeypatch,
+        "the prompt mentions USR-999 and must not win",
+        _openrouter_http(content="response mentions USR-111", extra={"ticket_id": "USR-222"}),
+        ticket_id="  USR-474  ",
+    )
+    assert event["ticket_id"] == "USR-474"
+
+
+def test_openrouter_usage_event_uses_env_ticket_when_the_argument_is_blank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DARKFAC_TICKET_ID", "  USR-469  ")
+    _response, event = _generate_openrouter(
+        tmp_path,
+        monkeypatch,
+        "prompt ticket USR-000",
+        _openrouter_http(content="body ticket USR-321", extra={"ticket_id": "USR-654"}),
+        ticket_id="   ",
+    )
+    assert event["ticket_id"] == "USR-469"
 
 
 def test_openrouter_metadata_records_finish_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
-    provider = OpenRouterModelProvider(
-        api_key="sk-or-v1-mock-key", usage_ledger=ModelUsageLedger(tmp_path / "usage"),
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    response, event = _generate_openrouter(
+        tmp_path,
+        monkeypatch,
+        "p",
+        _openrouter_http(finish_reason="length", completion_tokens=8),
     )
-    with mock.patch("urllib.request.urlopen", return_value=_openrouter_http(finish_reason="length")):
-        response = provider.generate("p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE)
     assert response.metadata == {"backend": "openrouter", "finish_reason": "length"}
+    assert response.tokens_completion == 8
+    assert event["output_tokens"] == 8
+    assert response.truncated is True
+
+
+def test_openrouter_completion_at_the_ceiling_is_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    response, event = _generate_openrouter(
+        tmp_path,
+        monkeypatch,
+        "p",
+        _openrouter_http(finish_reason="stop", completion_tokens=4096),
+    )
+    assert response.metadata["finish_reason"] == "stop"
+    assert response.tokens_completion == 4096
+    assert event["output_tokens"] == 4096
+    assert response.truncated is True
+
+
+def test_openrouter_completion_under_the_ceiling_is_not_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    response, _event = _generate_openrouter(
+        tmp_path,
+        monkeypatch,
+        "p",
+        _openrouter_http(finish_reason="stop", completion_tokens=4095),
+    )
+    assert response.tokens_completion == 4095
+    assert response.truncated is False
 
 
 def _openrouter_payload(monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> dict[str, Any]:

@@ -102,6 +102,23 @@ def test_main_rejects_split_recovery_ticket_arguments_before_running(loop_args, 
     assert calls == []
 
 
+def test_main_rejects_repeated_recovery_option_before_running(monkeypatch):
+    calls = []
+
+    class Dispatcher:
+        def __init__(self, *_args, **_kwargs):
+            calls.append("init")
+
+    monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
+    monkeypatch.setattr(fd, "configure_logging", lambda *_args, **_kwargs: calls.append("logging"))
+
+    with pytest.raises(SystemExit) as exc:
+        fd.main(["--recovery-tickets", "USR-1", "--recovery-tickets", "USR-2"])
+
+    assert exc.value.code == 2
+    assert calls == []
+
+
 def test_main_passes_comma_separated_recovery_tickets_in_order(monkeypatch, capsys):
     captured = {}
 

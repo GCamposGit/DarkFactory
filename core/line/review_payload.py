@@ -46,6 +46,7 @@ REASON_SPEC_NOT_INCLUDED = "spec_not_included"
 REASON_TICKETS_MISSING = "tickets_missing"
 REASON_TICKETS_UNREADABLE = "tickets_unreadable"
 REASON_TICKETS_EMPTY = "tickets_empty"
+REASON_TICKETS_NOT_INCLUDED = "tickets_not_included"
 REASON_CHANGED_UNREADABLE = "changed_file_unreadable"
 REASON_CHANGED_OUTSIDE = "changed_file_outside_root"
 
@@ -57,6 +58,7 @@ _CONTEXT_BLOCKERS = frozenset({
     REASON_TICKETS_MISSING,
     REASON_TICKETS_UNREADABLE,
     REASON_TICKETS_EMPTY,
+    REASON_TICKETS_NOT_INCLUDED,
 })
 
 _CRITERIA_KEYS = ("acceptance", "acceptance_criteria", "criteria")
@@ -332,16 +334,40 @@ def _load_tickets(
     if parse_problem:
         reasons.append(parse_problem)
         criteria = []
-    if not _add(slices, manifest, _slice_raw(CONTEXT_TICKETS_PATH, raw, budget)):
+    ticket_piece = _slice_raw(CONTEXT_TICKETS_PATH, raw, budget)
+    if not _add(slices, manifest, ticket_piece):
         if REASON_TICKETS_UNREADABLE not in reasons:
             reasons.append(REASON_TICKETS_UNREADABLE)
         return ()
-    return tuple(criteria)
+    if (
+        ticket_piece is None
+        or not ticket_piece[0].text.strip()
+        or ticket_piece[1].truncated
+    ):
+        reasons.append(REASON_TICKETS_NOT_INCLUDED)
+
+    included_criteria: list[str] = []
+    for criterion in criteria:
+        included, _size, truncated = budget.clip(redact_secrets(criterion))
+        if not included.strip() or truncated:
+            reasons.append(REASON_TICKETS_NOT_INCLUDED)
+            continue
+        included_criteria.append(included)
+    if criteria and len(included_criteria) != len(criteria):
+        # No partial acceptance list can silently stand in for the ticket's criteria.
+        included_criteria = []
+    if not included_criteria and REASON_TICKETS_NOT_INCLUDED not in reasons:
+        reasons.append(REASON_TICKETS_NOT_INCLUDED)
+    return tuple(included_criteria)
 
 
 def _locate(root: Path, raw_path: str) -> tuple[Path | None, str]:
     cleaned = _reason_path(raw_path)
     if not cleaned or cleaned.startswith("/") or ":" in cleaned:
+        return None, cleaned
+    # Reject traversal syntax even when normalization would happen to land back
+    # inside the tree. Review inputs are repo-relative paths, never path programs.
+    if ".." in cleaned.split("/"):
         return None, cleaned
     try:
         resolved = (root / cleaned).resolve()

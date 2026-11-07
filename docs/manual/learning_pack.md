@@ -30,7 +30,7 @@ falhas não interrompem a sondagem nem o launcher.
 
 ## Aprendizado da entrega USR-474 T2
 
-O OpenRouter não abre arquivo. A revisão paga só vale se o prompt do `generate` já trouxer os critérios, o trecho sanitizado e os hashes do manifesto. A SPEC sanitizada aparece uma vez. Sem SPEC ou sem tickets, a esteira devolve `review_context_unavailable` e não chama o modelo. A resposta precisa estar completa: saída no teto de 4096 tokens ou `finish_reason` `length` devolve `review_output_truncated` e não aprova. O `ticket_id` sai do `run_id` quando ele é o ticket, ou de `DARKFAC_TICKET_ID`; sem id o evento continua nulo e a revisão segue. Família independente e `validation.json` ficam como estavam. Quem tem filesystem continua com o diff integral e o `candidate.diff`.
+O OpenRouter não abre arquivo. A revisão paga só vale se o prompt do `generate` já trouxer os critérios, o trecho sanitizado e os hashes do manifesto. A SPEC sanitizada aparece uma vez. Sem SPEC ou sem tickets, a esteira devolve `review_context_unavailable` e não chama o modelo. A resposta precisa estar completa: saída no teto de 4096 tokens ou `finish_reason` `length` devolve `review_output_truncated` e não aprova. O `ticket_id` sai do `run_id` quando ele é o ticket, ou de `DARKFAC_TICKET_ID`; sem id o evento continua nulo. Prompt e resposta não viram identidade. A resposta normalizada guarda `finish_reason`, `completion_tokens` e `truncated`. Família independente e `validation.json` ficam como estavam. Quem tem filesystem continua com o diff integral e o `candidate.diff`.
 
 ## Aprendizado da entrega USR-474 T4
 

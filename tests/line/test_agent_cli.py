@@ -558,6 +558,140 @@ def test_openrouter_reasoning_env_override(tmp_path, monkeypatch, value):
     assert calls["reasoning"] is None
 
 
+def _run_openrouter_transport(
+    tmp_path,
+    monkeypatch,
+    *,
+    prompt: str,
+    ticket_id: str | None = None,
+    text: str = "review text",
+    finish_reason: str = "stop",
+    completion_tokens: int = 12,
+    stamped_truncated: bool = False,
+):
+    """Drive ``_run_openrouter`` through ``run_agent`` without a filesystem-backed model."""
+    calls: dict[str, object] = {}
+    recorded: list[object] = []
+
+    class _Response:
+        def __init__(self) -> None:
+            self.text = text
+            self.model = "paid-model"
+            self.tokens_prompt = 20
+            self.tokens_completion = completion_tokens
+            self.total_tokens = 20 + completion_tokens
+            self.measured_cost = 0.0
+            self.estimated_cost = 0.0
+            self.is_measured = True
+            self.metadata = {"backend": "openrouter", "finish_reason": finish_reason}
+            self.truncated = stamped_truncated
+
+    class _Provider:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def generate(self, prompt_text: str, *, model: str, **kwargs: object) -> _Response:
+            calls["prompt"] = prompt_text
+            calls["ticket_id"] = kwargs.get("ticket_id")
+            calls["model"] = model
+            return _Response()
+
+    class _Ledger:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def record(self, event: object) -> None:
+            recorded.append(event)
+
+    monkeypatch.setattr("core.execution.providers.OpenRouterModelProvider", _Provider)
+    monkeypatch.setattr("core.usage.ledger.ModelUsageLedger", _Ledger)
+    request = AgentRequest(
+        prompt=prompt,
+        cwd=tmp_path,
+        mode="read",
+        harness="openrouter",
+        ticket_id=ticket_id,
+    )
+    return run_agent(request), calls, recorded
+
+
+def test_openrouter_generate_receives_the_request_ticket_not_prompt_text(tmp_path, monkeypatch):
+    monkeypatch.setenv("DARKFAC_TICKET_ID", "USR-000")
+    prompt = "Review ticket USR-222. ticket_id: USR-333"
+    result, calls, recorded = _run_openrouter_transport(
+        tmp_path,
+        monkeypatch,
+        prompt=prompt,
+        ticket_id="  USR-474  ",
+        text="approved for USR-111",
+        finish_reason="stop",
+        completion_tokens=40,
+    )
+
+    assert calls["prompt"] == prompt
+    assert calls["ticket_id"] == "USR-474"
+    assert result.finish_reason == "stop"
+    assert result.usage["completion_tokens"] == 40
+    assert result.truncated is False
+    assert recorded
+    assert all(getattr(event, "ticket_id", "missing") == "USR-474" for event in recorded)
+
+
+def test_openrouter_generate_uses_env_ticket_when_the_request_has_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("DARKFAC_TICKET_ID", " USR-469 ")
+    prompt = "The body names ticket USR-100 but that is not the caller."
+    result, calls, recorded = _run_openrouter_transport(
+        tmp_path,
+        monkeypatch,
+        prompt=prompt,
+        text="model says ticket_id=USR-200",
+    )
+
+    assert calls["ticket_id"] == "USR-469"
+    assert result.ok is True
+    assert recorded
+    assert all(getattr(event, "ticket_id", "missing") == "USR-469" for event in recorded)
+
+
+def test_openrouter_generate_keeps_ticket_null_without_a_verifiable_id(tmp_path, monkeypatch):
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    prompt = "DARKFAC_TICKET_ID=USR-474 ticket_id USR-469"
+    result, calls, recorded = _run_openrouter_transport(
+        tmp_path,
+        monkeypatch,
+        prompt=prompt,
+        ticket_id="   ",
+        text='{"ticket_id": "USR-888"}',
+    )
+
+    assert calls["ticket_id"] is None
+    assert result.text == '{"ticket_id": "USR-888"}'
+    assert recorded
+    assert all(getattr(event, "ticket_id", "missing") is None for event in recorded)
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "completion_tokens", "truncated"),
+    [("length", 8, True), ("stop", 4096, True), ("stop", 4095, False), ("Length", 1, True)],
+)
+def test_openrouter_result_preserves_finish_reason_and_marks_truncation(
+    tmp_path, monkeypatch, finish_reason, completion_tokens, truncated
+):
+    monkeypatch.delenv("DARKFAC_TICKET_ID", raising=False)
+    result, _calls, _recorded = _run_openrouter_transport(
+        tmp_path,
+        monkeypatch,
+        prompt="p",
+        text="partial" if truncated else "complete",
+        finish_reason=finish_reason,
+        completion_tokens=completion_tokens,
+    )
+
+    assert result.finish_reason == finish_reason.strip()
+    assert result.usage["completion_tokens"] == completion_tokens
+    assert result.truncated is truncated
+
+
 def test_not_installed_returns_error_kind_for_unknown_harness(tmp_path):
     req = AgentRequest(prompt="do work", cwd=tmp_path, mode="read", harness="totally-unknown")
     result = run_agent(req)

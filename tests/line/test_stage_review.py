@@ -858,6 +858,7 @@ def _install_paid_transport(
     *,
     completion: int = 12,
     finish: str = "stop",
+    truncated: bool = False,
     text: str = _APPROVE_TEXT,
 ) -> dict[str, object]:
     """Fake OpenRouter transport. While ``generate`` runs it cannot read the disk."""
@@ -886,6 +887,7 @@ def _install_paid_transport(
             self.measured_cost = 0.0
             self.estimated_cost = 0.0
             self.is_measured = True
+            self.truncated = truncated
             self.metadata = {"backend": "openrouter", "finish_reason": finish}
 
     class _Transport:
@@ -1016,11 +1018,15 @@ def test_openrouter_review_without_ticket_id_keeps_a_null_event_and_continues(
 
 
 @pytest.mark.parametrize(
-    ("completion", "finish"),
-    [(4096, "stop"), (8, "length")],
+    ("completion", "finish", "truncated"),
+    [(4096, "stop", False), (8, "length", False), (12, "stop", True)],
 )
 def test_truncated_openrouter_review_does_not_approve(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completion: int, finish: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    completion: int,
+    finish: str,
+    truncated: bool,
 ) -> None:
     project, ws = _review_tree(
         tmp_path, monkeypatch, "USR-470",
@@ -1030,7 +1036,9 @@ def test_truncated_openrouter_review_does_not_approve(
     )
     ctx = ws_mod.context_dir(ws)
     validation = (ctx / "validation.json").read_bytes()
-    captured = _install_paid_transport(monkeypatch, completion=completion, finish=finish)
+    captured = _install_paid_transport(
+        monkeypatch, completion=completion, finish=finish, truncated=truncated,
+    )
 
     result = _paid_stage(tmp_path, _paid_model()).run(project, "USR-470")
 
@@ -1040,6 +1048,35 @@ def test_truncated_openrouter_review_does_not_approve(
     assert not (ctx / "review_verdict.json").exists()
     state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8")) if (ctx / "review_state.json").is_file() else {"rounds": []}
     assert not any(item.get("verdict") == "approve" for item in state.get("rounds", []))
+    assert (ctx / "validation.json").read_bytes() == validation
+
+
+def test_truncated_openrouter_review_can_only_approve_after_a_complete_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "USR-474",
+        spec=f"{_SPEC_SENTENCE}\n",
+        tickets=json.dumps([{"id": "T1", "acceptance": [_CRITERION]}]),
+        source=f"{_FILE_MARKER} = 1\n",
+    )
+    ctx = ws_mod.context_dir(ws)
+    validation = (ctx / "validation.json").read_bytes()
+    stage = _paid_stage(tmp_path, _paid_model())
+
+    first = _install_paid_transport(monkeypatch, truncated=True)
+    failed = stage.run(project, "USR-474")
+
+    assert failed.outcome == "failed"
+    assert failed.cause_code == "review_output_truncated"
+    assert not (ctx / "review_verdict.json").exists()
+
+    second = _install_paid_transport(monkeypatch, truncated=False)
+    retried = stage.run(project, "USR-474")
+
+    assert retried.outcome == "success"
+    assert first["calls"] == second["calls"] == 1
+    assert (ctx / "review_verdict.json").is_file()
     assert (ctx / "validation.json").read_bytes() == validation
 
 

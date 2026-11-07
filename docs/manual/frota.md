@@ -138,11 +138,15 @@ com caminhos, tamanhos e hashes para verificar o material enviado. O OpenRouter 
 arquivos da worktree por ferramenta; a revisão só pode aprovar o contexto efetivamente
 transportado. Contexto ausente recusa a revisão como `review_context_unavailable`, e uma
 resposta truncada recusa como `review_output_truncated`.
+Somente uma resposta completa, com `truncated=false`, pode sustentar aprovação; saída
+truncada não é evidência de revisão concluída.
 
-O evento de uso atribui `ticket_id` a partir do contexto da execução/requisição para
-relacionar tokens e custo ao ticket. Se essa identidade não puder ser determinada, a
+O evento de uso atribui `ticket_id` a partir da requisição ou de `DARKFAC_TICKET_ID`
+para relacionar tokens e custo ao ticket. Se essa identidade não puder ser determinada, a
 atribuição fica ausente e deve ser tratada como lacuna de evidência, sem inferência a
-partir de conteúdo textual.
+partir do prompt ou da resposta. A resposta normalizada preserva `finish_reason` e
+`completion_tokens`; `truncated` identifica `finish_reason` `length` ou uma conclusão
+de 4096 tokens.
 
 Para recuperação, `--recovery-tickets` aceita exatamente um argumento CSV, preservando a
 ordem e ignorando espaços e itens vazios. Confira sem iniciar a frota com

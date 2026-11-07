@@ -192,6 +192,8 @@ class AgentResult(BaseModel):
     usage: Optional[dict[str, Any]] = None
     # OpenRouter ``finish_reason``. ``length`` means the completion hit the token cap.
     finish_reason: Optional[str] = None
+    # True when that reason is ``length`` or ``completion_tokens`` reached the paid ceiling.
+    truncated: bool = False
     cost_usd: Optional[float] = None
     error_kind: ErrorKind = None
     reset_at: Optional[datetime] = None
@@ -1812,11 +1814,13 @@ def _apply_openrouter_write_blocks(text: str, cwd: Path) -> list[str]:
 
 
 def resolve_call_ticket_id(req: AgentRequest) -> str | None:
-    """Ticket stamped on the request, else ``DARKFAC_TICKET_ID``. Absent stays null."""
-    direct = (req.ticket_id or "").strip()
-    if direct:
-        return direct
-    return os.environ.get("DARKFAC_TICKET_ID", "").strip() or None
+    """Ticket stamped on the request, else ``DARKFAC_TICKET_ID``. Absent stays null.
+
+    The prompt and the model text are not read.
+    """
+    from core.execution.providers import explicit_ticket_id
+
+    return explicit_ticket_id(req.ticket_id)
 
 
 def _finish_reason(response: Any) -> str | None:
@@ -1828,6 +1832,27 @@ def _finish_reason(response: Any) -> str | None:
         return None
     text = finish.strip()
     return text or None
+
+
+def _completion_tokens(response: Any) -> int | None:
+    raw = getattr(response, "tokens_completion", None)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _openrouter_truncated(response: Any) -> bool:
+    """Length stop or a completion at the paid ceiling, including a provider stamp."""
+    from core.execution.providers import completion_truncated
+
+    derived = completion_truncated(
+        finish_reason=_finish_reason(response),
+        completion_tokens=_completion_tokens(response),
+    )
+    return bool(getattr(response, "truncated", False)) or derived
 
 
 def _run_openrouter(req: AgentRequest) -> AgentResult:
@@ -1877,11 +1902,10 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     }
     cost_usd = response.measured_cost if response.is_measured else response.estimated_cost
     if not (response.text or "").strip():
-        truncated = (response.tokens_completion or 0) >= _OPENROUTER_MAX_TOKENS
         logger.warning(
             "openrouter empty content: model=%s completion_tokens=%s max_tokens=%s%s",
             model, response.tokens_completion, _OPENROUTER_MAX_TOKENS,
-            " (likely finish_reason=length: reasoning consumed the budget)" if truncated else "",
+            " (finish_reason=length or completion at the ceiling)" if _openrouter_truncated(response) else "",
         )
     if req.mode == "write":
         modified_files = _apply_openrouter_write_blocks(response.text or "", req.cwd)
@@ -1892,6 +1916,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
         ok=True, text=response.text or "", harness="openrouter", model=response.model,
         duration_s=duration, usage=usage, cost_usd=cost_usd,
         finish_reason=_finish_reason(response),
+        truncated=_openrouter_truncated(response),
     )
 
 
