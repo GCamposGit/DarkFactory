@@ -54,7 +54,9 @@ traceback.
 #### Modo degradado: estado gravável por identidade (USR-463 T2)
 
 `resolve_state_dir()` é o contrato que `SuiteLock.acquire()` usa para escolher
-onde gravar o lock. Ele nunca levanta `SuiteLockUnwritable`:
+onde gravar o lock. Uma falha de permissão no diretório canônico leva ao
+fallback por identidade; se o próprio arquivo de lock do fallback também não
+for gravável, a função levanta `SuiteLockUnwritable` estruturado:
 
 - Verifica a permissão de escrita tocando o artefato exato que uma aquisição
   real tocaria primeiro (`<diretório-canônico>/suite-0.lock`), não apenas
@@ -73,6 +75,10 @@ onde gravar o lock. Ele nunca levanta `SuiteLockUnwritable`:
   irmãos preexistentes não são), senão
   `tempfile.gettempdir()/darkfac-harness-<usuário>` -- com `degraded=True` e
   `reason` explicando o motivo da degradação.
+- O fallback também é sondado tocando `suite-0.lock`. Se ele já contiver um
+  arquivo sem escrita para esta identidade, a resolução falha com
+  `SuiteLockUnwritable` apontando esse arquivo; não deixa um `PermissionError`
+  cru escapar na tentativa posterior de abrir o lock.
 
 `SuiteLock.acquire()` em modo degradado:
 

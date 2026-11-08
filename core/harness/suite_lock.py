@@ -205,9 +205,10 @@ def resolve_state_dir() -> StateDirResolution:
     """Canonical state directory, or a writable per-identity fallback (USR-463).
 
     Always creates and returns a directory this identity can write to.
-    Raises nothing for a permission problem -- that is exactly the condition
-    this function exists to route around; callers get ``degraded=True`` and a
-    ``reason`` instead of an exception.
+    A permission problem in the canonical directory switches to a per-identity
+    fallback. If that fallback is also unwritable, raise
+    ``SuiteLockUnwritable`` rather than leaking a raw ``PermissionError`` from
+    the later lock-file open.
     """
 
     canonical = _canonical_state_dir_path()
@@ -215,8 +216,17 @@ def resolve_state_dir() -> StateDirResolution:
         _probe_writable(canonical)
     except PermissionError as exc:
         fallback = _fallback_state_dir()
-        fallback.mkdir(parents=True, exist_ok=True)
         reason = f"sem permissao de escrita em {canonical / 'suite-0.lock'}: {exc}"
+        try:
+            # Probe the actual artifact used by acquisition. Creating the
+            # fallback directory alone is insufficient when a previous run
+            # left a lock file with a restrictive per-file ACL.
+            _probe_writable(fallback)
+        except PermissionError as fallback_exc:
+            raise SuiteLockUnwritable(
+                fallback / "suite-0.lock",
+                f"fallback for {canonical / 'suite-0.lock'} is also unwritable: {fallback_exc}",
+            ) from fallback_exc
         return StateDirResolution(path=fallback, degraded=True, reason=reason)
     return StateDirResolution(path=canonical, degraded=False, reason=None)
 

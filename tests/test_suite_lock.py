@@ -227,7 +227,7 @@ def test_resolve_state_dir_falls_back_per_identity_when_canonical_lock_unwritabl
     real_touch = Path.touch
 
     def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock":
+        if self.name == "suite-0.lock" and self.parent == canonical:
             raise PermissionError(13, "Permission denied")
         return real_touch(self, *args, **kwargs)
 
@@ -255,7 +255,7 @@ def test_resolve_state_dir_fallback_rooted_at_configured_state_dir(
     real_touch = Path.touch
 
     def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock":
+        if self.name == "suite-0.lock" and self.parent == canonical:
             raise PermissionError(13, "Permission denied")
         return real_touch(self, *args, **kwargs)
 
@@ -264,6 +264,37 @@ def test_resolve_state_dir_fallback_rooted_at_configured_state_dir(
     resolution = suite_lock.resolve_state_dir()
     assert resolution.degraded is True
     assert resolution.path.parent == canonical
+
+
+def test_resolve_state_dir_reports_unwritable_fallback_as_structured_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fallback lock file can also carry a restrictive per-file ACL.
+
+    Resolution must fail with the lock API's structured exception instead of
+    allowing the later ``_try_lock_file`` call to leak ``PermissionError``.
+    """
+
+    canonical = tmp_path / "state"
+    fallback = canonical / "darkfac-harness-sandboxed-user"
+    canonical.mkdir(parents=True)
+    fallback.mkdir()
+    monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(canonical))
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+
+    real_touch = Path.touch
+
+    def _deny_state_lock_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock" and self.parent in (canonical, fallback):
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _deny_state_lock_touch)
+
+    with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
+        suite_lock.resolve_state_dir()
+
+    assert excinfo.value.path == fallback / "suite-0.lock"
 
 
 def test_acquire_stays_on_canonical_dir_with_no_warning_when_writable(
