@@ -91,6 +91,15 @@ O monitoramento da fabrica opera de forma agnostica e centralizada em `core/line
 O roteador valida as capacidades com `agent_cli.supports(harness, mode)` antes de ranquear candidatos para o estagio `development`. Com `operating_harness=antigravity` em sessao interativa (fora do modo headless), o Antigravity declara capacidade de escrita para desenvolvimento no chat, viabilizando sua eleicao quando a cota estiver saudavel acima do piso de 15%. Em execucao headless, na frota ou com outro operador, Antigravity permanece estritamente somente-leitura.
 
 Na recuperacao USR-452, uma falha real de teste com contagem no HARNESS_RESULT nao e tratada como worker indisponivel por conter essa mensagem no traceback. O launcher corrige o candidato antes de repetir o portao; nao chama o owner para resolver essa classificacao tecnica.
+
+## Diagnostico de holds por ticket (USR-484)
+
+`python -m core.ops.briefing` inclui holds duraveis por ticket com a causa e a
+quantidade de ocorrencias. Um hold de falha repetida fica restrito ao candidato
+afetado; digest novo de candidato ou contexto o libera. O briefing tambem continua
+mostrando o estado da recuperacao global separadamente, para distinguir um ticket
+retido de uma frota em recuperacao serial.
+
 ## Recuperacao de CI sem repetir BUILD (USR-473)
 
 CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
