@@ -113,3 +113,5 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 06/11/2026: USR-477 corrige retomada de deploy sem report e registra falhas; rota paga independente usa sonnet, respeitando tetos e registro. Candidato em validacao, sem declarar producao.
 
 - 06/11/2026: USR-452 entregue em producao no SHA11366cac48e4cbb5f991ce112c71dc9bcd42f89d, PR826, CI42252777189. Backup snp3t_darkfac_20261106_163829_2ee471 restaurado com sucesso. USR-479 fecha cooldown e prova de retomada do corretivo integrado.
+
+- 08/11/2026: USR-484, corre??o dos quatro bloqueios da revis?o: causa oficial precede cauda; recovery tenta pr?ximos tickets; hold observa HEADs reais; retomada exige v?nculo HEAD/artefatos e status leg?vel. Altera??es locais, sem commit, push ou merge.

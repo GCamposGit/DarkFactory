@@ -2145,6 +2145,8 @@ def _deliver_sync(
         if not as_json:
             print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
         current_sha = git_mgr.get_current_sha(target_worktree)
+    if not external_project:
+        _record_build_binding(ticket, target_worktree, current_sha)
     return False, current_sha
 
 
@@ -3539,20 +3541,17 @@ def _can_resume_invalid_review(
 
 
 def _can_resume_built_candidate(ticket: UserTicket, workspace: TicketWorkspace) -> bool:
-    """USR-484: a clean preserved worktree with commits and valid PLAN/RESEARCH/BUILD goes straight to delivery.
-
-    Only the demand ledger row may differ from HEAD. Any other dirty path, no commit beyond the base or a
-    missing/invalid stage artifact keeps the normal PLAN and BUILD path.
-    """
+    """Resume only a clean candidate bound to the exact HEAD and stage artifact hashes."""
     if ticket.project_id != "darkfac":
         return False
-    from core.git.autonomy import GitAutonomyManager, _run_git
+    from core.git.autonomy import _run_git
 
-    try:
-        if [p for p in GitAutonomyManager(workspace.main_root).changed_paths(workspace.path) if p != LEDGER_RELATIVE]:
-            return False
-    except Exception as exc:  # an unreadable status is no proof of a clean candidate
-        logger.warning("Could not inspect %s: %s", workspace.path, exc)
+    status = _run_git(["status", "--porcelain", "-z"], cwd=workspace.path)
+    if status.returncode != 0:
+        return False
+    from core.git.ticket_workspace import _status_paths
+
+    if any(p != LEDGER_RELATIVE for p in _status_paths(status.stdout or "")):
         return False
     ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
     if ahead.returncode != 0 or not (ahead.stdout or "").strip().isdigit() or int(ahead.stdout.strip()) < 1:
@@ -3563,7 +3562,36 @@ def _can_resume_built_candidate(ticket: UserTicket, workspace: TicketWorkspace) 
             require_artifact(stage, rws)
     except StageArtifactMissing:
         return False
-    return True
+    try:
+        from core.line import workspace as line_workspace
+
+        binding = json.loads((line_workspace.context_dir(rws) / "build_binding.json").read_text(encoding="utf-8"))
+        head = _run_git(["rev-parse", "HEAD"], cwd=workspace.path)
+        return (head.returncode == 0 and binding == _build_binding(rws, head.stdout.strip()))
+    except (OSError, ValueError):
+        return False
+
+
+def _build_binding(rws: Any, head: str) -> dict[str, Any]:
+    import hashlib
+    from core.line import workspace as line_workspace
+
+    context = line_workspace.context_dir(rws)
+    files = ("SPEC.md", "tickets.json", "research.json", "progress.json")
+    return {"head": head, "artifacts": {
+        name: hashlib.sha256((context / name).read_bytes()).hexdigest() for name in files
+    }}
+
+
+def _record_build_binding(ticket: UserTicket, path: Path, head: str) -> None:
+    from core.line import workspace as line_workspace
+
+    rws = ticket_engine.run_workspace(ticket)
+    try:
+        binding = _build_binding(rws, head)
+        line_workspace.write_context(rws, "build_binding.json", json.dumps(binding))
+    except OSError as exc:
+        logger.warning("Build binding unavailable for %s: %s", path, exc)
 
 
 def _resumed_build_result(ticket: UserTicket, workspace: TicketWorkspace, progress: ProgressPublisher) -> dict[str, Any]:

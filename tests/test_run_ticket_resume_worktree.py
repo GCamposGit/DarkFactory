@@ -352,7 +352,21 @@ def test_built_candidate_resumes_delivery_without_plan_or_build_only_when_clean_
         rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
     )
     run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False  # unbound legacy artifacts
+    head = _git(ws.path, "rev-parse", "HEAD").strip()
+    run_ticket._record_build_binding(ticket, ws.path, head)
     assert run_ticket._can_resume_built_candidate(ticket, ws) is True
+    from core.git import autonomy
+    real_git = autonomy._run_git
+    with monkeypatch.context() as patch:
+        patch.setattr(autonomy, "_run_git", lambda args, **kw: SimpleNamespace(returncode=128, stdout="")
+                      if args[0] == "status" else real_git(args, **kw))
+        assert run_ticket._can_resume_built_candidate(ticket, ws) is False
+    (ws.path / "partial.py").write_text("partial = True\n", encoding="utf-8")
+    _git(ws.path, "add", "partial.py")
+    _git(ws.path, "commit", "--quiet", "-m", "partial candidate")
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False
+    _git(ws.path, "reset", "--hard", head)
     other = ticket.model_copy(update={"project_id": "outro"})
     assert run_ticket._can_resume_built_candidate(other, ws) is False
 

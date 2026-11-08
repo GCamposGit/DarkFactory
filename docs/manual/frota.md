@@ -339,3 +339,14 @@ gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
 comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
 de candidatos anteriores permanecem preservadas; o novo candidato exige suas
 proprias provas de portao, revisao e producao.
+
+
+### Retomada e prioridade ap?s os bloqueios USR-484
+
+Com recovery global ativo, a lista ordena tentativas e mant?m no m?ximo uma entrega em voo.
+Um ticket em hold ou com falha id?ntica aberta cede a vez ao pr?ximo da lista e depois ? fila regular.
+
+A retomada direta de um BUILD exige status Git leg?vel e limpo (exceto o ledger), commit al?m da base e
+`build_binding.json`: HEAD exato e hashes de SPEC, tickets, pesquisa e progress. A entrega grava esse
+v?nculo ap?s sincronizar o candidato. Artefatos antigos sem v?nculo, novo HEAD, artefato alterado ou
+falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.

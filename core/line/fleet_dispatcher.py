@@ -394,13 +394,38 @@ def failure_reason(rc: int, log_tail: str, lines: int = 8, chars: int = 800) -> 
 
 
 _CAUSE_HUMAN_RE = re.compile(r"\[ERRO NA ENTREGA\][^\n]*?causa:\s*([a-z0-9_]+)")
-_CAUSE_JSON_RE = re.compile(r'"cause"\s*:\s*"([a-z0-9_]+)"')
 
 
 def classify_log_cause(log_tail: str) -> str:
-    """Causa classificada do log ([ERRO NA ENTREGA] causa ou cause JSON); a ultima ocorrencia vale."""
-    found = [(m.start(), m.group(1)) for rx in (_CAUSE_HUMAN_RE, _CAUSE_JSON_RE) for m in rx.finditer(log_tail or "")]
-    return max(found)[1] if found else ""
+    """The official delivery line takes precedence over nested gate output."""
+    official = list(_CAUSE_HUMAN_RE.finditer(log_tail or ""))
+    if official:
+        return official[0].group(1)
+    # Only a complete launcher JSON envelope is a fallback, never an embedded cause.
+    for line in (log_tail or "").splitlines():
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("ok") is False and payload.get("cause"):
+            return str(payload["cause"])
+    return ""
+
+
+def ticket_candidate_digest(tid: str) -> str:
+    """Read candidate commits from registered ticket worktrees, independently of the ledger schema."""
+    from core.git.ticket_workspace import list_worktrees
+    from core.line.admission_store import safe_digest
+
+    slug = tid.lower()
+    candidates = [
+        (row.get("worktree"), row.get("HEAD"))
+        for row in list_worktrees(PROJECT_ROOT)
+        if row.get("branch", "").removeprefix("refs/heads/") == f"ticket/{slug}"
+        or row.get("branch", "").removeprefix("refs/heads/").startswith(f"ticket/{slug}-")
+    ]
+    return safe_digest(sorted(candidates))
+
 
 
 def _tail(path: Optional[Path], n: int = 6000) -> str:
@@ -649,7 +674,7 @@ class FleetDispatcher:
         now: float,
     ) -> None:
         project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
-        candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or "unknown")
+        candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or ticket_candidate_digest(tid))
         context = demand.get("context_digest")
         if not context:
             from core.line.admission_store import safe_digest
@@ -934,8 +959,7 @@ class FleetDispatcher:
                     skipped.update({tid: "recuperacao_prioritaria" for tid in rest})
                     queue = []
                 elif allowed:
-                    skipped.update({tid: "recuperacao_prioritaria" for tid in rest})
-                    queue = allowed[:1]
+                    queue = allowed + rest
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}

@@ -218,7 +218,7 @@ def test_recovery_list_stays_serialized_when_global_recovery_active(tmp_path: Pa
     e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"), active=True)
     cyc = e.d.run_cycle()
     assert [t for t, _ in e.launched] == ["USR-12"]
-    assert cyc["skipped"]["USR-13"] == "recuperacao_prioritaria"
+    assert "USR-13" in cyc["queue_remaining"]
     e.d.run_cycle()
     assert len(e.launched) == 1
 
@@ -830,15 +830,31 @@ def test_reap_cleans_operational_checkout_after_job_exits_without_changing_deplo
     assert e.d.deploys == 1
 
 
-def test_repeated_ticket_cause_holds_only_that_ticket_until_new_digest(tmp_path: Path):
-    def demands(candidate):
-        return [{**_d("USR-01"), "candidate_digest": candidate, "context_digest": "ctx"}, _d("USR-02")]
+def test_repeated_ticket_cause_holds_only_that_ticket_until_new_digest(tmp_path: Path, monkeypatch):
+    import subprocess
+    from core.demands.models import UserTicket
 
-    rows = demands("patch-a")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    git("init", "-b", "ticket/usr-01")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    (repo / "fix.py").write_text("first\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "candidate a")
+    monkeypatch.setattr(fd, "PROJECT_ROOT", repo)
+    row = UserTicket(id="USR-01", title="Fix", problem_statement="Failure").model_dump(mode="json")
+    row["context_digest"] = "ctx"
+    row["status"] = "planned"
+    row["created_at"] = "2026-01-01"
+    rows = [row, _d("USR-02")]
+    candidate = fd.ticket_candidate_digest("USR-01")
     e = Env(tmp_path, rows, free=("grokbox",))
     e.d.demands_loader = lambda: rows
     for i, host in enumerate(("grokbox", "notebook", "desktop")):  # fim do log e host diferentes
-        job = fd.InFlight("USR-01", host, Handle(), candidate_digest="patch-a",
+        job = fd.InFlight("USR-01", host, Handle(), candidate_digest=candidate,
                           context_digest="ctx", resource_version=f"{host}:v")
         e.d._record_failure(job, 1, "failure", f"[ERRO NA ENTREGA] causa: gate_failed; erro: x{i}\nfim {i}\n")
     store = e.d.admission_store
@@ -850,7 +866,9 @@ def test_repeated_ticket_cause_holds_only_that_ticket_until_new_digest(tmp_path:
     assert cyc["skipped"]["USR-01"] == "ticket_hold:gate_failed"
     assert cyc["ticket_holds"][0]["ticket_id"] == "USR-01"
 
-    rows[:] = demands("patch-b")  # digest novo libera; tempo nao libera
+    (repo / "fix.py").write_text("fixed\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "candidate b")  # real worktree commit releases hold without ledger edit
     e.handles["USR-02"].rc = 0
     e.now += 10**6
     e.d.run_cycle()
@@ -863,3 +881,37 @@ def test_normalize_error_preserves_ticket_causes():
     for cause in ("gate_failed", "gate_dirty_worktree", "fix_agent_no_changes"):
         assert normalize_error(cause) == cause
     assert fd.classify_log_cause('"cause": "infra"\n[ERRO NA ENTREGA] causa: gate_failed; erro: x') == "gate_failed"
+
+
+@pytest.mark.parametrize("cause", ["gate_failed", "gate_timeout", "ci_red_twice"])
+def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
+    e = Env(tmp_path, [])
+    nested = "infra" if cause == "gate_failed" else "gate_failed"
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        e.d._record_failure(job, 1, "failure",
+                            f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
+    store = e.d.admission_store
+    if cause == "gate_failed":
+        assert store.ticket_holds()[0]["cause"] == cause
+        assert not store.recovery_state()["active"]
+    else:
+        assert store.recovery_state()["active"]
+        assert not store.ticket_holds()
+
+
+@pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "identical_failure_open"])
+def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypatch, blocked):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03")])
+    e.d.config.recovery_tickets = ("USR-01", "USR-02")
+    e.d.admission_store.set_recovery(active=True, cause="infra", fingerprint="fp")
+    dispatch = e.d._dispatch_ticket
+    def attempt(host, probe, tid, demand, queue, idle, skipped, dispatched, now):
+        if tid == "USR-01":
+            skipped[tid] = blocked
+            return
+        return dispatch(host, probe, tid, demand, queue, idle, skipped, dispatched, now)
+    monkeypatch.setattr(e.d, "_dispatch_ticket", attempt)
+    cycle = e.d.run_cycle()
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cycle["skipped"]["USR-01"] == blocked
