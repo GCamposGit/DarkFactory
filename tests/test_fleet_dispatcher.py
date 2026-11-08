@@ -194,23 +194,75 @@ def test_host_lock_no_overlap(tmp_path: Path):
     e.d.run_cycle()
     e.d.run_cycle()
     assert len(e.launched) == 3
-    # Recovery completes one correction at a time, then resumes the regular queue
-    # without requiring the owner to remove a pause flag.
+
+
+def _recovery_env(tmp_path: Path, demands, tickets, *, active=False):
+    e = Env(tmp_path, demands)
+    e.d.config.recovery_tickets = tuple(tickets)
+    if active:
+        e.d.admission_store.set_recovery(active=True, cause="gate_failed", fingerprint="fp")
+    return e
+
+
+def test_recovery_list_only_prioritizes_when_global_recovery_inactive(tmp_path: Path):
+    demands = [_d("USR-11"), _d("USR-12"), _d("USR-13"), _d("USR-14")]
+    e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"))
+    cyc = e.d.run_cycle()
+    assert [t for t, _ in e.launched] == ["USR-12", "USR-11", "USR-13"]
+    assert "recuperacao_prioritaria" not in cyc["skipped"].values()
+    assert cyc["recovery_list"]["pending"] == ["USR-12", "USR-11"]
+
+
+def test_recovery_list_stays_serialized_when_global_recovery_active(tmp_path: Path):
     demands = [_d("USR-11"), _d("USR-12"), _d("USR-13")]
-    recovery = Env(tmp_path / "recovery", demands)
-    recovery.d.config.recovery_tickets = ("USR-12", "USR-11")
-    recovery.d.run_cycle()
-    assert [tid for tid, _ in recovery.launched] == ["USR-12"]
-    recovery.d.run_cycle()
-    assert len(recovery.launched) == 1
-    recovery.handles["USR-12"].rc = 0
-    demands[1]["status"] = "completed"
-    recovery.d.run_cycle()
-    assert [tid for tid, _ in recovery.launched] == ["USR-12", "USR-11"]
-    recovery.handles["USR-11"].rc = 0
+    e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"), active=True)
+    cyc = e.d.run_cycle()
+    assert [t for t, _ in e.launched] == ["USR-12"]
+    assert "USR-13" in cyc["queue_remaining"]
+    e.d.run_cycle()
+    assert len(e.launched) == 1
+
+
+def test_recovery_list_without_admissible_ticket_does_not_block_queue(tmp_path: Path):
+    demands = [_d("USR-11", "validating"), _d("USR-13")]
+    e = _recovery_env(tmp_path, demands, ("USR-11",))
+    cyc = e.d.run_cycle()
+    assert [t for t, _ in e.launched] == ["USR-13"]
+    assert cyc["recovery_list"]["cause"] == "recovery_list_no_admissible"
+    assert cyc["recovery_list"]["pending"] == ["USR-11"]
+
+
+def test_recovery_list_ticket_in_flight_is_not_no_admissible(tmp_path: Path):
+    demands = [_d("USR-11"), _d("USR-13")]
+    e = _recovery_env(tmp_path, demands, ("USR-11",))
+    e.d.run_cycle()
+    cyc = e.d.run_cycle()
+    assert cyc["recovery_list"]["cause"] == ""
+
+
+def test_recovery_list_completes_and_expires_persistently(tmp_path: Path):
+    demands = [_d("USR-11", "validating"), _d("USR-13", "validating")]
+    e = _recovery_env(tmp_path, demands, ("USR-11",))
+    e.d.run_cycle()
+    e.now += e.d.config.recovery_list_ttl_sec + 1
+    assert e.d.run_cycle()["recovery_list"]["cause"] == "recovery_list_expired"
     demands[0]["status"] = "completed"
-    recovery.d.run_cycle()
-    assert recovery.launched[-1][0] == "USR-13"
+    restarted = _recovery_env(tmp_path / "again", demands, ("USR-11",))
+    assert restarted.d.run_cycle()["recovery_list"]["cause"] == "recovery_list_completed"
+    # estado persistido: novo despachante com o mesmo state_path continua expirado
+    again = Env(tmp_path, [_d("USR-11")])
+    again.d.config.recovery_tickets = ("USR-11",)
+    assert again.d.run_cycle()["recovery_list"]["cause"] == "recovery_list_expired"
+    assert [t for t, _ in again.launched] == ["USR-11"]
+
+
+def test_identical_failure_open_does_not_idle_host_with_other_admissible_ticket(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+    e.d.admission_store.is_failure_open = lambda **kw: kw["ticket_id"] == "USR-01"
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cyc["skipped"]["USR-01"] == "identical_failure_open"
+    assert "grokbox" not in cyc["idle_reasons"]
 
 
 def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_path: Path, monkeypatch):
@@ -776,3 +828,90 @@ def test_reap_cleans_operational_checkout_after_job_exits_without_changing_deplo
     e.now += e.d.config.deploy_window_sec + 1
     e.d.run_cycle()
     assert e.d.deploys == 1
+
+
+def test_repeated_ticket_cause_holds_only_that_ticket_until_new_digest(tmp_path: Path, monkeypatch):
+    import subprocess
+    from core.demands.models import UserTicket
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    git("init", "-b", "ticket/usr-01")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    (repo / "fix.py").write_text("first\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "candidate a")
+    monkeypatch.setattr(fd, "PROJECT_ROOT", repo)
+    row = UserTicket(id="USR-01", title="Fix", problem_statement="Failure").model_dump(mode="json")
+    row["context_digest"] = "ctx"
+    row["status"] = "planned"
+    row["created_at"] = "2026-01-01"
+    rows = [row, _d("USR-02")]
+    candidate = fd.ticket_candidate_digest("USR-01")
+    e = Env(tmp_path, rows, free=("grokbox",))
+    e.d.demands_loader = lambda: rows
+    for i, host in enumerate(("grokbox", "notebook", "desktop")):  # fim do log e host diferentes
+        job = fd.InFlight("USR-01", host, Handle(), candidate_digest=candidate,
+                          context_digest="ctx", resource_version=f"{host}:v")
+        e.d._record_failure(job, 1, "failure", f"[ERRO NA ENTREGA] causa: gate_failed; erro: x{i}\nfim {i}\n")
+    store = e.d.admission_store
+    assert not store.recovery_state()["active"]  # sem recovery global
+    assert store.ticket_holds()[0]["occurrences"] == 3
+
+    cyc = e.d.run_cycle()  # o ticket retido nao prende o host livre
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cyc["skipped"]["USR-01"] == "ticket_hold:gate_failed"
+    assert cyc["ticket_holds"][0]["ticket_id"] == "USR-01"
+
+    (repo / "fix.py").write_text("fixed\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "candidate b")  # real worktree commit releases hold without ledger edit
+    e.handles["USR-02"].rc = 0
+    e.now += 10**6
+    e.d.run_cycle()
+    assert store.ticket_holds() == [] and ("USR-01", "grokbox") in e.launched
+
+
+def test_normalize_error_preserves_ticket_causes():
+    from core.line.admission_store import normalize_error
+
+    for cause in ("gate_failed", "gate_dirty_worktree", "fix_agent_no_changes"):
+        assert normalize_error(cause) == cause
+    assert fd.classify_log_cause('"cause": "infra"\n[ERRO NA ENTREGA] causa: gate_failed; erro: x') == "gate_failed"
+
+
+@pytest.mark.parametrize("cause", ["gate_failed", "gate_timeout", "ci_red_twice"])
+def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
+    e = Env(tmp_path, [])
+    nested = "infra" if cause == "gate_failed" else "gate_failed"
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        e.d._record_failure(job, 1, "failure",
+                            f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
+    store = e.d.admission_store
+    if cause == "gate_failed":
+        assert store.ticket_holds()[0]["cause"] == cause
+        assert not store.recovery_state()["active"]
+    else:
+        assert store.recovery_state()["active"]
+        assert not store.ticket_holds()
+
+
+@pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "identical_failure_open"])
+def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypatch, blocked):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03")])
+    e.d.config.recovery_tickets = ("USR-01", "USR-02")
+    e.d.admission_store.set_recovery(active=True, cause="infra", fingerprint="fp")
+    dispatch = e.d._dispatch_ticket
+    def attempt(host, probe, tid, demand, queue, idle, skipped, dispatched, now):
+        if tid == "USR-01":
+            skipped[tid] = blocked
+            return
+        return dispatch(host, probe, tid, demand, queue, idle, skipped, dispatched, now)
+    monkeypatch.setattr(e.d, "_dispatch_ticket", attempt)
+    cycle = e.d.run_cycle()
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cycle["skipped"]["USR-01"] == blocked

@@ -67,6 +67,15 @@ espera e não cobrem um zero, um busy ou um stale.
 `allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
 novo na leitura daquele momento.
 
+## Retomar candidato apos falha de entrega (USR-484)
+
+Depois de uma falha na entrega, o launcher pode reutilizar a worktree preservada
+quando ela contem commits alem da base e os artefatos de PLAN, RESEARCH e BUILD sao
+validos. O ledger do ticket pode ser a unica diferenca local. Nesse caso, a retomada
+segue para a entrega sem repetir PLAN ou BUILD. Worktree suja em outro caminho,
+ausencia de commit ou artefato invalido mantem o fluxo normal de planejamento e
+implementacao.
+
 ## Sequencia canonica de estagios (USR-375 S2)
 
 `core/line/stages.py` define a ordem: INTAKE, GRILL, PLAN, RESEARCH, BUILD, VALIDATE, REVIEW, MERGE, DEPLOY_SMOKE, DOCS, LEARNING.

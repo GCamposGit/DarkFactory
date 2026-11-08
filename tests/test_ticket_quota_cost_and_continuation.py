@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -202,7 +203,8 @@ def test_continuation_prompt_injected_when_workspace_has_changes(tmp_path: Path)
          patch("run_ticket._prepare_workspace", return_value=fake_workspace), \
          patch("run_ticket.agent_retry.run_with_retry", side_effect=fake_run_with_retry), \
          patch("core.git.autonomy.GitAutonomyManager.changed_paths", return_value=["core/foo.py"]), \
-         patch("run_ticket.subprocess.run", return_value=MagicMock(returncode=0)), \
+         patch("run_ticket.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")), \
+         patch("core.git.autonomy.GitAutonomyManager.get_current_sha", return_value="b" * 40), \
          patch("core.git.autonomy.GitAutonomyManager.complete_ticket", return_value=MagicMock(ok=True, commit_sha="b" * 40, sync_result=None)):
         exit_code = run_ticket.main(["USR-94", "--harness", "claude", "--json"])
         assert exit_code == 0

@@ -42,12 +42,22 @@ python -m core.line.fleet_dispatcher --help
 python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"
 ```
 
-O dispatcher executa os tickets nessa ordem, uma correção por vez. Não passe os IDs como
-argumentos posicionais separados: a validação de argumentos recusa a chamada com código 2
-antes de iniciar o ciclo. Retomadas em execução têm precedência.
-Quando todos os IDs estão completed/cancelled, a fila regular volta automaticamente.
-Esse argumento substitui o modo de espera exclusiva; não existe nova pausa a remover
-manualmente no final. Ticket ausente ou pendência material não contam como concluídos.
+`--recovery-tickets` mantém a ordem e dá prioridade aos itens da lista. Com
+`recovery.active=false`, a lista não serializa nem bloqueia a frota: depois dela o dispatcher
+continua pela fila regular e usa os hosts livres, sempre respeitando reservas e `suite_lock`.
+Com `recovery.active=true`, o modo global de recuperação mantém no máximo uma entrega em
+andamento e a lista segue serializada. Retomadas em execução têm precedência.
+
+O estado `recovery_list` em `last_cycle` informa `pending` e `cause`. A lista encerra com
+`recovery_list_completed` quando os itens ficam terminais ou `recovery_list_expired` ao
+vencer o TTL. Se nenhum item estiver admissível, publica `recovery_list_no_admissible`, mas
+não bloqueia a fila regular. Ticket ausente ou pendência material não contam como concluídos.
+Não passe os IDs como argumentos posicionais separados: a CLI recusa a chamada com código 2
+antes de iniciar o ciclo.
+
+Quando uma entrega falha depois de preservar um candidato confiável, o launcher retoma a
+entrega nessa worktree (`_resume_delivery`), sem repetir PLAN ou BUILD. Se não houver sinal
+confiável de desenvolvimento concluído, mantém o fluxo normal do ticket.
 
 `completed` no ledger não encerra uma entrega cujo recibo ainda diz `deployed=false`.
 O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só encerra
@@ -259,6 +269,14 @@ Quando um `run_ticket` da frota termina com código diferente de zero, ou o chec
 
 ## Circuit breaker e recuperação (USR-468)
 
+USR-484: o fingerprint de falha usa a causa classificada do log (`[ERRO NA ENTREGA] causa`
+ou `cause` JSON, a última vale), nunca o texto variável. No limiar, `gate_failed`,
+`gate_dirty_worktree` e `fix_agent_no_changes` seguram só o ticket (hold durável no
+admission store; `ticket_hold:<causa>` em `last_cycle`, com resumo em
+`python -m core.ops.briefing`), sem ativar recovery global. O diagnóstico lista o hold, a
+causa e as ocorrências. Um digest novo de candidato ou contexto libera o hold; esperar não.
+`infra`, `no_delivery_evidence` e `recovery_receipt` seguem no disjuntor global.
+
 O recibo é produzido pelo dispatcher depois do deploy canônico e da prova HTTP
 do SHA exato. Um marcador escrito pelo processo filho não libera a recuperação.
 A entrega pendente fica em `pending_recovery_releases.json`, ao lado do estado do
@@ -321,3 +339,14 @@ gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
 comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
 de candidatos anteriores permanecem preservadas; o novo candidato exige suas
 proprias provas de portao, revisao e producao.
+
+
+### Retomada e prioridade ap?s os bloqueios USR-484
+
+Com recovery global ativo, a lista ordena tentativas e mant?m no m?ximo uma entrega em voo.
+Um ticket em hold ou com falha id?ntica aberta cede a vez ao pr?ximo da lista e depois ? fila regular.
+
+A retomada direta de um BUILD exige status Git leg?vel e limpo (exceto o ledger), commit al?m da base e
+`build_binding.json`: HEAD exato e hashes de SPEC, tickets, pesquisa e progress. A entrega grava esse
+v?nculo ap?s sincronizar o candidato. Artefatos antigos sem v?nculo, novo HEAD, artefato alterado ou
+falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.

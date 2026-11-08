@@ -106,6 +106,7 @@ class DispatcherConfig:
     lock_requeue_cooldown_sec: float = 30.0  # host ocupado/trava: reenfileira quase de imediato
     deploy_window_sec: float = 180.0
     recovery_failure_threshold: int = 3
+    recovery_list_ttl_sec: float = 43200.0
     state_path: Path = STATE_PATH
 
 
@@ -392,6 +393,41 @@ def failure_reason(rc: int, log_tail: str, lines: int = 8, chars: int = 800) -> 
     return kept or f"sem saida no log; exit_code={rc}"
 
 
+_CAUSE_HUMAN_RE = re.compile(r"\[ERRO NA ENTREGA\][^\n]*?causa:\s*([a-z0-9_]+)")
+
+
+def classify_log_cause(log_tail: str) -> str:
+    """The official delivery line takes precedence over nested gate output."""
+    official = list(_CAUSE_HUMAN_RE.finditer(log_tail or ""))
+    if official:
+        return official[0].group(1)
+    # Only a complete launcher JSON envelope is a fallback, never an embedded cause.
+    for line in (log_tail or "").splitlines():
+        try:
+            payload = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("ok") is False and payload.get("cause"):
+            return str(payload["cause"])
+    return ""
+
+
+def ticket_candidate_digest(tid: str) -> str:
+    """Read candidate commits from registered ticket worktrees, independently of the ledger schema."""
+    from core.git.ticket_workspace import list_worktrees
+    from core.line.admission_store import safe_digest
+
+    slug = tid.lower()
+    candidates = [
+        (row.get("worktree"), row.get("HEAD"))
+        for row in list_worktrees(PROJECT_ROOT)
+        if row.get("branch", "").removeprefix("refs/heads/") == f"ticket/{slug}"
+        or row.get("branch", "").removeprefix("refs/heads/").startswith(f"ticket/{slug}-")
+    ]
+    return safe_digest(sorted(candidates))
+
+
+
 def _tail(path: Optional[Path], n: int = 6000) -> str:
     try:
         if path and path.exists():
@@ -473,18 +509,24 @@ class FleetDispatcher:
         logger.error("%s falhou em %s: exit_code=%s kind=%s motivo=%s", job.ticket_id, job.host_id, rc, kind,
                      " | ".join(reason.splitlines()))
         try:
-            from core.line.admission_store import make_fingerprint
+            from core.line.admission_store import TICKET_CAUSES, make_fingerprint
 
+            cause = classify_log_cause(tail) if kind == "failure" else ""
+            ticket_cause = cause if cause in TICKET_CAUSES else ""
             fingerprint = make_fingerprint(
                 project_id=job.project_id, ticket_id=job.ticket_id,
                 candidate_digest=job.candidate_digest, context_digest=job.context_digest,
                 error=(f"{kind}:{tail}" if kind == "recovery_receipt" and tail else
-                       kind if kind != "failure" else (tail or kind)),
-                resource_version=job.resource_version,
+                       kind if kind != "failure" else (cause or kind)),
+                # causa de ticket nao depende do host: soma entre hosts
+                resource_version="ticket_cause" if ticket_cause else job.resource_version,
             )
             occurrences = self.admission_store.record_failure(
                 fingerprint, initial_backoff_sec=int(self.config.requeue_cooldown_sec))
-            if occurrences >= max(1, self.config.recovery_failure_threshold):
+            if occurrences >= max(1, self.config.recovery_failure_threshold) and ticket_cause:
+                self.admission_store.set_ticket_hold(fingerprint, occurrences)
+                logger.error("%s em hold: causa=%s ocorrencias=%s", job.ticket_id, ticket_cause, occurrences)
+            elif occurrences >= max(1, self.config.recovery_failure_threshold):
                 state = self.admission_store.set_recovery(
                     active=True, cause=fingerprint.error_class, fingerprint=fingerprint.sha256)
                 self.recovery = state
@@ -632,7 +674,7 @@ class FleetDispatcher:
         now: float,
     ) -> None:
         project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
-        candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or "unknown")
+        candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or ticket_candidate_digest(tid))
         context = demand.get("context_digest")
         if not context:
             from core.line.admission_store import safe_digest
@@ -660,6 +702,11 @@ class FleetDispatcher:
             candidate_key = safe_digest(candidate)
             context_key = safe_digest(context)
             resource_key = safe_digest(resource_version)
+            hold = self.admission_store.ticket_hold(
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key, context_digest=context_key)
+            if hold:
+                idle[host.id] = skipped[tid] = f"ticket_hold:{hold['cause']}"
+                return  # so o ticket fica retido; o host tenta o proximo
             if self.admission_store.is_failure_open(
                 project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
                 context_digest=context_key, resource_version=resource_key,
@@ -667,8 +714,7 @@ class FleetDispatcher:
             ):
                 idle[host.id] = "identical_failure_open"
                 skipped[tid] = "identical_failure_open"
-                queue.insert(0, tid)
-                return
+                return  # fora da fila neste ciclo: o host tenta o proximo admissivel
             if self.recovery.get("active"):
                 recovery_token = self.admission_store.reserve_recovery()
                 if recovery_token is None:
@@ -809,13 +855,58 @@ class FleetDispatcher:
             if self.recovery.get("active") and dispatched:
                 idle[host.id] = "recovery_single_delivery_reserved"
                 continue
-            tid = queue.pop(0)
-            demand = next((row for row in demands if str(row.get("id", "")) == tid), None)
-            if demand is None:
-                skipped[tid] = "demand_disappeared"
-                idle[host.id] = "demand_disappeared"
-                continue
-            self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
+            while queue:
+                tid = queue.pop(0)
+                demand = next((row for row in demands if str(row.get("id", "")) == tid), None)
+                if demand is None:
+                    skipped[tid] = "demand_disappeared"
+                    idle[host.id] = "demand_disappeared"
+                    break
+                self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
+                if skipped.get(tid) != "identical_failure_open" and not skipped.get(tid, "").startswith("ticket_hold:"):
+                    break
+            if any(row.get("host") == host.id for row in dispatched):
+                idle.pop(host.id, None)
+
+    def _recovery_list_status(self, terminal: set[str], busy: set[str], queue: list[str], now: float) -> dict[str, Any]:
+        """Estado da lista de recuperacao (--recovery-tickets), persistido para sobreviver a reinicio.
+
+        A lista so prioriza; encerra com ``recovery_list_completed`` (toda terminal) ou
+        ``recovery_list_expired`` (apos o TTL), e ``recovery_list_no_admissible`` e publicado
+        enquanto nenhum item esta na fila nem em voo (a fila nao e travada por isso).
+        """
+        tickets = list(self.config.recovery_tickets)
+        if not tickets:
+            return {}
+        path = self.config.state_path.with_name("recovery_list_state.json")
+        state: dict[str, Any] = {}
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and loaded.get("tickets") == tickets:
+                state = loaded
+        except (OSError, ValueError):
+            state = {}
+        changed = False
+        if not state:
+            state = {"tickets": tickets, "started_at": now, "cause": ""}
+            changed = True
+        pending = [t for t in tickets if t not in terminal]
+        if not state.get("cause"):
+            if not pending:
+                state["cause"], changed = "recovery_list_completed", True
+            elif now - float(state.get("started_at", now)) > self.config.recovery_list_ttl_sec:
+                state["cause"], changed = "recovery_list_expired", True
+        if changed:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(state), encoding="utf-8")
+            except OSError:
+                logger.exception("falha ao gravar estado da lista de recuperacao")
+        cause = str(state.get("cause", ""))
+        live = not cause
+        if live and not any(t in queue or t in busy for t in tickets):
+            cause = "recovery_list_no_admissible"
+        return {"live": live, "tickets": tickets, "pending": pending, "cause": cause}
 
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
@@ -856,12 +947,19 @@ class FleetDispatcher:
                 | {r["ticket"] for r in resumptions if "ticket" in r})
         queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
         terminal = {str(d.get("id")) for d in demands if d.get("status") in _TERMINAL_STATUSES}
-        recovery = self.config.recovery_tickets
-        if recovery and not set(recovery).issubset(terminal):
-            allowed = [tid for tid in recovery if tid in queue]
-            skipped.update({tid: "recuperacao_prioritaria" for tid in queue if tid not in allowed})
-            active_resume = any(r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions)
-            queue = [] if active_resume or self.in_flight else allowed[:1]
+        recovery_list = self._recovery_list_status(terminal, busy, queue, now)
+        if recovery_list.get("live"):
+            allowed = [tid for tid in self.config.recovery_tickets if tid in queue]
+            rest = [tid for tid in queue if tid not in allowed]
+            if not self.recovery.get("active"):
+                queue = allowed + rest  # lista so prioriza: todo host livre e usado
+            else:
+                active_resume = any(r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions)
+                if active_resume or self.in_flight:
+                    skipped.update({tid: "recuperacao_prioritaria" for tid in rest})
+                    queue = []
+                elif allowed:
+                    queue = allowed + rest
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
@@ -883,6 +981,8 @@ class FleetDispatcher:
             "deployed_this_cycle": deployed,
             "demands_error": load_error,
             "recent_failures": self.failures,
+            "ticket_holds": self._ticket_holds(),
+            "recovery_list": {k: v for k, v in recovery_list.items() if k != "live"},
             "recovery": {"active": bool(self.recovery.get("active")),
                          "cause": self.recovery.get("cause", ""),
                          "fingerprint": self.recovery.get("fingerprint", ""),
@@ -893,6 +993,13 @@ class FleetDispatcher:
         }
         self._write_state()
         return self.last_cycle
+
+    def _ticket_holds(self) -> list[dict[str, Any]]:
+        try:
+            return self.admission_store.ticket_holds() if self.admission_store is not None else []
+        except Exception:  # noqa: BLE001
+            logger.exception("falha ao ler holds por ticket")
+            return []
 
     def _write_state(self) -> None:
         try:

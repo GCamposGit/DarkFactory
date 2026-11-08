@@ -1441,7 +1441,17 @@ def _gate_classify_failure(
 
     def _infra(cause: str, message: str) -> bool:
         st.last_cause = cause
-        attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", cause))
+        extra: dict[str, Any] = {}
+        if cause == "gate_dirty_worktree":
+            path_report = next(
+                (line for line in st.last_output.splitlines() if line.startswith("[DIRTY_PATHS] ")),
+                "[DIRTY_PATHS] unavailable",
+            )
+            extra["error"] = (
+                "Candidate worktree is dirty; commit or use a clean checkout before "
+                f"running the official harness\n{path_report}"
+            )
+        attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", cause, **extra))
         if not as_json:
             print(message, file=sys.stderr)
         return True
@@ -2135,6 +2145,8 @@ def _deliver_sync(
         if not as_json:
             print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
         current_sha = git_mgr.get_current_sha(target_worktree)
+    if not external_project:
+        _record_build_binding(ticket, target_worktree, current_sha)
     return False, current_sha
 
 
@@ -3528,6 +3540,60 @@ def _can_resume_invalid_review(
     )
 
 
+def _can_resume_built_candidate(ticket: UserTicket, workspace: TicketWorkspace) -> bool:
+    """Resume only a clean candidate bound to the exact HEAD and stage artifact hashes."""
+    if ticket.project_id != "darkfac":
+        return False
+    from core.git.autonomy import _run_git
+
+    status = _run_git(["status", "--porcelain", "-z"], cwd=workspace.path)
+    if status.returncode != 0:
+        return False
+    from core.git.ticket_workspace import _status_paths
+
+    if any(p != LEDGER_RELATIVE for p in _status_paths(status.stdout or "")):
+        return False
+    ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
+    if ahead.returncode != 0 or not (ahead.stdout or "").strip().isdigit() or int(ahead.stdout.strip()) < 1:
+        return False
+    rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
+    try:
+        for stage in (Stage.PLAN, Stage.RESEARCH, Stage.BUILD):
+            require_artifact(stage, rws)
+    except StageArtifactMissing:
+        return False
+    try:
+        from core.line import workspace as line_workspace
+
+        binding = json.loads((line_workspace.context_dir(rws) / "build_binding.json").read_text(encoding="utf-8"))
+        head = _run_git(["rev-parse", "HEAD"], cwd=workspace.path)
+        return (head.returncode == 0 and binding == _build_binding(rws, head.stdout.strip()))
+    except (OSError, ValueError):
+        return False
+
+
+def _build_binding(rws: Any, head: str) -> dict[str, Any]:
+    import hashlib
+    from core.line import workspace as line_workspace
+
+    context = line_workspace.context_dir(rws)
+    files = ("SPEC.md", "tickets.json", "research.json", "progress.json")
+    return {"head": head, "artifacts": {
+        name: hashlib.sha256((context / name).read_bytes()).hexdigest() for name in files
+    }}
+
+
+def _record_build_binding(ticket: UserTicket, path: Path, head: str) -> None:
+    from core.line import workspace as line_workspace
+
+    rws = ticket_engine.run_workspace(ticket)
+    try:
+        binding = _build_binding(rws, head)
+        line_workspace.write_context(rws, "build_binding.json", json.dumps(binding))
+    except OSError as exc:
+        logger.warning("Build binding unavailable for %s: %s", path, exc)
+
+
 def _resumed_build_result(ticket: UserTicket, workspace: TicketWorkspace, progress: ProgressPublisher) -> dict[str, Any]:
     """Return the normal build summary shape when a validated candidate resumes at REVIEW."""
     rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
@@ -3967,7 +4033,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if _cancelled():
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
-    resume_review = _can_resume_invalid_review(ticket, workspace)
+    resume_review = _can_resume_invalid_review(ticket, workspace) or _can_resume_built_candidate(ticket, workspace)
     if resume_review:
         # Preserve the validated plan/build/review diagnostics and resume at REVIEW.
         built = _resumed_build_result(ticket, workspace, progress)

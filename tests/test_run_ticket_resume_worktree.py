@@ -325,6 +325,69 @@ def test_resume_green_candidate_after_invalid_review_skips_development_and_binds
     assert run_ticket._can_resume_invalid_review(ticket, ws) is False
 
 
+def test_built_candidate_resumes_delivery_without_plan_or_build_only_when_clean_and_proven(
+    repo: SimpleNamespace,
+    launcher: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.research.policy import ResearchArtifact
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    ticket = run_ticket.UserTicket(
+        id="USR-484", project_id="darkfac", title="Retomar entrega", problem_statement="built candidate",
+    )
+    monkeypatch.setattr(_Store, "get_ticket", lambda _self, ticket_id: ticket if ticket_id == ticket.id else None)
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
+    # No commit and no artifacts: normal path.
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False
+
+    (ws.path / "impl.py").write_text("candidate = True\n", encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "built candidate")
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False  # commits but no artifacts
+
+    run_ticket.ticket_engine.write_minimal_plan(rws, ticket)
+    run_ticket.ticket_engine.write_research(
+        rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
+    )
+    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False  # unbound legacy artifacts
+    head = _git(ws.path, "rev-parse", "HEAD").strip()
+    run_ticket._record_build_binding(ticket, ws.path, head)
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is True
+    from core.git import autonomy
+    real_git = autonomy._run_git
+    with monkeypatch.context() as patch:
+        patch.setattr(autonomy, "_run_git", lambda args, **kw: SimpleNamespace(returncode=128, stdout="")
+                      if args[0] == "status" else real_git(args, **kw))
+        assert run_ticket._can_resume_built_candidate(ticket, ws) is False
+    (ws.path / "partial.py").write_text("partial = True\n", encoding="utf-8")
+    _git(ws.path, "add", "partial.py")
+    _git(ws.path, "commit", "--quiet", "-m", "partial candidate")
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False
+    _git(ws.path, "reset", "--hard", head)
+    other = ticket.model_copy(update={"project_id": "outro"})
+    assert run_ticket._can_resume_built_candidate(other, ws) is False
+
+    (ws.path / "stray.txt").write_text("dirty\n", encoding="utf-8")
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is False
+    (ws.path / "stray.txt").unlink()
+
+    monkeypatch.setattr(run_ticket, "_stage_plan", lambda *_a, **_k: pytest.fail("replanned"))
+    monkeypatch.setattr(run_ticket, "_stage_build", lambda *_a, **_k: pytest.fail("rebuilt"))
+    delivery_calls: list[Path] = []
+
+    def deliver(*args, **kwargs):
+        delivery_calls.append(args[2].path)
+        return 0, {"ok": True, "status": "completed"}
+
+    monkeypatch.setattr(run_ticket, "_stage_deliver", deliver)
+    assert run_ticket.main([ticket.id, "--harness", "grok"]) == 0
+    assert launcher.requests == []
+    assert delivery_calls == [ws.path]
+
+
 def test_continuation_notice_also_covers_work_that_was_already_committed(
     repo: SimpleNamespace, launcher: SimpleNamespace
 ) -> None:

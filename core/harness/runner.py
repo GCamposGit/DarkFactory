@@ -512,10 +512,20 @@ def _ensure_clean_worktree() -> None:
             f"Unable to verify candidate worktree cleanliness: {detail}"
         )
 
-    if process.stdout.strip():
+    dirty_lines = [line for line in process.stdout.splitlines() if line.strip()]
+    if dirty_lines:
+        # Porcelain v1 prefixes each path with the two-character status and a
+        # space. Keep the canonical diagnostic stable for run_ticket's
+        # classifier, then put the paths on their own line for durable errors.
+        paths = [line[3:] if len(line) >= 3 else line for line in dirty_lines]
+        shown_paths = paths[:20]
+        omitted = len(paths) - len(shown_paths)
+        path_report = ", ".join(shown_paths)
+        if omitted:
+            path_report = f"{path_report} +{omitted}"
         raise RuntimeError(
             "Candidate worktree is dirty; commit or use a clean checkout before "
-            "running the official harness"
+            f"running the official harness\n[DIRTY_PATHS] {path_report}"
         )
 
 

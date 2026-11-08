@@ -14296,5 +14296,45 @@
     "dependencies": [],
     "created_at": "2026-11-06T17:04:38.753753Z",
     "updated_at": "2026-11-06T17:32:11.287188Z"
+  },
+  {
+    "id": "USR-484",
+    "project_id": "darkfac",
+    "title": "Lista de recuperacao serializa a frota e repete BUILD apos falha de entrega",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 08/11 o despachante iniciado com --recovery-tickets admite um ticket por vez enquanto toda a lista nao for terminal (fleet_dispatcher.py:864), mesmo com recovery.active false. Resultado: Desktop livre com sem_ticket_executavel, 1 de 3 slots ocupado e os demais tickets em recuperacao_prioritaria. USR-469 e USR-471 alternaram 6 falhas de entrega em cerca de 9 horas (gate_failed, gate_dirty_worktree, fix_agent_no_changes) e voltaram a planned; uma tentativa do USR-469 consumiu 29 pontos da janela de 5h do Claude. Isso contraria o criterio de nao ficar ocioso com item pendente e recurso livre. Diagnostico do coordenador: (a) run_cycle aplica allowed[:1] enquanto a lista nao for terminal; (b) _record_failure usa `tail or kind` no fingerprint e o fim do log varia, entao a mesma causa nao soma ocorrencias e o disjuntor nao dispara; (c) o launcher reutiliza worktree preservada e ainda executa PLAN e BUILD; (d) runner.py recusa candidato sujo sem listar caminhos.",
+    "core_journey": [
+      "Em 08/11 o despachante iniciado com --recovery-tickets admite um ticket por vez enquanto toda a lista nao for terminal (fleet_dispatcher.py:864), mesmo com recovery.active false. Resultado: Desktop livre com sem_ticket_executavel, 1 de 3 slots ocupado e os demais tickets em recuperacao_prioritaria. USR-469 e USR-471 alternaram 6 falhas de entrega em cerca de 9 horas (gate_failed, gate_dirty_worktree, fix_agent_no_changes) e voltaram a planned; uma tentativa do USR-469 consumiu 29 pontos da janela de 5h do Claude. Isso contraria o criterio de nao ficar ocioso com item pendente e recurso livre. Diagnostico do coordenador: (a) run_cycle aplica allowed[:1] enquanto a lista nao for terminal; (b) _record_failure usa `tail or kind` no fingerprint e o fim do log varia, entao a mesma causa nao soma ocorrencias e o disjuntor nao dispara; (c) o launcher reutiliza worktree preservada e ainda executa PLAN e BUILD; (d) runner.py recusa candidato sujo sem listar caminhos."
+    ],
+    "non_goals": [
+      "Executar suites concorrentes no mesmo host ou reduzir piso de cota"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Lista de recuperacao prioriza sem impedir uso de host livre quando recovery.active e false, respeitando reservas e suite_lock",
+      "Lista de recuperacao encerra ou expira automaticamente com causa registrada e nao bloqueia a fila por tickets validating sem run",
+      "Falha de entrega com candidato preservado retoma pela entrega sem novo PLAN ou BUILD",
+      "Causa repetida no mesmo candidato para de consumir inferencia e aciona o circuit breaker com causa visivel no briefing",
+      "Causa gate_dirty_worktree registra os caminhos sujos",
+      "Testes de comportamento cobrem host livre durante recuperacao, retomada sem novo BUILD e repeticao de causa",
+      "T1 run_cycle: com recovery.active false a ordem e lista + demais da fila, sem recuperacao_prioritaria; com recovery.active true segue serializado; lista sem admissivel nao trava a fila e last_cycle publica recovery_list com pending e cause recovery_list_no_admissible",
+      "T2 run_ticket: worktree preservada, limpa, com commits fora da base e sinal confiavel de desenvolvimento concluido reaproveita _resume_delivery sem PLAN, BUILD ou inferencia de planejamento; sem sinal confiavel mantem o comportamento atual; respeitar complexity_ratchet",
+      "T3 _record_failure: fingerprint usa a causa classificada do log ([ERRO NA ENTREGA] causa, cause JSON); no limiar, causa especifica de ticket (gate_failed, gate_dirty_worktree, fix_agent_no_changes) segura so o ticket em hold duravel no admission store, visivel em last_cycle e no briefing, sem ativar recovery global; infra, no_delivery_evidence e recovery_receipt mantem o disjuntor USR-468; digest novo libera o hold",
+      "T4 runner.py: caminhos sujos (ate 20, depois +N) em linha separada, preservando o regex _GATE_DIRTY_WORKTREE_LINE de run_ticket.py",
+      "Manual frota.md (e portao.md se aplicavel), historico em FASE_ATUAL e learning pack atualizados; saldo de testes nao aumenta sem justificativa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-08T14:05:58.351857Z",
+    "updated_at": "2026-11-08T14:05:58.351857Z"
   }
 ]
