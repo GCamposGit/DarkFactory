@@ -29,6 +29,9 @@ def safe_digest(value: Any) -> str:
     return _canonical_hash(value)
 
 
+TICKET_CAUSES = frozenset({"gate_failed", "gate_dirty_worktree", "fix_agent_no_changes"})
+
+
 def normalize_error(error: BaseException | str) -> str:
     """Stable, non-sensitive error category; exception text is never retained."""
     if isinstance(error, BaseException):
@@ -38,6 +41,8 @@ def normalize_error(error: BaseException | str) -> str:
         message = str(error).casefold()
         receipt_error = re.fullmatch(r"recovery_receipt:(receipt_[a-z0-9_]+)", message)
         name = receipt_error.group(1) if receipt_error else "error"
+    if message in TICKET_CAUSES:
+        return message  # causa especifica de ticket: a classe e a propria causa
     categories = (
         ("quota", ("quota", "rate limit", "rate_limit", "429", "no_route_available")),
         ("context", ("context", "scanner", "scan failed", "input too long")),
@@ -128,6 +133,12 @@ class AdmissionStore:
                     columns = {row[1] for row in db.execute("PRAGMA table_info(failures)")}
                     if "occurrences" not in columns:
                         db.execute("ALTER TABLE failures ADD COLUMN occurrences INTEGER NOT NULL DEFAULT 1")
+                    db.execute("""CREATE TABLE IF NOT EXISTS ticket_holds (
+                        project_id TEXT NOT NULL, ticket_id TEXT NOT NULL, cause TEXT NOT NULL,
+                        candidate_digest TEXT NOT NULL, context_digest TEXT NOT NULL,
+                        occurrences INTEGER NOT NULL, fingerprint TEXT NOT NULL, held_at TEXT NOT NULL,
+                        PRIMARY KEY (project_id, ticket_id)
+                    )""")
                     db.execute("""CREATE TABLE IF NOT EXISTS reservations (
                         scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL
                     )""")
@@ -191,6 +202,45 @@ class AdmissionStore:
                 db.commit()
                 return occurrences
         except (sqlite3.Error, OSError) as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def set_ticket_hold(self, fingerprint: AdmissionFingerprint, occurrences: int) -> None:
+        """Hold duravel de um unico ticket; so digest novo de candidato ou contexto o libera."""
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        try:
+            with self._connection() as db:
+                db.execute("INSERT OR REPLACE INTO ticket_holds VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                           (fingerprint.project_id, fingerprint.ticket_id, fingerprint.error_class,
+                            fingerprint.candidate_digest, fingerprint.context_digest, int(occurrences),
+                            fingerprint.sha256, now))
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def ticket_hold(self, *, project_id: str, ticket_id: str, candidate_digest: str,
+                    context_digest: str) -> Optional[dict[str, Any]]:
+        """Hold vigente do ticket; se os digests mudaram, o hold e removido e retorna None."""
+        try:
+            with self._connection() as db:
+                row = db.execute("SELECT * FROM ticket_holds WHERE project_id=? AND ticket_id=?",
+                                 (project_id, ticket_id)).fetchone()
+                if row is None:
+                    return None
+                if row["candidate_digest"] != candidate_digest or row["context_digest"] != context_digest:
+                    db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?",
+                               (project_id, ticket_id))
+                    return None
+                return dict(row)
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def ticket_holds(self) -> list[dict[str, Any]]:
+        """Todos os holds por ticket (ticket, causa, ocorrencias) para last_cycle e briefing."""
+        try:
+            with self._connection() as db:
+                rows = db.execute("""SELECT project_id, ticket_id, cause, occurrences, held_at
+                    FROM ticket_holds ORDER BY ticket_id""").fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def recovery_state(self) -> dict[str, Any]:

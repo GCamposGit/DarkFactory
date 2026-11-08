@@ -152,6 +152,18 @@ def _handoff() -> list[str]:
     return content.splitlines() if content else ["Handoff vazio."]
 
 
+def _ticket_holds() -> list[str]:
+    """Tickets retidos pelo despachante por causa repetida no mesmo candidato (USR-484)."""
+    from core.line.admission_store import AdmissionStore
+
+    path = state_root() / "admission.sqlite3"
+    holds = AdmissionStore(path).ticket_holds() if path.exists() else []
+    if not holds:
+        return ["Nenhum ticket em hold."]
+    return [f"{h['ticket_id']}: causa={h['cause']} ocorrencias={h['occurrences']} desde {h['held_at']}"
+            for h in holds]
+
+
 def _sentinel() -> list[str]:
     """Status do sentinela autonomo da linha (USR-439)."""
     from core.line.sentinel import load_last_report, maybe_run_sentinel
@@ -180,6 +192,7 @@ def render_briefing() -> str:
     sections: list[tuple[str, Callable[[], list[str]]]] = [
         ("Sentinela da Linha (USR-439)", _sentinel),
         ("Fila do control store", _queue),
+        ("Tickets em hold (causa repetida)", _ticket_holds),
         ("Acoes abertas do owner", _owner_actions),
         ("Nos (somente leitura)", _nodes),
         ("PRs abertos", _pull_requests),

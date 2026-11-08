@@ -46,6 +46,7 @@ def test_execute_rejects_dirty_worktree_before_running_steps(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    (clean_git_repository / "tracked.txt").write_text("changed\n", encoding="utf-8")
     (clean_git_repository / "untracked.py").write_text("VALUE = 1\n", encoding="utf-8")
     monkeypatch.setattr(runner, "PROJECT_ROOT", clean_git_repository)
 
@@ -77,8 +78,40 @@ def test_execute_rejects_dirty_worktree_before_running_steps(
 
     output = capsys.readouterr().out
     assert "Candidate worktree is dirty" in output
+    assert "[DIRTY_PATHS] tracked.txt, untracked.py" in output
     assert "[HARNESS_FAIL]" in output
     assert "[HARNESS_RESULT]" not in output
+
+
+def test_dirty_worktree_path_report_caps_at_twenty(clean_git_repository: Path) -> None:
+    for index in range(22):
+        (clean_git_repository / f"untracked-{index:02d}.txt").write_text("x", encoding="utf-8")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(runner, "PROJECT_ROOT", clean_git_repository)
+    try:
+        with pytest.raises(RuntimeError) as error:
+            runner._ensure_clean_worktree()
+    finally:
+        monkeypatch.undo()
+
+    path_line = next(line for line in str(error.value).splitlines() if line.startswith("[DIRTY_PATHS] "))
+    assert path_line.count("untracked-") == 20
+    assert path_line.endswith("+2")
+
+
+def test_dirty_worktree_git_status_failure_fails_closed(
+    clean_git_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "PROJECT_ROOT", clean_git_repository)
+
+    def failed_git_status(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 128, "", "git status failed")
+
+    monkeypatch.setattr(runner.subprocess, "run", failed_git_status)
+    with pytest.raises(RuntimeError, match="Unable to verify candidate worktree cleanliness: git status failed"):
+        runner._ensure_clean_worktree()
 
 
 def test_execute_rejects_head_change_during_steps(

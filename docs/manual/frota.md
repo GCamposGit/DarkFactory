@@ -42,12 +42,22 @@ python -m core.line.fleet_dispatcher --help
 python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"
 ```
 
-O dispatcher executa os tickets nessa ordem, uma correção por vez. Não passe os IDs como
-argumentos posicionais separados: a validação de argumentos recusa a chamada com código 2
-antes de iniciar o ciclo. Retomadas em execução têm precedência.
-Quando todos os IDs estão completed/cancelled, a fila regular volta automaticamente.
-Esse argumento substitui o modo de espera exclusiva; não existe nova pausa a remover
-manualmente no final. Ticket ausente ou pendência material não contam como concluídos.
+`--recovery-tickets` mantém a ordem e dá prioridade aos itens da lista. Com
+`recovery.active=false`, a lista não serializa nem bloqueia a frota: depois dela o dispatcher
+continua pela fila regular e usa os hosts livres, sempre respeitando reservas e `suite_lock`.
+Com `recovery.active=true`, o modo global de recuperação mantém no máximo uma entrega em
+andamento e a lista segue serializada. Retomadas em execução têm precedência.
+
+O estado `recovery_list` em `last_cycle` informa `pending` e `cause`. A lista encerra com
+`recovery_list_completed` quando os itens ficam terminais ou `recovery_list_expired` ao
+vencer o TTL. Se nenhum item estiver admissível, publica `recovery_list_no_admissible`, mas
+não bloqueia a fila regular. Ticket ausente ou pendência material não contam como concluídos.
+Não passe os IDs como argumentos posicionais separados: a CLI recusa a chamada com código 2
+antes de iniciar o ciclo.
+
+Quando uma entrega falha depois de preservar um candidato confiável, o launcher retoma a
+entrega nessa worktree (`_resume_delivery`), sem repetir PLAN ou BUILD. Se não houver sinal
+confiável de desenvolvimento concluído, mantém o fluxo normal do ticket.
 
 `completed` no ledger não encerra uma entrega cujo recibo ainda diz `deployed=false`.
 O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só encerra
@@ -258,6 +268,14 @@ Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) recon
 Quando um `run_ticket` da frota termina com código diferente de zero, ou o checkout operacional não pode ser preparado, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra`, `lock` ou `launch`) e o motivo (últimas linhas do log do ticket ou erro de lançamento, sem segredos; nunca vazio). O histórico guarda as 20 últimas. Erros de lançamento mantêm o ticket em cooldown e não aparecem como despacho concluído.
 
 ## Circuit breaker e recuperação (USR-468)
+
+USR-484: o fingerprint de falha usa a causa classificada do log (`[ERRO NA ENTREGA] causa`
+ou `cause` JSON, a última vale), nunca o texto variável. No limiar, `gate_failed`,
+`gate_dirty_worktree` e `fix_agent_no_changes` seguram só o ticket (hold durável no
+admission store; `ticket_hold:<causa>` em `last_cycle`, com resumo em
+`python -m core.ops.briefing`), sem ativar recovery global. O diagnóstico lista o hold, a
+causa e as ocorrências. Um digest novo de candidato ou contexto libera o hold; esperar não.
+`infra`, `no_delivery_evidence` e `recovery_receipt` seguem no disjuntor global.
 
 O recibo é produzido pelo dispatcher depois do deploy canônico e da prova HTTP
 do SHA exato. Um marcador escrito pelo processo filho não libera a recuperação.

@@ -51,3 +51,17 @@ vazio ou só com health genérico, o processo sai com código 75, JSON `route_wa
 ### USR-468 T3 — Recovery com uma entrega por vez
 
 No modo recovery, a esteira trabalha como uma fila de faixa única: o SQLite mantém o latch e `AdmissionStore.reserve_recovery()` guarda a reserva global entre reinícios. O gate continua sendo o `suite_lock` oficial. Espera por gate, host ou rota não conta como sucesso; recovery só fecha quando `verify_recovery_receipt()` aprova um receipt recente, ligado ao candidato e ao `run_id`, com gate, revisão independente, CI, merge, deploy, smoke e learning pack comprovados.
+
+## Aprendizado da entrega USR-484 T5
+
+Uma lista `--recovery-tickets` ordena a prioridade, mas só serializa quando o recovery
+global está ativo. Com `recovery.active=false`, a fila regular continua usando os hosts
+livres, respeitando reservas e `suite_lock`. `last_cycle.recovery_list` mostra itens
+`pending` e a causa; a lista termina ao ficar toda terminal ou ao expirar, e
+`recovery_list_no_admissible` informa que nenhum item pode avançar sem parar a fila.
+Um candidato preservado com sinal confiável de desenvolvimento concluído retoma pela
+entrega, sem novo PLAN ou BUILD. Causas repetidas de gate ou agente podem reter apenas o
+ticket: `ticket_hold` fica visível no ciclo e no briefing, e só um digest novo de candidato
+ou contexto libera. O runner aponta caminhos sujos em `[DIRTY_PATHS]`, preservando a linha
+canônica de erro usada pelo classificador. Esta lição registra o comportamento operacional,
+sem afirmar CI, merge ou deploy.

@@ -1441,7 +1441,17 @@ def _gate_classify_failure(
 
     def _infra(cause: str, message: str) -> bool:
         st.last_cause = cause
-        attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", cause))
+        extra: dict[str, Any] = {}
+        if cause == "gate_dirty_worktree":
+            path_report = next(
+                (line for line in st.last_output.splitlines() if line.startswith("[DIRTY_PATHS] ")),
+                "[DIRTY_PATHS] unavailable",
+            )
+            extra["error"] = (
+                "Candidate worktree is dirty; commit or use a clean checkout before "
+                f"running the official harness\n{path_report}"
+            )
+        attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", cause, **extra))
         if not as_json:
             print(message, file=sys.stderr)
         return True
@@ -3528,6 +3538,34 @@ def _can_resume_invalid_review(
     )
 
 
+def _can_resume_built_candidate(ticket: UserTicket, workspace: TicketWorkspace) -> bool:
+    """USR-484: a clean preserved worktree with commits and valid PLAN/RESEARCH/BUILD goes straight to delivery.
+
+    Only the demand ledger row may differ from HEAD. Any other dirty path, no commit beyond the base or a
+    missing/invalid stage artifact keeps the normal PLAN and BUILD path.
+    """
+    if ticket.project_id != "darkfac":
+        return False
+    from core.git.autonomy import GitAutonomyManager, _run_git
+
+    try:
+        if [p for p in GitAutonomyManager(workspace.main_root).changed_paths(workspace.path) if p != LEDGER_RELATIVE]:
+            return False
+    except Exception as exc:  # an unreadable status is no proof of a clean candidate
+        logger.warning("Could not inspect %s: %s", workspace.path, exc)
+        return False
+    ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
+    if ahead.returncode != 0 or not (ahead.stdout or "").strip().isdigit() or int(ahead.stdout.strip()) < 1:
+        return False
+    rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
+    try:
+        for stage in (Stage.PLAN, Stage.RESEARCH, Stage.BUILD):
+            require_artifact(stage, rws)
+    except StageArtifactMissing:
+        return False
+    return True
+
+
 def _resumed_build_result(ticket: UserTicket, workspace: TicketWorkspace, progress: ProgressPublisher) -> dict[str, Any]:
     """Return the normal build summary shape when a validated candidate resumes at REVIEW."""
     rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
@@ -3967,7 +4005,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if _cancelled():
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
-    resume_review = _can_resume_invalid_review(ticket, workspace)
+    resume_review = _can_resume_invalid_review(ticket, workspace) or _can_resume_built_candidate(ticket, workspace)
     if resume_review:
         # Preserve the validated plan/build/review diagnostics and resume at REVIEW.
         built = _resumed_build_result(ticket, workspace, progress)

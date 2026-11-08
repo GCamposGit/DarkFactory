@@ -98,6 +98,7 @@ def test_dirty_worktree_requires_the_canonical_runner_diagnostic() -> None:
     canonical = SimpleNamespace(
         stdout=(
             "[ERROR] Candidate worktree is dirty; commit or use a clean checkout before running the official harness\n"
+            "[DIRTY_PATHS] core/dirty.py, untracked.txt\n"
             "[HARNESS_FAIL]"
         ),
         stderr="", returncode=1, duration_s=0.1,
@@ -106,6 +107,8 @@ def test_dirty_worktree_requires_the_canonical_runner_diagnostic() -> None:
         state, ["python", "runner.py"], canonical, Path.cwd(), attempts, True, "resume"
     ) is True
     assert state.last_cause == "gate_dirty_worktree"
+    assert attempts[-1]["cause"] == "gate_dirty_worktree"
+    assert "[DIRTY_PATHS] core/dirty.py, untracked.txt" in attempts[-1]["error"]
 
 
 def test_delivery_context_is_not_inherited_and_state_root_is_test_private(tmp_path: Path) -> None:

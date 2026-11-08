@@ -34,6 +34,13 @@ Quando `affected` recebe `--base HEAD` em uma worktree limpa, ele retorna soment
 os guards globais registrados sem montar o grafo de imports. Com qualquer mudanca
 staged, unstaged ou untracked, a selecao usa o diff e a analise normal.
 
+Se `runner.py` recusar um candidato sujo, a mensagem mantém a linha canônica
+`Candidate worktree is dirty; commit or use a clean checkout before running the official harness`
+e acrescenta em uma linha própria `[DIRTY_PATHS]` com até 20 caminhos. Quando houver mais,
+o fim da linha informa `+N` caminhos omitidos. A linha canônica permanece estável para o
+classificador `gate_dirty_worktree` de `run_ticket.py`; use a lista seguinte para localizar
+as alterações tracked ou untracked antes de limpar ou preparar um checkout limpo.
+
 Os perfis vivem em `harness.config.json` (campo `profiles` de cada step; padrao `["full"]`).
 Comando: `python C:\dev\DarkFac\core\harness\runner.py --profile pr`
 
