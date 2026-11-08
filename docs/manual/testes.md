@@ -38,6 +38,94 @@ precisa adquirir `suite_lock`, pois outro processo pode ocupar o slot depois da
 sonda. Worker ocupado gera espera de admissão, sem iniciar PLAN/BUILD para produzir
 mais candidatos que não podem ser validados.
 
+### Identidade restrita sem permissão de escrita no lock (USR-463)
+
+Quando o diretório de estado global (`state_dir()`) ou um arquivo `suite-N.lock`
+não é gravável pela identidade do processo chamador -- por exemplo um grupo
+sandboxed (`CodexSandboxUsers`) cuja ACL só concede `ReadAndExecute` sobre
+arquivos criados por outra conta -- `suite_lock.py` levanta `SuiteLockUnwritable`
+(com `path` e `reason`) em vez de propagar um `PermissionError` cru. `_try_lock_file`
+só retorna `None` para slot efetivamente ocupado por outro processo; falha de
+permissão é um erro estruturado distinto. `probe_free_slot()` nunca propaga essa
+exceção: trata o diretório ou slot sem permissão de escrita como "nenhum slot
+livre observado" e segue para o próximo slot, sem derrubar o chamador com
+traceback.
+
+#### Modo degradado: estado gravável por identidade (USR-463 T2)
+
+`resolve_state_dir()` é o contrato que `SuiteLock.acquire()` usa para escolher
+onde gravar o lock. Ele nunca levanta `SuiteLockUnwritable`:
+
+- Verifica a permissão de escrita tocando o artefato exato que uma aquisição
+  real tocaria primeiro (`<diretório-canônico>/suite-0.lock`), não apenas
+  criando o diretório -- `Path.mkdir(exist_ok=True)` num diretório já existente
+  é um no-op silencioso que não prova nada sobre a gravação de arquivos
+  preexistentes nele, já que a ACL do Windows é por arquivo: um `suite-0.lock`
+  criado por outra conta pode continuar sem escrita para a identidade atual
+  mesmo que novos arquivos possam ser criados no mesmo diretório.
+- Com escrita: retorna o diretório canônico, `degraded=False`, `reason=None`.
+  Nenhum diretório novo é criado além do canônico; nenhum aviso é impresso.
+  Esse caminho é idêntico ao comportamento anterior ao modo degradado.
+- Sem escrita: retorna um diretório por identidade --
+  `DARKFAC_HARNESS_STATE_DIR/darkfac-harness-<usuário>` quando essa variável
+  está configurada (mantém o fallback no mesmo volume configurado, onde um
+  subdiretório novo por identidade costuma ser criável mesmo quando arquivos
+  irmãos preexistentes não são), senão
+  `tempfile.gettempdir()/darkfac-harness-<usuário>` -- com `degraded=True` e
+  `reason` explicando o motivo da degradação.
+
+`SuiteLock.acquire()` em modo degradado:
+
+- Expõe `degraded=True` e `state_dir_used` (o diretório realmente usado para o
+  lock mantido) na instância, preenche `waited_sec` como de costume, e imprime
+  exatamente uma linha `[SUITE_LOCK]` explicando a degradação e deixando claro
+  que a exclusão entre identidades diferentes é best-effort (duas contas, cada
+  uma no seu próprio fallback, não se veem).
+- Antes de tomar o slot no diretório de fallback, espera enquanto o diretório
+  **canônico** tiver um sidecar `suite-N.json` legível apontando para um
+  processo confirmadamente vivo neste host (`process_identity.same_process`,
+  mesmo hostname). Um sidecar ausente, ilegível, de outro host, ou cujo dono
+  já morreu nunca bloqueia -- só um dono vivo confirmado bloqueia. A espera
+  respeita o `timeout_sec` já configurado da instância; se o prazo estourar
+  antes do dono canônico liberar, `acquire()` levanta `SuiteLockTimeout` com
+  `waited_sec` preenchido, exatamente como o timeout normal de slot ocupado.
+- Caso gravável (identidade normal) continua idêntico ao comportamento prévio:
+  nenhum aviso novo impresso, nenhum diretório de fallback criado.
+
+#### Portão oficial reporta o modo degradado sem quebrar (USR-463 T3)
+
+`core/harness/runner.py` (o portão oficial, `--quick`) usa o modo degradado
+acima de ponta a ponta, sem propagar `PermissionError`/`SuiteLockUnwritable`
+cru nem perder a telemetria do run:
+
+- `_append_run_timing()` grava `run_timings.jsonl` no diretório que
+  `suite_lock.resolve_state_dir()` resolve -- canônico quando gravável, ou o
+  fallback por identidade quando não -- em vez do acessor estrito
+  `suite_lock.state_dir()`, que levantaria `SuiteLockUnwritable` exatamente
+  neste caso. `_finish_run_timing()` continua envolvendo a gravação em
+  `contextlib.suppress(Exception)`, então uma falha residual aqui (ex.: disco
+  cheio) nunca muda o veredito, mas agora a gravação em si tem onde funcionar
+  sob identidade restrita.
+- `_timed_suite_lock()` grava no `RunTimings` de cada run se o lock usado
+  foi `lock_degraded` (bool) e qual `lock_state_dir` foi de fato usado --
+  lidos de `SuiteLock.degraded`/`state_dir_used` -- então o registro
+  `[RUN_TIMING]` e o `run_timings.jsonl` distinguem um run degradado (gate
+  passou, mas sob um diretório de fallback, exclusão best-effort) de um run
+  normal sem precisar re-derivar isso da ACL do host.
+- Além do tratamento já existente de `SuiteLockTimeout`, `_timed_suite_lock()`
+  também captura `SuiteLockUnwritable` antes de deixá-la subir: imprime a
+  mensagem estruturada `[SUITE_LOCK] ...` que a própria exceção já carrega e
+  relança o mesmo tipo (subclasse de `RuntimeError`), que o `main()` do
+  runner já converte em `[ERROR]`/`[HARNESS_FAIL]` com código de saída 2 --
+  nunca um traceback cru. Isso cobre o caso residual em que até o diretório de
+  fallback por identidade está sem escrita (o caso comum, fallback gravável,
+  já é tratado por `resolve_state_dir()` sem levantar nada).
+- Resultado de ponta a ponta: um gate rodando sob identidade restrita
+  (ex.: grupo sandboxed `CodexSandboxUsers`, que só tem `ReadAndExecute` nos
+  arquivos de lock pré-existentes de outra conta) ainda executa os passos e
+  emite `[HARNESS_PASS]` quando a suíte passa, com a evidência da degradação
+  no próprio `run_timings.jsonl`.
+
 ## Testes de forma
 
 Teste de forma e o que so confere a existencia de um arquivo, um trecho de texto dentro de markdown, skill, docs ou HTML, ou a presenca de chaves em um JSON/YAML de configuracao, sem executar comportamento. Ele passa mesmo que o produto esteja quebrado, entao nao prova nada sobre o produto e nao deve segurar o portao.

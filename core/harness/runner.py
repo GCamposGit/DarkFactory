@@ -737,6 +737,11 @@ class RunTimings:
     started_at: float = field(default_factory=time.perf_counter)
     lock_wait_sec: float = 0.0
     lock_timed_out: bool = False
+    #: USR-463: True when suite_lock.acquire() had to fall back to a
+    #: per-identity directory because the canonical one was unwritable.
+    lock_degraded: bool = False
+    #: USR-463: the directory the suite lock actually lived in for this run.
+    lock_state_dir: str | None = None
     exec_sec: float = 0.0
     path: str = "unresolved"
     steps_timeout_sum_sec: float = 0.0
@@ -758,6 +763,12 @@ class RunTimings:
             "tree_hash": self.tree_hash,
             "lock_wait_sec": round(self.lock_wait_sec, 1),
             "lock_timed_out": self.lock_timed_out,
+            # USR-463: the gate ran with the suite lock in a per-identity
+            # fallback directory (restricted ACL on the canonical one), not a
+            # run failure -- callers reading the log can tell degraded runs
+            # apart from normal ones without re-deriving it from the ACL.
+            "lock_degraded": self.lock_degraded,
+            "lock_state_dir": self.lock_state_dir,
             "exec_sec": round(self.exec_sec, 1),
             "total_sec": round(time.perf_counter() - self.started_at, 1),
             "steps_timeout_sum_sec": self.steps_timeout_sum_sec,
@@ -767,7 +778,11 @@ class RunTimings:
 
 
 def _append_run_timing(record: dict) -> None:
-    path = harness_suite_lock.state_dir() / RUN_TIMINGS_LOG_NAME
+    # USR-463: use the directory SuiteLock.acquire() itself would resolve to
+    # (canonical, or a writable per-identity fallback under a restricted ACL)
+    # instead of the strict canonical-only accessor, so telemetry for a
+    # degraded run actually lands somewhere writable instead of being dropped.
+    path = harness_suite_lock.resolve_state_dir().path / RUN_TIMINGS_LOG_NAME
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     if path.stat().st_size > RUN_TIMINGS_LOG_MAX_BYTES:
@@ -801,12 +816,30 @@ def _timed_suite_lock(timings: RunTimings):
             acquired = True
             waited = getattr(lock, "waited_sec", None)
             timings.lock_wait_sec += float(waited) if isinstance(waited, (int, float)) else time.perf_counter() - started
+            # USR-463: surface the degraded fallback (restricted ACL on the
+            # canonical state dir) in the per-run record instead of leaving it
+            # observable only via the printed [SUITE_LOCK] line.
+            timings.lock_degraded = bool(getattr(lock, "degraded", False))
+            state_dir_used = getattr(lock, "state_dir_used", None)
+            timings.lock_state_dir = str(state_dir_used) if state_dir_used is not None else None
             yield lock
     except harness_suite_lock.SuiteLockTimeout as exc:
         if acquired:
             raise
         timings.lock_timed_out = True
         timings.lock_wait_sec += float(getattr(exc, "waited_sec", 0.0) or (time.perf_counter() - started))
+        raise
+    except harness_suite_lock.SuiteLockUnwritable as exc:
+        # USR-463: a restricted identity could not even use its degraded
+        # fallback directory (resolve_state_dir() already handles the common
+        # case; this is the residual edge case where that fallback itself is
+        # unwritable). Report it as the same structured [SUITE_LOCK] message
+        # the exception already carries, not a raw traceback, and let the
+        # existing top-level handler in main() turn it into [HARNESS_FAIL].
+        if acquired:
+            raise
+        timings.lock_wait_sec += time.perf_counter() - started
+        print(f"[SUITE_LOCK] {exc}")
         raise
 
 

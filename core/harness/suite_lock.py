@@ -32,16 +32,33 @@ Env vars
     Set to ``1`` by a holder for its child processes, so a nested pytest
     invocation (e.g. the harness runner shelling out to pytest) does not try
     to acquire the same machine-wide lock again and deadlock against itself.
+
+Degraded mode (USR-463)
+------------------------
+A restricted identity (e.g. a sandboxed process group such as
+``CodexSandboxUsers``) can read the canonical state directory but not write
+to its pre-existing lock files -- their ACL grants write only to the account
+that created them. ``resolve_state_dir()`` detects this (by probing the exact
+artifact a real acquisition touches, ``suite-0.lock``) and, instead of
+raising, returns a writable per-identity fallback directory so that identity
+can still produce a usable lock. ``SuiteLock.acquire()`` uses that fallback
+when degraded, after waiting (best effort, respecting the overall timeout)
+for any *live* canonical holder to release first -- a dead or absent
+canonical holder never blocks it. Exclusion between different identities'
+fallback directories is best effort, not guaranteed: two different accounts
+each in their own degraded fallback do not see each other's locks.
 """
 
 from __future__ import annotations
 
 import contextlib
+import getpass
 import json
 import math
 import os
 import socket
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,26 +87,138 @@ class SuiteLockTimeout(RuntimeError):
     waited_sec: float = 0.0
 
 
+class SuiteLockUnwritable(RuntimeError):
+    """Raised when the lock state cannot be created or opened for *write*
+    access, as opposed to a slot being legitimately held by another process.
+
+    This happens when the identity running the process has a restrictive ACL
+    on the machine-global state directory (USR-463), e.g. a sandboxed process
+    group (CodexSandboxUsers) granted only read/execute on files created by a
+    different account. ``probe_free_slot`` treats it as "no slot observed
+    free"; callers of ``acquire()``/``suite_lock()`` see degraded mode
+    (``resolve_state_dir()``) instead of this exception bubbling up raw.
+    """
+
+    def __init__(self, path, reason: str) -> None:
+        self.path = path
+        self.reason = reason
+        super().__init__(f"[SUITE_LOCK] cannot write lock state at {path}: {reason}")
+
+
 def _env_flag_off(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() == "off"
 
 
-def state_dir() -> Path:
-    """Machine-global directory holding lock files and sidecar metadata."""
+def _canonical_state_dir_path() -> Path:
+    """Machine-global directory path, without creating it or checking access."""
 
     configured = os.environ.get("DARKFAC_HARNESS_STATE_DIR")
     if configured:
-        path = Path(configured).expanduser()
-    elif os.name == "nt":
+        return Path(configured).expanduser()
+    if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
-        path = base / "DarkFac" / "harness"
-    else:
-        xdg_state_home = os.environ.get("XDG_STATE_HOME")
-        base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
-        path = base / "darkfac" / "harness"
-    path.mkdir(parents=True, exist_ok=True)
+        return base / "DarkFac" / "harness"
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
+    return base / "darkfac" / "harness"
+
+
+def state_dir() -> Path:
+    """Machine-global directory holding lock files and sidecar metadata.
+
+    Raises ``SuiteLockUnwritable`` (not a raw ``PermissionError``) when the
+    running identity cannot create the directory, e.g. a sandboxed account
+    with a restrictive ACL on a directory created by a different account
+    (USR-463). Callers that need to keep running under such an identity use
+    ``resolve_state_dir()`` instead, which degrades gracefully rather than
+    raising.
+    """
+
+    path = _canonical_state_dir_path()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        raise SuiteLockUnwritable(path, str(exc)) from exc
     return path
+
+
+def _identity_name() -> str:
+    for var in ("USERNAME", "USER", "LOGNAME"):
+        value = os.environ.get(var)
+        if value:
+            return value
+    try:
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 - identity lookup must never crash locking
+        return "unknown"
+
+
+def _fallback_state_dir() -> Path:
+    """Per-identity writable directory used when the canonical one is not (USR-463).
+
+    Rooted at ``DARKFAC_HARNESS_STATE_DIR`` when configured (so the fallback
+    stays on the same configured volume as the canonical directory -- a fresh
+    per-identity subdirectory there is typically still creatable even when
+    pre-existing sibling files are not writable by this identity) or at
+    ``tempfile.gettempdir()`` otherwise.
+    """
+
+    configured = os.environ.get("DARKFAC_HARNESS_STATE_DIR")
+    base = Path(configured).expanduser() if configured else Path(tempfile.gettempdir())
+    return base / f"darkfac-harness-{_identity_name()}"
+
+
+def _probe_writable(directory: Path) -> None:
+    """Raise ``PermissionError`` when this identity cannot write the lock file
+    a real acquisition would touch first (USR-463).
+
+    ``Path.mkdir(exist_ok=True)`` on an already-existing directory is a silent
+    no-op that proves nothing about write access to its *contents* -- Windows
+    ACLs are set per-file, so a pre-existing ``suite-0.lock`` created by a
+    different account can stay unwritable even though new files can still be
+    created in the same directory. Probing that exact file reproduces the
+    real failure mode instead of a directory-level approximation of it.
+    """
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "suite-0.lock").touch(exist_ok=True)
+
+
+@dataclass(frozen=True)
+class StateDirResolution:
+    """Result of :func:`resolve_state_dir` (USR-463).
+
+    ``degraded`` is ``False`` and ``reason`` is ``None`` when the canonical
+    machine-global directory is writable by this identity -- the common case,
+    unchanged from before degraded mode existed. When the canonical directory
+    is not writable, ``path`` is a per-identity fallback directory instead,
+    ``degraded`` is ``True``, and ``reason`` explains why.
+    """
+
+    path: Path
+    degraded: bool
+    reason: str | None
+
+
+def resolve_state_dir() -> StateDirResolution:
+    """Canonical state directory, or a writable per-identity fallback (USR-463).
+
+    Always creates and returns a directory this identity can write to.
+    Raises nothing for a permission problem -- that is exactly the condition
+    this function exists to route around; callers get ``degraded=True`` and a
+    ``reason`` instead of an exception.
+    """
+
+    canonical = _canonical_state_dir_path()
+    try:
+        _probe_writable(canonical)
+    except PermissionError as exc:
+        fallback = _fallback_state_dir()
+        fallback.mkdir(parents=True, exist_ok=True)
+        reason = f"sem permissao de escrita em {canonical / 'suite-0.lock'}: {exc}"
+        return StateDirResolution(path=fallback, degraded=True, reason=reason)
+    return StateDirResolution(path=canonical, degraded=False, reason=None)
 
 
 def _slot_count() -> int:
@@ -172,10 +301,19 @@ class _LockHandle:
 
 
 def _try_lock_file(path: Path) -> object | None:
-    """Attempt a non-blocking exclusive lock on ``path``; ``None`` if busy."""
+    """Attempt a non-blocking exclusive lock on ``path``; ``None`` if busy.
 
-    path.touch(exist_ok=True)
-    handle = open(path, "r+b")
+    Raises ``SuiteLockUnwritable`` when the file cannot even be created or
+    opened for write access because the running identity lacks permission
+    (USR-463) -- a distinct condition from the lock being legitimately held
+    by another process, which is reported by returning ``None``.
+    """
+
+    try:
+        path.touch(exist_ok=True)
+        handle = open(path, "r+b")
+    except PermissionError as exc:
+        raise SuiteLockUnwritable(path, str(exc)) from exc
     try:
         if os.name == "nt":
             import msvcrt
@@ -256,6 +394,47 @@ def _describe_holder(lock_path: Path) -> str:
         f"held by pid {info.get('pid', '?')} on {info.get('hostname', '?')} "
         f"({info.get('cwd', '?')}) since {since}"
     )
+
+
+def _sidecar_owner_pid_if_live(lock_path: Path) -> int | None:
+    """``pid`` of ``lock_path``'s sidecar owner when it is confirmably alive on
+    this host (USR-463); ``None`` for an absent, unreadable, dead, or
+    unverifiable (e.g. recorded on a different host) owner.
+
+    Used to decide whether a degraded acquisition must wait for the canonical
+    holder: only a *confirmed-live* holder blocks it, matching the rule that a
+    dead or absent canonical lock never blocks the fallback.
+    """
+
+    info = _read_sidecar(lock_path)
+    if not info:
+        return None
+    pid = info.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if str(info.get("hostname") or "").lower() != socket.gethostname().lower():
+        return None
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        proc = psutil.Process(pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return None
+    if same_process(proc, info.get("started_at"), info.get("start_ticks")):
+        return pid
+    return None
+
+
+def _canonical_owner_is_live(canonical_dir: Path, slots: int) -> bool:
+    """True when any of the canonical directory's ``suite-N.lock`` sidecars
+    names a process confirmed alive on this host (USR-463)."""
+
+    for slot in range(slots):
+        if _sidecar_owner_pid_if_live(canonical_dir / f"suite-{slot}.lock") is not None:
+            return True
+    return False
 
 
 def _sample_holder_tree(
@@ -404,6 +583,14 @@ class SuiteLock:
         #: (``None`` until the lock is acquired). The runner reports it in the
         #: per-run timing record, separate from the suite execution time.
         self.waited_sec: float | None = None
+        #: USR-463: ``True`` once ``acquire()`` had to fall back to a
+        #: per-identity directory because the canonical one was unwritable.
+        self.degraded: bool = False
+        #: USR-463: the directory the held lock actually lives in -- the
+        #: canonical one, or the degraded fallback.
+        self.state_dir_used: Path | None = None
+        #: USR-463: why ``degraded`` is ``True``; ``None`` otherwise.
+        self.degradation_reason: str | None = None
 
     @property
     def held(self) -> bool:
@@ -412,7 +599,11 @@ class SuiteLock:
     def acquire(self) -> None:
         if self._handle is not None:
             return
-        directory = state_dir()
+        resolution = resolve_state_dir()
+        self.degraded = resolution.degraded
+        self.state_dir_used = resolution.path
+        self.degradation_reason = resolution.reason
+        directory = resolution.path
         wait_started = time.monotonic()
         deadline = wait_started + self._timeout_sec
         backoff = _POLL_MIN_SEC
@@ -422,6 +613,25 @@ class SuiteLock:
             window=_stall_window_sec(),
             reap=_reap_stalled_enabled(),
         )
+        if resolution.degraded:
+            canonical = _canonical_state_dir_path()
+            print(
+                f"[SUITE_LOCK] {resolution.reason}; usando estado degradado em {directory} "
+                "(exclusao entre identidades e best-effort, sem garantia de exclusividade "
+                "entre contas distintas)"
+            )
+            while _canonical_owner_is_live(canonical, self._slots):
+                if time.monotonic() >= deadline:
+                    timeout_error = SuiteLockTimeout(
+                        f"[SUITE_LOCK] timed out after {self._timeout_sec:.0f}s waiting for the "
+                        f"canonical lock owner at {canonical} to release before using the "
+                        f"degraded state dir {directory}"
+                    )
+                    timeout_error.waited_sec = time.monotonic() - wait_started
+                    raise timeout_error
+                _sleep(backoff)
+                backoff = min(backoff * 1.5, _POLL_MAX_SEC)
+            backoff = _POLL_MIN_SEC
         while True:
             for slot in range(self._slots):
                 lock_path = directory / f"suite-{slot}.lock"
@@ -437,7 +647,6 @@ class SuiteLock:
                         )
                     return
             if time.monotonic() >= deadline:
-                sample = directory / "suite-0.lock"
                 timeout_error = SuiteLockTimeout(
                     f"[SUITE_LOCK] timed out after {self._timeout_sec:.0f}s waiting for a free "
                     f"slot ({self._describe_first_busy(directory)})"
@@ -483,17 +692,27 @@ def probe_free_slot(*, slots: int | None = None) -> bool:
 
     This is a capacity observation only. Callers still need to acquire a lock
     for their actual work, so the result can become stale immediately.
+
+    Never raises for a permission problem (USR-463): a state directory or
+    lock file that this identity cannot write to is treated the same as "no
+    slot observed free" rather than crashing the caller.
     """
     if is_disabled():
         return True
     if is_held_by_ancestor():
         return False
     count = _slot_count() if slots is None else max(1, slots)
-    directory = state_dir()
+    try:
+        directory = state_dir()
+    except SuiteLockUnwritable:
+        return False
     handles: list[object] = []
     try:
         for slot in range(count):
-            handle = _try_lock_file(directory / f"suite-{slot}.lock")
+            try:
+                handle = _try_lock_file(directory / f"suite-{slot}.lock")
+            except SuiteLockUnwritable:
+                continue
             if handle is not None:
                 handles.append(handle)
         return bool(handles)

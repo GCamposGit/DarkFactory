@@ -127,6 +127,303 @@ def test_timeout_raises_when_no_slot_frees_up(tmp_path: Path, monkeypatch: pytes
         holder.release()
 
 
+def test_probe_free_slot_true_when_no_holder(tmp_path: Path) -> None:
+    assert suite_lock.probe_free_slot() is True
+
+
+def test_probe_free_slot_false_when_slot_held(tmp_path: Path) -> None:
+    holder = suite_lock.SuiteLock(timeout_sec=5)
+    holder.acquire()
+    try:
+        assert suite_lock.probe_free_slot() is False
+    finally:
+        holder.release()
+
+
+def test_probe_free_slot_respects_disabled_and_held_by_ancestor_flags() -> None:
+    os.environ["DARKFAC_SUITE_LOCK"] = "off"
+    assert suite_lock.probe_free_slot() is True
+    del os.environ["DARKFAC_SUITE_LOCK"]
+    os.environ["DARKFAC_SUITE_LOCK_HELD"] = "1"
+    assert suite_lock.probe_free_slot() is False
+
+
+def test_try_lock_file_raises_suite_lock_unwritable_on_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-463: a restricted ACL (e.g. CodexSandboxUsers) denying write access
+    to the lock file must surface as ``SuiteLockUnwritable``, never as a raw
+    ``PermissionError`` traceback that kills the whole gate run."""
+
+    lock_path = tmp_path / "suite-0.lock"
+
+    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "touch", _denied_touch)
+    with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
+        suite_lock._try_lock_file(lock_path)
+    assert excinfo.value.path == lock_path
+
+
+def test_try_lock_file_still_returns_none_when_slot_is_busy(tmp_path: Path) -> None:
+    """A slot genuinely held by another process stays a plain ``None`` --
+    permission failures must not be conflated with lock contention."""
+
+    lock_path = tmp_path / "suite-0.lock"
+    holder_handle = suite_lock._try_lock_file(lock_path)
+    assert holder_handle is not None
+    try:
+        assert suite_lock._try_lock_file(lock_path) is None
+    finally:
+        suite_lock._unlock_file(holder_handle)
+
+
+def test_state_dir_raises_suite_lock_unwritable_on_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unwritable_dir = tmp_path / "state" / "nested"
+    monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(unwritable_dir))
+
+    def _denied_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _denied_mkdir)
+    with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
+        suite_lock.state_dir()
+    assert excinfo.value.path == unwritable_dir
+
+
+def test_probe_free_slot_returns_false_instead_of_raising_when_state_dir_unwritable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unwritable(*args: object, **kwargs: object):
+        raise suite_lock.SuiteLockUnwritable(Path("unused"), "denied")
+
+    monkeypatch.setattr(suite_lock, "state_dir", _unwritable)
+    assert suite_lock.probe_free_slot() is False
+
+
+def test_resolve_state_dir_returns_canonical_when_writable(tmp_path: Path) -> None:
+    resolution = suite_lock.resolve_state_dir()
+    assert resolution.degraded is False
+    assert resolution.reason is None
+    assert resolution.path == tmp_path / "state"
+    assert resolution.path.is_dir()
+
+
+def test_resolve_state_dir_falls_back_per_identity_when_canonical_lock_unwritable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-463: probing write access via the exact artifact a real acquisition
+    touches (``suite-0.lock``) must detect a restricted identity even though
+    the directory itself already exists and ``mkdir(exist_ok=True)`` is a
+    silent no-op that proves nothing."""
+
+    canonical = tmp_path / "state"
+    canonical.mkdir(parents=True)
+    (canonical / "suite-0.lock").touch()
+
+    real_touch = Path.touch
+
+    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock":
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+    resolution = suite_lock.resolve_state_dir()
+    assert resolution.degraded is True
+    assert resolution.reason is not None
+    assert "suite-0.lock" in resolution.reason
+    assert resolution.path != canonical
+    assert "sandboxed-user" in resolution.path.name
+    assert resolution.path.is_dir()
+
+
+def test_resolve_state_dir_fallback_rooted_at_configured_state_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``DARKFAC_HARNESS_STATE_DIR`` is configured, the per-identity
+    fallback stays under that same configured base instead of jumping to the
+    system temp dir, so it remains on the same volume as the canonical dir."""
+
+    canonical = tmp_path / "state"
+    canonical.mkdir(parents=True)
+
+    real_touch = Path.touch
+
+    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock":
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+    resolution = suite_lock.resolve_state_dir()
+    assert resolution.degraded is True
+    assert resolution.path.parent == canonical
+
+
+def test_acquire_stays_on_canonical_dir_with_no_warning_when_writable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-463: the writable case must behave identically to before degraded
+    mode existed -- no warning printed, no fallback directory created."""
+
+    lock = suite_lock.SuiteLock(timeout_sec=5)
+    lock.acquire()
+    try:
+        assert lock.degraded is False
+        assert lock.degradation_reason is None
+        assert lock.state_dir_used == tmp_path / "state"
+    finally:
+        lock.release()
+    captured = capsys.readouterr()
+    assert "[SUITE_LOCK]" not in captured.out
+    assert not list(tmp_path.glob("darkfac-harness-*"))
+
+
+def test_acquire_uses_degraded_fallback_when_canonical_lock_unwritable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-463: a restricted identity must still be able to acquire the lock,
+    in a writable fallback directory, with exactly one explanatory warning."""
+
+    canonical = tmp_path / "state"
+    canonical.mkdir(parents=True)
+
+    real_touch = Path.touch
+
+    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock" and self.parent == canonical:
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+
+    lock = suite_lock.SuiteLock(timeout_sec=5)
+    lock.acquire()
+    try:
+        assert lock.degraded is True
+        assert lock.state_dir_used is not None
+        assert lock.state_dir_used != canonical
+        assert lock.held is True
+    finally:
+        lock.release()
+    captured = capsys.readouterr()
+    assert captured.out.count("[SUITE_LOCK]") == 1
+    assert "best-effort" in captured.out or "best effort" in captured.out
+
+
+def test_acquire_degraded_does_not_wait_for_dead_canonical_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A canonical sidecar naming a pid that is not alive must never block the
+    degraded acquisition (USR-463)."""
+
+    canonical = tmp_path / "state"
+    canonical.mkdir(parents=True)
+    canonical_lock = canonical / "suite-0.lock"
+    canonical_lock.touch()
+    import json
+    import socket
+
+    (canonical / "suite-0.json").write_text(
+        json.dumps(
+            {
+                "pid": 999999999,
+                "hostname": socket.gethostname(),
+                "started_at": time.time(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    real_touch = Path.touch
+
+    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock" and self.parent == canonical:
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+
+    lock = suite_lock.SuiteLock(timeout_sec=5)
+    lock.acquire()
+    try:
+        assert lock.degraded is True
+        assert lock.held is True
+    finally:
+        lock.release()
+
+
+def test_acquire_degraded_waits_for_live_canonical_owner_then_times_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A canonical sidecar naming *this* (confirmably alive) process must block
+    the degraded acquisition until the configured deadline (USR-463)."""
+
+    canonical = tmp_path / "state"
+    canonical.mkdir(parents=True)
+    canonical_lock = canonical / "suite-0.lock"
+    canonical_lock.touch()
+    import json
+    import socket
+
+    (canonical / "suite-0.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "started_at": time.time(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    real_touch = Path.touch
+
+    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock" and self.parent == canonical:
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+    monkeypatch.setattr(suite_lock, "_sleep", lambda _s: None)
+
+    try:
+        import psutil  # noqa: F401
+    except ImportError:
+        pytest.skip("psutil not installed")
+
+    lock = suite_lock.SuiteLock(timeout_sec=0.2)
+    with pytest.raises(suite_lock.SuiteLockTimeout) as excinfo:
+        lock.acquire()
+    assert excinfo.value.waited_sec >= 0.0
+    assert lock.held is False
+
+
+def test_probe_free_slot_skips_unwritable_slot_without_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A single unwritable slot must not crash the probe; it is simply not
+    counted as free (USR-463)."""
+
+    real_try_lock_file = suite_lock._try_lock_file
+
+    def _flaky(path: Path):
+        raise suite_lock.SuiteLockUnwritable(path, "denied")
+
+    monkeypatch.setattr(suite_lock, "_try_lock_file", _flaky)
+    assert suite_lock.probe_free_slot() is False
+    monkeypatch.setattr(suite_lock, "_try_lock_file", real_try_lock_file)
+
+
 def _contender_script(state_dir: Path, marker_path: Path, hold_seconds: float) -> str:
     return textwrap.dedent(
         f"""
