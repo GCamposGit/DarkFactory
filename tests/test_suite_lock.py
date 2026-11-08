@@ -242,6 +242,62 @@ def test_resolve_state_dir_falls_back_per_identity_when_canonical_lock_unwritabl
     assert resolution.path.is_dir()
 
 
+def test_resolve_state_dir_checks_write_open_not_only_touch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read-only ACL may allow touch but reject the ``r+b`` open used to lock."""
+
+    canonical = tmp_path / "state"
+    canonical.mkdir(parents=True)
+    real_open = open
+
+    def _deny_write_open(file: object, mode: str = "r", *args: object, **kwargs: object):
+        if Path(file) == canonical / "suite-0.lock" and mode == "r+b":
+            raise PermissionError(13, "write data denied")
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", _deny_write_open)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+
+    resolution = suite_lock.resolve_state_dir()
+
+    assert resolution.degraded is True
+    assert resolution.path == canonical / "darkfac-harness-sandboxed-user"
+
+
+def test_acquire_degrades_if_canonical_lock_becomes_unwritable_after_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A permission change after resolution must still switch acquisition to fallback."""
+
+    canonical = tmp_path / "state"
+    real_touch = Path.touch
+    denied = False
+
+    def _deny_acquisition_touch(self: Path, *args: object, **kwargs: object) -> None:
+        nonlocal denied
+        if self == canonical / "suite-0.lock" and not denied:
+            denied = True
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _deny_acquisition_touch)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+
+    lock = suite_lock.SuiteLock(timeout_sec=5)
+    lock.acquire()
+    try:
+        fallback = canonical / "darkfac-harness-sandboxed-user"
+        assert lock.held is True
+        assert lock.degraded is True
+        assert lock.state_dir_used == fallback
+        assert lock._handle is not None and lock._handle.path.parent == fallback
+    finally:
+        lock.release()
+
+    assert "estado degradado" in capsys.readouterr().out
+
+
 def test_resolve_state_dir_fallback_rooted_at_configured_state_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

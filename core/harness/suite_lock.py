@@ -182,7 +182,14 @@ def _probe_writable(directory: Path) -> None:
     """
 
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "suite-0.lock").touch(exist_ok=True)
+    lock_path = directory / "suite-0.lock"
+    lock_path.touch(exist_ok=True)
+    # ``touch`` only proves that the file can be created or its timestamp
+    # changed. Windows ACLs can grant that access while denying the write-data
+    # access required by the real ``r+b`` lock-file open below. Probe the same
+    # open mode so the resolver catches that restricted-identity case too.
+    with open(lock_path, "r+b"):
+        pass
 
 
 @dataclass(frozen=True)
@@ -645,7 +652,51 @@ class SuiteLock:
         while True:
             for slot in range(self._slots):
                 lock_path = directory / f"suite-{slot}.lock"
-                handle = _try_lock_file(lock_path)
+                try:
+                    handle = _try_lock_file(lock_path)
+                except SuiteLockUnwritable as exc:
+                    # The canonical ACL can change between the initial probe
+                    # and acquisition (or deny the exact open despite touch
+                    # succeeding). Degrade here as well, rather than leaking
+                    # the structured error out of a gate that could use its
+                    # per-identity lock directory.
+                    if resolution.degraded:
+                        raise
+                    canonical = _canonical_state_dir_path()
+                    fallback = _fallback_state_dir()
+                    reason = (
+                        f"sem permissao de escrita em {lock_path}: {exc.reason}"
+                    )
+                    try:
+                        _probe_writable(fallback)
+                    except PermissionError as fallback_exc:
+                        raise SuiteLockUnwritable(
+                            fallback / "suite-0.lock",
+                            f"fallback for {lock_path} is also unwritable: {fallback_exc}",
+                        ) from fallback_exc
+                    resolution = StateDirResolution(fallback, True, reason)
+                    self.degraded = True
+                    self.state_dir_used = fallback
+                    self.degradation_reason = reason
+                    directory = fallback
+                    print(
+                        f"[SUITE_LOCK] {reason}; usando estado degradado em {directory} "
+                        "(exclusao entre identidades e best-effort, sem garantia de exclusividade "
+                        "entre contas distintas)"
+                    )
+                    while _canonical_owner_is_live(canonical, self._slots):
+                        if time.monotonic() >= deadline:
+                            timeout_error = SuiteLockTimeout(
+                                f"[SUITE_LOCK] timed out after {self._timeout_sec:.0f}s waiting for the "
+                                f"canonical lock owner at {canonical} to release before using the "
+                                f"degraded state dir {directory}"
+                            )
+                            timeout_error.waited_sec = time.monotonic() - wait_started
+                            raise timeout_error
+                        _sleep(backoff)
+                        backoff = min(backoff * 1.5, _POLL_MAX_SEC)
+                    backoff = _POLL_MIN_SEC
+                    break
                 if handle is not None:
                     _write_sidecar(lock_path)
                     self._handle = _LockHandle(file=handle, path=lock_path, slot=slot)

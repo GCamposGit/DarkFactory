@@ -58,11 +58,12 @@ onde gravar o lock. Uma falha de permissão no diretório canônico leva ao
 fallback por identidade; se o próprio arquivo de lock do fallback também não
 for gravável, a função levanta `SuiteLockUnwritable` estruturado:
 
-- Verifica a permissão de escrita tocando o artefato exato que uma aquisição
-  real tocaria primeiro (`<diretório-canônico>/suite-0.lock`), não apenas
-  criando o diretório -- `Path.mkdir(exist_ok=True)` num diretório já existente
-  é um no-op silencioso que não prova nada sobre a gravação de arquivos
-  preexistentes nele, já que a ACL do Windows é por arquivo: um `suite-0.lock`
+- Verifica o artefato exato que uma aquisição real usa
+  (`<diretório-canônico>/suite-0.lock`): além de tocar o arquivo, abre-o em
+  `r+b`, o mesmo modo de escrita usado pelo lock. `Path.mkdir(exist_ok=True)`
+  num diretório já existente é um no-op silencioso que não prova nada sobre a
+  gravação de arquivos preexistentes nele, já que a ACL do Windows é por
+  arquivo: um `suite-0.lock`
   criado por outra conta pode continuar sem escrita para a identidade atual
   mesmo que novos arquivos possam ser criados no mesmo diretório.
 - Com escrita: retorna o diretório canônico, `degraded=False`, `reason=None`.
@@ -75,10 +76,13 @@ for gravável, a função levanta `SuiteLockUnwritable` estruturado:
   irmãos preexistentes não são), senão
   `tempfile.gettempdir()/darkfac-harness-<usuário>` -- com `degraded=True` e
   `reason` explicando o motivo da degradação.
-- O fallback também é sondado tocando `suite-0.lock`. Se ele já contiver um
-  arquivo sem escrita para esta identidade, a resolução falha com
+- O fallback também é sondado tocando e abrindo `suite-0.lock` em `r+b`. Se ele
+  já contiver um arquivo sem escrita para esta identidade, a resolução falha com
   `SuiteLockUnwritable` apontando esse arquivo; não deixa um `PermissionError`
   cru escapar na tentativa posterior de abrir o lock.
+- Se a permissão do lock canônico mudar depois da sondagem, a própria aquisição
+  também troca para o fallback por identidade e espera um eventual dono
+  canônico confirmado antes de adquirir o slot.
 
 `SuiteLock.acquire()` em modo degradado:
 
