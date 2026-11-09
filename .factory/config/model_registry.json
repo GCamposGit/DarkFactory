@@ -255,7 +255,7 @@
       "release_date": null,
       "retirement_date": null,
       "gateway_ids": [
-        "x-ai/grok-4.6","xai/grok-4.6"
+        "xai/grok-4.6"
       ],
       "qualification": {
         "status": "grandfathered"
