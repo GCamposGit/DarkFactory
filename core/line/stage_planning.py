@@ -352,6 +352,10 @@ def run_planning(
 
     if plan is None:
         # Bad JSON is retried on another harness before it is terminal (see stage_grill).
+        logger.warning(
+            "planning run %s: invalid plan from %s: %s",
+            run_id, getattr(last_result, "harness", None), diagnostics.redacted_head(last_error),
+        )
         return stage_grill.invalid_json_outcome(ws, run_id, STAGE, last_result, "plan_invalid")
 
     workspace.write_context(ws, _SPEC_FILE, _render_spec_markdown(plan.spec))
