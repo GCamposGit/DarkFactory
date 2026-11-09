@@ -2275,7 +2275,7 @@ def _deliver_worktree(
         )
 
     try:
-        _require_plan_and_build(ticket, rws, standalone)
+        _require_plan_and_build(ticket, rws, standalone, target_worktree)
     except StageArtifactMissing as exc:
         return refused(exc.stage, exc.reason)
     ticket_engine.clear_delivery(rws, keep_validation=True)
@@ -2515,21 +2515,84 @@ def _ci_red_twice_result(
     return payload if return_result else 1
 
 
-def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> None:
-    """Delivery never starts without PLAN and BUILD artifacts (raises `StageArtifactMissing`).
+def _artifact_present(stage: Stage, rws: Any) -> bool:
+    """True when `stage`'s artifact already validates; never raises."""
+    try:
+        require_artifact(stage, rws)
+        return True
+    except StageArtifactMissing:
+        return False
 
-    Exception: an operator's standalone `--resume-delivery` of a worktree cut before USR-375 S4 (no
-    artifact at all) records a minimal plan/build so the old worktree can still go through VALIDATE,
-    REVIEW and MERGE; the launcher and the fleet always produce both stages themselves.
+
+def _has_build_evidence(target_worktree: Optional[Path], base_branch: str) -> bool:
+    """True when `target_worktree` carries at least one commit beyond `origin/<base_branch>` (USR-447).
+
+    BUILD is never backfilled on trust alone: without a real commit ahead of the base, the stage
+    stays refused instead of a `progress.json` recording work that was never done.
     """
-    if standalone and not ticket_engine.has_any(rws):
-        logger.warning("resume-delivery de %s sem artefatos de estagio: plano/build minimos registrados", ticket.id)
+    if target_worktree is None or not target_worktree.is_dir():
+        return False
+    from core.git.autonomy import _run_git
+
+    _run_git(["fetch", "origin", base_branch], cwd=target_worktree, timeout_s=120)
+    remote_ref = f"origin/{base_branch}"
+    if _run_git(["rev-parse", "--verify", "--quiet", remote_ref], cwd=target_worktree).returncode != 0:
+        return False
+    ahead = _run_git(["rev-list", "--count", f"{remote_ref}..HEAD"], cwd=target_worktree)
+    text = (ahead.stdout or "").strip()
+    return ahead.returncode == 0 and text.isdigit() and int(text) > 0
+
+
+def _require_plan_and_build(
+    ticket: UserTicket, rws: Any, standalone: bool, target_worktree: Optional[Path] = None
+) -> None:
+    """Delivery never starts without INTAKE/PLAN/RESEARCH/BUILD artifacts (raises `StageArtifactMissing`).
+
+    The launcher and the fleet always produce every stage themselves; only an operator's standalone
+    `--resume-delivery` backfills, and only stage by stage (USR-447): a worktree missing just one
+    artifact (e.g. a docs rebase that preserved INTAKE/GRILL but never re-ran planning) gets only that
+    stage rebuilt, never touching a stage whose artifact already validates. The previous `has_any`
+    gate was all-or-nothing: a single leftover file from an earlier attempt skipped the whole backfill
+    and let a later stage fail on its own missing artifact (plan_invalid / stage_artifact_missing:PLAN
+    even though the implementation itself was already committed).
+
+    PLAN provenance (`ensure_plan_provenance`) is checked before a PLAN already on disk is trusted: a
+    `plan_origin.json` naming a different ticket refuses the resume instead of being silently rebound.
+    BUILD is backfilled only when `_has_build_evidence` finds a real commit ahead of the base branch.
+    """
+    if not standalone:
+        require_artifact(Stage.PLAN, rws)
+        require_artifact(Stage.RESEARCH, rws)
+        require_artifact(Stage.BUILD, rws)
+        return
+
+    if not _artifact_present(Stage.INTAKE, rws):
+        logger.warning("resume-delivery de %s: INTAKE ausente, DEMAND.md reconstruido", ticket.id)
         ticket_engine.write_demand(rws, ticket)
+    require_artifact(Stage.INTAKE, rws)
+
+    ticket_engine.ensure_plan_provenance(rws, ticket.id)
+    if not _artifact_present(Stage.PLAN, rws):
+        logger.warning("resume-delivery de %s: PLAN ausente/invalido, plano minimo registrado", ticket.id)
         ticket_engine.write_minimal_plan(rws, ticket)
-        ticket_engine.write_research(rws, ticket_extras.legacy_research(ticket.id))
-        ticket_engine.write_build(rws, None, [ticket.id])
     require_artifact(Stage.PLAN, rws)
+
+    if not _artifact_present(Stage.RESEARCH, rws):
+        logger.warning("resume-delivery de %s: RESEARCH ausente/invalido, pesquisa legada registrada", ticket.id)
+        ticket_engine.write_research(rws, ticket_extras.legacy_research(ticket.id))
     require_artifact(Stage.RESEARCH, rws)
+
+    if not _artifact_present(Stage.BUILD, rws):
+        base_branch = _review_base_branch(ticket)
+        if not _has_build_evidence(target_worktree, base_branch):
+            raise StageArtifactMissing(
+                Stage.BUILD,
+                "artefato ausente e sem commit a frente da base: implementacao nao verificavel",
+            )
+        logger.warning(
+            "resume-delivery de %s: BUILD ausente, progress.json registrado por commit verificado", ticket.id
+        )
+        ticket_engine.write_build(rws, None, [ticket.id])
     require_artifact(Stage.BUILD, rws)
 
 
@@ -3542,6 +3605,7 @@ def _stage_plan(
                 return _stage_wait(args, ticket, workspace, progress, Stage.PLAN, cause)
             if cause is not None:
                 return _stage_refused(args, ticket, workspace, progress, Stage.PLAN, cause)
+            ticket_engine.write_plan_origin(rws, ticket.id, "planning_agent")
         planned = ticket_engine.plan_tickets(rws)
         stage = Stage.RESEARCH
         research = ticket_extras.run_research(ticket, rws, workspace.main_root)
