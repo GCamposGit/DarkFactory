@@ -42,7 +42,8 @@ from core.line.agent_cli import (
     redact_secrets,
     run_agent,
 )
-from core.line.recovery_receipt import independent_route, review_capabilities, review_context
+from core.line.recovery_receipt import implementation_families, review_capabilities, review_context
+from core.line.review_cascade import ADVERSARIAL_PROMPT, select_review_route
 from core.line.review_payload import (
     ReviewPayload,
     build_review_payload,
@@ -139,6 +140,8 @@ class ReviewRound(BaseModel):
     # USR-171: binding of the verdict to the reviewed candidate and review policy.
     candidate_digest: Optional[str] = None
     policy_digest: Optional[str] = None
+    # USR-488: cascade level, model, persona and reason of the reviewer that produced this round.
+    route: Optional[dict] = None
 
 
 MAX_REVIEW_AGENT_RETRIES: int = 5
@@ -473,6 +476,7 @@ class ReviewStage:
         round_num: int,
         harness: str,
         model: Optional[str],
+        persona_prompt: str = "",
     ) -> AgentResult | StageResult:
         """Build the prompt, refuse a missing SPEC or tickets, and call the reviewer."""
         diff_text = _get_diff(git_ws, default_branch)
@@ -486,7 +490,7 @@ class ReviewStage:
                 outcome="failed", cause_code="review_context_unavailable", output_refs=[],
             )
         template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
-        prompt = _compose_review_prompt(
+        prompt = persona_prompt + _compose_review_prompt(
             ws,
             harness,
             fill_template(
@@ -692,24 +696,29 @@ class ReviewStage:
             *state.timed_out_harnesses,
             *(item["harness"] for item in current_invalid if item.get("harness")),
         ]))
-        route = self.pick_func(
-            "review",
-            review_capabilities(ws, self.host_caps),
+        review_route = select_review_route(
+            self.pick_func,
+            self.host_caps,
+            independent_caps=review_capabilities(ws, self.host_caps),
             implementing_harness=implementing_harness,
-            config=self.routing_config,
+            families=implementation_families(ws, implementing_harness),
             exclude=excluded_harnesses,
+            openrouter_fallbacks=("review.openrouter", "distill.openrouter"),
+            config=self.routing_config,
         )
-        if route is None:
-            # No route is a matter of time, not of the owner (USR-87): retry at the earliest reset.
+        if review_route is None:
+            # No route at any cascade level is a matter of time, not of the owner (USR-87).
             return self.route_waiter.no_route_result(
                 "review", project, run_id,
                 host_caps=self.host_caps, config=self.routing_config, mode="read",
                 implementing_harness=implementing_harness,
             )
-        harness, model = independent_route(ws, *route, self.routing_config.stages["review"].openrouter_model)
+        harness, model = review_route.harness, review_route.model
+        workspace.write_context(ws, "review_route.json", json.dumps(review_route.record()))
 
         agent_result = self._invoke_reviewer(
             ws, git_ws, run_id, default_branch, round_num, harness, model,
+            persona_prompt=ADVERSARIAL_PROMPT if review_route.level == 4 else "",
         )
         if isinstance(agent_result, StageResult):
             return agent_result
@@ -749,6 +758,7 @@ class ReviewStage:
                 verdict="approve" if approved else "changes_required",
                 candidate_digest=cur_candidate,
                 policy_digest=cur_policy,
+                route=review_route.record(),
             )
         )
         state.agent_error_streak = 0
@@ -757,7 +767,10 @@ class ReviewStage:
             # USR-375 S4: the stage contract artifact `stages.require_artifact(REVIEW)` validates.
             workspace.write_context(ws, VERDICT_FILE, verdict.model_dump_json(indent=2))
             from core.line.recovery_receipt import record_review_execution
-            record_review_execution(ws, cur_candidate, implementing_harness or "", harness, agent_result.model or model)
+            record_review_execution(
+                ws, cur_candidate, implementing_harness or "", harness, agent_result.model or model,
+                route=review_route.record(),
+            )
 
         job_key = f"{run_id}:review:{round_num}"
         if publish:

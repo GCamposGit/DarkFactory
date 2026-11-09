@@ -102,13 +102,10 @@ def test_review_uses_family_different_from_development(
     project = _project(str(origin))
     run_id = "run-1"
     ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
-    from core.line.recovery_receipt import record_implementation, independent_route, route_family
-    from core.models.registry import resolve
+    from core.line.recovery_receipt import record_implementation
     record_implementation(ws, "claude", None)
     record_implementation(ws, "codex", None)
     ws_mod.write_context(ws, "SPEC.md", "Actual acceptance: persist recovery across restart")
-    paid = independent_route(ws, "openrouter", resolve("planning.codex"), load_routing_config().stages["review"].openrouter_model)
-    assert route_family(*paid) not in {"anthropic", "openai"}
 
     agent = _ScriptedAgent([{"verdict": "approve", "blocking": [], "non_blocking": []}])
     stage = ReviewStage(
@@ -1123,7 +1120,7 @@ def test_missing_or_empty_spec_or_tickets_do_not_call_the_model(
     assert not (ctx / "review_verdict.json").exists()
 
 
-def test_review_rejects_the_implementer_family_and_leaves_validation_untouched(
+def test_review_uses_recorded_contingency_when_only_the_implementer_family_answers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core.line.recovery_receipt import record_implementation
@@ -1149,12 +1146,17 @@ def test_review_rejects_the_implementer_family_and_leaves_validation_untouched(
         routing_config=load_routing_config(),
     )
 
-    with pytest.raises(ValueError, match="review_same_implementation_family"):
-        stage.run(project, "run-same-family")
+    result = stage.run(project, "run-same-family")
 
-    assert calls == []
+    assert result.outcome == "success"
+    assert len(calls) == 1 and calls[0].mode == "read"
     assert (ctx / "validation.json").read_bytes() == validation
-    assert not (ctx / "review_verdict.json").exists()
+    route = json.loads((ctx / "review_route.json").read_text(encoding="utf-8"))
+    assert route["level"] in (3, 4) and route["persona"] and route["reason"]
+    execution = json.loads((ctx / "review_execution.json").read_text(encoding="utf-8"))
+    assert execution["contingency"] == route
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["rounds"][-1]["route"] == route and not state["rounds"][-1]["forced"]
 
 
 def test_filesystem_review_keeps_the_full_diff_and_shows_the_spec_once(

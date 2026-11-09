@@ -17,6 +17,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from core.line import routing
+from core.line.review_cascade import valid_contingency
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ class RouteHit(BaseModel):
     harness: Optional[str] = None
     model: Optional[str] = None
     evidence_ref: str
+    # USR-488: cascade level 3 or 4 (same family, recorded). Only these may share the writer's family.
+    contingency_level: Optional[int] = None
 
 
 class GateWorkerObservation(BaseModel):
@@ -308,7 +311,7 @@ def decide(
         return wait_for(build, CODE_NO_BUILD_ROUTE, RESOURCE_BUILD, STAGE_BUILD)
     if not review.harness:
         return wait_for(review, CODE_NO_REVIEW_ROUTE, RESOURCE_REVIEW, STAGE_REVIEW)
-    if review.harness.casefold() == build.harness.casefold():
+    if review.harness.casefold() == build.harness.casefold() and review.contingency_level is None:
         return wait_for(review, CODE_REVIEW_SAME_FAMILY, RESOURCE_REVIEW, STAGE_REVIEW)
     gate_code, gate_ref = classify_gate(gate, observed)
     if gate_code is not None:
@@ -501,6 +504,28 @@ def _select_route(
     )
 
 
+def _select_review(pick_route: PickFn, caps: Iterable[str], writer: str, **common: Any) -> RouteHit:
+    """Cascade of USR-488: independent route first, recorded contingency before any wait."""
+    from core.line.recovery_receipt import route_family
+    from core.line.review_cascade import select_review_route
+
+    try:
+        families = {route_family(writer, None)}
+    except ValueError:
+        families = set()
+    route = select_review_route(
+        lambda stage, caps_, **kw: pick_route(stage, caps_, reserve_quota=False, mode="read", **common, **kw),
+        caps, implementing_harness=writer, families=families,
+    )
+    if route is None:
+        return RouteHit(stage=STAGE_REVIEW, harness=None, model=None, evidence_ref="routing://review/none")
+    return RouteHit(
+        stage=STAGE_REVIEW, harness=route.harness, model=route.model,
+        evidence_ref=f"routing://review/{route.harness}" + (f"#level={route.level}" if route.level > 2 else ""),
+        contingency_level=route.level if route.contingency else None,
+    )
+
+
 def _prospective_writer(picked: Optional[str], pinned: Optional[str], *, execution_context: str) -> Optional[str]:
     """The harness that would write, once a write route exists. A pin does not invent a route."""
     if not picked:
@@ -571,15 +596,7 @@ def admit(
     else:
         build = build_pick
     if writer:
-        review = _select_route(
-            pick_route,
-            "review",
-            read_caps,
-            decision_stage=STAGE_REVIEW,
-            mode="read",
-            implementing_harness=writer,
-            **common,
-        )
+        review = _select_review(pick_route, read_caps, writer, **common)
     else:
         review = RouteHit(stage=STAGE_REVIEW, harness=None, model=None, evidence_ref="routing://review/none")
 
@@ -668,9 +685,10 @@ def verify_recovery_receipt(
     if review.get("approved") is not True or review.get("independent") is not True:
         return False, "receipt_review_not_approved"
     implementer_family = str(receipt.get("implementer_family") or "").strip().casefold()
+    same_family = str(review.get("reviewer_family") or "").strip().casefold() == implementer_family
     if (not review.get("reviewer_family") or not implementer_family
             or str(review.get("implementer_family") or "").strip().casefold() != implementer_family
-            or str(review.get("reviewer_family") or "").strip().casefold() == implementer_family):
+            or (same_family and not valid_contingency(review.get("contingency")))):
         return False, "receipt_review_not_independent"
     if stages["ci"].get("green") is not True:
         return False, "receipt_ci_not_green"
