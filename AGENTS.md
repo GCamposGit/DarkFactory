@@ -33,7 +33,7 @@ Fonte única das regras para todo agente e harness (Claude Code, Codex, Grok Bui
 - **Harness de operação**: o harness pelo qual o owner opera (`DARKFAC_OPERATING_HARNESS` ou autodetecção) é eleito para `development` enquanto estiver acima do piso; abaixo dele vale o Dynamic Headroom. Não altera grill, planning, review nem integration.
 - **Modelos**: ids concretos vivem só em `.factory/config/model_registry.json` (lido por `core.models.registry`); textos citam apenas aliases. Planejamento usa o alias `opus`; implementação por subagente usa `sonnet`.
 - **Subagentes do chat gastam a cota do chat.** Antes de paralelizar, confira a cota; com a janela pressionada, mande o trabalho para a frota (`run_ticket.py --create --queue-only`).
-- **Revisão cruzada**: o revisor é sempre de família de modelo diferente da do implementador.
+- **Revisão cruzada**: preferencialmente o revisor é de família diferente da do implementador. Sem rota disponível, a cascata registrada é: outra família via OpenRouter, mesma família com outro modelo, mesmo modelo com persona adversarial. Detalhes em `docs/manual/roteamento.md`.
 
 ## 4. Código
 
@@ -47,16 +47,16 @@ Fonte única das regras para todo agente e harness (Claude Code, Codex, Grok Bui
 
 ## 5. Validação
 
-Portão único oficial:
+Comando oficial do portão:
 
 ```powershell
-python C:\dev\DarkFac\core\harness\runner.py --quick
+python C:\dev\DarkFac\core\harnessunner.py --quick
 ```
 
-- Roda a suíte inteira em paralelo (`pytest-xdist`), com verdict cacheado por árvore e `suite_lock` por máquina. Não rode `pytest tests` como segundo portão nem portões em paralelo no mesmo host.
+- **PR**: roda os testes afetados (`python -m core.harness.affected --run`) mais os contratos `lint-imports`, `python scripts/complexity_ratchet.py` e `python -m core.harness.docs_sync --base origin/main --head HEAD`.
+- **Suíte completa**: roda em host Linux ou no CI; o CI noturno Windows permanece. Verdict cacheado por árvore e `suite_lock` por máquina; não rode portões em paralelo no mesmo host.
 - Sucesso só com marcador `[HARNESS_PASS]` e ao menos uma checagem executada.
-- Loop interno: `python -m pytest tests/test_meu_modulo.py -q` ou `python -m core.harness.affected --run`. Nunca substitui o portão.
-- Antes de abrir PR, rode o que o CI exige: `lint-imports`, `python scripts/complexity_ratchet.py` e `python -m core.harness.docs_sync --base origin/main --head HEAD`.
+- Loop interno: `python -m pytest tests/test_meu_modulo.py -q`. Nunca substitui o portão.
 - Detalhes de workers, hosts e variáveis em `docs/HARNESS_INTEROP.md`.
 
 ## 6. Entrega autônoma (zero toque humano)
