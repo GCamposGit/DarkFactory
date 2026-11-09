@@ -74,6 +74,7 @@ Gerado de `.factory/config/model_registry.json` por `python scripts/generate_mod
 | `planning.openrouter` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
+| `review.openrouter` | `gpt-6-luna` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |
 | `subagent.opus` | `claude-opus-5-5` | active |
 | `subagent.sonnet` | `claude-sonnet-5-5` | active |
