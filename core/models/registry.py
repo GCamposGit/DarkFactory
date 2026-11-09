@@ -56,6 +56,7 @@ class ModelEntry(BaseModel):
     tier: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     gateway_ids: list[str] = Field(default_factory=list)  # provider/gateway-prefixed ids (e.g. OpenRouter); naming only
+    cli_ids: list[str] = Field(default_factory=list)  # slash-free slugs accepted by the model's own CLI; naming only
     status: ModelStatus
     price_input_per_mtok: Optional[float] = Field(default=None, ge=0)
     price_output_per_mtok: Optional[float] = Field(default=None, ge=0)
@@ -124,7 +125,13 @@ class ModelRegistry(BaseModel):
                 raise ValueError(f"duplicate model id {entry.id!r}")
             by_id[entry.id] = entry
         for entry in self.models:
-            for alias in [*entry.aliases, *entry.gateway_ids]:
+            for gid in entry.gateway_ids:
+                if "/" not in gid:
+                    raise ValueError(f"gateway id {gid!r} for model {entry.id!r} must contain '/' (provider/model)")
+            for cid in entry.cli_ids:
+                if "/" in cid:
+                    raise ValueError(f"cli id {cid!r} for model {entry.id!r} must not contain '/'")
+            for alias in [*entry.aliases, *entry.gateway_ids, *entry.cli_ids]:
                 key = alias.strip().lower()
                 if key in names or key in by_id:
                     raise ValueError(f"alias {alias!r} collides with another alias or model id")
@@ -182,15 +189,21 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
     },
     "models": [
         _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
-        _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"], gateway_ids=["claude-sonnet"]),
-        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"]),
+        _fb(
+            "claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"],
+            gateway_ids=["anthropic/claude-sonnet-5.5"], cli_ids=["claude-sonnet"],
+        ),
+        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5.5"]),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
         _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
         _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna", "openai/gpt-5-6-luna-high"]),
         _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True, gateway_ids=["openai/gpt-6-astra"]),
-        _fb("gpt-sol", "openai", "openai", "high", ["sol"], gateway_ids=["openai/gpt-5.6-sol", "gpt-5.6-sol", "openai/gpt-5-6-sol"]),
-        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["xai/grok-4.6"]),
-        _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"]),
+        _fb(
+            "gpt-sol", "openai", "openai", "high", ["sol"],
+            gateway_ids=["openai/gpt-5.6-sol", "openai/gpt-5-6-sol"], cli_ids=["gpt-5.6-sol"],
+        ),
+        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["x-ai/grok-4.6"]),
+        _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"], gateway_ids=["x-ai/grok-4.7"]),
         _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"], gateway_ids=["google/gemini-3.8-flash"]),
         _fb("deepseek/deepseek-v4.1-flash", "deepseek", "deepseek", "low", ["deepseek-flash"]),
         _fb("deepseek/deepseek-v4-pro", "deepseek", "deepseek", "high", ["deepseek-v4-pro"], "candidate"),
@@ -262,7 +275,9 @@ def clear_cache() -> None:
 def _find(reg: ModelRegistry, name: str) -> Optional[ModelEntry]:
     low = name.strip().lower()
     for entry in reg.models:
-        if low == entry.id.lower() or low in (a.strip().lower() for a in [*entry.aliases, *entry.gateway_ids]):
+        if low == entry.id.lower() or low in (
+            a.strip().lower() for a in [*entry.aliases, *entry.gateway_ids, *entry.cli_ids]
+        ):
             return entry
     return None
 
@@ -349,3 +364,16 @@ def gateway_id(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> st
     if entry is None:
         raise KeyError(f"unknown model alias or id: {alias_or_id!r}")
     return entry.gateway_ids[0] if entry.gateway_ids else entry.id
+
+
+def cli_id(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
+    """Slash-free slug accepted by the model's own CLI, for a name regardless of status.
+
+    Falls back to the canonical id when the model has no declared ``cli_ids``. Naming only, NOT a
+    routability check.
+    """
+    reg = registry if registry is not None else get_registry()
+    entry = _find(reg, alias_or_id)
+    if entry is None:
+        raise KeyError(f"unknown model alias or id: {alias_or_id!r}")
+    return entry.cli_ids[0] if entry.cli_ids else entry.id

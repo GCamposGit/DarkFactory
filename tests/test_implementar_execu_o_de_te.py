@@ -255,16 +255,16 @@ def test_harness_test_runner_specs():
     assert codex_rca_spec.reasoning_effort == "max"
     assert codex_rca_spec.execution_tier == ExecutionTier.DEEP_DIAGNOSTIC
 
-    # 3. Grok / Grok Builder: Grok 4.6 with low reasoning effort
+    # 3. Grok / Grok Builder: Grok 4.6 with low reasoning effort (bare CLI slug, never a gateway id)
     grok_spec = get_harness_test_runner_spec(HarnessType.GROK)
     assert grok_spec.harness == HarnessType.GROK
-    assert grok_spec.model_id == "xai/grok-4.6"
+    assert grok_spec.model_id == "grok-4.6"
     assert grok_spec.reasoning_effort == "low"
 
-    # 4. Claude Code: Claude 3.5 Haiku as standard test runner subagent
+    # 4. Claude Code: Claude 3.5 Haiku as standard test runner subagent (bare CLI slug)
     claude_spec = get_harness_test_runner_spec(HarnessType.CLAUDE_CODE)
     assert claude_spec.harness == HarnessType.CLAUDE_CODE
-    assert claude_spec.model_id == "anthropic/claude-haiku-5-5"
+    assert claude_spec.model_id == "claude-haiku-5-5"
     assert claude_spec.execution_tier == ExecutionTier.LIGHT_HARNESS
 
     # 5. Local-first preference rule ($0 cost)
@@ -284,7 +284,7 @@ def test_generate_subagent_prompt_multi_harness():
 
     grok_prompt = generate_subagent_prompt(instr, harness=HarnessType.GROK)
     assert "GROK" in grok_prompt
-    assert "xai/grok-4.6" in grok_prompt
+    assert "grok-4.6" in grok_prompt
 
     claude_prompt = generate_subagent_prompt(instr, harness=HarnessType.CLAUDE_CODE)
     assert "CLAUDE_CODE" in claude_prompt

@@ -68,3 +68,32 @@ def test_same_family_reviewer_is_rejected() -> None:
 def test_roles_only_route_to_active_models() -> None:
     for role, model_id in REGISTRY.roles.items():
         assert BY_ID[model_id].status == "active", role
+
+
+def test_gateway_id_without_slash_is_rejected() -> None:
+    raw = REGISTRY.model_dump(mode="json")
+    raw["models"][0]["gateway_ids"] = ["no-slash-slug"]
+    with pytest.raises(ValueError):
+        reg.parse_registry(raw)
+
+
+def test_cli_id_with_slash_is_rejected() -> None:
+    raw = REGISTRY.model_dump(mode="json")
+    raw["models"][0]["cli_ids"] = ["provider/not-a-cli-slug"]
+    with pytest.raises(ValueError):
+        reg.parse_registry(raw)
+
+
+def test_cli_id_colliding_with_another_models_alias_is_rejected() -> None:
+    raw = REGISTRY.model_dump(mode="json")
+    other_alias = raw["models"][1]["aliases"][0]
+    raw["models"][0]["cli_ids"] = [other_alias]
+    with pytest.raises(ValueError):
+        reg.parse_registry(raw)
+
+
+def test_cli_id_colliding_with_another_models_id_is_rejected() -> None:
+    raw = REGISTRY.model_dump(mode="json")
+    raw["models"][0]["cli_ids"] = [raw["models"][1]["id"]]
+    with pytest.raises(ValueError):
+        reg.parse_registry(raw)

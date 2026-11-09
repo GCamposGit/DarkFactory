@@ -280,7 +280,7 @@
       "status": "active",
       "models": [
         {
-          "model_id": "xai/grok-4.6",
+          "model_id": "x-ai/grok-4.6",
           "alias": "grok-4.6",
           "family": "grok",
           "parameter_size": "frontier_high",
@@ -346,12 +346,12 @@
       "allowed_models": [
         "gpt-review:latest",
         "deepseek/deepseek-v4.1-flash",
-        "xai/grok-4.6"
+        "x-ai/grok-4.6"
       ],
       "fallback_order": [
         "gpt-review:latest",
         "deepseek/deepseek-v4.1-flash",
-        "xai/grok-4.6"
+        "x-ai/grok-4.6"
       ],
       "isolation_rule": "Cross-Model Family Isolation: O revisor DEVE obrigatoriamente pertencer a uma família de modelos distinta daquela usada pelo implementador da etapa."
     },
@@ -363,12 +363,12 @@
       "allowed_models": [
         "gpt-review:latest",
         "deepseek/deepseek-v4.1-flash",
-        "xai/grok-4.6"
+        "x-ai/grok-4.6"
       ],
       "fallback_order": [
         "gpt-review:latest",
         "deepseek/deepseek-v4.1-flash",
-        "xai/grok-4.6"
+        "x-ai/grok-4.6"
       ]
     }
   },

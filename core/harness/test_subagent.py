@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from core.models.registry import gateway_id, id_of, resolve
+from core.models.registry import cli_id, gateway_id, id_of, resolve
 
 logger = logging.getLogger("core.harness.test_subagent")
 
@@ -134,7 +134,7 @@ def get_harness_test_runner_spec(
         effort = "low" if not deep_rca else "high"
         return HarnessRunnerSpec(
             harness=norm_harness,
-            model_id=gateway_id(resolve("review.grok")),
+            model_id=cli_id(resolve("review.grok")),
             reasoning_effort=effort,
             execution_tier=ExecutionTier.LIGHT_HARNESS if not deep_rca else ExecutionTier.DEEP_DIAGNOSTIC,
             rationale="Grok 4.6 with reasoning_effort='low' for rapid local terminal verification and parallel Arena subagent execution.",
@@ -145,7 +145,7 @@ def get_harness_test_runner_spec(
         if deep_rca:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id=gateway_id("legacy-sonnet"),
+                model_id=cli_id("legacy-sonnet"),
                 reasoning_effort="medium",
                 execution_tier=ExecutionTier.DEEP_DIAGNOSTIC,
                 rationale="Claude 3.7 Sonnet with controlled thinking for architectural debugging and complex test regressions.",
@@ -154,7 +154,7 @@ def get_harness_test_runner_spec(
         else:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id=gateway_id("haiku"),
+                model_id=cli_id("haiku"),
                 reasoning_effort="none",
                 execution_tier=ExecutionTier.LIGHT_HARNESS,
                 rationale="Claude Haiku 5.5: Subagent standard for lightweight, ultra-low latency command execution and output distillation.",
