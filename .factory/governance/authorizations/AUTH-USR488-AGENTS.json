@@ -1,0 +1,11 @@
+{
+  "id": "AUTH-USR488-AGENTS",
+  "ticket_id": "USR-488",
+  "approver": "owner",
+  "paths": [
+    "AGENTS.md"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "0f2ad9883e7314e7f40bafdeeea6665fce325cd6",
+  "expires_at": "2026-11-13T23:59:00Z"
+}
