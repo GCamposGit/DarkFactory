@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 from core.paths import state_root
+from core.common.tempdirs import chmod_and_retry as _chmod_and_retry
 from core.common.time import utc_now
 
 logger = logging.getLogger("darkfac.git.ticket_workspace")
@@ -388,17 +389,6 @@ def create_workspace(
 # ----------------------------------------------------------------------
 # Removal
 # ----------------------------------------------------------------------
-
-
-def _chmod_and_retry(func: Callable[[str], Any], target: str, exc: BaseException) -> None:
-    """``rmtree`` error hook: clear the read-only bit (git objects, Windows) and retry once."""
-    if isinstance(exc, FileNotFoundError):
-        return
-    try:
-        os.chmod(target, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
-    except OSError:
-        pass
-    func(target)
 
 
 def robust_rmtree(path: Path) -> None:

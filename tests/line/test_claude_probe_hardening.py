@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from core.common import tempdirs
 from core.line import agent_cli, auth_bootstrap
 from core.line.agent_cli import AgentRequest, AgentResult, redact_secrets, run_agent
 from core.orchestrator.cloud_worker import CloudWorker
@@ -45,7 +47,18 @@ def test_redact_secrets_covers_tokens_bearer_and_env_assignments(monkeypatch: py
 # --------------------------------------------------------------------------
 
 
-def test_probe_claude_runs_in_neutral_empty_dir_with_minimal_request(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_claude_runs_in_neutral_temp_cwd_and_shutdown_never_tracebacks(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Single behavioral check for the whole USR-457 sandbox contract on `probe_claude`.
+
+    `probe_sandbox` must hand the agent a cwd that is empty and outside the repo (so no
+    CLAUDE.md/AGENTS.md/.claude/hooks load), remove it on normal exit, and -- the USR-457
+    addition -- never let a removal failure (production: WinError 5 from a restricted-ACL
+    sandbox subprocess) surface as a "Exception ignored in" trace from a weakref finalizer
+    at interpreter shutdown: it is a structured log instead, and the probe's own verdict is
+    unaffected by it.
+    """
     seen: dict[str, Any] = {}
 
     def fake_run_agent(req: AgentRequest) -> AgentResult:
@@ -55,20 +68,39 @@ def test_probe_claude_runs_in_neutral_empty_dir_with_minimal_request(monkeypatch
         return AgentResult(ok=True, text="OK", harness="claude", duration_s=1.0)
 
     monkeypatch.setattr(auth_bootstrap, "run_agent", fake_run_agent)
-    result = auth_bootstrap.probe_claude()
+
+    def _denied(path: Path) -> None:
+        exc = PermissionError("[WinError 5] Access is denied")
+        exc.winerror = 5  # type: ignore[attr-defined]
+        raise exc
+
+    monkeypatch.setattr(tempdirs, "robust_rmtree", _denied)
+
+    with caplog.at_level(logging.WARNING, logger="darkfac.common.tempdirs"):
+        result = auth_bootstrap.probe_claude()
 
     req: AgentRequest = seen["req"]
-    assert result.ok is True
-    assert req.mode == "read" and req.harness == "claude"
-    assert req.max_turns == 1
-    assert req.timeout_s == 120
-    assert req.prompt == "Reply with the single word OK"
-    # Neutral: exists and is EMPTY while the probe runs (no CLAUDE.md/AGENTS.md/.claude/hooks)...
-    assert seen["cwd_exists"] is True and seen["cwd_entries"] == []
-    assert req.cwd.resolve() != auth_bootstrap.REPO_ROOT.resolve()
-    assert not (req.cwd / "CLAUDE.md").exists()
-    # ...and cleaned up afterwards.
-    assert not req.cwd.exists()
+    try:
+        assert result.ok is True
+        assert req.mode == "read" and req.harness == "claude"
+        assert req.max_turns == 1
+        assert req.timeout_s == 120
+        assert req.prompt == "Reply with the single word OK"
+        # Neutral: exists, EMPTY while the probe runs (no CLAUDE.md/AGENTS.md/.claude/hooks),
+        # and lives inside the system temp dir, not the repo.
+        assert seen["cwd_exists"] is True and seen["cwd_entries"] == []
+        assert req.cwd.resolve() != auth_bootstrap.REPO_ROOT.resolve()
+        assert not (req.cwd / "CLAUDE.md").exists()
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        resolved_cwd = req.cwd.resolve()
+        assert resolved_cwd == temp_root or temp_root in resolved_cwd.parents
+        # A denied cleanup is logged with the winerror, never raised and never a finalizer trace.
+        assert "winerror=5" in caplog.text
+        assert "Exception ignored in" not in caplog.text
+    finally:
+        monkeypatch.undo()
+        if req.cwd.exists():
+            tempdirs.robust_rmtree(req.cwd)
 
 
 def test_probe_claude_failure_detail_has_error_kind_and_redacted_truncated_text(monkeypatch: pytest.MonkeyPatch) -> None:

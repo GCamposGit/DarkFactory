@@ -17,7 +17,6 @@ import re
 import shutil
 import ssl
 import subprocess
-import tempfile
 import threading
 import time
 import urllib.error
@@ -30,6 +29,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.common.tempdirs import probe_sandbox
 from core.models.registry import id_of, resolve_claude_probe_model, resolve_known
 from core.usage.models import (
     AccountConnectionStatus,
@@ -1699,7 +1699,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             return None
         selection = resolve_claude_probe_model("haiku")
         try:
-            with tempfile.TemporaryDirectory(prefix="darkfac-quota-probe-") as neutral:
+            with probe_sandbox(prefix="darkfac-quota-probe-") as neutral:
                 result = subprocess.run(
                     [executable, "-p", "ok", "--output-format", "stream-json", "--verbose",
                      "--model", selection.cli_model_id, "--max-turns", "1"],
