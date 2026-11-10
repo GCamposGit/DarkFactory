@@ -48,6 +48,8 @@ continua pela fila regular e usa os hosts livres, sempre respeitando reservas e 
 Com `recovery.active=true`, o modo global de recuperação mantém no máximo uma entrega em
 andamento e a lista segue serializada. Retomadas em execução têm precedência.
 
+Falha repetida do mesmo ticket (qualquer causa) cria hold so desse ticket; o modo global de recuperação não é mais ativado por falhas, e os demais tickets seguem despachados.
+
 O estado `recovery_list` em `last_cycle` informa `pending` e `cause`. A lista encerra com
 `recovery_list_completed` quando os itens ficam terminais ou `recovery_list_expired` ao
 vencer o TTL. Se nenhum item estiver admissível, publica `recovery_list_no_admissible`, mas

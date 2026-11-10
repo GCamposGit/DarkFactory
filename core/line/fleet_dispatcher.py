@@ -523,14 +523,12 @@ class FleetDispatcher:
             )
             occurrences = self.admission_store.record_failure(
                 fingerprint, initial_backoff_sec=int(self.config.requeue_cooldown_sec))
-            if occurrences >= max(1, self.config.recovery_failure_threshold) and ticket_cause:
+            # repeticao e do mesmo ticket (o fingerprint inclui ticket_id): segura so ele; 75 e trava ocupada = espera
+            if occurrences >= max(1, self.config.recovery_failure_threshold) and (
+                    ticket_cause or (rc != 75 and kind != "lock")):
                 self.admission_store.set_ticket_hold(fingerprint, occurrences)
-                logger.error("%s em hold: causa=%s ocorrencias=%s", job.ticket_id, ticket_cause, occurrences)
-            elif occurrences >= max(1, self.config.recovery_failure_threshold) and rc != 75 and kind != "lock":  # 75 e trava ocupada = espera, nao falha
-                state = self.admission_store.set_recovery(
-                    active=True, cause=fingerprint.error_class, fingerprint=fingerprint.sha256)
-                self.recovery = state
-                logger.error("dispatcher recovery ativo: cause=%s fingerprint=%s", state["cause"], state["fingerprint"])
+                logger.error("%s em hold: causa=%s ocorrencias=%s", job.ticket_id,
+                             ticket_cause or fingerprint.error_class, occurrences)
         except Exception:  # noqa: BLE001 - no admission can be trusted after persistence failure
             logger.exception("falha ao persistir circuit breaker de %s", job.ticket_id)
 
