@@ -43,7 +43,7 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
 MIN_NOTEBOOK_WORKERS = 1
 INFRA_EXIT_CODES = frozenset({75})
-LOCK_MARKERS = ("[TRAVA DE LINHA]", "[RESERVA DE FROTA]")
+LOCK_MARKERS = ("[TRAVA DE LINHA]", "[RESERVA DE FROTA]", "ja possui PR ativo")
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
