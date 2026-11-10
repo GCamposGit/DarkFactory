@@ -407,7 +407,11 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
                          context_digest="ctx", resource_version="worker-v1")
     for _ in range(3):
         e.d._record_failure(failed, 1, "context", "context scanner failed")
-    assert e.d.admission_store.recovery_state()["active"] == 1
+    # falha repetida do mesmo ticket segura so o ticket; a frota segue livre
+    assert e.d.admission_store.recovery_state()["active"] == 0
+    assert [h["ticket_id"] for h in e.d.admission_store.ticket_holds()] == ["USR-99"]
+    assert len(e.d.run_cycle()["dispatched"]) == 2
+    e.d.admission_store.set_recovery(active=True, cause="context", fingerprint="fp")
 
     # A fresh dispatcher sees the durable latch and only dispatches one delivery globally.
     e.d = fd.FleetDispatcher(
@@ -892,21 +896,20 @@ def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
         e.d._record_failure(job, 1, "failure",
                             f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
     store = e.d.admission_store
+    assert not store.recovery_state()["active"]  # falha repetida nunca serializa a frota
+    assert [h["ticket_id"] for h in store.ticket_holds()] == ["USR-01"]
     if cause == "gate_failed":
         assert store.ticket_holds()[0]["cause"] == cause
-        assert not store.recovery_state()["active"]
-    else:
-        assert store.recovery_state()["active"]
-        assert not store.ticket_holds()
 
 
-@pytest.mark.parametrize(("rc", "active"), [(75, False), (1, True)])
-def test_identical_failures_activate_recovery_except_structured_wait(tmp_path, rc, active):
+@pytest.mark.parametrize(("rc", "held"), [(75, False), (1, True)])
+def test_identical_failures_hold_ticket_except_structured_wait(tmp_path, rc, held):
     e = Env(tmp_path, [])
     for _ in range(3):
         job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
         e.d._record_failure(job, rc, "failure", "route_wait: sem rota")
-    assert bool(e.d.admission_store.recovery_state()["active"]) is active
+    assert not e.d.admission_store.recovery_state()["active"]
+    assert bool(e.d.admission_store.ticket_holds()) is held
 
 
 def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
