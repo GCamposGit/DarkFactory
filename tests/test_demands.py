@@ -33,6 +33,7 @@ from core.demands.service import DemandsService
 from core.roadmap.compiler import RoadmapCompiler
 from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
 from core.roadmap.sources import UserDemandsRoadmapSource
+from core.workflow.control_contracts import StoreUnavailableError
 from hub.backend.main import app
 
 
@@ -622,3 +623,173 @@ def test_demands_path_override_stays_file_only(queue_env, monkeypatch: pytest.Mo
     assert queue.get_ticket("USR-501") is None
     assert _queue_pairs(state) == [("darkfac", "USR-413", "planned")]
     assert _ledger_ids(ledger) == ["USR-500", "USR-413", "USR-501"]
+
+
+def _default_ledger_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Shared-checkout-shaped repo (real ``.git`` dir): matches the Hub/CLI default ledger path
+    so reads merge the control store, the same condition the Hub route depends on."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]", encoding="utf-8")
+    for cmd in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]):
+        subprocess.run(["git", *cmd], cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(repo))
+    return ledger
+
+
+class _DemandsOnlyHubService:
+    """Minimal stand-in exposing just what the two demand-ticket routes call on HubService."""
+
+    def __init__(self, demands_service: DemandsService) -> None:
+        self._demands_service = demands_service
+
+    def get_demand_ticket(self, ticket_id: str):
+        return self._demands_service.get_ticket(ticket_id)
+
+    def list_demand_tickets(self, project_id=None, status=None):
+        stat_enum = DeliveryStatus(status) if status else None
+        return self._demands_service.list_tickets(project_id=project_id, status=stat_enum)
+
+
+def test_demand_lookup_reads_control_store_without_file_snapshot(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-449 T1: a ticket registered only in the control store (never written to demands.json,
+    no snapshot wait) is readable through DemandsService.get_ticket in the same round -- the exact
+    read path GET /api/demands/tickets/<id> uses."""
+    queue = queue_env["queue"]
+    ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
+
+    queue.register_ticket(_queued_ticket("USR-449", title="So na fila duravel", status=DeliveryStatus.PLANNED))
+
+    service = DemandsService(store=DemandsStore(ledger))
+    found = service.get_ticket("USR-449")
+    assert found is not None
+    assert found.title == "So na fila duravel"
+    assert _ledger_ids(ledger) == []  # never materialized into the file snapshot by a plain read
+
+    assert service.get_ticket("USR-000-NUNCA-EXISTIU") is None
+
+
+def test_hub_api_get_demand_ticket_200_for_queue_only_404_only_for_absent(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-449 T1: GET /api/demands/tickets/<id> is 200 for a control-store-only ticket and 404
+    only for an id genuinely absent from both the file and the store."""
+    queue = queue_env["queue"]
+    ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
+    queue.register_ticket(_queued_ticket("USR-449", title="Na fila, nao no arquivo"))
+
+    stub_service = _DemandsOnlyHubService(DemandsService(store=DemandsStore(ledger)))
+    app.dependency_overrides[get_hub_service] = lambda: stub_service
+    try:
+        client = TestClient(app)
+        ok = client.get("/api/demands/tickets/USR-449")
+        assert ok.status_code == 200
+        assert ok.json()["id"] == "USR-449"
+
+        missing = client.get("/api/demands/tickets/USR-000-NUNCA-EXISTIU")
+        assert missing.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_hub_api_get_demand_ticket_store_failure_is_503_not_404(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A control store that is configured but errors on read must surface as 503, never a false
+    404 and never a quiet fallback that looks like a normal (empty) answer (USR-449)."""
+    queue = queue_env["queue"]
+    ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
+    queue.register_ticket(_queued_ticket("USR-449", title="Ticket real"))
+
+    def _boom():
+        raise StoreUnavailableError("Postgres unreachable (simulado)")
+
+    monkeypatch.setattr(queue, "control_store", _boom)
+
+    stub_service = _DemandsOnlyHubService(DemandsService(store=DemandsStore(ledger)))
+    app.dependency_overrides[get_hub_service] = lambda: stub_service
+    try:
+        client = TestClient(app)
+        resp = client.get("/api/demands/tickets/USR-449")
+        assert resp.status_code == 503
+        assert "store" in resp.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_list_queue_tickets_raises_on_store_failure_but_empty_when_never_configured(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store that genuinely does not exist yet reads as ``[]``; once it exists, a read failure
+    raises StoreUnavailableError instead of being swallowed into that same empty result (USR-449)."""
+    queue = queue_env["queue"]
+    state = queue_env["state"]
+
+    assert queue.list_queue_tickets() == []
+    assert not (state / "control.db").exists()
+
+    queue.register_ticket(_queued_ticket("USR-9100"))
+    assert (state / "control.db").exists()
+
+    def _boom():
+        raise RuntimeError("disco cheio (simulado)")
+
+    monkeypatch.setattr(queue, "control_store", _boom)
+    with pytest.raises(StoreUnavailableError):
+        queue.list_queue_tickets()
+
+
+def test_queue_store_control_url_honors_hub_env_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """USR-449: queue_store resolves the control-store URL through the same precedence
+    core.line.owner_intake.line_database_url uses (DARKHUB_LINE_DATABASE_URL /
+    DARKFAC_HF02_DATABASE_URL / DARKHUB_CONTROL_DATABASE_URL), not only DARKFAC_HF02_DATABASE_URL --
+    that mismatch is what pointed the Hub's demand lookups at an empty local SQLite file instead
+    of the coordinator/worker's Postgres, even though DARKHUB_CONTROL_DATABASE_URL was set."""
+    from core.demands import queue_store
+    import core.line.owner_intake as owner_intake
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    monkeypatch.setenv("DARKHUB_CONTROL_DATABASE_URL", "postgresql://hub-only-role@host/db")
+    assert owner_intake.line_database_url() == "postgresql://hub-only-role@host/db"
+
+    captured: dict[str, object] = {}
+
+    def _fake_default_control_store(*, sqlite_db_path=None, database_url=None):
+        captured["database_url"] = database_url
+        return object()
+
+    monkeypatch.setattr("core.line.store_selection.default_control_store", _fake_default_control_store)
+    queue_store._store.cache_clear()
+    try:
+        queue_store.control_store()
+        assert captured["database_url"] == "postgresql://hub-only-role@host/db"
+    finally:
+        queue_store._store.cache_clear()
+
+
+def test_default_control_store_rejects_silent_mock_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-449: a configured (non-mock) Postgres URL the adapter cannot reach must raise, never
+    hand back its in-memory mock as if it were the real, persistent store."""
+    import core.orchestrator.adapters.control_postgres as control_postgres
+    from core.line import store_selection
+
+    class _AlwaysMock:
+        def __init__(self, **_kwargs: object) -> None:
+            self.mock_mode = True
+
+    monkeypatch.setattr(control_postgres, "PostgresControlStore", _AlwaysMock)
+
+    with pytest.raises(StoreUnavailableError):
+        store_selection.default_control_store(database_url="postgresql://user:pass@unreachable-host/db")
+
+    # The documented escape hatch (an explicit "mock" URL) is still honored, not rejected.
+    store = store_selection.default_control_store(database_url="mock://anything")
+    assert store.mock_mode is True

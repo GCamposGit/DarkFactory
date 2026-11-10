@@ -30,20 +30,37 @@ def default_control_db_path() -> Path:
 DEFAULT_CONTROL_DB = default_control_db_path()
 
 
-def default_control_store(*, sqlite_db_path: Path | str | None = None) -> ControlStore:
-    """Postgres (real cloud line) if `DARKFAC_HF02_DATABASE_URL` is set, else
-    a persistent local SQLite file -- never the coordinator/worker's
-    in-memory mock, which would silently drop every canary/dogfood demand
-    between process invocations."""
-    effective_path = sqlite_db_path or default_control_db_path()
-    database_url = os.environ.get("DARKFAC_HF02_DATABASE_URL")
-    if database_url:
-        from core.orchestrator.adapters.control_postgres import PostgresControlStore
-        from core.workflow.control_contracts import RuntimeOwner
+def default_control_store(
+    *, sqlite_db_path: Path | str | None = None, database_url: str | None = None
+) -> ControlStore:
+    """Postgres (real cloud line) if a database URL is configured, else a persistent
+    local SQLite file -- never the coordinator/worker's in-memory mock, which would
+    silently drop every canary/dogfood demand between process invocations.
 
-        return PostgresControlStore(
-            database_url=database_url,
+    ``database_url`` defaults to ``DARKFAC_HF02_DATABASE_URL`` (the coordinator/worker's
+    own resolution); callers that read the same Postgres under a different env-var name
+    (e.g. the Hub's ``DARKHUB_LINE_DATABASE_URL`` / ``DARKHUB_CONTROL_DATABASE_URL``, see
+    ``core.line.owner_intake.line_database_url``) pass the resolved URL explicitly instead
+    of duplicating this function's env lookup.
+    """
+    effective_path = sqlite_db_path or default_control_db_path()
+    url = database_url if database_url is not None else os.environ.get("DARKFAC_HF02_DATABASE_URL")
+    if url:
+        from core.orchestrator.adapters.control_postgres import PostgresControlStore
+        from core.workflow.control_contracts import RuntimeOwner, StoreUnavailableError
+
+        store = PostgresControlStore(
+            database_url=url,
             runtime_owner=RuntimeOwner.CLOUD_DBOS_POSTGRES.value,
             lease_duration_sec=300,
         )
+        if store.mock_mode and not url.startswith("mock"):
+            # A real URL was configured but the connection failed: `PostgresControlStore`
+            # degrades to an in-memory mock on its own. Serving that silently would make a
+            # Postgres outage look like "no tickets queued" instead of a store failure.
+            raise StoreUnavailableError(
+                f"Postgres control store at the configured URL is unreachable; "
+                "refusing its in-memory mock fallback"
+            )
+        return store
     return SQLiteControlStore(db_path=effective_path)
