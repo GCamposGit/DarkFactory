@@ -909,6 +909,17 @@ def test_identical_failures_activate_recovery_except_structured_wait(tmp_path, r
     assert bool(e.d.admission_store.recovery_state()["active"]) is active
 
 
+def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
+    text = "[RESERVA DE FROTA] Fleet capacity ceiling of 1 active cycles reached"
+    assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
+    e = Env(tmp_path, [])
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        kind = "lock" if fd.is_lock_refusal(text) else "failure"
+        e.d._record_failure(job, 2, kind, text)
+    assert not e.d.admission_store.recovery_state()["active"]
+
+
 def test_lock_refusals_do_not_activate_recovery(tmp_path):
     e = Env(tmp_path, [])
     for _ in range(3):
