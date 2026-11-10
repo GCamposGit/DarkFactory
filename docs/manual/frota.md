@@ -351,4 +351,4 @@ A retomada direta de um BUILD exige status Git leg?vel e limpo (exceto o ledger)
 v?nculo ap?s sincronizar o candidato. Artefatos antigos sem v?nculo, novo HEAD, artefato alterado ou
 falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.
 
-Saida com codigo 75 (route_wait, gate_capacity_zero) e espera estruturada: fica no circuito por ticket, mas nunca ativa a recuperacao global da frota.
+Saida com codigo 75 (route_wait, gate_capacity_zero) e espera estruturada: fica no circuito por ticket, mas nunca ativa a recuperacao global da frota. O mesmo vale para recusa por trava de linha ou reserva de outro ticket vivo (kind lock): fica registrada por ticket, sem recuperacao global.
