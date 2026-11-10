@@ -349,7 +349,7 @@ def test_all_cascade_accounts_in_cooldown_review_returns_openrouter(tmp_path):
         openrouter_balance_lookup=lambda: 10.0,
     )
     from core.models.registry import resolve
-    assert choice == ("openrouter", resolve("distill.openrouter"))
+    assert choice == ("openrouter", resolve("review.openrouter"))
 
 
 def test_openrouter_respects_run_cap_budget(tmp_path):

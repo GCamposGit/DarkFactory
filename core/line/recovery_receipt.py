@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.line.review_cascade import valid_contingency
 from core.line.workspace import RunWorkspace
 
 
@@ -18,29 +19,24 @@ def record_implementation(ws: RunWorkspace, harness: str, model: str | None) -> 
     workspace.write_context(ws, path.name, json.dumps(sorted(set(families + [family]))))
 
 
+def implementation_families(ws: RunWorkspace, implementing_harness: str | None = None) -> list[str]:
+    """Families that wrote the candidate; the implementer's own when nothing was recorded."""
+    from core.line import workspace
+    path = workspace.context_dir(ws) / "implementation_families.json"
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return [route_family(implementing_harness, None)] if implementing_harness else []
+    except ValueError:
+        return []
+
+
 def review_capabilities(ws: RunWorkspace, caps: list[str] | tuple[str, ...]) -> list[str]:
     from core.line import workspace
     path = workspace.context_dir(ws) / "implementation_families.json"
     families = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
     known = {"harness:claude": "anthropic", "harness:codex": "openai", "harness:grok": "xai", "harness:antigravity": "google"}
     return [cap for cap in caps if known.get(cap) not in families]
-
-
-def independent_route(ws: RunWorkspace, harness: str, model: str | None, fallback_model: str | None = None) -> tuple[str, str | None]:
-    from core.line import workspace
-    from core.models.registry import resolve
-    path = workspace.context_dir(ws) / "implementation_families.json"
-    families = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-    if route_family(harness, model) in families:
-        if harness != "openrouter":
-            raise ValueError("review_same_implementation_family")
-        for candidate in (fallback_model, "distill.openrouter"):
-            if candidate:
-                model = resolve(candidate)
-                if route_family(harness, model) not in families:
-                    return harness, model
-        raise ValueError("review_no_independent_paid_family")
-    return harness, model
 
 
 def route_family(harness: str, model: str | None) -> str:
@@ -95,7 +91,8 @@ def build_receipt(ticket_id: str, run_id: str, repo_root: Path) -> dict[str, Any
             or last.get("candidate_digest") != digest or last.get("verdict") != "approve"
             or last.get("forced") or review.get("candidate_digest") != digest
             or not review.get("implementer_family") or not review.get("reviewer_family")
-            or review["reviewer_family"] in review.get("implementation_families", [review["implementer_family"]])):
+            or (review["reviewer_family"] in review.get("implementation_families", [review["implementer_family"]])
+                and not valid_contingency(review.get("contingency")))):
         raise ValueError("recovery_candidate_or_review_unproven")
     merge = read("merge.json")
     if merge.get("candidate_digest") != digest:
@@ -128,7 +125,8 @@ def build_receipt(ticket_id: str, run_id: str, repo_root: Path) -> dict[str, Any
         "candidate_digest": digest, "implementer_family": review["implementer_family"],
         "gate": evidence(str(directory / "validation.json"), passed=True, marker="[HARNESS_PASS]"),
         "review": evidence(str(directory / "review_execution.json"), approved=True, independent=True,
-                           implementer_family=review["implementer_family"], reviewer_family=review["reviewer_family"]),
+                           implementer_family=review["implementer_family"], reviewer_family=review["reviewer_family"],
+                           contingency=review.get("contingency")),
         "ci": evidence(pr_url, green=True),
         "merge": evidence(str(directory / "merge.json"), sha=sha, reachable=True),
         "deploy": evidence(str(directory / "deploy_report.json"), sha=sha, deployed=True, observed_at=stamp),
@@ -137,7 +135,10 @@ def build_receipt(ticket_id: str, run_id: str, repo_root: Path) -> dict[str, Any
     }
 
 
-def record_review_execution(ws: RunWorkspace, digest: str, implementer: str, reviewer: str, model: str | None) -> None:
+def record_review_execution(
+    ws: RunWorkspace, digest: str, implementer: str, reviewer: str, model: str | None,
+    route: dict[str, Any] | None = None,
+) -> None:
     """Persist actual routing evidence alongside the bound review verdict."""
     from core.line import workspace
     try:
@@ -146,6 +147,10 @@ def record_review_execution(ws: RunWorkspace, digest: str, implementer: str, rev
         execution = {"candidate_digest": digest,
                      "implementer_family": route_family(implementer, None),
                      "reviewer_family": route_family(reviewer, model), "implementation_families": families}
+        if route:
+            execution["review_route"] = route
+            if route.get("level") in (3, 4):
+                execution["contingency"] = route
     except ValueError:
         execution = {"candidate_digest": digest, "family_evidence_missing": True}
     workspace.write_context(ws, "review_execution.json", json.dumps(execution))
