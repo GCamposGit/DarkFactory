@@ -350,3 +350,5 @@ A retomada direta de um BUILD exige status Git leg?vel e limpo (exceto o ledger)
 `build_binding.json`: HEAD exato e hashes de SPEC, tickets, pesquisa e progress. A entrega grava esse
 v?nculo ap?s sincronizar o candidato. Artefatos antigos sem v?nculo, novo HEAD, artefato alterado ou
 falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.
+
+Saida com codigo 75 (route_wait, gate_capacity_zero) e espera estruturada: fica no circuito por ticket, mas nunca ativa a recuperacao global da frota.

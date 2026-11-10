@@ -407,7 +407,7 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
                          context_digest="ctx", resource_version="worker-v1")
     for _ in range(3):
         e.d._record_failure(failed, 1, "context", "context scanner failed")
-    assert bool(e.d.admission_store.recovery_state()["active"] == 1
+    assert e.d.admission_store.recovery_state()["active"] == 1
 
     # A fresh dispatcher sees the durable latch and only dispatches one delivery globally.
     e.d = fd.FleetDispatcher(
@@ -424,7 +424,7 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
 
     e.handles[job.ticket_id].rc = 0
     e.d.run_cycle()  # exit zero without a delivery receipt is still not success
-    assert bool(e.d.admission_store.recovery_state()["active"] == 1
+    assert e.d.admission_store.recovery_state()["active"] == 1
     assert e.d.cooldown[job.ticket_id] > e.now
     normal = Env(tmp_path / "normal", [_d("USR-01")], free=("grokbox",))
     normal.d.run_cycle()
