@@ -122,6 +122,9 @@ hub/data/owner_actions/
 .factory/runs/fleet_dispatcher_logs/
 .factory/runs/fleet_dispatcher_state.json
 .factory/runs/sentinel_state.json
+.factory/runs/fleet_policy_snapshot.json
+.factory/runs/model_audit_receipt.json
+.factory/runs/recovery_list_state.json
 .factory/daily_digest_state.json
 .factory/queue_snapshot.json
 
