@@ -512,3 +512,17 @@ def test_recovery_receipt_requires_fresh_candidate_bound_production_chain():
         assert admission.verify_recovery_receipt(
             {**receipt, "review": review}, candidate_digest=candidate, run_id="fleet-run-468", now=now,
         )[1] == expected
+
+def test_openrouter_writer_and_reviewer_compare_model_family_not_harness_name() -> None:
+    def hit(stage: str, model: str) -> admission.RouteHit:
+        return admission.RouteHit(stage=stage, harness="openrouter", model=model, evidence_ref=f"routing://{stage}/openrouter")
+
+    def run(build_model: str, review_model: str) -> AdmissionDecision:
+        return decide(
+            planning=hit("planning", "gpt-sol"), build=hit("build", build_model), review=hit("review", review_model),
+            gate=_gate(_usable()), now=NOW, not_before_for=lambda kind: NOW,
+        )
+
+    assert run("gpt-sol", "sonnet").outcome == "allow"
+    blocked = run("sonnet", "sonnet")
+    assert blocked.outcome == "wait" and blocked.code == CODE_REVIEW_SAME_FAMILY

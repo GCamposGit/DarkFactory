@@ -311,7 +311,7 @@ def decide(
         return wait_for(build, CODE_NO_BUILD_ROUTE, RESOURCE_BUILD, STAGE_BUILD)
     if not review.harness:
         return wait_for(review, CODE_NO_REVIEW_ROUTE, RESOURCE_REVIEW, STAGE_REVIEW)
-    if review.harness.casefold() == build.harness.casefold() and review.contingency_level is None:
+    if _hit_family(review) == _hit_family(build) and review.contingency_level is None:
         return wait_for(review, CODE_REVIEW_SAME_FAMILY, RESOURCE_REVIEW, STAGE_REVIEW)
     gate_code, gate_ref = classify_gate(gate, observed)
     if gate_code is not None:
@@ -504,15 +504,24 @@ def _select_route(
     )
 
 
-def _select_review(pick_route: PickFn, caps: Iterable[str], writer: str, **common: Any) -> RouteHit:
-    """Cascade of USR-488: independent route first, recorded contingency before any wait."""
+def _hit_family(hit: RouteHit) -> str:
+    """Model family of a route; the harness name only when the family is unknown (OpenRouter carries many)."""
     from core.line.recovery_receipt import route_family
-    from core.line.review_cascade import select_review_route
 
     try:
-        families = {route_family(writer, None)}
+        return route_family((hit.harness or "").casefold(), hit.model)
     except ValueError:
-        families = set()
+        return (hit.harness or "").casefold()
+
+
+def _select_review(
+    pick_route: PickFn, caps: Iterable[str], writer: str, writer_model: Optional[str] = None, **common: Any,
+) -> RouteHit:
+    """Cascade of USR-488: independent route first, recorded contingency before any wait."""
+    from core.line.review_cascade import select_review_route
+
+    writer_family = _hit_family(RouteHit(stage=STAGE_BUILD, harness=writer, model=writer_model, evidence_ref=""))
+    families = {writer_family} if writer_family != writer.casefold() else set()
     route = select_review_route(
         lambda stage, caps_, **kw: pick_route(stage, caps_, reserve_quota=False, mode="read", **common, **kw),
         caps, implementing_harness=writer, families=families,
@@ -596,7 +605,7 @@ def admit(
     else:
         build = build_pick
     if writer:
-        review = _select_review(pick_route, read_caps, writer, **common)
+        review = _select_review(pick_route, read_caps, writer, build.model, **common)
     else:
         review = RouteHit(stage=STAGE_REVIEW, harness=None, model=None, evidence_ref="routing://review/none")
 
