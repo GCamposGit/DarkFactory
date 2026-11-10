@@ -14342,8 +14342,8 @@
     "project_id": "darkfac",
     "title": "Separar id de CLI e id de gateway do Grok no registro de modelos",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "a68e8c53e0a82c880ae0d796cb01dd826a273dc2",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14365,6 +14365,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-09T21:58:24.753095Z",
-    "updated_at": "2026-11-09T21:58:24.753095Z"
+    "updated_at": "2026-11-10T22:06:08.081537Z"
   }
 ]
