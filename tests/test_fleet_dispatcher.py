@@ -909,6 +909,15 @@ def test_identical_failures_activate_recovery_except_structured_wait(tmp_path, r
     assert bool(e.d.admission_store.recovery_state()["active"]) is active
 
 
+def test_lock_refusals_do_not_activate_recovery(tmp_path):
+    e = Env(tmp_path, [])
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        e.d._record_failure(job, 2, "lock", "canonical_ownership_conflict")
+    assert not e.d.admission_store.recovery_state()["active"]
+    assert len(e.d.failures) == 3
+
+
 @pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "identical_failure_open"])
 def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypatch, blocked):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03")])

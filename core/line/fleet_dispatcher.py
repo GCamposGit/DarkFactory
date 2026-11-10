@@ -526,7 +526,7 @@ class FleetDispatcher:
             if occurrences >= max(1, self.config.recovery_failure_threshold) and ticket_cause:
                 self.admission_store.set_ticket_hold(fingerprint, occurrences)
                 logger.error("%s em hold: causa=%s ocorrencias=%s", job.ticket_id, ticket_cause, occurrences)
-            elif occurrences >= max(1, self.config.recovery_failure_threshold) and rc != 75:  # 75 = espera estruturada
+            elif occurrences >= max(1, self.config.recovery_failure_threshold) and rc != 75 and kind != "lock":  # 75 e trava ocupada = espera, nao falha
                 state = self.admission_store.set_recovery(
                     active=True, cause=fingerprint.error_class, fingerprint=fingerprint.sha256)
                 self.recovery = state
