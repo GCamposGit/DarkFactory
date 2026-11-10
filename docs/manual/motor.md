@@ -355,3 +355,5 @@ gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
 comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
 de candidatos anteriores permanecem preservadas; o novo candidato exige suas
 proprias provas de portao, revisao e producao.
+
+Na admissao, "mesma familia" compara a familia do modelo, nao o nome do harness: escritor e revisor via OpenRouter com modelos de familias diferentes sao independentes.
