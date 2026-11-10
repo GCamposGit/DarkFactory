@@ -22,7 +22,8 @@ Todo JSON versionado em `.factory/` aparece aqui. A checagem fora do portao `pyt
 
 | Arquivo | Proposito | Le | Escreve | Campos principais |
 |---|---|---|---|---|
-| `model_registry.json` | Unica fonte de ids de modelos, papeis e limiares. | `core/models/registry.py`, `scripts/generate_model_docs.py` | edicao via ticket | `models`, `roles`, `quota_floor_percent`, `grill_thresholds`, `rollback_thresholds` |
+| `model_registry.json` | Unica fonte de ids de modelos, papeis e limiares. | `core/models/registry.py`, `scripts/generate_model_docs.py` | edicao via ticket | `models`, `roles`, `quota_floor_percent`, `grill_thresholds`, `rollback_thresholds`, `gateway_ids`, `cli_ids` |
+| `openrouter_catalog.json` | Snapshot do catalogo OpenRouter usado pela sonda offline de gateways. | `core/models/gateway_probe.py` | `python -m core.models.gateway_probe --write-snapshot` | `collected_at`, `source`, `generated_by`, `model_ids` |
 | `line_routing.json` | Roteamento por estagio, pressao de cota e tetos de run. | `core/line/routing.py`, `core/line/bindings.py` | edicao via ticket | `stages`, `pressure_thresholds`, `cooldown_default_minutes`, `run_caps` |
 | `line_fleet.json` | Hosts e slots da frota de workers. | `core/line/fleet_dispatcher.py`, `core/line/fleet_policy.py`, `scripts/start_fleet_worker.py` | edicao via ticket | `max_fleet_slots`, `hosts` |
 | `subagent_model_routing.json` | Politica de modelo por tipo de tarefa de subagente. | `core/line/subagent_routing.py`, `core/models/docgen.py` | edicao via ticket | `limits`, `eligible_task_types`, `forbidden_tags`, `forbidden_stages`, `opus_stages` |

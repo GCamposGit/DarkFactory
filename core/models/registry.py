@@ -131,11 +131,20 @@ class ModelRegistry(BaseModel):
             for cid in entry.cli_ids:
                 if "/" in cid:
                     raise ValueError(f"cli id {cid!r} for model {entry.id!r} must not contain '/'")
-            for alias in [*entry.aliases, *entry.gateway_ids, *entry.cli_ids]:
-                key = alias.strip().lower()
-                if key in names or key in by_id:
-                    raise ValueError(f"alias {alias!r} collides with another alias or model id")
-                names.add(key)
+            named_fields = (
+                ("alias", entry.aliases),
+                ("gateway", entry.gateway_ids),
+                ("cli", entry.cli_ids),
+            )
+            for kind, values in named_fields:
+                for alias in values:
+                    key = alias.strip().lower()
+                    owner = by_id.get(key)
+                    same_model = owner is not None and owner.id == entry.id
+                    # A cli slug equal to this model's own id is the canonical name.
+                    if key in names or (owner is not None and not (same_model and kind == "cli")):
+                        raise ValueError(f"alias {alias!r} collides with another alias or model id")
+                    names.add(key)
         markers = {m.strip().lower() for m in self.forbidden_autonomous_markers if m.strip()}
         for role, model_id in self.roles.items():
             entry = by_id.get(model_id)
@@ -188,22 +197,34 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         "min_qualification_steps": DEFAULT_MIN_QUALIFICATION_STEPS,
     },
     "models": [
-        _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
+        _fb(
+            "claude-opus-5-5", "anthropic", "claude", "high", ["opus"],
+            gateway_ids=["anthropic/claude-opus-5.5"],
+        ),
         _fb(
             "claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"],
             gateway_ids=["anthropic/claude-sonnet-5.5"], cli_ids=["claude-sonnet"],
         ),
-        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5.5"]),
+        _fb(
+            "claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"],
+            gateway_ids=["anthropic/claude-haiku-5.5"], cli_ids=["claude-haiku-5-5"],
+        ),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
         _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
-        _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna", "openai/gpt-5-6-luna-high"]),
+        _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna"]),
         _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True, gateway_ids=["openai/gpt-6-astra"]),
         _fb(
             "gpt-sol", "openai", "openai", "high", ["sol"],
-            gateway_ids=["openai/gpt-5.6-sol", "openai/gpt-5-6-sol"], cli_ids=["gpt-5.6-sol"],
+            gateway_ids=["openai/gpt-5.6-sol"], cli_ids=["gpt-5.6-sol"],
         ),
-        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["x-ai/grok-4.6"]),
-        _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"], gateway_ids=["x-ai/grok-4.7"]),
+        _fb(
+            "grok-4.6", "xai", "grok", "mid", ["grok-review"],
+            gateway_ids=["x-ai/grok-4.6"], cli_ids=["grok-4.6"],
+        ),
+        _fb(
+            "grok-4.7", "xai", "grok", "mid", ["grok-dev"],
+            gateway_ids=["x-ai/grok-4.7"], cli_ids=["grok-4.7"],
+        ),
         _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"], gateway_ids=["google/gemini-3.8-flash"]),
         _fb("deepseek/deepseek-v4.1-flash", "deepseek", "deepseek", "low", ["deepseek-flash"]),
         _fb("deepseek/deepseek-v4-pro", "deepseek", "deepseek", "high", ["deepseek-v4-pro"], "candidate"),

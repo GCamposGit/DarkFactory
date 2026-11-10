@@ -52,6 +52,10 @@ vazio ou só com health genérico, o processo sai com código 75, JSON `route_wa
 
 No modo recovery, a esteira trabalha como uma fila de faixa única: o SQLite mantém o latch e `AdmissionStore.reserve_recovery()` guarda a reserva global entre reinícios. O gate continua sendo o `suite_lock` oficial. Espera por gate, host ou rota não conta como sucesso; recovery só fecha quando `verify_recovery_receipt()` aprova um receipt recente, ligado ao candidato e ao `run_id`, com gate, revisão independente, CI, merge, deploy, smoke e learning pack comprovados.
 
+## Aprendizado da entrega USR-496
+
+O registro separa o slug do CLI (`cli_ids`, lido por `cli_id()`) do id de fio do OpenRouter (`gateway_ids`, lido por `gateway_id()`). Sem lista, o leitor devolve o id canonico. A sonda `python -m core.models.gateway_probe` confere, offline, o gateway efetivo de cada modelo active contra `.factory/config/openrouter_catalog.json`. Catalogo vazio ou rede indisponivel sai com erro estruturado (codigo 2), nao com uma lista de ausencias. `--write-snapshot` regrava o snapshot a partir do catalogo vivo. O portao nao chama a rede. A coleta de 2026-11-10T21:52:52Z tem 469 ids e zero achados em modelos active. Os ids que sobraram, todos fora de active, ficaram no ticket USR-505.
+
 ## Aprendizado da entrega USR-484 T5
 
 Uma lista `--recovery-tickets` ordena a prioridade, mas só serializa quando o recovery

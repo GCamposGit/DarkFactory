@@ -108,10 +108,12 @@ def test_gateway_ids_resolve_naming_only() -> None:
 
 def test_cli_id_falls_back_to_canonical_id_without_declared_cli_ids() -> None:
     """``cli_id`` returns the declared slug when present, else the canonical id (naming only)."""
-    # grok-4.6 and claude-haiku-5-5 declare no cli_ids: fallback is the canonical id itself.
+    # grok-4.6 and haiku declare a cli slug equal to the canonical id.
     assert registry.cli_id("grok-review") == "grok-4.6"
     assert registry.cli_id("haiku") == "claude-haiku-5-5"
-    assert registry.id_of("grok-review") == "grok-4.6" == registry.cli_id("grok-review")
+    # gemini-3.8-flash declares no cli_ids: fallback is the canonical id itself.
+    assert registry.cli_id("flash") == "gemini-3.8-flash"
+    assert registry.id_of("flash") == registry.cli_id("flash")
     with pytest.raises(KeyError):
         registry.cli_id("nope-unknown")
 

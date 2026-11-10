@@ -13,3 +13,9 @@ def test_haiku_uses_distinct_cli_and_gateway_ids() -> None:
     assert cli_id("haiku") == "claude-haiku-5-5"
     assert gateway_id("haiku") == "anthropic/claude-haiku-5.5"
     assert id_of("claude-haiku-5-5") == id_of("haiku")
+
+
+def test_opus_wire_id_is_not_the_cli_slug() -> None:
+    assert gateway_id("opus") == "anthropic/claude-opus-5.5"
+    assert cli_id("opus") == "claude-opus-5-5"
+    assert id_of("opus") == "claude-opus-5-5"

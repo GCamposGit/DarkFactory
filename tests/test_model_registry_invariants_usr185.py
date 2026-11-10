@@ -97,3 +97,17 @@ def test_cli_id_colliding_with_another_models_id_is_rejected() -> None:
     raw["models"][0]["cli_ids"] = [raw["models"][1]["id"]]
     with pytest.raises(ValueError):
         reg.parse_registry(raw)
+
+
+def test_cli_id_equal_to_the_models_own_id_is_accepted() -> None:
+    raw = REGISTRY.model_dump(mode="json")
+    raw["models"][0]["cli_ids"] = [raw["models"][0]["id"]]
+    parsed = reg.parse_registry(raw)
+    assert parsed.models[0].cli_ids == [raw["models"][0]["id"]]
+
+
+def test_alias_equal_to_the_models_own_id_is_rejected() -> None:
+    raw = REGISTRY.model_dump(mode="json")
+    raw["models"][0]["aliases"] = [raw["models"][0]["id"]]
+    with pytest.raises(ValueError):
+        reg.parse_registry(raw)

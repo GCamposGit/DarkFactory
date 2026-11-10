@@ -22,6 +22,8 @@ WIRE_ID_MARKER = "census: wire-id"
 SCAN_SUFFIXES = {".py", ".json", ".md", ".yaml", ".yml", ".toml", ".txt", ".ps1", ".html", ".js", ".ts"}
 ALLOWLIST_PREFIXES: tuple[str, ...] = (
     ".factory/config/model_registry.json",
+    # Generated OpenRouter snapshot (gateway_probe --write-snapshot), not a model choice.
+    ".factory/config/openrouter_catalog.json",
     # Historical evidence/actor labels are not active model-selection inputs.
     ".factory/demands/demands.json",
     ".factory/owner_actions/owner_actions.json",
