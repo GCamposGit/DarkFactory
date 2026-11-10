@@ -164,6 +164,24 @@ def _ticket_holds() -> list[str]:
             for h in holds]
 
 
+_OPERATOR_FINDINGS = (
+    ("idle_queue", "idle_queue"),
+    ("status_without_process", "active_without_process"),
+    ("stale_lock", "stale_lock"),
+)
+
+
+def _operator_findings(report: object) -> list[str]:
+    """Nomes que o operador ve quando o achado esta no relatorio."""
+    findings = set(getattr(report, "findings", []) or [])
+    details = getattr(report, "details", {}) or {}
+    labels: list[str] = []
+    for key, label in _OPERATOR_FINDINGS:
+        if key in findings or label in findings or key in details:
+            labels.append(label)
+    return labels
+
+
 def _sentinel() -> list[str]:
     """Status do sentinela autonomo da linha (USR-439)."""
     from core.line.sentinel import load_last_report, maybe_run_sentinel
@@ -182,6 +200,11 @@ def _sentinel() -> list[str]:
         f"Rotas: Dev={report.route_development or 'NENHUMA'} (Frota={report.fleet_route_development or 'NENHUMA'}) | Plan={report.route_planning or 'NENHUMA'}",
         f"Fila: {len(report.pending_tickets)} pendente(s) | {len(report.in_flight_tickets)} em voo",
     ]
+    managed = {key for key, _label in _OPERATOR_FINDINGS} | {label for _key, label in _OPERATOR_FINDINGS}
+    shown = _operator_findings(report)
+    shown.extend(item for item in report.findings if item not in managed and item not in shown)
+    if shown:
+        lines.append(f"Achados: {', '.join(shown)}")
     if report.quotas:
         q_str = ", ".join(f"{h}: {q}%" for h, q in report.quotas.items() if q is not None)
         lines.append(f"Cotas telemetria: {q_str}")

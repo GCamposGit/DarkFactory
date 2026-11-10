@@ -14336,5 +14336,35 @@
     "dependencies": [],
     "created_at": "2026-11-08T14:05:58.351857Z",
     "updated_at": "2026-11-08T14:05:58.351857Z"
+  },
+  {
+    "id": "USR-501",
+    "project_id": "darkfac",
+    "title": "Sentinela alerta fila ociosa, status sem processo e trava mais antiga que o ultimo merge",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "a00e68bab05e494bf5e8fffb3cb6e66b90efdd64",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 09/11 a fila parou sem alerta. Ampliar USR-439 sem peca nova.",
+    "core_journey": [
+      "Em 09/11 a fila parou sem alerta. Ampliar USR-439 sem peca nova."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Alerta Telegram e Hub quando host livre, rota e ticket elegivel ficam sem execucao por mais de 15 min",
+      "Alerta de status ativo sem processo",
+      "Alerta de trava mais antiga que o ultimo merge relevante"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T22:21:13.663307Z",
+    "updated_at": "2026-11-10T22:51:32.474261Z"
   }
 ]
