@@ -386,20 +386,30 @@ def test_route_wait_keeps_a_later_reset_and_floors_an_earlier_one() -> None:
     assert calls[0][0] == "planning"
 
 
+def test_contingency_hit_may_share_the_writer_family_but_a_plain_hit_may_not() -> None:
+    kwargs = dict(planning=_hit("planning", "claude"), build=_hit("build", "claude"), gate=_gate(_usable()),
+                  now=NOW, not_before_for=lambda kind: NOW)
+    plain = decide(review=_hit("review", "claude"), **kwargs)
+    assert plain.outcome == "wait" and plain.code == CODE_REVIEW_SAME_FAMILY
+    cascade = decide(review=_hit("review", "claude").model_copy(update={"contingency_level": 4}), **kwargs)
+    assert cascade.outcome == "allow"
+
+
 def test_missing_review_route_waits_without_asking_the_gate_clock() -> None:
     routes = {"planning": ("claude", "opus"), "development": ("codex", "sonnet"), "review": None}
     decision, seen, earliest_calls = _admit(routes, gate=_gate(_usable()))
     assert decision.code == CODE_NO_REVIEW_ROUTE and decision.stage == STAGE_REVIEW
-    assert [row["stage"] for row in seen] == ["planning", "development", "review"]
+    assert [row["stage"] for row in seen] == ["planning", "development", "review", "review"]
     assert earliest_calls[0][0] == "review"
     assert decision.not_before == NOW + timedelta(seconds=routing.MIN_ROUTE_WAIT_SECONDS)
 
 
-def test_same_family_pick_waits_and_a_gate_failure_does_not_call_earliest() -> None:
+def test_same_family_review_uses_contingency_and_a_gate_failure_does_not_call_earliest() -> None:
+    # Only the writer's family answers: cascade level 3 (same family, another model) admits.
     same, seen, calls = _admit(_routes(build="claude", review="claude"), gate=_gate(_usable()))
-    assert same.code == CODE_REVIEW_SAME_FAMILY
+    assert same.outcome == "allow" and "level=3" in same.evidence_ref
     assert seen[2]["implementing_harness"] == "claude"
-    assert calls[0][0] == "review"
+    assert calls == []
 
     zero = _worker("local", 0, False, NOW, "gate://local")
     waiting, _seen, gate_calls = _admit(_routes(), gate=_gate(zero))
@@ -491,3 +501,28 @@ def test_recovery_receipt_requires_fresh_candidate_bound_production_chain():
     assert admission.verify_recovery_receipt(
         bad_review, candidate_digest=candidate, run_id="fleet-run-468", now=now,
     )[1] == "receipt_review_not_independent"
+    same_family = dict(approved=True, independent=True, reviewer_family="codex", implementer_family="codex")
+    contingency = {"level": 3, "persona": "standard", "reason": "same_family_other_model"}
+    for review, expected in (
+        (stage(**same_family), "receipt_review_not_independent"),
+        (stage(**same_family, contingency={"level": 1, "persona": "standard", "reason": "x"}),
+         "receipt_review_not_independent"),
+        (stage(**same_family, contingency=contingency), "receipt_valid"),
+    ):
+        assert admission.verify_recovery_receipt(
+            {**receipt, "review": review}, candidate_digest=candidate, run_id="fleet-run-468", now=now,
+        )[1] == expected
+
+def test_openrouter_writer_and_reviewer_compare_model_family_not_harness_name() -> None:
+    def hit(stage: str, model: str) -> admission.RouteHit:
+        return admission.RouteHit(stage=stage, harness="openrouter", model=model, evidence_ref=f"routing://{stage}/openrouter")
+
+    def run(build_model: str, review_model: str) -> AdmissionDecision:
+        return decide(
+            planning=hit("planning", "gpt-sol"), build=hit("build", build_model), review=hit("review", review_model),
+            gate=_gate(_usable()), now=NOW, not_before_for=lambda kind: NOW,
+        )
+
+    assert run("gpt-sol", "sonnet").outcome == "allow"
+    blocked = run("sonnet", "sonnet")
+    assert blocked.outcome == "wait" and blocked.code == CODE_REVIEW_SAME_FAMILY

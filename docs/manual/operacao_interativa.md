@@ -109,3 +109,7 @@ nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a workt
 fica preservada para retomada automatica. Esgotar essa tentativa registra falha
 tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
 `run_ticket.py --recovery --run-id <id>` ativa a reserva canonica de uma entrega global e usa a identidade recebida do dispatcher. O launcher verifica o gate antes de iniciar qualquer agente; `gate_busy` retorna como espera estruturada.
+
+## Revisao sem outra familia disponivel
+
+A sessao interativa e a frota usam a mesma cascata de revisao (USR-488): outra familia por harness, outra familia pelo OpenRouter, mesma familia com outro modelo e, por fim, o mesmo modelo com persona adversarial. O nivel usado fica registrado no veredito; so sem nenhum nivel a admissao espera. Detalhes em [roteamento](roteamento.md).

@@ -43,7 +43,7 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
 MIN_NOTEBOOK_WORKERS = 1
 INFRA_EXIT_CODES = frozenset({75})
-LOCK_MARKERS = ("[TRAVA DE LINHA]",)
+LOCK_MARKERS = ("[TRAVA DE LINHA]", "[RESERVA DE FROTA]")
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -526,7 +526,7 @@ class FleetDispatcher:
             if occurrences >= max(1, self.config.recovery_failure_threshold) and ticket_cause:
                 self.admission_store.set_ticket_hold(fingerprint, occurrences)
                 logger.error("%s em hold: causa=%s ocorrencias=%s", job.ticket_id, ticket_cause, occurrences)
-            elif occurrences >= max(1, self.config.recovery_failure_threshold):
+            elif occurrences >= max(1, self.config.recovery_failure_threshold) and rc != 75 and kind != "lock":  # 75 e trava ocupada = espera, nao falha
                 state = self.admission_store.set_recovery(
                     active=True, cause=fingerprint.error_class, fingerprint=fingerprint.sha256)
                 self.recovery = state

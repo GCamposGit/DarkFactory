@@ -51,7 +51,8 @@ encerra com exit 75 (`EXIT_ROUTE_WAIT`). O stdout recebe um JSON com `ok` false,
 na fila. A worktree não é criada e o dry run não imprime `[DRY RUN]`.
 
 A revisão prospectiva usa outro harness que a rota de build (o nome do harness, sem distinção de
-maiúsculas). A mesma família produz `review_same_family`. O harness que escreveria é o pin `--harness`
+maiúsculas). Uma rota de mesma família sem nível de contingência produz `review_same_family`; a cascata
+do USR-488 (`docs/manual/roteamento.md`) tenta antes outra família, OpenRouter, outro modelo e persona. O harness que escreveria é o pin `--harness`
 quando ele declara escrita; em contexto headless o pin Antigravity continua fora da escrita e a revisão
 é comparada com o harness que o `pick` de `development` elegeu. Um pin não inventa rota quando esse
 `pick` devolve `None`.
@@ -354,3 +355,5 @@ gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
 comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
 de candidatos anteriores permanecem preservadas; o novo candidato exige suas
 proprias provas de portao, revisao e producao.
+
+Na admissao, "mesma familia" compara a familia do modelo, nao o nome do harness: escritor e revisor via OpenRouter com modelos de familias diferentes sao independentes.
