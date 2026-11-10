@@ -407,7 +407,7 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
                          context_digest="ctx", resource_version="worker-v1")
     for _ in range(3):
         e.d._record_failure(failed, 1, "context", "context scanner failed")
-    assert e.d.admission_store.recovery_state()["active"] == 1
+    assert bool(e.d.admission_store.recovery_state()["active"] == 1
 
     # A fresh dispatcher sees the durable latch and only dispatches one delivery globally.
     e.d = fd.FleetDispatcher(
@@ -424,7 +424,7 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
 
     e.handles[job.ticket_id].rc = 0
     e.d.run_cycle()  # exit zero without a delivery receipt is still not success
-    assert e.d.admission_store.recovery_state()["active"] == 1
+    assert bool(e.d.admission_store.recovery_state()["active"] == 1
     assert e.d.cooldown[job.ticket_id] > e.now
     normal = Env(tmp_path / "normal", [_d("USR-01")], free=("grokbox",))
     normal.d.run_cycle()
@@ -898,6 +898,15 @@ def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
     else:
         assert store.recovery_state()["active"]
         assert not store.ticket_holds()
+
+
+@pytest.mark.parametrize(("rc", "active"), [(75, False), (1, True)])
+def test_identical_failures_activate_recovery_except_structured_wait(tmp_path, rc, active):
+    e = Env(tmp_path, [])
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        e.d._record_failure(job, rc, "failure", "route_wait: sem rota")
+    assert bool(e.d.admission_store.recovery_state()["active"]) is active
 
 
 @pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "identical_failure_open"])
