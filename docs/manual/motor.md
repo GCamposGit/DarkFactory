@@ -236,7 +236,24 @@ O revisor com filesystem continua recebendo o diff integral no prompt e os mesmo
 ## Planejamento
 
 Rotas de planejamento: Claude (role `planning.claude`) ou Codex (role `planning.codex`), ambos com modelo tier `high` no registro.
-O Codex roda com esforco `high` (pin do estagio) e o slug do CLI vem do `gateway_ids` do modelo no registro.
+O Codex roda com esforco `high` (pin do estagio). O slug do CLI sai de `cli_id()` (`cli_ids` do registro, ou o id canonico quando a lista esta vazia). Quem fala com o OpenRouter usa `gateway_id()`, nao o slug do CLI.
+
+## Ids de CLI e de gateway (USR-496)
+
+O registro `.factory/config/model_registry.json` guarda dois nomes do mesmo modelo, lidos por `core.models.registry`:
+
+- `cli_ids`: slug sem barra, aceito pelo CLI do harness. Call sites de argv usam `cli_id()`. Se o slug e o proprio id canonico, a lista fica vazia e `cli_id()` devolve esse id. Um `cli_ids` igual ao id de outro modelo, ou com barra, e rejeitado.
+- `gateway_ids`: id com barra do OpenRouter (provedor/modelo). Call sites de fio usam `gateway_id()`, que devolve o primeiro `gateway_ids` ou, se a lista estiver vazia, o id canonico. Esse fallback nao e um wire id valido quando o id canonico nao esta no catalogo.
+
+A sonda `python -m core.models.gateway_probe` roda offline contra `.factory/config/openrouter_catalog.json`. Ela olha so modelos com `status` `active`. O gateway efetivo e o `gateway_ids` declarado; sem declaracao, o id canonico. `cli_ids` nao entra. Sai 0 sem achados, 1 com achados e 2 com erro estruturado (`empty_catalog` ou `catalog_unavailable`). `--json` imprime o relatorio no stdout. Catalogo vazio ou falha de rede nao vira lista de modelos ausentes nem sucesso silencioso.
+
+Atualizar o snapshot (a sonda grava o arquivo; nao edite o JSON a mao):
+
+```powershell
+python -m core.models.gateway_probe --write-snapshot
+```
+
+O portao nao chama a rede. A checagem viva e opt-in: `DARKFAC_LIVE_OPENROUTER=1`.
 
 O estagio `planning` so roteia para modelos de nivel alto (`tier` `high` ou `frontier` em
 `.factory/config/model_registry.json`, lido por `core.models.registry`). Um harness sem modelo

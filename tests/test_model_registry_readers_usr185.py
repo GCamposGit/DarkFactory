@@ -87,7 +87,14 @@ def test_gateway_ids_resolve_naming_only() -> None:
     assert registry.gateway_id("anthropic/claude-opus-5") == "anthropic/claude-opus-5"
     assert registry.gateway_id("astra") == "openai/gpt-6-astra"
     assert registry.gateway_id("deepseek-v4-pro") == "deepseek/deepseek-v4-pro"  # no gateway id: canonical id
-    assert registry.id_of("xai/grok-4.6") == "grok-4.6"
+    assert registry.id_of("x-ai/grok-4.6") == "grok-4.6"
+    assert registry.gateway_id("grok-review") == "x-ai/grok-4.6"
+    assert registry.gateway_id("haiku") == "anthropic/claude-haiku-5.5"
+    assert registry.cli_id("grok-review") == "grok-4.6"
+    assert registry.cli_id("haiku") == "claude-haiku-5-5"
+    assert registry.cli_id("sonnet") == "claude-sonnet"
+    assert registry.cli_id("sol") == "gpt-5.6-sol"
+    assert registry.resolve("claude-sonnet") == registry.resolve("sonnet")
     with pytest.raises(KeyError):
         registry.gateway_id("nope/unknown")
     # Gateway-only models were never routable: no role points at them and resolve() refuses them.
@@ -99,6 +106,18 @@ def test_gateway_ids_resolve_naming_only() -> None:
     assert not routed & {"deepseek/deepseek-v4-pro", "gemini-3.1-pro", "gpt-image-2", "claude-3-7-sonnet"}
 
 
+def test_cli_id_falls_back_to_canonical_id_without_declared_cli_ids() -> None:
+    """``cli_id`` returns the declared slug when present, else the canonical id (naming only)."""
+    # grok-4.6 and haiku declare a cli slug equal to the canonical id.
+    assert registry.cli_id("grok-review") == "grok-4.6"
+    assert registry.cli_id("haiku") == "claude-haiku-5-5"
+    # gemini-3.8-flash declares no cli_ids: fallback is the canonical id itself.
+    assert registry.cli_id("flash") == "gemini-3.8-flash"
+    assert registry.id_of("flash") == registry.cli_id("flash")
+    with pytest.raises(KeyError):
+        registry.cli_id("nope-unknown")
+
+
 def test_qualified_routes_ids_unchanged() -> None:
     from core.workflow import qualified_routes as qr
 
@@ -107,14 +126,14 @@ def test_qualified_routes_ids_unchanged() -> None:
         "anthropic/claude-opus-5": "claude", "claude-opus-5": "claude", "gpt-6-astra": "gpt-oss",
         "gemini-3.8-flash": "gemini", "google/gemini-3.8-flash": "gemini", "google/gemini-3.1-pro": "gemini",
         "deepseek-v4-pro": "deepseek", "deepseek-v4.1-flash": "deepseek", "deepseek/deepseek-v4-pro": "deepseek",
-        "deepseek/deepseek-v4.1-flash": "deepseek", "grok-4.6": "grok", "xai/grok-4.6": "grok",
+        "deepseek/deepseek-v4.1-flash": "deepseek", "grok-4.6": "grok", "x-ai/grok-4.6": "grok",
     }.items():
         assert fs[key] == fam
     cat = qr._EMBEDDED_DEFAULT_CATALOG
     assert cat["roles_mapping"]["high_architecture"]["allowed_models"] == [
             "anthropic/claude-opus-5", "deepseek/deepseek-v4-pro", "google/gemini-3.1-pro",
     ]
-    assert cat["roles_mapping"]["verifier"]["allowed_models"][1:] == ["deepseek/deepseek-v4.1-flash", "xai/grok-4.6"]
+    assert cat["roles_mapping"]["verifier"]["allowed_models"][1:] == ["deepseek/deepseek-v4.1-flash", "x-ai/grok-4.6"]
 
 
 def test_gateway_readers_ids_unchanged() -> None:

@@ -372,7 +372,7 @@
       }
     },
     {
-      "model_id": "xai/grok-4.6",
+      "model_id": "x-ai/grok-4.6",
       "name": "xAI Grok 4.6",
       "provider": "xai",
       "context_length": 524288,

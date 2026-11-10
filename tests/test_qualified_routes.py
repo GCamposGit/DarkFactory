@@ -290,7 +290,7 @@ def test_verifier_cross_model_family_isolation(empty_quota_report: AccountUsageR
     decision_c = select_route(job=job_deepseek, quota_report=quota_no_gpt)
     assert decision_c.status == "QUALIFIED"
     # DeepSeek is skipped due to family collision; routes to grok-4.6 (xai)
-    assert decision_c.selected_model == "xai/grok-4.6"
+    assert decision_c.selected_model == "x-ai/grok-4.6"
     assert decision_c.selected_provider == "xai"
 
 

@@ -531,20 +531,19 @@ def codex_sandbox_mode() -> str:
 
 
 def _codex_cli_slug(model: str) -> str:
-    """Codex CLI slug for a registry model: a slash-free gateway id when declared.
+    """Codex CLI slug for a registry model: ``cli_id`` when the model declares one.
 
     The registry id of the planning model (role ``planning.codex``) is not a slug the Codex CLI knows; models
-    without such a gateway id are passed through unchanged.
+    without a declared cli id are passed through unchanged.
     """
     try:
-        from core.models.registry import get_registry
+        from core.models.registry import cli_id, get_registry
 
         low = model.strip().lower()
         for entry in get_registry().models:
             if entry.provider == "openai" and low in (n.strip().lower() for n in [entry.id, *entry.aliases]):
-                for gid in entry.gateway_ids:
-                    if gid and "/" not in gid:
-                        return gid
+                if entry.cli_ids:
+                    return cli_id(entry.id)
     except Exception as exc:  # registry trouble must not break the call
         logger.debug("codex slug lookup failed for %s: %s", model, exc)
     return model

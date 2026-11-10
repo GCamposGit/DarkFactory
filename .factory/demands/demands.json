@@ -14336,5 +14336,35 @@
     "dependencies": [],
     "created_at": "2026-11-08T14:05:58.351857Z",
     "updated_at": "2026-11-08T14:05:58.351857Z"
+  },
+  {
+    "id": "USR-496",
+    "project_id": "darkfac",
+    "title": "Separar id de CLI e id de gateway do Grok no registro de modelos",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "a68e8c53e0a82c880ae0d796cb01dd826a273dc2",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O registro usa xai/grok-4.6 como gateway, id inexistente no catalogo OpenRouter (correto: x-ai/grok-4.6). O mesmo valor alimenta o CLI do Grok em core/harness/test_subagent.py, entao corrigir so o gateway altera o CLI. Evidencia: auditoria de 09/11 contra /api/v1/models; outros ids de gateway invalidos: anthropic/claude-haiku-5-5.",
+    "core_journey": [
+      "O registro usa xai/grok-4.6 como gateway, id inexistente no catalogo OpenRouter (correto: x-ai/grok-4.6). O mesmo valor alimenta o CLI do Grok em core/harness/test_subagent.py, entao corrigir so o gateway altera o CLI. Evidencia: auditoria de 09/11 contra /api/v1/models; outros ids de gateway invalidos: anthropic/claude-haiku-5-5."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Registro distingue id de CLI e id de gateway sem duplicar modelo",
+      "Todo gateway de modelo ativo existe no catalogo OpenRouter, verificado por sonda",
+      "CLI do Grok mantem o id aceito pelo CLI"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T21:58:24.753095Z",
+    "updated_at": "2026-11-10T22:06:08.081537Z"
   }
 ]
