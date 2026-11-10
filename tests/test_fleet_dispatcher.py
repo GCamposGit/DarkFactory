@@ -912,6 +912,9 @@ def test_identical_failures_activate_recovery_except_structured_wait(tmp_path, r
 def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
     text = "[RESERVA DE FROTA] Fleet capacity ceiling of 1 active cycles reached"
     assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
+    active_pr = "[RECUSA] Ticket USR-494 ja possui PR ativo #830: https://github.com/x/y/pull/830"
+    assert fd.is_lock_refusal(active_pr) and not fd.is_infra_failure(2, active_pr)
+    assert not fd.is_lock_refusal("[RECUSA] pull_request_lookup_unavailable")
     e = Env(tmp_path, [])
     for _ in range(3):
         job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
