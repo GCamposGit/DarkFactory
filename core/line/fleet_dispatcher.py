@@ -53,6 +53,7 @@ EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "plan
 MIN_NOTEBOOK_WORKERS = 1
 INFRA_EXIT_CODES = frozenset({75})
 LOCK_MARKERS = ("[TRAVA DE LINHA]", "[RESERVA DE FROTA]", "ja possui PR ativo")
+HOST_REFUSAL_MARKERS = ("host_indisponivel", "host_recusado", "worker_ocupado")
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -447,6 +448,12 @@ def is_lock_refusal(log_tail: str) -> bool:
     return any(m in log_tail for m in LOCK_MARKERS)
 
 
+def is_host_refusal(log_tail: str) -> bool:
+    """The host refused the job before an agent spent quota."""
+
+    return any(marker in (log_tail or "") for marker in HOST_REFUSAL_MARKERS)
+
+
 def is_infra_failure(rc: int, log_tail: str) -> bool:
     return rc in INFRA_EXIT_CODES or any(m in log_tail for m in INFRA_MARKERS)
 
@@ -535,6 +542,8 @@ class FleetDispatcher:
         sentinel_hook: Optional[Callable[[], Any]] = None,
         admission_store: Any = None,
         express_alert: Optional[Callable[[Any], bool]] = None,
+        quota_lookup: Optional[Callable[[], Mapping[str, Optional[float]]]] = None,
+        resume_source: Optional[Callable[[], list[dict[str, Any]]]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -558,6 +567,10 @@ class FleetDispatcher:
                 admission_store = None
         self.admission_store = admission_store
         self.express_alert = express_alert  # None usa o alerta ALL da via expressa (USR-494 T4)
+        self.quota_lookup = quota_lookup  # None: a fila nao inventa escassez de cota
+        # None: retomadas reais so quando o lancamento e o da fabrica (launch is None).
+        self.resume_source = resume_source
+        self._no_merge_brake: Any = None
         self.in_flight: dict[str, InFlight] = {}  # trava por host: no maximo um ticket por host
         self.cooldown: dict[str, float] = {}
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
@@ -666,9 +679,9 @@ class FleetDispatcher:
                 continue
             del self.in_flight[host_id]
             _remove_operational_checkout(job.operational_checkout)
-            tail = _tail(job.log_path) if rc != 0 else ""
+            tail = _tail(job.log_path)
             if rc == 0:
-                tail = _tail(job.log_path)
+                self._observe_quota_consumption(job, produced_own_merge=_delivery_evidence(tail))
                 in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
                 if _delivery_evidence(tail):
                     self._close_express_episode(job.ticket_id)
@@ -690,18 +703,25 @@ class FleetDispatcher:
                     self._release_reservation(job)
                 if not _delivery_evidence(tail):
                     self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
-            elif is_lock_refusal(tail):
-                self._record_failure(job, rc, "lock", tail)
+            elif is_lock_refusal(tail) or is_host_refusal(tail):
+                host_refused = not is_lock_refusal(tail)
+                self._record_failure(job, rc, "host" if host_refused else "lock", tail)
                 self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.lock_requeue_cooldown_sec
-                self.lock_busy[host_id] = f"host_ocupado_trava:{job.ticket_id}"
-                logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
+                label = "host_recusado" if host_refused else "host_ocupado_trava"
+                self.lock_busy[host_id] = f"{label}:{job.ticket_id}"
+                if host_refused:
+                    logger.warning("host recusou %s em %s; reenfileirado sem consumo", job.ticket_id, host_id)
+                else:
+                    logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
             elif is_infra_failure(rc, tail):
+                self._observe_quota_consumption(job, produced_own_merge=False)
                 self._record_failure(job, rc, "infra", tail)
                 self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec
                 logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
             else:
+                self._observe_quota_consumption(job, produced_own_merge=False)
                 self._record_failure(job, rc, "failure", tail)
                 self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
@@ -1017,7 +1037,12 @@ class FleetDispatcher:
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
         from core.line.pending_delivery import tick, acknowledge_deploy
-        resumptions = tick(PROJECT_ROOT) if self.launch is None and not self.dry_run else []
+        if self.resume_source is not None:
+            resumptions = list(self.resume_source() or [])
+        elif self.launch is None and not self.dry_run:
+            resumptions = tick(PROJECT_ROOT)
+        else:
+            resumptions = []
         if any(r.get("status") == "dispatcher_busy" for r in resumptions):
             self.last_cycle = {"ts": datetime.now(timezone.utc).isoformat(), "resumptions": resumptions,
                                "dispatched": [], "deployed": False}
@@ -1068,6 +1093,8 @@ class FleetDispatcher:
             delivery_in_flight=delivery_in_flight,
         )
         skipped.update(preempt_skips)
+        queue, policy_skips = self._apply_work_policy(queue, demands)
+        skipped.update(policy_skips)
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
@@ -1101,6 +1128,80 @@ class FleetDispatcher:
         }
         self._write_state()
         return self.last_cycle
+
+    def _pause_brake(self) -> Any:
+        from core.line.sentinel import notify_no_merge_pause
+        from core.orchestrator.no_merge_pause import NoMergeBuildPause
+
+        path = self.config.state_path.with_name("no_merge_pause.json")
+        brake = self._no_merge_brake
+        if brake is None or getattr(brake, "state_path", None) != path:
+            brake = NoMergeBuildPause.from_environment(path, notify_no_merge_pause)
+            self._no_merge_brake = brake
+        else:
+            brake.retry_sentinel()
+        return brake
+
+    def _apply_work_policy(
+        self,
+        queue: list[str],
+        demands: list[dict[str, Any]],
+    ) -> tuple[list[str], dict[str, str]]:
+        """Candidate priority, unmerged limit and the no-merge pause. Resumptions already ran."""
+
+        from core.orchestrator.cycle_viability import load_cycle_estimate
+        from core.orchestrator.work_admission import (
+            discover_work_signals,
+            prioritize_fleet_queue,
+            scheduling_limit_from_environment,
+        )
+
+        brake = self._pause_brake()
+        decision = brake.admission_decision("BUILD")
+        quota_available: Optional[float] = None
+        cycle_cost = 0.0
+        review_cost = 0.0
+        if self.quota_lookup is not None:
+            try:
+                reading = self.quota_lookup() or {}
+            except Exception as exc:  # noqa: BLE001 - unknown quota does not look like spare quota
+                logger.warning("leitura de cota da fila falhou: %s", type(exc).__name__)
+                reading = {}
+            known = [
+                float(value)
+                for value in reading.values()
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            ]
+            quota_available = max(known) if known else 0.0
+            estimate = load_cycle_estimate()
+            cycle_cost = estimate.total
+            review_cost = estimate.review
+        return prioritize_fleet_queue(
+            queue,
+            demands,
+            quota_available=quota_available,
+            cycle_cost=cycle_cost,
+            review_cost=review_cost,
+            new_builds_paused=not decision.admitted,
+            pause_reason=decision.reason,
+            max_unmerged_candidates=scheduling_limit_from_environment(),
+            work_signals=discover_work_signals(queue),
+        )
+
+    def _observe_quota_consumption(self, job: InFlight, *, produced_own_merge: bool) -> None:
+        from core.orchestrator.no_merge_pause import ConsumptionCompleted
+
+        try:
+            self._pause_brake().record_consumption(
+                ConsumptionCompleted(
+                    event_id=f"{job.run_id or job.ticket_id}:{job.host_id}:{int(self.clock())}",
+                    work_id=job.ticket_id,
+                    stage="BUILD",
+                    produced_own_merge=produced_own_merge,
+                )
+            )
+        except Exception:  # noqa: BLE001 - the brake must not strand a finished job
+            logger.exception("falha ao registrar consumo sem merge de %s", job.ticket_id)
 
     def _ticket_holds(self) -> list[dict[str, Any]]:
         try:
@@ -1170,11 +1271,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
+    def _fleet_quota_lookup() -> dict[str, Optional[float]]:
+        from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom
+
+        return {harness: _default_quota_headroom(provider) for harness, provider in _HARNESS_TO_PROVIDER.items()}
+
     d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec, resume_only=args.resume_only and not recovery,
                                         recovery_tickets=recovery), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
-                        busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts)
+                        busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
+                        quota_lookup=_fleet_quota_lookup)
     if args.loop and not args.once:
         d.run_forever()
         return 0

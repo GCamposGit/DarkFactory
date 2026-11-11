@@ -10,6 +10,9 @@ os três canais funcionam sem erro.
 se o critério foi cumprido; `collect_v0_proof_evidence` monta a entrada dela a partir das stores
 que a linha já escreve.
 
+`GET /api/usage/merge-quota` devolve a cota gasta com merge e a cota gasta sem merge. O numero
+e o mesmo agregador do briefing.
+
 ## A regra (`evaluate_v0_proof`)
 
 Função pura: sem I/O, sem relógio implícito (`now` é sempre passado pelo chamador). Recebe uma

@@ -14428,5 +14428,38 @@
     "dependencies": [],
     "created_at": "2026-11-09T09:30:45.287241Z",
     "updated_at": "2026-11-11T00:57:13.060069Z"
+  },
+  {
+    "id": "USR-493",
+    "project_id": "darkfac",
+    "title": "Viabilidade de ponta a ponta: so iniciar BUILD se a cota cobrir ate a revisao",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "f12b595754a81b7a79a49c2de59f9300a212e442",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em cerca de 30h de 08-09/11 a frota registrou 18 consumos de BUILD sem merge proprio. A admissao confere rota no instante atual, nao se a cota previsto chega a revisao; USR-484 levou o Claude de 44 para 7 por cento na janela e terminou sem revisor. Candidatos prontos competem com novos BUILDs.",
+    "core_journey": [
+      "Em cerca de 30h de 08-09/11 a frota registrou 18 consumos de BUILD sem merge proprio. A admissao confere rota no instante atual, nao se a cota previsto chega a revisao; USR-484 levou o Claude de 44 para 7 por cento na janela e terminou sem revisor. Candidatos prontos competem com novos BUILDs."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Admissao estima PLAN, BUILD, correcao e REVIEW pelo historico e reserva a revisao antes do BUILD",
+      "Candidato pronto tem prioridade de cota e host sobre novo BUILD, com limite de candidatos sem merge",
+      "Sequencia configuravel de consumos sem merge pausa novos BUILDs e aciona o Sentinela sem parar retomadas",
+      "Hub e briefing mostram cota gasta por merge e sem merge",
+      "Testes de comportamento cobrem cota insuficiente, prioridade de candidato e pausa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T09:30:06.473220Z",
+    "updated_at": "2026-11-11T04:04:22.302583Z"
   }
 ]

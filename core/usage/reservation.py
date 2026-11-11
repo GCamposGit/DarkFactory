@@ -11,9 +11,10 @@ import logging
 import os
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +36,7 @@ class QuotaReservation(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     expires_at: str
     ticket_id: Optional[str] = None
+    purpose: str = "stage"
 
 
 class QuotaReservationManager:
@@ -141,6 +143,119 @@ class QuotaReservationManager:
         if released:
             logger.debug("Released quota reservation %s", reservation_id)
         return released
+
+    @contextmanager
+    def _process_lock(self) -> Iterator[None]:
+        """Exclusive lock so two processes cannot both pass the affordability check."""
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        handle = open(lock_path, "a+b")
+        try:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
+
+    def active_rows(self, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Reservations that have not expired."""
+
+        current_time = now or datetime.now(timezone.utc)
+        with self._lock:
+            data = self._load_data()
+            return self._prune_expired(data.get("reservations", []), current_time)
+
+    def reserve_if_affordable(
+        self,
+        *,
+        provider_id: str,
+        harness: str,
+        percent: float,
+        headroom: float,
+        required_total: float,
+        ticket_id: Optional[str] = None,
+        purpose: str = "review",
+        ttl_seconds: Optional[int] = None,
+    ) -> Tuple[bool, str, Optional[str], float]:
+        """Reserve ``percent`` only when ``headroom`` still covers ``required_total``.
+
+        Other active reservations for the same provider are subtracted first.
+        The same ticket and purpose refresh the existing slice instead of stacking.
+        """
+
+        if percent < 0 or required_total < 0 or headroom < 0:
+            raise ValueError("quota values cannot be negative")
+        if percent > 100:
+            raise ValueError("percent cannot exceed 100")
+        clean_provider = provider_id.lower().strip()
+        clean_harness = harness.lower().strip()
+        ttl = ttl_seconds if ttl_seconds is not None else self.default_ttl_seconds
+        with self._process_lock():
+            with self._lock:
+                now = datetime.now(timezone.utc)
+                data = self._load_data()
+                active = self._prune_expired(data.get("reservations", []), now)
+                others: List[Dict[str, Any]] = []
+                own: Optional[Dict[str, Any]] = None
+                for row in active:
+                    same_ticket = str(row.get("ticket_id") or "") == str(ticket_id or "")
+                    same_purpose = str(row.get("purpose") or "") == purpose
+                    same_harness = str(row.get("harness") or "") == clean_harness
+                    if own is None and same_ticket and same_purpose and same_harness:
+                        own = row
+                    else:
+                        others.append(row)
+                reserved_others = sum(
+                    float(row.get("percent") or 0.0)
+                    for row in others
+                    if str(row.get("provider_id") or "") == clean_provider
+                )
+                available = float(headroom) - reserved_others
+                if available + 1e-9 < float(required_total):
+                    data["reservations"] = others + ([own] if own else [])
+                    self._save_data(data)
+                    return False, "insufficient_quota", None, available
+                if own is not None:
+                    own["expires_at"] = (now + timedelta(seconds=ttl)).isoformat()
+                    own["percent"] = float(percent)
+                    data["reservations"] = others + [own]
+                    self._save_data(data)
+                    return True, "already_reserved", str(own.get("reservation_id") or ""), available
+                reservation = QuotaReservation(
+                    provider_id=clean_provider,
+                    harness=clean_harness,
+                    percent=float(percent),
+                    created_at=now.isoformat(),
+                    expires_at=(now + timedelta(seconds=ttl)).isoformat(),
+                    ticket_id=ticket_id,
+                    purpose=purpose,
+                )
+                data["reservations"] = others + [reservation.model_dump()]
+                self._save_data(data)
+                return True, "reserved", reservation.reservation_id, available
 
     def get_active_reserved_percent(self, provider_id: str, now: Optional[datetime] = None) -> float:
         """Sum of currently active reserved percentage for a provider."""

@@ -143,6 +143,14 @@ def _quotas() -> list[str]:
     return lines
 
 
+def _merge_quota() -> list[str]:
+    """Same aggregator the Hub exposes. A read failure stays inside this section."""
+
+    from core.orchestrator.merge_quota import load_merge_quota_lines
+
+    return load_merge_quota_lines()
+
+
 def _handoff() -> list[str]:
     path = project_root() / HANDOFF_RELATIVE
     try:
@@ -220,6 +228,7 @@ def render_briefing() -> str:
         ("Nos (somente leitura)", _nodes),
         ("PRs abertos", _pull_requests),
         ("Cotas por harness (snapshots, sem probes)", _quotas),
+        ("Cota gasta com merge e sem merge", _merge_quota),
         ("Handoff de operacao", _handoff),
     ]
     lines = ["DarkFac | Briefing operacional", f"Gerado em {datetime.now(timezone.utc).isoformat()}"]

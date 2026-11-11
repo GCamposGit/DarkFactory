@@ -31,6 +31,7 @@ document.addEventListener("DOMContentLoaded", () => {
   mountAIUsageMonitor();
   loadAIUsage(false);
   loadTicketCosts();
+  loadMergeQuota();
   window.setInterval(() => {
     if (document.visibilityState === "visible") loadAIUsage(false);
   }, 60000);
@@ -92,6 +93,8 @@ function mountAIUsageMonitor() {
       <h3 class="text-xs font-semibold text-slate-200">Custo por ticket</h3>
       <p class="text-[10px] text-slate-500">API + custo implicito da assinatura; tentativas falhas incluidas.</p>
       <div id="ticket-cost-list" class="mt-2 text-[11px] font-mono text-slate-400">carregando…</div>
+      <h3 class="mt-3 text-xs font-semibold text-slate-200">Cota gasta com merge e sem merge</h3>
+      <div id="merge-quota-split" class="mt-2 text-[11px] font-mono text-slate-400">carregando…</div>
     </div>`;
   quickDock.insertAdjacentElement("afterend", section);
   document.getElementById("refresh-ai-usage")?.addEventListener("click", () => loadAIUsage(true));
@@ -111,6 +114,19 @@ async function loadTicketCosts() {
       : "sem custos registrados";
   } catch (error) {
     target.textContent = "custo por ticket indisponivel";
+  }
+}
+
+async function loadMergeQuota() {
+  const target = document.getElementById("merge-quota-split");
+  if (!target) return;
+  try {
+    const response = await hubNetFetch("/api/usage/merge-quota");
+    if (!response.ok) throw new Error("status " + response.status);
+    const body = await response.json();
+    target.textContent = `com merge: ${body.quota_spent_with_merge} | sem merge: ${body.quota_spent_without_merge}`;
+  } catch (error) {
+    target.textContent = "cota com e sem merge indisponivel";
   }
 }
 

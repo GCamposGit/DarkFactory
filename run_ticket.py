@@ -3320,6 +3320,7 @@ def evaluate_admission(args: argparse.Namespace, ticket: UserTicket) -> admissio
     build_caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
     pinned = str(getattr(args, "harness", "") or "").strip() or None
     operating = detect_operating_harness() if execution_context == "interactive" else None
+    headroom, estimate, reserved = _cycle_quota_inputs()
     return admission.admit(
         build_caps=build_caps,
         read_caps=list(_DEV_CAPS),
@@ -3328,7 +3329,42 @@ def evaluate_admission(args: argparse.Namespace, ticket: UserTicket) -> admissio
         project_id=ticket.project_id,
         complexity=_routing_complexity(ticket),
         pinned_harness=pinned,
+        cycle_headroom=headroom,
+        cycle_estimate=estimate,
+        cycle_reserved=reserved,
     )
+
+
+def _cycle_quota_inputs() -> tuple[dict[str, Any], Any, dict[str, float]]:
+    """Headroom, historical estimate and review reservations for admission.
+
+    A read failure becomes an empty headroom map. Admission then refuses BUILD
+    instead of treating the missing reading as enough quota.
+    """
+
+    from core.orchestrator.cycle_viability import load_cycle_estimate, reserved_percent_by_harness
+
+    headroom: dict[str, Any] = {}
+    try:
+        for harness, row in inspect_quotas().items():
+            if isinstance(row, dict):
+                headroom[str(harness)] = row.get("headroom")
+    except Exception as exc:  # noqa: BLE001 - unknown quota must not look like spare quota
+        logger.warning("cycle quota headroom unavailable: %s", type(exc).__name__)
+        headroom = {}
+    try:
+        estimate = load_cycle_estimate()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cycle quota estimate unavailable: %s", type(exc).__name__)
+        from core.orchestrator.cycle_viability import fallback_estimate
+
+        estimate = fallback_estimate()
+    try:
+        reserved = reserved_percent_by_harness()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cycle quota reservations unavailable: %s", type(exc).__name__)
+        reserved = {}
+    return headroom, estimate, reserved
 
 
 def _stage_admission(
@@ -3841,6 +3877,8 @@ def _stage_development_route_wait(
     *,
     slice_index: int = 1,
     slice_total: int = 1,
+    cause: str = "development_no_route",
+    message: Optional[str] = None,
 ) -> int:
     """No writable harness above the floor for this slice. Keep the worktree and requeue.
 
@@ -3849,15 +3887,15 @@ def _stage_development_route_wait(
     """
     _requeue_after_route_wait(ticket)
     from core.line.pending_delivery import schedule
-    schedule(ticket.id, workspace.path, "development", cause="development_no_route")
-    cause = "development_no_route"
+    schedule(ticket.id, workspace.path, "development", cause=cause)
     floor = f"{QUOTA_FLOOR_MIN:g}"
-    message = f"development apos o PLAN sem rota com cota acima de {floor}%"
-    if slice_index > 1:
-        message = (
-            f"development da fatia {slice_index}/{slice_total} sem rota com cota acima de {floor}%; "
-            "o trabalho das fatias anteriores permanece na worktree"
-        )
+    if message is None:
+        message = f"development apos o PLAN sem rota com cota acima de {floor}%"
+        if slice_index > 1:
+            message = (
+                f"development da fatia {slice_index}/{slice_total} sem rota com cota acima de {floor}%; "
+                "o trabalho das fatias anteriores permanece na worktree"
+            )
     progress.phase("agent", "skipped", message, cause="route_wait")
     progress.set_outcome(message, "route_wait")
     print(
@@ -3916,7 +3954,30 @@ def _stage_build(
                 args, ticket, workspace, progress, slice_index=index, slice_total=len(plan_items),
             )
         selected_harness, selected_model, follow_pin, quotas = resolved
-        slice_before = quotas.get(selected_harness, {}).get("headroom")
+        slice_row = quotas.get(selected_harness, {})
+        slice_before = slice_row.get("headroom") if isinstance(slice_row, dict) else None
+        from core.orchestrator.cycle_viability import guard_build_start
+
+        guard = guard_build_start(
+            ticket_id=ticket.id,
+            harness=selected_harness,
+            headroom=slice_before,
+            provider_id=_HARNESS_TO_PROVIDER.get(selected_harness, selected_harness),
+        )
+        if not guard.admitted:
+            return _stage_development_route_wait(
+                args,
+                ticket,
+                workspace,
+                progress,
+                slice_index=index,
+                slice_total=len(plan_items),
+                cause="cycle_quota_short",
+                message=(
+                    "BUILD nao inicia: a cota prevista nao cobre PLAN, BUILD, "
+                    f"correcao e REVIEW ({guard.reason})"
+                ),
+            )
         if cost_harness != selected_harness:
             cost_before = slice_before
             cost_harness = selected_harness
@@ -3958,6 +4019,7 @@ def _stage_build(
         after_headroom=after_headroom,
         duration_s=total_duration if sequential else report.total_duration_s,
         success=True,
+        stage="BUILD",
     )
     if not args.json:
         print(f"\n{format_ticket_quota_summary(cost_record)}")

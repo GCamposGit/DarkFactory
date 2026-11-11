@@ -1336,6 +1336,39 @@ def check_factory_status(
     )
 
 
+def notify_no_merge_pause(context: Mapping[str, Any]) -> bool:
+    """Alert once per pause episode. The caller decides when a retry is still due."""
+
+    from core.notifications.models import AlertCategory, AlertSeverity, NotificationChannel
+    from core.notifications.service import NotificationService
+
+    episode = context.get("pause_episode")
+    sequence = context.get("sequence")
+    threshold = context.get("threshold")
+    service = NotificationService(cooldown_minutes=45)
+    event = service.notify(
+        category=AlertCategory.SYSTEM_HEALTH,
+        severity=AlertSeverity.WARNING,
+        title="Novos BUILDs pausados: consumos sem merge",
+        message=(
+            "A esteira pausou novos BUILDs depois de "
+            f"{sequence} consumos seguidos sem merge proprio "
+            f"(limiar {threshold}, episodio {episode}). "
+            "Retomadas, correcoes e revisoes continuam."
+        ),
+        provider_id=f"no-merge-pause-{episode}",
+        channel=NotificationChannel.ALL,
+        details={
+            "pause_episode": episode,
+            "sequence": sequence,
+            "threshold": threshold,
+            "work_id": context.get("work_id"),
+        },
+        force=True,
+    )
+    return event is not None
+
+
 def _send_telegram_alert(
     status: SentinelStatus,
     reason: str,
