@@ -55,6 +55,11 @@ def normalize_error(error: BaseException | str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", name).strip("_")[:64] or "unknown_error"
 
 
+def normalize_main_sha(main_sha: Optional[str]) -> str:
+    """Stable, case-insensitive form of a main-branch sha; missing/blank becomes ''."""
+    return str(main_sha or "").strip().casefold()
+
+
 @dataclass(frozen=True)
 class AdmissionFingerprint:
     project_id: str
@@ -63,27 +68,29 @@ class AdmissionFingerprint:
     context_digest: str
     error_class: str
     resource_version: str
+    main_sha: str
     sha256: str
 
 
 def make_fingerprint(
     *, project_id: str, ticket_id: str, candidate_digest: Optional[str] = None,
     baseline_sha: Optional[str] = None, context_digest: Optional[str] = None,
-    error: BaseException | str, resource_version: str,
+    error: BaseException | str, resource_version: str, main_sha: Optional[str] = None,
 ) -> AdmissionFingerprint:
     candidate = safe_digest(candidate_digest or baseline_sha or "unknown")
     context = safe_digest(context_digest or "unknown")
     resource = safe_digest(resource_version)
     error_class = normalize_error(error)
+    main = normalize_main_sha(main_sha)
     raw = {
         "project_id": project_id, "ticket_id": ticket_id,
         "candidate_digest": candidate, "context_digest": context,
-        "error_class": error_class, "resource_version": resource,
+        "error_class": error_class, "resource_version": resource, "main_sha": main,
     }
     return AdmissionFingerprint(
         project_id=project_id, ticket_id=ticket_id, candidate_digest=candidate,
         context_digest=context, error_class=error_class,
-        resource_version=resource, sha256=_canonical_hash(raw),
+        resource_version=resource, main_sha=main, sha256=_canonical_hash(raw),
     )
 
 
@@ -133,12 +140,18 @@ class AdmissionStore:
                     columns = {row[1] for row in db.execute("PRAGMA table_info(failures)")}
                     if "occurrences" not in columns:
                         db.execute("ALTER TABLE failures ADD COLUMN occurrences INTEGER NOT NULL DEFAULT 1")
+                    if "main_sha" not in columns:
+                        db.execute("ALTER TABLE failures ADD COLUMN main_sha TEXT NOT NULL DEFAULT ''")
                     db.execute("""CREATE TABLE IF NOT EXISTS ticket_holds (
                         project_id TEXT NOT NULL, ticket_id TEXT NOT NULL, cause TEXT NOT NULL,
                         candidate_digest TEXT NOT NULL, context_digest TEXT NOT NULL,
                         occurrences INTEGER NOT NULL, fingerprint TEXT NOT NULL, held_at TEXT NOT NULL,
+                        main_sha TEXT NOT NULL DEFAULT '',
                         PRIMARY KEY (project_id, ticket_id)
                     )""")
+                    hold_columns = {row[1] for row in db.execute("PRAGMA table_info(ticket_holds)")}
+                    if "main_sha" not in hold_columns:
+                        db.execute("ALTER TABLE ticket_holds ADD COLUMN main_sha TEXT NOT NULL DEFAULT ''")
                     db.execute("""CREATE TABLE IF NOT EXISTS reservations (
                         scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL
                     )""")
@@ -163,13 +176,22 @@ class AdmissionStore:
     def is_failure_open(
         self, *, project_id: str, ticket_id: str, candidate_digest: str,
         context_digest: str, resource_version: str, error_class: Optional[str] = None,
+        main_sha: Optional[str] = None,
     ) -> bool:
-        """Return true for an identical failure scope; elapsed backoff alone never opens it."""
+        """Return true for an identical failure scope recorded on the same main sha.
+
+        Elapsed backoff alone never opens it; a different main sha always does
+        (the fix may already be on main, so the old failure can no longer speak for it).
+        """
         try:
             with self._connection() as db:
                 query = """SELECT 1 FROM failures WHERE project_id=? AND ticket_id=?
-                    AND candidate_digest=? AND context_digest=? AND resource_version=? AND open=1"""
-                params: tuple[Any, ...] = (project_id, ticket_id, candidate_digest, context_digest, resource_version)
+                    AND candidate_digest=? AND context_digest=? AND resource_version=?
+                    AND main_sha=? AND open=1"""
+                params: tuple[Any, ...] = (
+                    project_id, ticket_id, candidate_digest, context_digest, resource_version,
+                    normalize_main_sha(main_sha),
+                )
                 if error_class is not None:
                     query += " AND error_class=?"
                     params += (error_class,)
@@ -191,41 +213,47 @@ class AdmissionStore:
                 next_probe = now + timedelta(seconds=backoff)
                 db.execute("""INSERT INTO failures (
                     fingerprint, project_id, ticket_id, candidate_digest, context_digest,
-                    error_class, resource_version, recorded_at, next_probe_at, backoff_sec, open, occurrences
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    error_class, resource_version, recorded_at, next_probe_at, backoff_sec, open, occurrences,
+                    main_sha
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     ON CONFLICT(fingerprint) DO UPDATE SET recorded_at=excluded.recorded_at,
                     next_probe_at=excluded.next_probe_at, backoff_sec=excluded.backoff_sec, open=1,
-                    occurrences=excluded.occurrences""",
+                    occurrences=excluded.occurrences, main_sha=excluded.main_sha""",
                     (fingerprint.sha256, fingerprint.project_id, fingerprint.ticket_id,
                      fingerprint.candidate_digest, fingerprint.context_digest, fingerprint.error_class,
-                     fingerprint.resource_version, now.isoformat(), next_probe.isoformat(), backoff, occurrences))
+                     fingerprint.resource_version, now.isoformat(), next_probe.isoformat(), backoff, occurrences,
+                     fingerprint.main_sha))
                 db.commit()
                 return occurrences
         except (sqlite3.Error, OSError) as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def set_ticket_hold(self, fingerprint: AdmissionFingerprint, occurrences: int) -> None:
-        """Hold duravel de um unico ticket; so digest novo de candidato ou contexto o libera."""
+        """Hold duravel de um unico ticket; so digest novo de candidato/contexto ou novo sha do main o libera."""
         now = self.clock().astimezone(timezone.utc).isoformat()
         try:
             with self._connection() as db:
-                db.execute("INSERT OR REPLACE INTO ticket_holds VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                db.execute("""INSERT OR REPLACE INTO ticket_holds
+                    (project_id, ticket_id, cause, candidate_digest, context_digest, occurrences,
+                     fingerprint, held_at, main_sha)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                            (fingerprint.project_id, fingerprint.ticket_id, fingerprint.error_class,
                             fingerprint.candidate_digest, fingerprint.context_digest, int(occurrences),
-                            fingerprint.sha256, now))
+                            fingerprint.sha256, now, fingerprint.main_sha))
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def ticket_hold(self, *, project_id: str, ticket_id: str, candidate_digest: str,
-                    context_digest: str) -> Optional[dict[str, Any]]:
-        """Hold vigente do ticket; se os digests mudaram, o hold e removido e retorna None."""
+                    context_digest: str, main_sha: Optional[str] = None) -> Optional[dict[str, Any]]:
+        """Hold vigente do ticket; digests diferentes ou sha do main diferente removem o hold (None)."""
         try:
             with self._connection() as db:
                 row = db.execute("SELECT * FROM ticket_holds WHERE project_id=? AND ticket_id=?",
                                  (project_id, ticket_id)).fetchone()
                 if row is None:
                     return None
-                if row["candidate_digest"] != candidate_digest or row["context_digest"] != context_digest:
+                if (row["candidate_digest"] != candidate_digest or row["context_digest"] != context_digest
+                        or row["main_sha"] != normalize_main_sha(main_sha)):
                     db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?",
                                (project_id, ticket_id))
                     return None
@@ -234,12 +262,45 @@ class AdmissionStore:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def ticket_holds(self) -> list[dict[str, Any]]:
-        """Todos os holds por ticket (ticket, causa, ocorrencias) para last_cycle e briefing."""
+        """Todos os holds por ticket (ticket, causa, ocorrencias, sha do main) para last_cycle e briefing."""
         try:
             with self._connection() as db:
-                rows = db.execute("""SELECT project_id, ticket_id, cause, occurrences, held_at
+                rows = db.execute("""SELECT project_id, ticket_id, cause, occurrences, held_at, main_sha
                     FROM ticket_holds ORDER BY ticket_id""").fetchall()
                 return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def close_failures_for_other_sha(self, main_sha: Optional[str]) -> int:
+        """Close every open failure recorded under a different main sha; return how many closed.
+
+        Legacy rows written before this sha dimension existed carry main_sha=''; they
+        count as "another sha" too; once the line observes any concrete main sha, a
+        failure that cannot prove it still applies to that sha stops blocking.
+        """
+        current = normalize_main_sha(main_sha)
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                cursor = db.execute(
+                    "UPDATE failures SET open=0 WHERE open=1 AND main_sha<>?", (current,)
+                )
+                db.commit()
+                return cursor.rowcount
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def prune_closed_failures(self, older_than_days: float) -> int:
+        """Delete closed failures recorded before the cutoff; return how many removed."""
+        cutoff = self.clock().astimezone(timezone.utc) - timedelta(days=max(0.0, float(older_than_days)))
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                cursor = db.execute(
+                    "DELETE FROM failures WHERE open=0 AND recorded_at<?", (cutoff.isoformat(),)
+                )
+                db.commit()
+                return cursor.rowcount
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
@@ -393,11 +454,14 @@ class AdmissionStore:
                 rows = db.execute(
                     """SELECT fingerprint, project_id, ticket_id, candidate_digest,
                     context_digest, error_class, resource_version, recorded_at, next_probe_at,
-                    backoff_sec, open FROM failures ORDER BY recorded_at"""
+                    backoff_sec, open, main_sha FROM failures ORDER BY recorded_at"""
                 ).fetchall()
                 return [dict(row) for row in rows]
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
 
-__all__ = ["AdmissionFingerprint", "AdmissionStore", "AdmissionStoreError", "make_fingerprint", "normalize_error", "safe_digest"]
+__all__ = [
+    "AdmissionFingerprint", "AdmissionStore", "AdmissionStoreError", "make_fingerprint",
+    "normalize_error", "normalize_main_sha", "safe_digest",
+]

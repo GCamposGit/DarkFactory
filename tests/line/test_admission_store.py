@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -124,3 +125,162 @@ def test_recovery_receipt_cause_and_completion_are_durable_and_idempotent(tmp_pa
     restarted.set_recovery(active=True, cause="new_incident", fingerprint="fp-2")
     reused = restarted.complete_recovery(receipt_digest="receipt-hash", candidate_digest="candidate-468")
     assert reused["active"] == 1 and reused["successes"] == 1
+
+
+def test_failure_scope_includes_main_sha_and_closes_on_new_sha(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    fp_a = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest="candidate",
+        context_digest="context", error="gate_failed", resource_version="notebook",
+        main_sha="sha-a",
+    )
+    store.record_failure(fp_a)
+    # Mesmo sha do main: a falha continua bloqueando.
+    assert store.is_failure_open(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp_a.candidate_digest,
+        context_digest=fp_a.context_digest, resource_version=fp_a.resource_version, main_sha="sha-a",
+    )
+    # Novo sha do main: a falha identica deixa de valer.
+    assert not store.is_failure_open(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp_a.candidate_digest,
+        context_digest=fp_a.context_digest, resource_version=fp_a.resource_version, main_sha="sha-b",
+    )
+    # Ausencia de main_sha equivale ao escopo legado (vazio), nao ao sha-a.
+    assert not store.is_failure_open(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp_a.candidate_digest,
+        context_digest=fp_a.context_digest, resource_version=fp_a.resource_version,
+    )
+
+
+def test_close_failures_for_other_sha_closes_other_and_legacy_rows(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    fp_a = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-1", candidate_digest="candidate",
+        context_digest="context", error="gate_failed", resource_version="notebook",
+        main_sha="sha-a",
+    )
+    fp_legacy = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-2", candidate_digest="candidate",
+        context_digest="context", error="gate_failed", resource_version="notebook",
+    )
+    fp_current = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-3", candidate_digest="candidate",
+        context_digest="context", error="gate_failed", resource_version="notebook",
+        main_sha="sha-b",
+    )
+    store.record_failure(fp_a)
+    store.record_failure(fp_legacy)
+    store.record_failure(fp_current)
+
+    closed = store.close_failures_for_other_sha("sha-b")
+    assert closed == 2
+
+    rows = {row["ticket_id"]: row for row in store.snapshot()}
+    assert rows["USR-1"]["open"] == 0
+    assert rows["USR-2"]["open"] == 0
+    assert rows["USR-3"]["open"] == 1
+    assert not store.is_failure_open(
+        project_id="darkfac", ticket_id="USR-1", candidate_digest=fp_a.candidate_digest,
+        context_digest=fp_a.context_digest, resource_version=fp_a.resource_version, main_sha="sha-a",
+    )
+    assert store.is_failure_open(
+        project_id="darkfac", ticket_id="USR-3", candidate_digest=fp_current.candidate_digest,
+        context_digest=fp_current.context_digest, resource_version=fp_current.resource_version, main_sha="sha-b",
+    )
+
+    # Rodar de novo com o mesmo sha corrente nao fecha a falha ja vigente nesse sha.
+    assert store.close_failures_for_other_sha("sha-b") == 0
+
+
+def test_prune_closed_failures_only_removes_old_closed_rows(tmp_path):
+    now = datetime(2026, 11, 10, tzinfo=timezone.utc)
+    store = AdmissionStore(tmp_path / "admission.sqlite3", clock=lambda: now)
+    old_a = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-OLD-A", candidate_digest="c",
+        context_digest="x", error="gate_failed", resource_version="notebook", main_sha="sha-a",
+    )
+    old_b = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-OLD-B", candidate_digest="c",
+        context_digest="x", error="gate_failed", resource_version="notebook", main_sha="sha-a",
+    )
+    store.record_failure(old_a)
+    store.record_failure(old_b)
+    assert store.close_failures_for_other_sha("sha-b") == 2  # fecha old_a e old_b (sha-a != sha-b)
+
+    recent = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-RECENT", candidate_digest="c",
+        context_digest="x", error="gate_failed", resource_version="notebook", main_sha="sha-c",
+    )
+    later = AdmissionStore(store.path, clock=lambda: now + timedelta(days=10))
+    later.record_failure(recent)
+    assert later.close_failures_for_other_sha("sha-c") == 0  # recent ja esta no sha corrente
+
+    pruner = AdmissionStore(store.path, clock=lambda: now + timedelta(days=10))
+    removed = pruner.prune_closed_failures(older_than_days=5)
+    assert removed == 2
+
+    remaining = {row["ticket_id"] for row in pruner.snapshot()}
+    assert remaining == {"USR-RECENT"}
+
+
+def test_ticket_hold_is_released_on_new_main_sha_but_kept_on_same_sha(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    fp = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest="candidate",
+        context_digest="context", error="gate_failed", resource_version="notebook",
+        main_sha="sha-a",
+    )
+    store.set_ticket_hold(fp, occurrences=3)
+
+    hold = store.ticket_hold(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp.candidate_digest,
+        context_digest=fp.context_digest, main_sha="sha-a",
+    )
+    assert hold is not None and hold["cause"] == "gate_failed"
+
+    released = store.ticket_hold(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp.candidate_digest,
+        context_digest=fp.context_digest, main_sha="sha-b",
+    )
+    assert released is None
+    # O hold foi removido: nem uma nova consulta no sha antigo o recupera.
+    assert store.ticket_hold(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp.candidate_digest,
+        context_digest=fp.context_digest, main_sha="sha-a",
+    ) is None
+
+
+def test_opening_a_pre_main_sha_database_does_not_raise(tmp_path):
+    path = tmp_path / "admission.sqlite3"
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("""CREATE TABLE failures (
+            fingerprint TEXT PRIMARY KEY, project_id TEXT NOT NULL, ticket_id TEXT NOT NULL,
+            candidate_digest TEXT NOT NULL, context_digest TEXT NOT NULL,
+            error_class TEXT NOT NULL, resource_version TEXT NOT NULL,
+            recorded_at TEXT NOT NULL, next_probe_at TEXT NOT NULL,
+            backoff_sec INTEGER NOT NULL, open INTEGER NOT NULL DEFAULT 1
+        )""")
+        connection.execute("""CREATE TABLE ticket_holds (
+            project_id TEXT NOT NULL, ticket_id TEXT NOT NULL, cause TEXT NOT NULL,
+            candidate_digest TEXT NOT NULL, context_digest TEXT NOT NULL,
+            occurrences INTEGER NOT NULL, fingerprint TEXT NOT NULL, held_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, ticket_id)
+        )""")
+        connection.commit()
+    finally:
+        connection.close()
+
+    store = AdmissionStore(path)
+    fp = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest="candidate",
+        context_digest="context", error="gate_failed", resource_version="notebook",
+        main_sha="sha-a",
+    )
+    store.record_failure(fp)
+    store.set_ticket_hold(fp, occurrences=1)
+    assert store.is_failure_open(
+        project_id="darkfac", ticket_id="USR-497", candidate_digest=fp.candidate_digest,
+        context_digest=fp.context_digest, resource_version=fp.resource_version, main_sha="sha-a",
+    )
+    assert store.ticket_holds()[0]["main_sha"] == "sha-a"
