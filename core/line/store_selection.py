@@ -54,12 +54,15 @@ def default_control_store(
             runtime_owner=RuntimeOwner.CLOUD_DBOS_POSTGRES.value,
             lease_duration_sec=300,
         )
-        if store.mock_mode and not url.startswith("mock"):
+        # Missing `mock_mode` must not escape as AttributeError (USR-449). False means the
+        # adapter did not degrade to its in-memory mock.
+        degraded_to_mock = bool(getattr(store, "mock_mode", False))
+        if degraded_to_mock and not url.startswith("mock"):
             # A real URL was configured but the connection failed: `PostgresControlStore`
             # degrades to an in-memory mock on its own. Serving that silently would make a
             # Postgres outage look like "no tickets queued" instead of a store failure.
             raise StoreUnavailableError(
-                f"Postgres control store at the configured URL is unreachable; "
+                "Postgres control store at the configured URL is unreachable; "
                 "refusing its in-memory mock fallback"
             )
         return store

@@ -793,3 +793,131 @@ def test_default_control_store_rejects_silent_mock_fallback(monkeypatch: pytest.
     # The documented escape hatch (an explicit "mock" URL) is still honored, not rejected.
     store = store_selection.default_control_store(database_url="mock://anything")
     assert store.mock_mode is True
+
+
+class _GenericListFailure:
+    """Stand-in whose ``list_tickets`` fails with a plain exception, not StoreUnavailableError."""
+
+    def list_tickets(self) -> list[object]:
+        raise RuntimeError("disco cheio (simulado)")
+
+
+def test_generic_list_tickets_failure_is_store_unavailable_and_http_503(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-449: ``control_store().list_tickets()`` raising a generic exception (not an already
+    wrapped StoreUnavailableError) must be normalized. ``list_queue_tickets`` and ``get_ticket``
+    propagate StoreUnavailableError, and both Hub reads answer 503 — never 200 or 404.
+
+    Patching ``control_store`` to raise StoreUnavailableError itself does not cover the
+    ``except Exception`` rewrap. A regression that swallowed the generic error into ``[]``
+    would turn the known id into a false 404 and the list into an empty 200.
+    """
+    queue = queue_env["queue"]
+    ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
+    queue.register_ticket(_queued_ticket("USR-449", title="Ticket real"))
+    monkeypatch.setattr(queue, "control_store", lambda: _GenericListFailure())
+
+    with pytest.raises(StoreUnavailableError) as listed:
+        queue.list_queue_tickets()
+    assert isinstance(listed.value.__cause__, RuntimeError)
+
+    with pytest.raises(StoreUnavailableError) as known:
+        queue.get_ticket("USR-449")
+    assert isinstance(known.value.__cause__, RuntimeError)
+
+    with pytest.raises(StoreUnavailableError):
+        queue.get_ticket("USR-000-NUNCA-EXISTIU")
+
+    stub_service = _DemandsOnlyHubService(DemandsService(store=DemandsStore(ledger)))
+    app.dependency_overrides[get_hub_service] = lambda: stub_service
+    try:
+        client = TestClient(app)
+        one = client.get("/api/demands/tickets/USR-449")
+        assert one.status_code == 503
+        assert "store" in one.json()["detail"].lower()
+        assert "disco cheio" in one.json()["detail"].lower()
+
+        missing = client.get("/api/demands/tickets/USR-000-NUNCA-EXISTIU")
+        assert missing.status_code == 503
+
+        listing = client.get("/api/demands/tickets")
+        assert listing.status_code == 503
+        assert "store" in listing.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_default_control_store_mock_url_reaches_real_adapter() -> None:
+    """USR-449: the resolved URL is what the real PostgresControlStore stores. A mock URL stays
+    the in-memory escape hatch and does not open a network connection."""
+    from core.line import store_selection
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+
+    store = store_selection.default_control_store(database_url="mock://hub-resolved")
+    assert type(store) is PostgresControlStore
+    assert store.raw_url == "mock://hub-resolved"
+    assert store.mock_mode is True
+
+
+def test_real_postgres_invalid_url_is_store_unavailable_not_attribute_error() -> None:
+    """USR-449: the real PostgresControlStore exposes ``mock_mode``. An invalid URL degrades to
+    the in-memory mock inside the adapter; ``default_control_store`` must raise
+    StoreUnavailableError, never AttributeError."""
+    from core.line import store_selection
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+
+    url = "postgresql://darkfac:pw@127.0.0.1:99999/darkfac"
+    raw = PostgresControlStore(
+        database_url=url,
+        runtime_owner="cloud_dbos_postgres",
+        lease_duration_sec=300,
+    )
+    assert type(raw) is PostgresControlStore
+    assert raw.mock_mode is True
+
+    with pytest.raises(StoreUnavailableError) as caught:
+        store_selection.default_control_store(database_url=url)
+    assert type(caught.value) is StoreUnavailableError
+    assert "mock" in str(caught.value).lower()
+
+
+def test_default_control_store_missing_mock_mode_is_not_attribute_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backend that does not publish ``mock_mode`` is returned, not crashed with AttributeError.
+    The explicit getattr default is what keeps that miss from breaking the structured contract."""
+    import core.orchestrator.adapters.control_postgres as control_postgres
+    from core.line import store_selection
+
+    class _NoMockMode:
+        def __init__(self, **kwargs: object) -> None:
+            self.raw_url = kwargs.get("database_url")
+
+    monkeypatch.setattr(control_postgres, "PostgresControlStore", _NoMockMode)
+    store = store_selection.default_control_store(database_url="postgresql://darkfac:pw@127.0.0.1:99999/darkfac")
+    assert isinstance(store, _NoMockMode)
+    assert store.raw_url == "postgresql://darkfac:pw@127.0.0.1:99999/darkfac"
+
+
+def test_postgres_schema_init_bounds_connect_then_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Schema bootstrap dials with connect_timeout=5. A refused connect still sets ``mock_mode``
+    on the real adapter instead of hanging or raising AttributeError."""
+    import psycopg
+
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+
+    seen: dict[str, object] = {}
+
+    def _refuse(url: str, **kwargs: object) -> None:
+        seen["url"] = url
+        seen["connect_timeout"] = kwargs.get("connect_timeout")
+        raise RuntimeError("connection refused (simulado)")
+
+    monkeypatch.setattr(psycopg, "connect", _refuse)
+    url = "postgresql://darkfac:pw@127.0.0.1:1/darkfac"
+    store = PostgresControlStore(database_url=url)
+    assert type(store) is PostgresControlStore
+    assert store.mock_mode is True
+    assert seen["url"] == url
+    assert seen["connect_timeout"] == 5

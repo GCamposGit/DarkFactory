@@ -279,7 +279,9 @@ class PostgresControlStore:
         if self.mock_mode:
             return
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            # Bound the bootstrap dial. A blackholed host otherwise blocks the constructor
+            # forever, so callers never observe the mock fallback or StoreUnavailableError.
+            with self._psycopg.connect(self.raw_url, connect_timeout=5) as conn:
                 with conn.cursor() as cur:
                     cur.execute(POSTGRES_DDL)
                 conn.commit()

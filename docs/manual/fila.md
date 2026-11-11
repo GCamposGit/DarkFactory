@@ -30,10 +30,21 @@ de ID vale o control store, exceto quando o ledger já marca o ticket como `comp
 
 Um store configurado (URL de linha definido, ou `control.db` local já existente) que falha ao
 responder levanta `StoreUnavailableError` (USR-449); a leitura só cai silenciosamente para `[]`/
-`demands.json` quando o store nunca existiu (sem URL e sem `control.db`). Isso vale tanto para
-`queue_store.list_queue_tickets`/`get_ticket` quanto para `GET /api/demands/tickets[/{id}]` no
-Hub, que devolvem 503 (nunca 404 nem uma lista vazia servida de memória) quando o Postgres
-configurado está fora do ar.
+`demands.json` quando o store nunca existiu (sem URL e sem `control.db`). Uma exceção genérica
+de `list_tickets()` (não só `StoreUnavailableError` já pronta) é normalizada para esse mesmo
+erro: `list_queue_tickets` e `get_ticket` não devolvem `[]` nem `None` nesse caso.
+
+No Hub, os dois GET propagam esse erro e respondem 503 (nunca 404 nem uma lista vazia):
+`GET /api/demands/tickets` via `service.list_demand_tickets`, e
+`GET /api/demands/tickets/{id}` via `service.get_demand_ticket`. Um id que não está no arquivo
+nem na fila continua 404.
+
+`default_control_store` recusa o mock em memória do `PostgresControlStore` quando o URL
+configurado não começa com `mock` e `mock_mode` é verdadeiro. O adaptador real publica esse
+atributo; se ele faltar, a leitura assume que não houve fallback em memória e não levanta
+`AttributeError`. URL inválida (ou Postgres fora do ar, depois do limite de conexão) nesse
+caminho levanta `StoreUnavailableError`. A abertura do schema usa `connect_timeout` de 5
+segundos, o mesmo limite das outras leituras Postgres do adaptador.
 
 ## Resolver para entrega (USR-424)
 
