@@ -19,7 +19,12 @@ consultada no máximo a cada15 minutos; o estado sobrevive ao reinício. REVIEW 
 vinculada ao candidato. PLAN/BUILD usam a retomada canônica do ticket, com suas reservas.
 Processo vivo não é duplicado, ticket terminal sai da fila e falha diferente de
 `route_wait` fica bloqueada com causa explícita. Decisão material `waiting_human`
-continua dependendo do owner. Nenhuma espera compra créditos nem aumenta o teto.
+continua dependendo do owner. A exceção é técnica (USR-447): `pending_delivery._tick_row`
+destrava uma vez o ticket cuja `delivery_evidence` começa com `rebase_conflict:` ou
+`technical_failed:` e que não tem `HUMAN_REQUEST.json` aberto. A linha volta a `planned`
+e a mesma espera segue para a retomada. Um `waiting_human` de decisão ou G1, ou um pedido
+humano ainda em disco, não é solto. A flag `technical_release_done` impede uma segunda soltura
+da mesma espera. Nenhuma espera compra créditos nem aumenta o teto.
 
 Durante recuperação, o mesmo serviço admite só retomadas:
 

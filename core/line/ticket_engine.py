@@ -11,11 +11,15 @@ Only helpers without launcher globals live here; the flow (agents, gate, merge) 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
+
+from pydantic import BaseModel, Field
 
 from core.line import workspace
 from core.line.stage_planning import PlanningTicket
@@ -29,6 +33,7 @@ from core.line.stages import (
     BuildReport,
     MergeReceipt,
     Stage,
+    StageArtifactMissing,
     ValidationReport,
     require_artifact,
 )
@@ -38,9 +43,20 @@ DEMAND_FILE = "DEMAND.md"
 GRILL_FILE = "GRILL.md"
 SPEC_FILE = "SPEC.md"
 TICKETS_FILE = "tickets.json"
+PLAN_ORIGIN_FILE = "plan_origin.json"
 
 # Produced by the delivery process; never trusted from an earlier attempt.
 DELIVERY_FILES: tuple[str, ...] = (VALIDATION_FILE, MERGE_FILE, DEPLOY_REPORT_FILE)
+
+
+class PlanOrigin(BaseModel):
+    """Provenance of a PLAN artifact (USR-447): which ticket it belongs to and how it was produced."""
+
+    ticket_id: str = Field(min_length=1)
+    origin: str = Field(min_length=1)
+    branch: str = ""
+    recorded_at: str = ""
+    evidence: list[str] = Field(default_factory=list)
 
 
 def artifacts_root() -> Path:
@@ -59,10 +75,26 @@ def run_workspace(ticket: Any, branch: str = "", base_sha: str = "") -> workspac
 
 
 def reset(ws: workspace.RunWorkspace) -> None:
-    """A fresh launcher run starts with no artifact: nothing from an earlier attempt counts."""
+    """Archive the previous context under ``superseded/<timestamp>/`` (USR-447).
+
+    A fresh launcher run must not trust the previous attempt, and it must not destroy it either.
+    Files already under ``superseded/`` stay where they are so a second reset does not bury the archive.
+    """
     directory = workspace.context_dir(ws)
-    if directory.exists():
-        shutil.rmtree(directory, ignore_errors=True)
+    if not directory.is_dir():
+        return
+    children = [path for path in directory.iterdir() if path.name != "superseded"]
+    if not children:
+        return
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    archive = directory / "superseded" / stamp
+    suffix = 0
+    while archive.exists():
+        suffix += 1
+        archive = directory / "superseded" / f"{stamp}-{suffix}"
+    archive.mkdir(parents=True)
+    for child in children:
+        shutil.move(str(child), str(archive / child.name))
 
 
 def clear_delivery(ws: workspace.RunWorkspace, *, keep_validation: bool = False) -> None:
@@ -159,9 +191,74 @@ def ensure_approved_verdict(ws: workspace.RunWorkspace) -> None:
     workspace.write_context(ws, VERDICT_FILE, ReviewVerdict(verdict="approve").model_dump_json(indent=2))
 
 
-def has_any(ws: workspace.RunWorkspace) -> bool:
+def _plan_evidence(ws: workspace.RunWorkspace) -> list[str]:
+    """sha256 of each PLAN file on disk, as `"<name>:sha256:<hex>"` (empty when neither exists)."""
     directory = workspace.context_dir(ws)
-    return directory.is_dir() and any(directory.iterdir())
+    evidence: list[str] = []
+    for name in (SPEC_FILE, TICKETS_FILE):
+        path = directory / name
+        if path.is_file():
+            evidence.append(f"{name}:sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}")
+    return evidence
+
+
+def write_plan_origin(
+    ws: workspace.RunWorkspace,
+    ticket_id: str,
+    origin: str,
+    extra_evidence: Iterable[str] | None = None,
+) -> None:
+    """Record PLAN provenance; called every time a PLAN artifact is (re)written for `ticket_id`.
+
+    ``extra_evidence`` is appended after the file hashes. Resume backfill passes ``commit:<sha>``
+    for each commit ahead of the base (USR-447).
+    """
+    evidence = _plan_evidence(ws)
+    for item in extra_evidence or ():
+        if item and item not in evidence:
+            evidence.append(item)
+    record = PlanOrigin(
+        ticket_id=ticket_id,
+        origin=origin,
+        branch=ws.branch,
+        recorded_at=datetime.now(timezone.utc).isoformat(),
+        evidence=evidence,
+    )
+    workspace.write_context(ws, PLAN_ORIGIN_FILE, record.model_dump_json(indent=2))
+
+
+def ensure_plan_provenance(ws: workspace.RunWorkspace, ticket_id: str) -> None:
+    """Validate (or migrate) `plan_origin.json` before a PLAN artifact is trusted (USR-447).
+
+    - No record on disk (or an unreadable one): a truly legacy worktree. If a PLAN artifact already
+      sits there (pre-USR-447, no provenance was ever written), it is bound to `ticket_id` once, with
+      `origin="legacy_migrated"` and the evidence found on disk. Without a PLAN artifact either there
+      is nothing yet to migrate: the caller backfills PLAN itself, which records its own origin.
+    - A record with no `ticket_id` field (older minimal schema): the same legacy migration, bound by
+      the per-ticket artifact directory it already lives in, not by content it never carried.
+    - A record whose `ticket_id` equals `ticket_id`: already bound; left untouched.
+    - A record whose `ticket_id` is a *different* ticket: refused. The binding is never rewritten
+      merely to pass this check — a resume must not silently claim another ticket's plan.
+    """
+    directory = workspace.context_dir(ws)
+    path = directory / PLAN_ORIGIN_FILE
+    recorded_ticket_id: Optional[str] = None
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = None
+        if isinstance(raw, dict):
+            recorded_ticket_id = raw.get("ticket_id") or None
+    if recorded_ticket_id is not None:
+        if recorded_ticket_id != ticket_id:
+            raise StageArtifactMissing(
+                Stage.PLAN,
+                f"plan_origin.json pertence ao ticket {recorded_ticket_id}, nao a {ticket_id}",
+            )
+        return
+    if (directory / SPEC_FILE).is_file() or (directory / TICKETS_FILE).is_file():
+        write_plan_origin(ws, ticket_id, "legacy_migrated")
 
 
 def write_demand(ws: workspace.RunWorkspace, ticket: Any) -> None:
@@ -182,8 +279,18 @@ def write_grill(ws: workspace.RunWorkspace, ticket: Any) -> None:
     workspace.write_context(ws, GRILL_FILE, "\n".join(lines) + "\n")
 
 
-def write_minimal_plan(ws: workspace.RunWorkspace, ticket: Any) -> None:
-    """Plan of a small fix: one ticket equal to the demand, no planning agent."""
+def write_minimal_plan(
+    ws: workspace.RunWorkspace,
+    ticket: Any,
+    *,
+    origin: str = "minimal_small_fix",
+    extra_evidence: Iterable[str] | None = None,
+) -> None:
+    """Plan of a small fix: one ticket equal to the demand, no planning agent.
+
+    ``origin`` is ``minimal_small_fix`` for that path and ``resume_backfill`` when a resume
+    regenerates a missing PLAN. Commit shas go in ``extra_evidence`` and are not inferred here.
+    """
     spec = f"# SPEC\n\n## Objetivo\n{ticket.title}: {ticket.problem_statement or ticket.title}\n"
     item = PlanningTicket(
         id=ticket.id, title=ticket.title, goal=ticket.problem_statement or "",
@@ -192,6 +299,7 @@ def write_minimal_plan(ws: workspace.RunWorkspace, ticket: Any) -> None:
     )
     workspace.write_context(ws, SPEC_FILE, spec)
     workspace.write_context(ws, TICKETS_FILE, json.dumps([item.model_dump()], indent=2, ensure_ascii=False))
+    write_plan_origin(ws, ticket.id, origin, extra_evidence=extra_evidence)
 
 
 def plan_tickets(ws: workspace.RunWorkspace) -> list[PlanningTicket]:
@@ -266,8 +374,10 @@ def merge_receipt_from(report: Any, branch: str, fallback_sha: str) -> tuple[str
 
 __all__ = [
     "DEMAND_FILE", "GRILL_FILE", "SPEC_FILE", "TICKETS_FILE", "VERDICT_FILE", "DELIVERY_FILES",
+    "PLAN_ORIGIN_FILE", "PlanOrigin",
     "artifacts_root", "run_workspace", "reset", "clear_delivery", "review_approves",
-    "reusable_validation", "keep_reusable_validation", "ensure_approved_verdict", "has_any",
+    "reusable_validation", "keep_reusable_validation", "ensure_approved_verdict",
+    "write_plan_origin", "ensure_plan_provenance",
     "write_demand", "write_grill",
     "write_minimal_plan", "write_research", "plan_tickets", "sub_ticket_prompt", "write_build", "write_validation",
     "write_merge", "write_deploy", "merge_receipt_from",
