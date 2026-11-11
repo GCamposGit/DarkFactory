@@ -388,19 +388,110 @@ def test_built_candidate_resumes_delivery_without_plan_or_build_only_when_clean_
     assert delivery_calls == [ws.path]
 
 
-def test_continuation_notice_also_covers_work_that_was_already_committed(
-    repo: SimpleNamespace, launcher: SimpleNamespace
+def test_reset_archives_the_previous_plan(repo: SimpleNamespace) -> None:
+    """reset moves the context into superseded/<timestamp>/ and leaves it readable (USR-447 T2)."""
+    from core.line import workspace as line_workspace
+
+    rws = run_ticket.ticket_engine.run_workspace(_TICKET)
+    run_ticket.ticket_engine.write_minimal_plan(rws, _TICKET)
+    context = line_workspace.context_dir(rws)
+    marker = "PLAN ORIGINAL QUE NAO PODE SUMIR\n"
+    (context / "SPEC.md").write_text(marker, encoding="utf-8")
+    run_ticket.ticket_engine.reset(rws)
+    assert not (context / "SPEC.md").exists()
+    archived = list((context / "superseded").glob("*/SPEC.md"))
+    assert len(archived) == 1 and archived[0].read_text(encoding="utf-8") == marker
+    run_ticket.ticket_engine.reset(rws)
+    assert archived[0].read_text(encoding="utf-8") == marker
+
+
+def test_clean_worktree_still_invokes_the_planner_and_archives(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """No commit of the ticket: the planner runs, and a previous PLAN is archived rather than deleted."""
+    from core.line import workspace as line_workspace
+
+    rws = run_ticket.ticket_engine.run_workspace(_TICKET)
+    run_ticket.ticket_engine.write_minimal_plan(rws, _TICKET)
+    context = line_workspace.context_dir(rws)
+    marker = "PLAN ORIGINAL QUE NAO PODE SUMIR\n"
+    (context / "SPEC.md").write_text(marker, encoding="utf-8")
+    planned: list[bool] = []
+    real_plan = run_ticket._plan_with_agent
+
+    def spy(*args, **kwargs):
+        planned.append(True)
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", spy)
+    monkeypatch.setattr(run_ticket, "_stage_build", lambda *_a, **_k: 0)
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 0
+    assert planned
+    assert launcher.requests == []
+    archived = list((context / "superseded").glob("*/SPEC.md"))
+    assert archived and marker in archived[0].read_text(encoding="utf-8")
+    assert (context / "SPEC.md").is_file()
+    assert (context / "SPEC.md").read_text(encoding="utf-8") != marker
+
+
+def test_committed_work_with_a_bound_plan_skips_the_planner(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A committed ticket and a bound PLAN enter delivery without reset or the planner (USR-447 T2)."""
+    from core.line import workspace as line_workspace
+
+    ws = create_workspace("USR-205", cwd=repo.local)
+    (ws.path / "impl.py").write_text("x = 1\n", encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "wip")
+    rws = run_ticket.ticket_engine.run_workspace(_TICKET, ws.branch, ws.base_sha)
+    run_ticket.ticket_engine.write_minimal_plan(rws, _TICKET)
+    context = line_workspace.context_dir(rws)
+    marker = "PLANO ORIGINAL PRESERVADO\n"
+    (context / "SPEC.md").write_text(marker, encoding="utf-8")
+    delivered: list[Path] = []
+
+    def deliver(*args, **_kwargs):
+        delivered.append(args[2].path)
+        return 0, {"ok": True, "status": "completed"}
+
+    monkeypatch.setattr(run_ticket, "_stage_deliver", deliver)
+    monkeypatch.setattr(run_ticket, "_stage_plan", lambda *_a, **_k: pytest.fail("planner"))
+    monkeypatch.setattr(run_ticket, "_stage_build", lambda *_a, **_k: pytest.fail("development"))
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 0
+    assert delivered == [ws.path]
+    assert launcher.requests == []
+    assert (context / "SPEC.md").read_text(encoding="utf-8") == marker
+    assert not (context / "superseded").exists()
+
+
+def test_committed_work_without_a_plan_backfills_and_skips_development(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Committed work and no PLAN is regenerated as resume_backfill and is not developed again."""
+    from core.line import workspace as line_workspace
+
     ws = create_workspace("USR-205", cwd=repo.local)
     (ws.path / "committed_impl.py").write_text("x = 1\n", encoding="utf-8")
     _git(ws.path, "add", "committed_impl.py")
     _git(ws.path, "commit", "--quiet", "-m", "wip")
+    head = _git(ws.path, "rev-parse", "HEAD")
+    delivered: list[Path] = []
 
-    run_ticket.main(["USR-205", "--harness", "grok"])
+    def deliver(*args, **_kwargs):
+        delivered.append(args[2].path)
+        return 0, {"ok": True, "status": "completed"}
 
-    assert Path(launcher.requests[0].cwd) == ws.path
-    assert "AVISO DE CONTINUA" in launcher.requests[0].prompt
-    assert "committed_impl.py" in launcher.requests[0].prompt
+    monkeypatch.setattr(run_ticket, "_stage_deliver", deliver)
+    monkeypatch.setattr(run_ticket, "_stage_plan", lambda *_a, **_k: pytest.fail("planner"))
+    monkeypatch.setattr(run_ticket, "_stage_build", lambda *_a, **_k: pytest.fail("development"))
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 0
+    assert delivered == [ws.path]
+    assert launcher.requests == []
+    context = line_workspace.context_dir(run_ticket.ticket_engine.run_workspace(_TICKET))
+    origin = json.loads((context / "plan_origin.json").read_text(encoding="utf-8"))
+    assert origin["origin"] == "resume_backfill"
+    assert f"commit:{head}" in origin["evidence"]
 
 
 def test_prepare_workspace_reports_the_other_preserved_worktrees_without_deleting_them(

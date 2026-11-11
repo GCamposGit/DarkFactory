@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -927,3 +929,359 @@ def test_resume_reuses_approval_and_writes_approve_verdict(
     assert (ctx / "validation.json").read_bytes() == validation_before
     assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
     assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")
+
+
+def _usr447_ticket() -> UserTicket:
+    return UserTicket(
+        id="USR-447", project_id="darkfac", title="Retomada de plano",
+        problem_statement="PLAN perdido na retomada", status=DeliveryStatus.IMPLEMENTING,
+    )
+
+
+def _rev_parse(repo: Path) -> str:
+    shown = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(repo), check=True, capture_output=True, text=True,
+    )
+    return shown.stdout.strip()
+
+
+def _usr447_repo(tmp_path: Path, *, commit: bool) -> tuple[Path, UserTicket, str]:
+    """Ticket branch. ``commit`` adds one implementation commit ahead of main."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ticket = _usr447_ticket()
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    DemandsStore(ledger).save_ticket(ticket)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ledger")
+    _git(repo, "checkout", "-b", "ticket/usr-447")
+    if commit:
+        (repo / "impl.py").write_text("x = 1\n", encoding="utf-8")
+        _git(repo, "add", "impl.py")
+        _git(repo, "commit", "-m", "feat: impl")
+    return repo, ticket, _rev_parse(repo)
+
+
+def _usr447_context(ticket: UserTicket) -> Path:
+    from core.line import workspace as line_workspace
+
+    return line_workspace.context_dir(run_ticket.ticket_engine.run_workspace(ticket))
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _stop_at_gate(seen: dict[str, bool], rws: object) -> object:
+    from core.line.stages import Stage, require_artifact
+
+    def gate(*_args: object, **_kwargs: object) -> int:
+        seen["gate"] = True
+        require_artifact(Stage.PLAN, rws)  # type: ignore[arg-type]
+        require_artifact(Stage.RESEARCH, rws)  # type: ignore[arg-type]
+        require_artifact(Stage.BUILD, rws)  # type: ignore[arg-type]
+        return 1
+
+    return gate
+
+
+def test_resume_backfills_plan_from_demand_and_grill_when_a_commit_is_ahead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DEMAND+GRILL and one commit ahead regenerate PLAN as resume_backfill and reach the gate."""
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    repo, ticket, head = _usr447_repo(tmp_path, commit=True)
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_grill(rws, ticket)
+    context = _usr447_context(ticket)
+    demand_before = (context / "DEMAND.md").read_bytes()
+    grill_before = (context / "GRILL.md").read_bytes()
+    seen: dict[str, bool] = {}
+    caplog.set_level(logging.WARNING, logger="darkfac.run_ticket")
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=_stop_at_gate(seen, rws)), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-447", worktree_path=repo, skip_validation=True)
+
+    assert code == 1
+    assert seen.get("gate") is True
+    assert (context / "DEMAND.md").read_bytes() == demand_before
+    assert (context / "GRILL.md").read_bytes() == grill_before
+    origin = json.loads((context / "plan_origin.json").read_text(encoding="utf-8"))
+    assert origin["ticket_id"] == "USR-447"
+    assert origin["origin"] == "resume_backfill"
+    assert f"commit:{head}" in origin["evidence"]
+    assert f"SPEC.md:sha256:{_sha256(context / 'SPEC.md')}" in origin["evidence"]
+    assert f"tickets.json:sha256:{_sha256(context / 'tickets.json')}" in origin["evidence"]
+    assert any("git fetch origin/main falhou" in rec.message for rec in caplog.records)
+
+
+def test_resume_refuses_build_without_a_commit_ahead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No commit ahead of the base: BUILD is not invented and delivery stops."""
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    repo, ticket, _head = _usr447_repo(tmp_path, commit=False)
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_grill(rws, ticket)
+    context = _usr447_context(ticket)
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-447", worktree_path=repo, skip_validation=True)
+
+    assert code == 1
+    assert not (context / "progress.json").exists()
+    assert "implementacao nao verificavel" in capsys.readouterr().err
+
+
+def test_resume_refuses_foreign_plan_origin_without_rewriting_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """plan_origin.json of another ticket refuses the resume and stays byte-for-byte."""
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    repo, ticket, _head = _usr447_repo(tmp_path, commit=True)
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_minimal_plan(rws, ticket)
+    context = _usr447_context(ticket)
+    origin_path = context / "plan_origin.json"
+    foreign = json.loads(origin_path.read_text(encoding="utf-8"))
+    foreign["ticket_id"] = "USR-999"
+    origin_path.write_text(json.dumps(foreign, indent=2), encoding="utf-8")
+    before = origin_path.read_bytes()
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-447", worktree_path=repo, skip_validation=True)
+
+    assert code == 1
+    assert origin_path.read_bytes() == before
+    assert "plan_origin.json pertence ao ticket USR-999" in capsys.readouterr().err
+
+
+def test_legacy_plan_without_origin_is_migrated_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PLAN with no plan_origin is bound once as legacy_migrated and is not rewritten on resume."""
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    repo, ticket, _head = _usr447_repo(tmp_path, commit=True)
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    spec = "# SPEC\n\n## Objetivo\nlegado\n"
+    tickets = json.dumps([{"id": "T1", "title": "Legado"}], indent=2)
+    from core.line import workspace as line_workspace
+
+    line_workspace.write_context(rws, "SPEC.md", spec)
+    line_workspace.write_context(rws, "tickets.json", tickets)
+    context = _usr447_context(ticket)
+    run_ticket.ticket_engine.ensure_plan_provenance(rws, ticket.id)
+    origin = json.loads((context / "plan_origin.json").read_text(encoding="utf-8"))
+    assert origin["origin"] == "legacy_migrated"
+    assert origin["ticket_id"] == "USR-447"
+    assert f"SPEC.md:sha256:{_sha256(context / 'SPEC.md')}" in origin["evidence"]
+    assert f"tickets.json:sha256:{_sha256(context / 'tickets.json')}" in origin["evidence"]
+    bound = {
+        "spec": (context / "SPEC.md").read_bytes(),
+        "tickets": (context / "tickets.json").read_bytes(),
+        "origin": (context / "plan_origin.json").read_bytes(),
+    }
+    run_ticket.ticket_engine.ensure_plan_provenance(rws, ticket.id)
+    assert (context / "plan_origin.json").read_bytes() == bound["origin"]
+    seen: dict[str, bool] = {}
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=_stop_at_gate(seen, rws)), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-447", worktree_path=repo, skip_validation=True)
+
+    assert code == 1 and seen.get("gate") is True
+    assert (context / "SPEC.md").read_bytes() == bound["spec"]
+    assert (context / "tickets.json").read_bytes() == bound["tickets"]
+    assert (context / "plan_origin.json").read_bytes() == bound["origin"]
+
+
+def test_valid_plan_is_not_overwritten_by_resume_backfill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid PLAN already bound to the ticket keeps its bytes and its original origin."""
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    repo, ticket, _head = _usr447_repo(tmp_path, commit=True)
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_minimal_plan(rws, ticket)
+    context = _usr447_context(ticket)
+    before = {
+        "spec": (context / "SPEC.md").read_bytes(),
+        "tickets": (context / "tickets.json").read_bytes(),
+        "origin": (context / "plan_origin.json").read_bytes(),
+    }
+    seen: dict[str, bool] = {}
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=_stop_at_gate(seen, rws)), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-447", worktree_path=repo, skip_validation=True)
+
+    assert code == 1 and seen.get("gate") is True
+    assert (context / "SPEC.md").read_bytes() == before["spec"]
+    assert (context / "tickets.json").read_bytes() == before["tickets"]
+    assert (context / "plan_origin.json").read_bytes() == before["origin"]
+    assert json.loads(before["origin"])["origin"] == "minimal_small_fix"
+
+
+def test_unreadable_plan_origin_without_spec_is_resume_backfill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Garbage plan_origin and no SPEC is replaced by resume_backfill plus the commit sha."""
+    monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    repo, ticket, head = _usr447_repo(tmp_path, commit=True)
+    rws = run_ticket.ticket_engine.run_workspace(ticket)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    context = _usr447_context(ticket)
+    context.mkdir(parents=True, exist_ok=True)
+    (context / "plan_origin.json").write_text("{not-json", encoding="utf-8")
+    seen: dict[str, bool] = {}
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=_stop_at_gate(seen, rws)), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        code = run_ticket.resume_delivery("USR-447", worktree_path=repo, skip_validation=True)
+
+    assert code == 1 and seen.get("gate") is True
+    origin = json.loads((context / "plan_origin.json").read_text(encoding="utf-8"))
+    assert origin["origin"] == "resume_backfill"
+    assert f"commit:{head}" in origin["evidence"]
+
+
+def test_fase_atual_conflict_takes_main_and_keeps_the_discarded_side(tmp_path: Path) -> None:
+    """docs/FASE_ATUAL.md keeps origin/main and the ticket text is stored beside the run."""
+    name = "docs/FASE_ATUAL.md"
+    repo = _conflict_repo(tmp_path, {name: ("nota do ticket\n", "nota da main\n")})
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == [name]
+    with patch.object(run_ticket, "_invoke_fix_agent") as agent:
+        ok, files, _ = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert ok is True and files == []
+    agent.assert_not_called()
+    assert (repo / name).read_text(encoding="utf-8") == "nota da main\n"
+    assert not _rebase_in_progress(repo)
+    discarded = _usr447_context(_TICKET_412) / "rebase_discarded" / name
+    assert "nota do ticket" in discarded.read_text(encoding="utf-8")
+
+
+def test_unresolved_code_conflict_schedules_resume(tmp_path: Path) -> None:
+    """A code conflict that survives the agent schedules a development resume and stays technical."""
+    repo = _conflict_repo(tmp_path, {"mod.py": ("a = 1\n", "a = 2\n")})
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    DemandsStore(ledger).save_ticket(_TICKET_412)
+    with patch.object(run_ticket, "PROJECT_ROOT", repo), \
+            patch.object(run_ticket, "_invoke_fix_agent", return_value=None):
+        code = run_ticket.resume_delivery("USR-412", worktree_path=repo, skip_validation=True)
+    assert code == 1
+    assert DemandsStore(ledger).get_ticket("USR-412").status == DeliveryStatus.VALIDATING
+    assert not _rebase_in_progress(repo)
+    pending = json.loads(
+        (tmp_path / "state" / "pending_delivery" / "USR-412.json").read_text(encoding="utf-8")
+    )
+    assert pending["resume_delivery"] is True
+    assert pending["cause"] == "rebase_conflict"
+    assert pending["stage"] == "development"
+    assert Path(pending["worktree"]).resolve() == repo.resolve()
+
+
+def test_tick_releases_technical_waiting_human_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One technical waiting_human becomes planned and is not released a second time."""
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pd
+
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    directory = tmp_path / "pending"
+    row = pd.schedule(
+        "USR-447", candidate, "development", resume_delivery=True,
+        cause="rebase_conflict", directory=directory,
+    )
+    ticket = {
+        "id": "USR-447", "status": "waiting_human", "project_id": "darkfac",
+        "delivery_evidence": "rebase_conflict: docs/FASE_ATUAL.md",
+    }
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [ticket],
+    ))
+    monkeypatch.setattr(
+        "core.git.ticket_workspace.list_worktrees",
+        lambda _root: [{"worktree": str(candidate.resolve())}],
+    )
+    monkeypatch.setattr(pd, "_route", lambda _row: None)
+    calls: list[object] = []
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    due = row.next_check + 1
+    assert pd.tick(tmp_path, directory=directory, now=due)[0]["status"] == "waiting_route"
+    assert ticket["status"] == "planned"
+    assert calls == []
+    stored = pd.PendingDelivery.model_validate_json((directory / "USR-447.json").read_text(encoding="utf-8"))
+    assert stored.technical_release_done is True
+
+    ticket["status"] = "waiting_human"
+    again = pd.tick(tmp_path, directory=directory, now=due + pd.RECHECK_SECONDS + 5)
+    assert again[0]["status"] == "waiting_human"
+    assert ticket["status"] == "waiting_human"
+    assert calls == []
+
+
+def test_tick_keeps_business_waiting_human_and_an_open_human_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G1 evidence and an open HUMAN_REQUEST stay paused, with the release flag still clear."""
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pd
+    from core.line.ticket_engine import artifacts_root
+
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    directory = tmp_path / "pending"
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr(pd, "_route", lambda _row: (_ for _ in ()).throw(AssertionError("route")))
+
+    def _arm(ticket_id: str, evidence: str) -> dict:
+        row = pd.schedule(
+            ticket_id, candidate, "development", resume_delivery=True,
+            cause="rebase_conflict", directory=directory,
+        )
+        ticket = {
+            "id": ticket_id, "status": "waiting_human", "project_id": "darkfac",
+            "delivery_evidence": evidence,
+        }
+        monkeypatch.setattr("core.demands.queue_store.control_store", lambda t=ticket: SimpleNamespace(
+            mock_mode=False, list_tickets=lambda: [t],
+        ))
+        result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+        saved = pd.PendingDelivery.model_validate_json(
+            (directory / f"{ticket_id}.json").read_text(encoding="utf-8")
+        )
+        matched = next(item for item in result if item["ticket"] == ticket_id)
+        assert matched["status"] == "waiting_human"
+        assert ticket["status"] == "waiting_human"
+        assert saved.technical_release_done is False
+        return ticket
+
+    _arm("USR-447", "G1: ambiguidade material")
+    request = artifacts_root() / "USR-448" / ".darkfac" / "runs" / "USR-448" / "HUMAN_REQUEST.json"
+    request.parent.mkdir(parents=True)
+    request.write_text(
+        json.dumps({"kind": "grill", "run_id": "USR-448", "blocking_stage": "grill", "guide_md": "decida"}),
+        encoding="utf-8",
+    )
+    _arm("USR-448", "technical_failed: rebase_conflict: mod.py")

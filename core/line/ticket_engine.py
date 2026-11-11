@@ -75,10 +75,26 @@ def run_workspace(ticket: Any, branch: str = "", base_sha: str = "") -> workspac
 
 
 def reset(ws: workspace.RunWorkspace) -> None:
-    """A fresh launcher run starts with no artifact: nothing from an earlier attempt counts."""
+    """Archive the previous context under ``superseded/<timestamp>/`` (USR-447).
+
+    A fresh launcher run must not trust the previous attempt, and it must not destroy it either.
+    Files already under ``superseded/`` stay where they are so a second reset does not bury the archive.
+    """
     directory = workspace.context_dir(ws)
-    if directory.exists():
-        shutil.rmtree(directory, ignore_errors=True)
+    if not directory.is_dir():
+        return
+    children = [path for path in directory.iterdir() if path.name != "superseded"]
+    if not children:
+        return
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    archive = directory / "superseded" / stamp
+    suffix = 0
+    while archive.exists():
+        suffix += 1
+        archive = directory / "superseded" / f"{stamp}-{suffix}"
+    archive.mkdir(parents=True)
+    for child in children:
+        shutil.move(str(child), str(archive / child.name))
 
 
 def clear_delivery(ws: workspace.RunWorkspace, *, keep_validation: bool = False) -> None:
@@ -186,14 +202,27 @@ def _plan_evidence(ws: workspace.RunWorkspace) -> list[str]:
     return evidence
 
 
-def write_plan_origin(ws: workspace.RunWorkspace, ticket_id: str, origin: str) -> None:
-    """Record PLAN provenance; called every time a PLAN artifact is (re)written for `ticket_id`."""
+def write_plan_origin(
+    ws: workspace.RunWorkspace,
+    ticket_id: str,
+    origin: str,
+    extra_evidence: Iterable[str] | None = None,
+) -> None:
+    """Record PLAN provenance; called every time a PLAN artifact is (re)written for `ticket_id`.
+
+    ``extra_evidence`` is appended after the file hashes. Resume backfill passes ``commit:<sha>``
+    for each commit ahead of the base (USR-447).
+    """
+    evidence = _plan_evidence(ws)
+    for item in extra_evidence or ():
+        if item and item not in evidence:
+            evidence.append(item)
     record = PlanOrigin(
         ticket_id=ticket_id,
         origin=origin,
         branch=ws.branch,
         recorded_at=datetime.now(timezone.utc).isoformat(),
-        evidence=_plan_evidence(ws),
+        evidence=evidence,
     )
     workspace.write_context(ws, PLAN_ORIGIN_FILE, record.model_dump_json(indent=2))
 
@@ -250,8 +279,18 @@ def write_grill(ws: workspace.RunWorkspace, ticket: Any) -> None:
     workspace.write_context(ws, GRILL_FILE, "\n".join(lines) + "\n")
 
 
-def write_minimal_plan(ws: workspace.RunWorkspace, ticket: Any) -> None:
-    """Plan of a small fix: one ticket equal to the demand, no planning agent."""
+def write_minimal_plan(
+    ws: workspace.RunWorkspace,
+    ticket: Any,
+    *,
+    origin: str = "minimal_small_fix",
+    extra_evidence: Iterable[str] | None = None,
+) -> None:
+    """Plan of a small fix: one ticket equal to the demand, no planning agent.
+
+    ``origin`` is ``minimal_small_fix`` for that path and ``resume_backfill`` when a resume
+    regenerates a missing PLAN. Commit shas go in ``extra_evidence`` and are not inferred here.
+    """
     spec = f"# SPEC\n\n## Objetivo\n{ticket.title}: {ticket.problem_statement or ticket.title}\n"
     item = PlanningTicket(
         id=ticket.id, title=ticket.title, goal=ticket.problem_statement or "",
@@ -260,7 +299,7 @@ def write_minimal_plan(ws: workspace.RunWorkspace, ticket: Any) -> None:
     )
     workspace.write_context(ws, SPEC_FILE, spec)
     workspace.write_context(ws, TICKETS_FILE, json.dumps([item.model_dump()], indent=2, ensure_ascii=False))
-    write_plan_origin(ws, ticket.id, "minimal_small_fix")
+    write_plan_origin(ws, ticket.id, origin, extra_evidence=extra_evidence)
 
 
 def plan_tickets(ws: workspace.RunWorkspace) -> list[PlanningTicket]:

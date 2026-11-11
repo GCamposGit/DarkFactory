@@ -110,7 +110,9 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    Toda gravacao de PLAN deixa tambem `plan_origin.json` (`PlanOrigin` em `core/line/ticket_engine.py`, USR-447)
    no mesmo diretorio de artefatos: `ticket_id`, `origin`, `branch`, `recorded_at` e `evidence`
    (`SPEC.md:sha256:<hex>` e `tickets.json:sha256:<hex>` dos arquivos presentes).
-   `origin` e `planning_agent` depois do agente de planejamento e `minimal_small_fix` no plano minimo.
+   `origin` e `planning_agent` depois do agente de planejamento, `minimal_small_fix` no plano minimo
+   de correcao pequena e `resume_backfill` quando a retomada regenera um PLAN ausente.
+   No backfill, `evidence` inclui tambem `commit:<sha>` de cada commit a frente da base.
 3. **RESEARCH** (USR-376, entre PLAN e BUILD) chama `research.policy.run_research_stage` com o ledger
    `.factory/research/` do checkout principal e grava `research.json`. Sem busca web deterministica neste
    processo o estagio registra `research_skipped` com o motivo "busca web indisponivel neste host"; nunca
@@ -147,11 +149,13 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    Registro do proprio `ticket_id` fica intocado. Registro de outro ticket recusa o resume
    (`StageArtifactMissing` em PLAN; motivo `plan_origin.json pertence ao ticket <outro>, nao a <este>`).
    O vinculo nao e reescrito para a checagem passar.
-   PLAN ausente ou invalido grava o plano minimo (`origin` `minimal_small_fix`).
+   PLAN ausente ou invalido grava o plano minimo com `origin` `resume_backfill` e os shas `commit:<sha>`
+   a frente da base. Esse caminho nao usa `minimal_small_fix`.
    RESEARCH ausente grava `research.json` legado (`research_skipped`, worktree anterior ao USR-376).
-   BUILD ausente so grava `progress.json` quando `_has_build_evidence` acha ao menos um commit a frente de
-   `origin/<base>` (`git fetch` da base e `rev-list --count`). Worktree ausente, ref remoto inexistente ou
-   zero commits a frente recusam BUILD (`artefato ausente e sem commit a frente da base: implementacao nao verificavel`)
+   BUILD ausente so grava `progress.json` quando ha ao menos um commit a frente da base
+   (`git fetch` de `origin/<base>`; se o fetch falha, o aviso fica no log e o ref local `origin/<base>`
+   ainda conta se existir; sem esse ref, vale o branch local da base). Worktree ausente ou zero commits
+   a frente recusam BUILD (`artefato ausente e sem commit a frente da base: implementacao nao verificavel`)
    e nao inventam `progress.json`.
    O id e resolvido nesta
    ordem: arquivo do ledger da worktree; fila duravel do control store (mesmo id, uma linha materializada
@@ -206,7 +210,18 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
 
 Os artefatos do ticket ficam fora da worktree (que o merge remove), em
 `<state_root>/artifacts/ticket_runs/<ID>/.darkfac/runs/<ID>/` (`core/line/ticket_engine.py`). Uma execucao
-nova do launcher normalmente apaga os artefatos anteriores. A entrega apaga `merge.json` e o relatorio de
+nova do launcher arquiva o contexto anterior em `superseded/<timestamp>/` (`ticket_engine.reset`) em vez de
+apaga-lo. O que ja esta em `superseded/` permanece. Se a worktree ja tem commit do ticket a frente da base
+e o PLAN valida e esta vinculado ao ticket, o launcher nao chama `reset` nem o planejador e entra na entrega
+pelo caminho de candidato retomado. Com implementacao comitada e PLAN ausente ou invalido, o PLAN e
+regenerado (`origin` `resume_backfill`, evidencia dos commits) e o desenvolvimento nao roda de novo.
+Worktree sem esse commit segue INTAKE, GRILL e PLAN com o planejador.
+Conflito de rebase em `docs/FASE_ATUAL.md` (arquivo regenerado pela fabrica, junto dos ledgers) fica com a
+copia de `origin/main`. O texto da branch vai para `rebase_discarded/docs/FASE_ATUAL.md` no diretorio de
+artefatos. Conflito tecnico que sobra agenda `pending_delivery` com `resume_delivery=True` e `cause`
+`rebase_conflict`, e a worktree fica preservada. `pending_delivery._tick_row` destrava uma vez um ticket
+em `waiting_human` cuja `delivery_evidence` comeca com `rebase_conflict:` ou `technical_failed:` e que nao
+tem `HUMAN_REQUEST.json` aberto. Pausa de decisao ou G1 permanece. A entrega apaga `merge.json` e o relatorio de
 deploy do attempt anterior mesmo quando `validation.json` e reaproveitado. `validation.json` `passed` com
 o mesmo `candidate_digest` fica, inclusive se so a politica de revisao mudou. Digest vazio fica so quando
 a ultima rodada de `review_state` e `approve`, `approval_binding_valid` aceita o candidato e a politica, e

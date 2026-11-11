@@ -31,6 +31,8 @@ class PendingDelivery(BaseModel):
     started_at: float = 0
     status: Literal["waiting", "running", "blocked"] = "waiting"
     cause: str = "route_wait"
+    # One automatic release of a technical waiting_human. A later pause stays paused (USR-447).
+    technical_release_done: bool = False
 
 
 def queue_dir() -> Path:
@@ -101,6 +103,71 @@ def _pid_running(row: PendingDelivery) -> bool:
         return False
     except psutil.AccessDenied:
         return True  # A possibly live owner must not be duplicated.
+
+
+_TECHNICAL_WAIT_PREFIXES = ("rebase_conflict:", "technical_failed:")
+
+
+def _evidence_is_technical(ticket: dict) -> bool:
+    evidence = str(ticket.get("delivery_evidence") or "").strip()
+    return evidence.startswith(_TECHNICAL_WAIT_PREFIXES)
+
+
+def _open_human_request(ticket_id: str, worktree: Path) -> bool:
+    """True when a HumanRequest file is still on disk for this ticket."""
+    from core.line.human import _REQUEST_FILE
+    from core.line.ticket_engine import artifacts_root
+
+    candidates = (
+        artifacts_root() / ticket_id / ".darkfac" / "runs" / ticket_id / _REQUEST_FILE,
+        worktree / ".darkfac" / "runs" / ticket_id / _REQUEST_FILE,
+    )
+    for candidate in candidates:
+        try:
+            raw = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(raw, dict) and str(raw.get("kind") or "") and str(raw.get("run_id") or ""):
+            return True
+    return False
+
+
+def _mark_ticket_planned(store: object, ticket: dict) -> None:
+    """Best-effort durable release. The in-memory row is what this tick continues with."""
+    ticket["status"] = "planned"
+    ticket_id = str(ticket.get("id") or "")
+    upsert = getattr(store, "upsert_ticket", None)
+    if upsert is None or not ticket_id:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        upsert(
+            str(ticket.get("project_id") or "darkfac"),
+            ticket_id,
+            "planned",
+            dict(ticket),
+            datetime.now(timezone.utc),
+        )
+    except Exception as exc:  # noqa: BLE001 - the in-memory release still lets this tick resume
+        logger.warning("Could not persist technical release of %s: %s", ticket_id, type(exc).__name__)
+
+
+def _release_technical_human_wait(store: object, row: PendingDelivery, ticket: dict) -> bool:
+    """Release one technical ``waiting_human``. A decision or an open human request stays paused.
+
+    The flag on the pending row makes the release happen once: putting the ticket back into
+    ``waiting_human`` afterwards does not launch another automatic resume.
+    """
+    if row.technical_release_done:
+        return False
+    if not _evidence_is_technical(ticket):
+        return False
+    if _open_human_request(row.ticket_id, Path(row.worktree)):
+        return False
+    row.technical_release_done = True
+    _mark_ticket_planned(store, ticket)
+    return True
 
 
 def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
@@ -178,7 +245,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         path.unlink()
         return {"ticket": row.ticket_id, "status": "terminal"}
     if ticket.get("status") == "waiting_human":
-        return {"ticket": row.ticket_id, "status": "waiting_human"}
+        if not _release_technical_human_wait(store, row, ticket):
+            return {"ticket": row.ticket_id, "status": "waiting_human"}
+        _save(path, row)
     allowed = {Path(w["worktree"]).resolve() for w in list_worktrees(repo_root)}
     worktree = Path(row.worktree).resolve()
     if worktree not in allowed:
