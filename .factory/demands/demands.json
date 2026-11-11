@@ -14434,8 +14434,8 @@
     "project_id": "darkfac",
     "title": "Viabilidade de ponta a ponta: so iniciar BUILD se a cota cobrir ate a revisao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "f12b595754a81b7a79a49c2de59f9300a212e442",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14460,6 +14460,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-09T09:30:06.473220Z",
-    "updated_at": "2026-11-09T09:30:06.473220Z"
+    "updated_at": "2026-11-11T04:04:22.302583Z"
   }
 ]
