@@ -25,6 +25,14 @@ _TERMINAL = frozenset({"completed", "cancelled", "canceled"})
 
 @functools.lru_cache(maxsize=4)
 def _store(database_url: str, db_path: str):  # noqa: ANN202 - ControlStore, imported lazily
+    """Control store for one already-resolved URL and one SQLite path.
+
+    ``control_store`` reads the environment on every call and passes that pair in. A later
+    call with a different URL or path is a cache miss and builds another store; the previous
+    entry stays until the four-slot LRU drops it. The same pair reuses the constructed
+    object (connections are opened per operation, not held here). ``lru_cache`` does not
+    store exceptions, so a refused construct is tried again on the next call.
+    """
     from core.line.store_selection import default_control_store
 
     return default_control_store(sqlite_db_path=db_path or None, database_url=database_url or None)

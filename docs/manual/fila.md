@@ -1,4 +1,4 @@
-<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py -->
+<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py, core/line/store_selection.py -->
 # Fila de tickets (USR-343)
 
 A fila de desenvolvimento vive no control store: Postgres quando um URL de linha está
@@ -35,16 +35,26 @@ de `list_tickets()` (não só `StoreUnavailableError` já pronta) é normalizada
 erro: `list_queue_tickets` e `get_ticket` não devolvem `[]` nem `None` nesse caso.
 
 No Hub, os dois GET propagam esse erro e respondem 503 (nunca 404 nem uma lista vazia):
-`GET /api/demands/tickets` via `service.list_demand_tickets`, e
-`GET /api/demands/tickets/{id}` via `service.get_demand_ticket`. Um id que não está no arquivo
-nem na fila continua 404.
+`GET /api/demands/tickets` via `HubService.list_demand_tickets`, e
+`GET /api/demands/tickets/{id}` via `HubService.get_demand_ticket`. Esses dois métodos não
+capturam `StoreUnavailableError`; quem traduz o erro em 503 é a rota. Um id que não está no
+arquivo nem na fila continua 404 só quando o store responde.
 
 `default_control_store` recusa o mock em memória do `PostgresControlStore` quando o URL
-configurado não começa com `mock` e `mock_mode` é verdadeiro. O adaptador real publica esse
-atributo; se ele faltar, a leitura assume que não houve fallback em memória e não levanta
-`AttributeError`. URL inválida (ou Postgres fora do ar, depois do limite de conexão) nesse
-caminho levanta `StoreUnavailableError`. A abertura do schema usa `connect_timeout` de 5
-segundos, o mesmo limite das outras leituras Postgres do adaptador.
+configurado não é o esquema explícito `mock:` / `mock://` e `mock_mode` é verdadeiro. O
+adaptador trata qualquer URL que comece com as letras `mock` como offline (então `mockery://`
+não disca), mas isso não é a saída autorizada: essa função levanta `StoreUnavailableError`.
+O adaptador real publica `mock_mode`; se o atributo faltar, a leitura assume que não houve
+fallback em memória e não levanta `AttributeError`. URL inválida ou Postgres inacessível nesse
+caminho levanta `StoreUnavailableError` (o construtor degrada para mock e esta função recusa
+o mock). O `connect_timeout` de 5 segundos vale na abertura do schema
+(`PostgresControlStore._init_db`) e nas três leituras de identidade e posse
+(`get_run_identity`, `get_manual_ticket_owner`, `get_active_ticket_reservation`). `accept`,
+`claim`, `list_tickets` e as demais operações do adaptador abrem a conexão sem esse timeout.
+
+`queue_store._store` guarda até quatro stores num `lru_cache` cuja chave é o URL já resolvido
+e o caminho do SQLite. Trocar a variável de ambiente muda a chave e não reaproveita o store
+anterior. A mesma chave devolve o objeto já construído. Falha de construção não entra no cache.
 
 ## Resolver para entrega (USR-424)
 

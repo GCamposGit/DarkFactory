@@ -30,6 +30,17 @@ def default_control_db_path() -> Path:
 DEFAULT_CONTROL_DB = default_control_db_path()
 
 
+def _explicit_mock_url(url: str) -> bool:
+    """True only for the intentional in-memory scheme (``mock:`` / ``mock://``).
+
+    ``PostgresControlStore`` treats every URL that starts with the letters ``mock`` as its
+    offline hatch, so ``mockery://`` never dials either. That broader prefix is not an
+    authorized escape: a configured URL that merely shares the prefix and comes back with
+    ``mock_mode`` is a failed open, not a test double.
+    """
+    return url.startswith("mock:")
+
+
 def default_control_store(
     *, sqlite_db_path: Path | str | None = None, database_url: str | None = None
 ) -> ControlStore:
@@ -57,7 +68,7 @@ def default_control_store(
         # Missing `mock_mode` must not escape as AttributeError (USR-449). False means the
         # adapter did not degrade to its in-memory mock.
         degraded_to_mock = bool(getattr(store, "mock_mode", False))
-        if degraded_to_mock and not url.startswith("mock"):
+        if degraded_to_mock and not _explicit_mock_url(url):
             # A real URL was configured but the connection failed: `PostgresControlStore`
             # degrades to an in-memory mock on its own. Serving that silently would make a
             # Postgres outage look like "no tickets queued" instead of a store failure.

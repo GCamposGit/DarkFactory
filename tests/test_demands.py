@@ -641,7 +641,11 @@ def _default_ledger_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
 
 
 class _DemandsOnlyHubService:
-    """Minimal stand-in exposing just what the two demand-ticket routes call on HubService."""
+    """Minimal stand-in exposing just what the two demand-ticket routes call on HubService.
+
+    Failure tests must not stop here: ``HubService`` can grow its own try/except. Use
+    ``_real_hub_for_ledger`` for store-down cases (USR-449).
+    """
 
     def __init__(self, demands_service: DemandsService) -> None:
         self._demands_service = demands_service
@@ -652,6 +656,35 @@ class _DemandsOnlyHubService:
     def list_demand_tickets(self, project_id=None, status=None):
         stat_enum = DeliveryStatus(status) if status else None
         return self._demands_service.list_tickets(project_id=project_id, status=stat_enum)
+
+
+def _real_hub_for_ledger(ledger: Path) -> HubService:
+    """Production HubService whose demands file is the default ledger, so reads merge the queue."""
+    repo = ledger.parents[2]
+    service = HubService(data_dir=repo / ".factory", project_root=repo)
+    assert service.demands_store.path.resolve() == ledger.resolve()
+    return service
+
+
+def _refuse_psycopg(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Install a ``psycopg`` whose ``connect`` fails immediately.
+
+    ``PostgresControlStore`` imports psycopg inside the constructor. Replacing the module
+    exercises that dial on machines where the optional package is absent, and never opens a
+    socket or waits on a connect timeout.
+    """
+    import sys
+    import types
+
+    seen: dict[str, object] = {}
+
+    def _refuse(url: str, **kwargs: object) -> None:
+        seen["url"] = url
+        seen["connect_timeout"] = kwargs.get("connect_timeout")
+        raise RuntimeError("connection refused (simulado)")
+
+    monkeypatch.setitem(sys.modules, "psycopg", types.SimpleNamespace(connect=_refuse))
+    return seen
 
 
 def test_demand_lookup_reads_control_store_without_file_snapshot(
@@ -701,18 +734,23 @@ def test_hub_api_get_demand_ticket_store_failure_is_503_not_404(
     queue_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A control store that is configured but errors on read must surface as 503, never a false
-    404 and never a quiet fallback that looks like a normal (empty) answer (USR-449)."""
+    404 and never a quiet fallback that looks like a normal (empty) answer (USR-449).
+
+    The route is served by the real ``HubService``, not a stand-in that only forwards the call.
+    """
     queue = queue_env["queue"]
     ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
     queue.register_ticket(_queued_ticket("USR-449", title="Ticket real"))
+    service = _real_hub_for_ledger(ledger)
 
     def _boom():
         raise StoreUnavailableError("Postgres unreachable (simulado)")
 
     monkeypatch.setattr(queue, "control_store", _boom)
+    with pytest.raises(StoreUnavailableError):
+        service.get_demand_ticket("USR-449")
 
-    stub_service = _DemandsOnlyHubService(DemandsService(store=DemandsStore(ledger)))
-    app.dependency_overrides[get_hub_service] = lambda: stub_service
+    app.dependency_overrides[get_hub_service] = lambda: service
     try:
         client = TestClient(app)
         resp = client.get("/api/demands/tickets/USR-449")
@@ -790,9 +828,13 @@ def test_default_control_store_rejects_silent_mock_fallback(monkeypatch: pytest.
     with pytest.raises(StoreUnavailableError):
         store_selection.default_control_store(database_url="postgresql://user:pass@unreachable-host/db")
 
-    # The documented escape hatch (an explicit "mock" URL) is still honored, not rejected.
+    # The documented escape hatch (an explicit "mock:" URL) is still honored, not rejected.
     store = store_selection.default_control_store(database_url="mock://anything")
     assert store.mock_mode is True
+
+    # A URL that only shares the "mock" prefix is not that hatch.
+    with pytest.raises(StoreUnavailableError):
+        store_selection.default_control_store(database_url="mockery://not-an-escape-hatch")
 
 
 class _GenericListFailure:
@@ -811,11 +853,13 @@ def test_generic_list_tickets_failure_is_store_unavailable_and_http_503(
 
     Patching ``control_store`` to raise StoreUnavailableError itself does not cover the
     ``except Exception`` rewrap. A regression that swallowed the generic error into ``[]``
-    would turn the known id into a false 404 and the list into an empty 200.
+    would turn the known id into a false 404 and the list into an empty 200. The HTTP
+    client is the real ``HubService``, so a try/except on that class cannot hide the 503.
     """
     queue = queue_env["queue"]
     ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
     queue.register_ticket(_queued_ticket("USR-449", title="Ticket real"))
+    service = _real_hub_for_ledger(ledger)
     monkeypatch.setattr(queue, "control_store", lambda: _GenericListFailure())
 
     with pytest.raises(StoreUnavailableError) as listed:
@@ -829,8 +873,13 @@ def test_generic_list_tickets_failure_is_store_unavailable_and_http_503(
     with pytest.raises(StoreUnavailableError):
         queue.get_ticket("USR-000-NUNCA-EXISTIU")
 
-    stub_service = _DemandsOnlyHubService(DemandsService(store=DemandsStore(ledger)))
-    app.dependency_overrides[get_hub_service] = lambda: stub_service
+    with pytest.raises(StoreUnavailableError) as via_hub:
+        service.get_demand_ticket("USR-449")
+    assert isinstance(via_hub.value.__cause__, RuntimeError)
+    with pytest.raises(StoreUnavailableError):
+        service.list_demand_tickets()
+
+    app.dependency_overrides[get_hub_service] = lambda: service
     try:
         client = TestClient(app)
         one = client.get("/api/demands/tickets/USR-449")
@@ -860,14 +909,21 @@ def test_default_control_store_mock_url_reaches_real_adapter() -> None:
     assert store.mock_mode is True
 
 
-def test_real_postgres_invalid_url_is_store_unavailable_not_attribute_error() -> None:
-    """USR-449: the real PostgresControlStore exposes ``mock_mode``. An invalid URL degrades to
+def test_real_postgres_invalid_url_is_store_unavailable_not_attribute_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-449: the real PostgresControlStore exposes ``mock_mode``. A refused dial degrades to
     the in-memory mock inside the adapter; ``default_control_store`` must raise
-    StoreUnavailableError, never AttributeError."""
+    StoreUnavailableError, never AttributeError.
+
+    ``psycopg.connect`` is replaced and raises at once. The test does not open a socket and
+    does not wait on a connect timeout (port 99999 is not a CI oracle).
+    """
     from core.line import store_selection
     from core.orchestrator.adapters.control_postgres import PostgresControlStore
 
-    url = "postgresql://darkfac:pw@127.0.0.1:99999/darkfac"
+    url = "postgresql://darkfac:pw@db.invalid/darkfac"
+    seen = _refuse_psycopg(monkeypatch)
     raw = PostgresControlStore(
         database_url=url,
         runtime_owner="cloud_dbos_postgres",
@@ -875,11 +931,15 @@ def test_real_postgres_invalid_url_is_store_unavailable_not_attribute_error() ->
     )
     assert type(raw) is PostgresControlStore
     assert raw.mock_mode is True
+    assert seen["url"] == url
+    assert seen["connect_timeout"] == 5
 
+    seen.clear()
     with pytest.raises(StoreUnavailableError) as caught:
         store_selection.default_control_store(database_url=url)
     assert type(caught.value) is StoreUnavailableError
     assert "mock" in str(caught.value).lower()
+    assert seen["connect_timeout"] == 5
 
 
 def test_default_control_store_missing_mock_mode_is_not_attribute_error(
@@ -895,29 +955,83 @@ def test_default_control_store_missing_mock_mode_is_not_attribute_error(
             self.raw_url = kwargs.get("database_url")
 
     monkeypatch.setattr(control_postgres, "PostgresControlStore", _NoMockMode)
-    store = store_selection.default_control_store(database_url="postgresql://darkfac:pw@127.0.0.1:99999/darkfac")
+    url = "postgresql://darkfac:pw@db.invalid/darkfac"
+    store = store_selection.default_control_store(database_url=url)
     assert isinstance(store, _NoMockMode)
-    assert store.raw_url == "postgresql://darkfac:pw@127.0.0.1:99999/darkfac"
+    assert store.raw_url == url
 
 
 def test_postgres_schema_init_bounds_connect_then_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """Schema bootstrap dials with connect_timeout=5. A refused connect still sets ``mock_mode``
-    on the real adapter instead of hanging or raising AttributeError."""
-    import psycopg
+    on the real adapter instead of hanging or raising AttributeError.
 
+    The adapter imports psycopg inside the constructor. The test injects that module, so a
+    missing optional install cannot skip the dial and pass on the ImportError fallback.
+    """
     from core.orchestrator.adapters.control_postgres import PostgresControlStore
 
-    seen: dict[str, object] = {}
-
-    def _refuse(url: str, **kwargs: object) -> None:
-        seen["url"] = url
-        seen["connect_timeout"] = kwargs.get("connect_timeout")
-        raise RuntimeError("connection refused (simulado)")
-
-    monkeypatch.setattr(psycopg, "connect", _refuse)
-    url = "postgresql://darkfac:pw@127.0.0.1:1/darkfac"
+    seen = _refuse_psycopg(monkeypatch)
+    url = "postgresql://darkfac:pw@db.invalid/darkfac"
     store = PostgresControlStore(database_url=url)
     assert type(store) is PostgresControlStore
     assert store.mock_mode is True
     assert seen["url"] == url
     assert seen["connect_timeout"] == 5
+
+
+def test_mockery_prefix_is_not_a_mock_escape_hatch() -> None:
+    """``mockery://`` starts with the letters mock, so the real adapter does not dial, but it is
+    not the ``mock:`` escape. ``default_control_store`` raises instead of returning that mock."""
+    from core.line import store_selection
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+
+    url = "mockery://not-an-escape-hatch"
+    raw = PostgresControlStore(database_url=url)
+    assert type(raw) is PostgresControlStore
+    assert raw.mock_mode is True
+    assert raw.raw_url == url
+    with pytest.raises(StoreUnavailableError):
+        store_selection.default_control_store(database_url=url)
+
+
+def test_real_hub_service_unreachable_configured_store_is_503_not_404(
+    queue_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-449 baseline: a line URL is set and the dial fails. ``list_queue_tickets`` surfaces
+    ``StoreUnavailableError`` (the adapter degrades to mock; ``default_control_store`` refuses it).
+    The real ``HubService`` does not swallow that, and both Hub reads answer 503 — never 200 or 404.
+
+    The dial is injected. No socket is opened and nothing waits on a connect timeout.
+    """
+    ledger = _default_ledger_repo(queue_env["root"], monkeypatch)
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DARKHUB_CONTROL_DATABASE_URL", raising=False)
+    url = "postgresql://darkfac:pw@db.invalid/darkfac"
+    monkeypatch.setenv("DARKHUB_LINE_DATABASE_URL", url)
+    queue_env["queue"]._store.cache_clear()
+    seen = _refuse_psycopg(monkeypatch)
+    service = _real_hub_for_ledger(ledger)
+
+    with pytest.raises(StoreUnavailableError):
+        service.get_demand_ticket("USR-449")
+    with pytest.raises(StoreUnavailableError):
+        service.list_demand_tickets()
+    assert seen["url"] == url
+    assert seen["connect_timeout"] == 5
+
+    app.dependency_overrides[get_hub_service] = lambda: service
+    try:
+        client = TestClient(app)
+        one = client.get("/api/demands/tickets/USR-449")
+        assert one.status_code == 503
+        assert "store" in one.json()["detail"].lower()
+
+        missing = client.get("/api/demands/tickets/USR-000-NUNCA-EXISTIU")
+        assert missing.status_code == 503
+
+        listing = client.get("/api/demands/tickets")
+        assert listing.status_code == 503
+        assert "store" in listing.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+        queue_env["queue"]._store.cache_clear()
