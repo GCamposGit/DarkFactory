@@ -14465,8 +14465,8 @@
     "project_id": "darkfac",
     "title": "Admissao avalia so o worker de portao local e trava a frota quando o Notebook esta sem RAM",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "4682b9870ea9f3756cf2589432421e893045698b",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14489,6 +14489,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-11T07:37:45.029296Z",
-    "updated_at": "2026-11-11T07:37:45.029296Z"
+    "updated_at": "2026-11-11T09:37:27.206352Z"
   }
 ]
