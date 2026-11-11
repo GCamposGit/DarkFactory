@@ -20,6 +20,9 @@ from typing import Any, Callable, Mapping, Protocol
 
 
 _STATE_VERSION = 1
+_MAX_PROCESSED_EVENTS = 256
+_MAX_SEQUENCE_EVENTS = 64
+_MAX_AUDIT_EVENTS = 200
 _NEW_BUILD_STAGES = frozenset({"BUILD"})
 _RESUMABLE_STAGES = frozenset(
     {
@@ -96,6 +99,7 @@ class _BrakeState:
     paused: bool = False
     pause_episode: int = 0
     sentinel_episode: int = 0
+    sentinel_pending: dict[str, Any] | None = None
     paused_at: str | None = None
     released_at: str | None = None
     release_reason: str | None = None
@@ -111,6 +115,11 @@ class _BrakeState:
             paused=bool(value.get("paused", False)),
             pause_episode=int(value.get("pause_episode", 0)),
             sentinel_episode=int(value.get("sentinel_episode", 0)),
+            sentinel_pending=(
+                dict(value["sentinel_pending"])
+                if isinstance(value.get("sentinel_pending"), dict)
+                else None
+            ),
             paused_at=value.get("paused_at"),
             released_at=value.get("released_at"),
             release_reason=value.get("release_reason"),
@@ -143,6 +152,7 @@ class NoMergeBuildPause:
         self.sentinel = sentinel
         self._lock = threading.RLock()
         self._state = self._load()
+        self.retry_sentinel()
 
     @classmethod
     def from_environment(
@@ -224,7 +234,7 @@ class NoMergeBuildPause:
             state = self._state
 
             if event.event_id in state.processed_event_ids:
-                return ConsumptionUpdate(
+                duplicate_update = ConsumptionUpdate(
                     duplicate=True,
                     paused=state.paused,
                     pause_started=False,
@@ -233,12 +243,17 @@ class NoMergeBuildPause:
                     no_merge_sequence=state.no_merge_sequence,
                     pause_episode=state.pause_episode if state.paused else None,
                 )
+            else:
+                duplicate_update = None
 
-            state.processed_event_ids.append(event.event_id)
             pause_started = False
             pause_released = False
+            if duplicate_update is None:
+                state.processed_event_ids.append(event.event_id)
 
-            if event.produced_own_merge:
+            if duplicate_update is not None:
+                pass
+            elif event.produced_own_merge:
                 previous_sequence = state.no_merge_sequence
                 was_paused = state.paused
                 state.no_merge_sequence = 0
@@ -300,9 +315,9 @@ class NoMergeBuildPause:
                         "paused_at": event.completed_at,
                     }
 
-                    # Persist the notification claim before invoking an
-                    # external integration. Reprocessing cannot notify twice.
-                    state.sentinel_episode = state.pause_episode
+                    # The episode is pending until the Sentinel accepts it.
+                    # A crash before that acceptance leaves the retry in place.
+                    state.sentinel_pending = dict(sentinel_context)
                     state.audit.append(
                         {
                             "type": "new_build_pause_started",
@@ -311,11 +326,26 @@ class NoMergeBuildPause:
                         }
                     )
 
+            self._compact_state()
             self._persist()
+
+        if duplicate_update is not None:
+            delivered = self.retry_sentinel()
+            return ConsumptionUpdate(
+                duplicate=True,
+                paused=duplicate_update.paused,
+                pause_started=False,
+                pause_released=False,
+                sentinel_triggered=delivered,
+                no_merge_sequence=duplicate_update.no_merge_sequence,
+                pause_episode=duplicate_update.pause_episode,
+            )
 
         sentinel_triggered = False
         if sentinel_context is not None:
-            sentinel_triggered = self._notify_sentinel(sentinel_context)
+            sentinel_triggered = self._deliver_sentinel(sentinel_context)
+        else:
+            sentinel_triggered = self.retry_sentinel()
 
         return ConsumptionUpdate(
             duplicate=False,
@@ -371,6 +401,69 @@ class NoMergeBuildPause:
             )
             self._persist()
             return True
+
+    def retry_sentinel(self) -> bool:
+        """Deliver a pause episode that was persisted but not accepted yet."""
+
+        with self._lock:
+            self._reload()
+            pending = self._state.sentinel_pending
+            if not isinstance(pending, dict):
+                return False
+            episode = int(pending.get("pause_episode") or 0)
+            if self._state.sentinel_episode >= episode and episode > 0:
+                self._state.sentinel_pending = None
+                self._persist()
+                return False
+            context = dict(pending)
+        return self._deliver_sentinel(context)
+
+    def _deliver_sentinel(self, context: Mapping[str, Any]) -> bool:
+        delivered = self._notify_sentinel(context)
+        if not delivered:
+            return False
+        episode = int(context.get("pause_episode") or 0)
+        with self._lock:
+            self._reload()
+            pending = self._state.sentinel_pending
+            pending_episode = int(pending.get("pause_episode") or 0) if isinstance(pending, dict) else 0
+            if pending_episode == episode or self._state.sentinel_episode < episode:
+                self._state.sentinel_episode = episode
+                if pending_episode == episode:
+                    self._state.sentinel_pending = None
+                self._state.audit.append(
+                    {
+                        "type": "sentinel_delivered",
+                        "at": _utc_now(),
+                        "episode": episode,
+                    }
+                )
+                self._compact_state()
+                self._persist()
+        return True
+
+    def _compact_state(self) -> None:
+        state = self._state
+        sequence: list[str] = []
+        for event_id in state.sequence_event_ids:
+            if event_id not in sequence:
+                sequence.append(event_id)
+        if len(sequence) > _MAX_SEQUENCE_EVENTS:
+            sequence = sequence[-_MAX_SEQUENCE_EVENTS:]
+        state.sequence_event_ids = sequence
+
+        processed: list[str] = []
+        for event_id in state.processed_event_ids:
+            if event_id not in processed:
+                processed.append(event_id)
+        if len(processed) > _MAX_PROCESSED_EVENTS:
+            protected = set(sequence)
+            older = [event_id for event_id in processed if event_id not in protected]
+            room = max(0, _MAX_PROCESSED_EVENTS - len(sequence))
+            processed = list(sequence) + older[-room:]
+        state.processed_event_ids = processed
+        if len(state.audit) > _MAX_AUDIT_EVENTS:
+            state.audit = state.audit[-_MAX_AUDIT_EVENTS:]
 
     def _load(self) -> _BrakeState:
         if not self.state_path.exists():

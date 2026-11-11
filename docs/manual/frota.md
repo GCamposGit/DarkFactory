@@ -1,4 +1,4 @@
-<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/orchestrator/work_admission.py, core/orchestrator/no_merge_pause.py, core/orchestrator/candidate_priority.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 # Operação da frota
 
@@ -88,7 +88,16 @@ a espera após verificar o SHA saudável de produção incluindo o candidato. Fa
 deploy permanece pendente para nova tentativa, sem chamar um agente para supervisionar.
 
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
-para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
+para grokbox, Notebook e Desktop. Antes de ocupar um host, a fila passa por
+`prioritize_fleet_queue`: candidato pronto, revisao, correcao e retomada ficam na frente
+de um BUILD novo e conservam a ordem relativa. O limite
+`ORCHESTRATOR_MAX_UNMERGED_CANDIDATES` (padrao 3; `none` remove o teto) segura BUILD novo
+quando ha candidatos sem merge suficientes. Uma sequencia de consumos concluidos sem merge
+proprio, limiar `ORCHESTRATOR_NO_MERGE_BUILD_PAUSE_THRESHOLD` (padrao 3), pausa so BUILD
+novo e pede o Sentinela uma vez por episodio; a entrega fica pendente ate o aviso ser
+aceito e uma nova leitura tenta de novo. Retomadas de `pending_delivery` seguem antes
+dessa pausa. O processo do despachante le a cota real; um teste sem `quota_lookup` nao
+inventa escassez. O serviço não depende de sessão interativa. Uma reserva
 de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e
 o job volta a ser elegível para admissão em outro host. A indisponibilidade de uma VM é
 tratada como falha normal de infraestrutura, sem concluir o ticket.

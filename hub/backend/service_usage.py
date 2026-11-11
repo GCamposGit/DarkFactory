@@ -120,6 +120,34 @@ class UsageMixin:
                 })
         return cost_by_ticket(records, load_subscription_prices())[:max(1, limit)]
 
+    def get_merge_quota(self) -> dict[str, Any]:
+        """Quota spent on merged tickets and quota spent without a merge (USR-493)."""
+
+        from core.orchestrator.merge_quota import load_merge_quota
+
+        return load_merge_quota(records=self._merge_quota_records(), demands=self._merge_quota_demands())
+
+    def _merge_quota_records(self) -> list[dict[str, Any]]:
+        from core.usage.ticket_cost import read_ticket_quota_history
+
+        return list(read_ticket_quota_history(self._ticket_reports_dir()))
+
+    def _merge_quota_demands(self) -> list[dict[str, Any]]:
+        import json
+
+        from core.paths import project_root
+
+        path = project_root() / ".factory" / "demands" / "demands.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+        if isinstance(payload, dict) and isinstance(payload.get("demands"), list):
+            return [row for row in payload["demands"] if isinstance(row, dict)]
+        return []
+
     @staticmethod
     def _ticket_reports_dir() -> Any:
         from core.paths import state_root

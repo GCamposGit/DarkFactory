@@ -12,7 +12,7 @@ import logging
 import os
 from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -31,6 +31,7 @@ CODE_GATE_ZERO = "gate_capacity_zero"
 CODE_GATE_BUSY = "gate_worker_busy"
 CODE_GATE_STALE = "gate_worker_stale"
 CODE_GATE_GENERIC = "gate_health_generic"
+CODE_CYCLE_QUOTA_SHORT = "cycle_quota_short"
 
 STAGE_ADMISSION = "admission"
 STAGE_PLANNING = "planning"
@@ -43,6 +44,7 @@ RESOURCE_PLANNING = "route:planning"
 RESOURCE_BUILD = "route:build"
 RESOURCE_REVIEW = "route:review"
 RESOURCE_GATE = "gate:worker"
+RESOURCE_CYCLE_QUOTA = "quota:cycle"
 
 # A gate reading older than this is not capacity. Equal to the line lock's
 # heartbeat-stale window so a paused notebook is not treated as idle.
@@ -565,11 +567,16 @@ def admit(
     earliest: EarliestFn = routing.earliest_route_available_at,
     observe_gate: Optional[Callable[[], GateObservation]] = None,
     clock: Clock = lambda: datetime.now(timezone.utc),
+    cycle_headroom: Optional[Mapping[str, Any]] = None,
+    cycle_estimate: Any = None,
+    cycle_reserved: Optional[Mapping[str, float]] = None,
 ) -> AdmissionDecision:
     """Read routes and gate capacity. Does not execute an agent or create a candidate file.
 
-    ``reserve_quota`` is always false. The returned allow does not replace the
-    ``pick`` each stage runs later.
+    ``reserve_quota`` on the route probe is always false. When ``cycle_headroom``
+    is provided, an allow also requires the predicted PLAN, BUILD, correction and
+    REVIEW cost to fit the build harness. The review slice itself is reserved
+    later, immediately before BUILD.
     """
     if execution_context not in ("interactive", "headless"):
         raise ValueError(f"Unknown execution_context: {execution_context}")
@@ -625,13 +632,34 @@ def admit(
         )
 
     gate = observe_gate() if observe_gate is not None else collect_gate_observation(clock=lambda: now)
-    return decide(
+    decision = decide(
         planning=planning,
         build=build,
         review=review,
         gate=gate,
         now=now,
         not_before_for=not_before_for,
+    )
+    if decision.outcome != "allow" or cycle_headroom is None:
+        return decision
+    from core.orchestrator.cycle_viability import StageEstimate, cycle_is_covered, load_cycle_estimate
+
+    estimate = cycle_estimate if isinstance(cycle_estimate, StageEstimate) else load_cycle_estimate()
+    covered, reason, _available = cycle_is_covered(
+        build.harness,
+        cycle_headroom,
+        estimate,
+        cycle_reserved,
+    )
+    if covered:
+        return decision
+    return _wait(
+        code=CODE_CYCLE_QUOTA_SHORT,
+        stage=STAGE_BUILD,
+        resource=RESOURCE_CYCLE_QUOTA,
+        observed_at=now,
+        evidence_ref=f"quota://cycle/{reason}",
+        not_before=_backoff(now, now),
     )
 
 

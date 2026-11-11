@@ -1,5 +1,11 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py, core/orchestrator/cycle_viability.py -->
 # Motor da esteira
+
+Antes da worktree e do PLAN, a admissao estima o custo de PLAN, BUILD, correcao e REVIEW
+pelo historico (`core.orchestrator.cycle_viability`). Headroom desconhecido ou curto demais
+espera com `cycle_quota_short`. O probe de rota continua com `reserve_quota` falso. O BUILD
+so chama o agente depois de reservar, de forma atomica, a fatia de REVIEW. Estagio sem
+amostra usa `ORCHESTRATOR_CYCLE_FALLBACK_PLAN`, `_BUILD`, `_CORRECTION` e `_REVIEW`.
 
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
 (USR-452). Com testes descobertos e saída1 da suíte, mensagens de timeout ou

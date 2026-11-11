@@ -965,6 +965,15 @@ def get_ticket_costs_endpoint(
     return [row.model_dump() for row in service.get_ticket_costs(limit=limit)]
 
 
+@router.get("/usage/merge-quota")
+def get_merge_quota_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> dict:
+    """Quota points spent on work that merged, and points spent without a merge."""
+
+    return service.get_merge_quota()
+
+
 @router.post("/usage/models/events", response_model=ModelUsageReport)
 def record_model_usage_endpoint(
     payload: ModelCallEvent,
