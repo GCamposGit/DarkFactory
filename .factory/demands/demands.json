@@ -14434,8 +14434,8 @@
     "project_id": "darkfac",
     "title": "Launcher esconde causa da falha do gh e host pode ficar sem gh",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "5703ed24cd3d8778bfd9955a9ca13fb017a0d94f",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14458,6 +14458,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-08T14:32:53.462968Z",
-    "updated_at": "2026-11-08T14:32:53.462968Z"
+    "updated_at": "2026-11-11T07:13:52.934959Z"
   }
 ]
