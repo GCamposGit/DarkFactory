@@ -8,6 +8,7 @@ An allow is not a cached route: each later stage calls ``pick`` again.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Callable, Iterable, Sequence
@@ -570,6 +571,7 @@ def admit(
     cycle_headroom: Optional[Mapping[str, Any]] = None,
     cycle_estimate: Any = None,
     cycle_reserved: Optional[Mapping[str, float]] = None,
+    quota_reset_lookup: Optional[Callable[[str], Optional[datetime]]] = None,
 ) -> AdmissionDecision:
     """Read routes and gate capacity. Does not execute an agent or create a candidate file.
 
@@ -644,7 +646,10 @@ def admit(
         return decision
     from core.orchestrator.cycle_viability import StageEstimate, cycle_is_covered, load_cycle_estimate
 
-    estimate = cycle_estimate if isinstance(cycle_estimate, StageEstimate) else load_cycle_estimate()
+    if isinstance(cycle_estimate, StageEstimate):
+        estimate = cycle_estimate
+    else:
+        estimate = load_cycle_estimate(harness=build.harness, model=build.model)
     covered, reason, _available = cycle_is_covered(
         build.harness,
         cycle_headroom,
@@ -653,14 +658,61 @@ def admit(
     )
     if covered:
         return decision
+    reset_at = _known_quota_reset(build.harness, quota_reset_lookup)
     return _wait(
         code=CODE_CYCLE_QUOTA_SHORT,
         stage=STAGE_BUILD,
         resource=RESOURCE_CYCLE_QUOTA,
         observed_at=now,
         evidence_ref=f"quota://cycle/{reason}",
-        not_before=_backoff(now, now),
+        not_before=_backoff(now, reset_at or now),
     )
+
+
+def _known_quota_reset(
+    harness: Optional[str],
+    lookup: Optional[Callable[[str], Optional[datetime]]],
+) -> Optional[datetime]:
+    """When the build harness quota is expected back. Unknown stays a short wait."""
+
+    if not harness:
+        return None
+    if lookup is None:
+        lookup = _snapshot_quota_reset
+    try:
+        found = lookup(routing._HARNESS_TO_PROVIDER.get(harness, harness))
+    except Exception as exc:  # noqa: BLE001 - a broken snapshot must not block the wait
+        logger.debug("cycle quota reset lookup failed for %s: %s", harness, type(exc).__name__)
+        return None
+    if isinstance(found, datetime):
+        return found
+    return None
+
+
+def _snapshot_quota_reset(provider_id: str) -> Optional[datetime]:
+    """Soonest future ``resets_at`` in the local provider snapshot. No live probe."""
+
+    from core.paths import state_root
+
+    path = state_root() / "usage" / "providers" / f"{provider_id}.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    windows = payload.get("windows") if isinstance(payload, dict) else None
+    if not isinstance(windows, list):
+        return None
+    now = datetime.now(timezone.utc)
+    resets: list[datetime] = []
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        parsed = routing._parse_until(window.get("resets_at"))
+        if parsed is not None and parsed > now:
+            resets.append(parsed)
+    if not resets:
+        return None
+    return min(resets)
 
 
 RECOVERY_RECEIPT_MAX_AGE = timedelta(days=7)

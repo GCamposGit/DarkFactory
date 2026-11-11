@@ -95,8 +95,11 @@ de um BUILD novo e conservam a ordem relativa. O limite
 quando ha candidatos sem merge suficientes. Uma sequencia de consumos concluidos sem merge
 proprio, limiar `ORCHESTRATOR_NO_MERGE_BUILD_PAUSE_THRESHOLD` (padrao 3), pausa so BUILD
 novo e pede o Sentinela uma vez por episodio; a entrega fica pendente ate o aviso ser
-aceito e uma nova leitura tenta de novo. Retomadas de `pending_delivery` seguem antes
-dessa pausa. O processo do despachante le a cota real; um teste sem `quota_lookup` nao
+aceito e uma nova leitura tenta de novo. Cada tentativa encerrada registra se produziu
+merge proprio, inclusive falha de infra ou de agente que gastou cota. Recusa de trava
+ou de host nao entra na sequencia. Ticket `planned` sem `work_kind` continua se ja tem
+worktree, PR, candidato, etapa pendente ou veredito de correcao; so a demanda sem esses
+sinais e BUILD novo. Retomadas de `pending_delivery` seguem antes dessa pausa. O processo do despachante le a cota real; um teste sem `quota_lookup` nao
 inventa escassez. O serviço não depende de sessão interativa. Uma reserva
 de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e
 o job volta a ser elegível para admissão em outro host. A indisponibilidade de uma VM é

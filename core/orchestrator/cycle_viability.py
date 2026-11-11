@@ -123,22 +123,47 @@ def _median(values: Sequence[float]) -> float:
     return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
+def _segment_label(record: Mapping[str, object], key: str) -> str:
+    value = record.get(key)
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower()
+
+
 def estimate_from_records(
     records: Sequence[Mapping[str, object]],
     *,
     fallback: Optional[StageEstimate] = None,
+    harness: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> StageEstimate:
-    """Median positive consumption per stage. Missing stages keep the fallback."""
+    """Median positive consumption per stage.
+
+    When ``harness`` or ``model`` is set, a stage uses the median of rows that
+    match that segment. A stage with no segmented sample falls back to the
+    global median, then to the configured fallback.
+    """
 
     base = fallback or fallback_estimate()
-    samples: dict[str, list[float]] = {name: [] for name in _FALLBACK_DEFAULTS}
+    wanted_harness = (harness or "").strip().lower()
+    wanted_model = (model or "").strip().lower()
+    segmented = bool(wanted_harness or wanted_model)
+    global_samples: dict[str, list[float]] = {name: [] for name in _FALLBACK_DEFAULTS}
+    segment_samples: dict[str, list[float]] = {name: [] for name in _FALLBACK_DEFAULTS}
     for record in records:
         stage = _stage_name(record.get("stage"))
         if stage is None:
             continue
         points = _positive_points(record)
-        if points is not None:
-            samples[stage].append(points)
+        if points is None:
+            continue
+        global_samples[stage].append(points)
+        if not segmented:
+            continue
+        harness_ok = not wanted_harness or _segment_label(record, "harness") == wanted_harness
+        model_ok = not wanted_model or _segment_label(record, "model") == wanted_model
+        if harness_ok and model_ok:
+            segment_samples[stage].append(points)
     sources = dict(base.sources)
     values = {
         "plan": base.plan,
@@ -146,11 +171,15 @@ def estimate_from_records(
         "correction": base.correction,
         "review": base.review,
     }
-    for stage, observed in samples.items():
-        if not observed:
-            continue
-        values[stage] = round(_median(observed), 4)
-        sources[stage] = "history"
+    for stage in _FALLBACK_DEFAULTS:
+        segment = segment_samples[stage]
+        observed = global_samples[stage]
+        if segment:
+            values[stage] = round(_median(segment), 4)
+            sources[stage] = "history"
+        elif observed:
+            values[stage] = round(_median(observed), 4)
+            sources[stage] = "history_global" if segmented else "history"
     return StageEstimate(
         plan=values["plan"],
         build=values["build"],
@@ -165,6 +194,8 @@ def load_cycle_estimate(
     *,
     reports_dir: Optional[os.PathLike[str]] = None,
     environment: Optional[Mapping[str, str]] = None,
+    harness: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> StageEstimate:
     """Read the ticket quota ledger unless the caller already supplied rows."""
 
@@ -174,7 +205,12 @@ def load_cycle_estimate(
         from core.usage.ticket_cost import read_ticket_quota_history
 
         records = read_ticket_quota_history(None if reports_dir is None else Path(reports_dir))
-    return estimate_from_records(records, fallback=fallback_estimate(environment))
+    return estimate_from_records(
+        records,
+        fallback=fallback_estimate(environment),
+        harness=harness,
+        model=model,
+    )
 
 
 def _number(value: object) -> Optional[float]:
@@ -232,10 +268,11 @@ def guard_build_start(
     estimate: Optional[StageEstimate] = None,
     manager: object | None = None,
     provider_id: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> BuildGuard:
     """Refuse BUILD when the cycle does not fit, otherwise reserve the review slice."""
 
-    estimate = estimate or load_cycle_estimate()
+    estimate = estimate or load_cycle_estimate(harness=harness, model=model)
     covered, reason, available = cycle_is_covered(
         harness,
         {harness: headroom},

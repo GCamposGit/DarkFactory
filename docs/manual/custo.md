@@ -10,7 +10,7 @@ da janela semanal e de 5h, custo de API e sucesso. Linha sem `ticket_id` e rejei
 - Mensalidades: `.factory/config/subscription_prices.json`, confirmadas pelo owner em 25/10/2026
   (20 USD/mes cada; Grok anual e Gemini promocional convertidos para o equivalente mensal).
 - Hub: `GET /api/usage/ticket-costs` lista o custo total por ticket (tentativas falhas incluidas).
-- `GET /api/usage/merge-quota` e o briefing mostram a mesma soma de pontos de headroom: `quota_spent_with_merge` para ticket `completed` com `delivery_evidence`, e `quota_spent_without_merge` para o restante. O painel de uso do Hub escreve as duas linhas.
+- `GET /api/usage/merge-quota` e o briefing mostram a mesma soma de pontos de headroom. Cada linha do ledger entra uma vez: tentativa repetida (`attempt_id`) ou o mesmo ticket, horario e estagio nao conta de novo. Linha com desfecho proprio (`produced_own_merge` ou `outcome`) usa esse desfecho, mesmo se o ticket depois ficou `completed`. Linha legada sem desfecho usa o status do ticket: `completed` com `delivery_evidence` conta como merge; o restante conta como sem merge. O painel de uso do Hub escreve as duas linhas.
 
 ## Cota do Claude Code
 

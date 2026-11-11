@@ -3,9 +3,13 @@
 
 Antes da worktree e do PLAN, a admissao estima o custo de PLAN, BUILD, correcao e REVIEW
 pelo historico (`core.orchestrator.cycle_viability`). Headroom desconhecido ou curto demais
-espera com `cycle_quota_short`. O probe de rota continua com `reserve_quota` falso. O BUILD
-so chama o agente depois de reservar, de forma atomica, a fatia de REVIEW. Estagio sem
-amostra usa `ORCHESTRATOR_CYCLE_FALLBACK_PLAN`, `_BUILD`, `_CORRECTION` e `_REVIEW`.
+espera com `cycle_quota_short`. Se o snapshot local do provedor traz `resets_at` no futuro,
+a espera usa esse horario; sem reset conhecido, espera o piso de 60 segundos. O probe de
+rota continua com `reserve_quota` falso. O BUILD so chama o agente depois de reservar, de
+forma atomica, a fatia de REVIEW. Essa reserva usa a mediana do harness e do modelo
+eleitos; estagio sem amostra nesse recorte cai na mediana global e, sem ela, no fallback.
+Estagio sem amostra usa `ORCHESTRATOR_CYCLE_FALLBACK_PLAN`, `_BUILD`, `_CORRECTION` e
+`_REVIEW`.
 
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
 (USR-452). Com testes descobertos e saída1 da suíte, mensagens de timeout ou

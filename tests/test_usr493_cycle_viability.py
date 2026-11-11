@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +27,7 @@ from core.orchestrator.cycle_viability import (
 )
 from core.orchestrator.merge_quota import aggregate_merge_quota, load_merge_quota_lines
 from core.orchestrator.no_merge_pause import ConsumptionCompleted, NoMergeBuildPause
-from core.orchestrator.work_admission import prioritize_fleet_queue
+from core.orchestrator.work_admission import prioritize_fleet_queue, signals_from_worktrees
 from core.usage.reservation import QuotaReservationManager
 from hub.backend.api import get_hub_service
 from hub.backend.main import app
@@ -76,6 +76,24 @@ def test_history_estimate_uses_median_and_configured_fallback() -> None:
     assert estimate.sources["plan"] == "fallback"
     assert estimate.total == 11.5
 
+    segmented = estimate_from_records(
+        [
+            {"stage": "BUILD", "harness": "codex", "model": "gpt", "weekly_delta": 2},
+            {"stage": "BUILD", "harness": "codex", "model": "gpt", "weekly_delta": 4},
+            {"stage": "BUILD", "harness": "claude", "model": "opus", "weekly_delta": 20},
+            {"stage": "REVIEW", "harness": "grok", "model": "grok", "weekly_delta": 6},
+        ],
+        fallback=fallback,
+        harness="codex",
+        model="gpt",
+    )
+    assert segmented.build == 3
+    assert segmented.sources["build"] == "history"
+    assert segmented.review == 6
+    assert segmented.sources["review"] == "history_global"
+    assert segmented.plan == 1.5
+    assert segmented.sources["plan"] == "fallback"
+
 
 def _open_gate(now: datetime) -> GateObservation:
     return GateObservation(
@@ -113,10 +131,28 @@ def test_admission_waits_when_cycle_quota_is_short_and_does_not_reserve_on_pick(
         clock=lambda: now,
         cycle_headroom={"codex": estimate.total - 0.1},
         cycle_estimate=estimate,
+        quota_reset_lookup=lambda _provider: None,
     )
     assert decision.outcome == "wait"
     assert decision.code == CODE_CYCLE_QUOTA_SHORT
     assert seen and all(flag is False for flag in seen)
+    assert decision.not_before == now + timedelta(seconds=60)
+
+    reset_at = datetime(2026, 11, 11, 6, tzinfo=timezone.utc)
+    waiting = admit(
+        build_caps=["harness:codex"],
+        read_caps=["harness:claude", "harness:codex", "harness:grok"],
+        execution_context="headless",
+        pick_route=pick_route,
+        earliest=lambda *_a, **_k: now,
+        observe_gate=lambda: _open_gate(now),
+        clock=lambda: now,
+        cycle_headroom={"codex": estimate.total - 0.1},
+        cycle_estimate=estimate,
+        quota_reset_lookup=lambda _provider: reset_at,
+    )
+    assert waiting.code == CODE_CYCLE_QUOTA_SHORT
+    assert waiting.not_before == reset_at
 
 
 def test_admission_refuses_short_and_unknown_headroom_without_reserving_pick_quota() -> None:
@@ -286,6 +322,58 @@ def test_candidate_limit_and_pause_keep_resumptions(monkeypatch: pytest.MonkeyPa
     assert paused == ["USR-RESUME"]
     assert reasons["USR-NEW"] == "new_build_paused_after_no_merge_sequence"
 
+    real, real_reasons = prioritize_fleet_queue(
+        ["USR-NEW", "USR-PR", "USR-TREE", "USR-FIX"],
+        [
+            {"id": "USR-NEW", "status": "planned"},
+            {"id": "USR-PR", "status": "planned", "pr_url": "https://github.com/org/repo/pull/12"},
+            {"id": "USR-TREE", "status": "planned", "worktree": "C:/dev/DarkFac/.worktrees/usr-tree"},
+            {"id": "USR-FIX", "status": "planned", "review_verdict": "changes_required"},
+        ],
+        new_builds_paused=True,
+        max_unmerged_candidates=1,
+    )
+    assert real == ["USR-PR", "USR-TREE", "USR-FIX"]
+    assert real_reasons["USR-NEW"] == "new_build_paused_after_no_merge_sequence"
+
+    limited, limited_reasons = prioritize_fleet_queue(
+        ["USR-NEW", "USR-PR", "USR-TREE"],
+        [
+            {"id": "USR-NEW", "status": "planned"},
+            {"id": "USR-PR", "status": "planned", "pr_number": 12},
+            {"id": "USR-TREE", "status": "planned", "worktree": "C:/wt/usr-tree"},
+        ],
+        max_unmerged_candidates=1,
+    )
+    assert limited == ["USR-PR", "USR-TREE"]
+    assert limited_reasons["USR-NEW"] == "candidate_limit"
+
+    discovered = signals_from_worktrees(
+        ["USR-493", "USR-REVIEW"],
+        [{"branch": "ticket/usr-493-20261111T014228Z", "worktree": "C:/wt/usr-493"}],
+        [{"ticket_id": "USR-REVIEW", "stage": "review", "worktree": "C:/wt/usr-review"}],
+    )
+    signaled, signaled_reasons = prioritize_fleet_queue(
+        ["USR-NEW", "USR-493", "USR-REVIEW"],
+        [
+            {"id": "USR-NEW", "status": "planned"},
+            {"id": "USR-493", "status": "planned"},
+            {"id": "USR-REVIEW", "status": "planned"},
+        ],
+        new_builds_paused=True,
+        work_signals=discovered,
+    )
+    assert signaled == ["USR-493", "USR-REVIEW"]
+    assert signaled_reasons["USR-NEW"] == "new_build_paused_after_no_merge_sequence"
+
+    fingerprint, fingerprint_reasons = prioritize_fleet_queue(
+        ["USR-FINGERPRINT"],
+        [{"id": "USR-FINGERPRINT", "status": "planned", "candidate_digest": "candidate-USR-FINGERPRINT"}],
+        new_builds_paused=True,
+    )
+    assert fingerprint == []
+    assert fingerprint_reasons["USR-FINGERPRINT"] == "new_build_paused_after_no_merge_sequence"
+
 
 def test_fleet_dispatches_the_ready_candidate_on_the_first_host(tmp_path: Path) -> None:
     launched: list[str] = []
@@ -413,6 +501,47 @@ def test_hub_and_briefing_share_the_merge_split(tmp_path: Path, monkeypatch: pyt
     assert body["quota_spent_with_merge"] == report["quota_spent_with_merge"]
     assert body["quota_spent_without_merge"] == report["quota_spent_without_merge"]
 
+    classified = [
+        {
+            "ticket_id": "USR-MERGED",
+            "timestamp": "2026-11-01T00:00:00+00:00",
+            "stage": "BUILD",
+            "delta_headroom": 5,
+            "produced_own_merge": False,
+        },
+        {
+            "ticket_id": "USR-MERGED",
+            "timestamp": "2026-11-01T00:00:00+00:00",
+            "stage": "BUILD",
+            "delta_headroom": 5,
+            "produced_own_merge": False,
+        },
+        {
+            "ticket_id": "USR-MERGED",
+            "timestamp": "2026-11-02T00:00:00+00:00",
+            "stage": "BUILD",
+            "attempt_id": "cycle-2",
+            "delta_headroom": 3,
+            "produced_own_merge": True,
+        },
+        {"ticket_id": "USR-OLD", "delta_headroom": 4},
+        {
+            "ticket_id": "USR-OLD",
+            "timestamp": "2026-11-03T00:00:00+00:00",
+            "stage": "REVIEW",
+            "delta_headroom": 1,
+        },
+        {
+            "ticket_id": "USR-OLD",
+            "timestamp": "2026-11-03T00:00:00+00:00",
+            "stage": "REVIEW",
+            "delta_headroom": 1,
+        },
+    ]
+    split = aggregate_merge_quota(classified, ["USR-MERGED"])
+    assert split["quota_spent_with_merge"] == 3
+    assert split["quota_spent_without_merge"] == 10
+
 
 def test_merge_resets_the_pause(tmp_path: Path) -> None:
     calls: list[int] = []
@@ -424,3 +553,74 @@ def test_merge_resets_the_pause(tmp_path: Path) -> None:
     assert brake.paused is False
     assert brake.admission_decision("BUILD").admitted is True
     assert calls == [1]
+
+
+def test_reap_records_failed_consumption_and_skips_lock_and_host(tmp_path: Path) -> None:
+    seen: list[tuple[str, bool]] = []
+
+    class _Brake:
+        state_path = tmp_path / "no_merge_pause.json"
+
+        def record_consumption(self, event: ConsumptionCompleted) -> None:
+            seen.append((event.work_id, event.produced_own_merge))
+
+        def retry_sentinel(self) -> None:
+            return None
+
+    dispatcher = FleetDispatcher(
+        DispatcherConfig(hosts=[HostSpec("grokbox", 1, None)], state_path=tmp_path / "state.json"),
+        demands_loader=lambda: [],
+        clock=lambda: 1000.0,
+    )
+    dispatcher._no_merge_brake = _Brake()
+
+    def finish(ticket: str, rc: int, text: str) -> None:
+        log = tmp_path / f"{ticket}.log"
+        log.write_text(text, encoding="utf-8")
+        dispatcher.in_flight["grokbox"] = InFlight(
+            ticket,
+            "grokbox",
+            SimpleNamespace(poll=lambda: rc),
+            log_path=log,
+            run_id=ticket,
+        )
+        dispatcher._reap()
+
+    finish("USR-INFRA", 75, "harness_infra_error")
+    finish("USR-FAIL", 1, "agent exploded")
+    finish("USR-BARE", 0, "finished without a merge marker")
+    finish("USR-LOCK", 2, "[TRAVA DE LINHA] ocupada")
+    finish("USR-HOST", 2, "worker_ocupado")
+    assert ("USR-INFRA", False) in seen
+    assert ("USR-FAIL", False) in seen
+    assert ("USR-BARE", False) in seen
+    assert all(ticket not in {"USR-LOCK", "USR-HOST"} for ticket, _merged in seen)
+
+
+def test_fleet_pause_keeps_planned_work_discovered_from_a_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.orchestrator.work_admission as work_admission
+
+    monkeypatch.setattr(
+        work_admission,
+        "discover_work_signals",
+        lambda _ids, **_kwargs: {"USR-FIX": {"worktree": str(tmp_path / "wt")}},
+    )
+    path = tmp_path / "no_merge_pause.json"
+    brake = NoMergeBuildPause(path, threshold=1, sentinel=lambda _ctx: None)
+    brake.record_consumption(_event("spent-1"))
+    launched: list[str] = []
+    dispatcher = FleetDispatcher(
+        DispatcherConfig(hosts=[HostSpec("grokbox", 1, None)], state_path=tmp_path / "state.json"),
+        demands_loader=lambda: [
+            {"id": "USR-NEW", "status": "planned", "created_at": "2026-01-01", "tags": [], "dependencies": []},
+            {"id": "USR-FIX", "status": "planned", "created_at": "2026-01-02", "tags": [], "dependencies": []},
+        ],
+        probe=lambda _host: HostProbe(True, "ready"),
+        launch=lambda tid, host, **_kwargs: launched.append(tid) or InFlight(tid, host.id, SimpleNamespace(poll=lambda: None)),
+        clock=lambda: 1000.0,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+    )
+    dispatcher._no_merge_brake = brake
+    cycle = dispatcher.run_cycle()
+    assert launched == ["USR-FIX"]
+    assert cycle["skipped"]["USR-NEW"] == "new_build_paused_after_no_merge_sequence"

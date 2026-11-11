@@ -53,6 +53,7 @@ EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "plan
 MIN_NOTEBOOK_WORKERS = 1
 INFRA_EXIT_CODES = frozenset({75})
 LOCK_MARKERS = ("[TRAVA DE LINHA]", "[RESERVA DE FROTA]", "ja possui PR ativo")
+HOST_REFUSAL_MARKERS = ("host_indisponivel", "host_recusado", "worker_ocupado")
 INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -447,6 +448,12 @@ def is_lock_refusal(log_tail: str) -> bool:
     return any(m in log_tail for m in LOCK_MARKERS)
 
 
+def is_host_refusal(log_tail: str) -> bool:
+    """The host refused the job before an agent spent quota."""
+
+    return any(marker in (log_tail or "") for marker in HOST_REFUSAL_MARKERS)
+
+
 def is_infra_failure(rc: int, log_tail: str) -> bool:
     return rc in INFRA_EXIT_CODES or any(m in log_tail for m in INFRA_MARKERS)
 
@@ -672,9 +679,8 @@ class FleetDispatcher:
                 continue
             del self.in_flight[host_id]
             _remove_operational_checkout(job.operational_checkout)
-            tail = _tail(job.log_path) if rc != 0 else ""
+            tail = _tail(job.log_path)
             if rc == 0:
-                tail = _tail(job.log_path)
                 self._observe_quota_consumption(job, produced_own_merge=_delivery_evidence(tail))
                 in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
                 if _delivery_evidence(tail):
@@ -697,18 +703,25 @@ class FleetDispatcher:
                     self._release_reservation(job)
                 if not _delivery_evidence(tail):
                     self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
-            elif is_lock_refusal(tail):
-                self._record_failure(job, rc, "lock", tail)
+            elif is_lock_refusal(tail) or is_host_refusal(tail):
+                host_refused = not is_lock_refusal(tail)
+                self._record_failure(job, rc, "host" if host_refused else "lock", tail)
                 self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.lock_requeue_cooldown_sec
-                self.lock_busy[host_id] = f"host_ocupado_trava:{job.ticket_id}"
-                logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
+                label = "host_recusado" if host_refused else "host_ocupado_trava"
+                self.lock_busy[host_id] = f"{label}:{job.ticket_id}"
+                if host_refused:
+                    logger.warning("host recusou %s em %s; reenfileirado sem consumo", job.ticket_id, host_id)
+                else:
+                    logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
             elif is_infra_failure(rc, tail):
+                self._observe_quota_consumption(job, produced_own_merge=False)
                 self._record_failure(job, rc, "infra", tail)
                 self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec
                 logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
             else:
+                self._observe_quota_consumption(job, produced_own_merge=False)
                 self._record_failure(job, rc, "failure", tail)
                 self._release_reservation(job)
                 self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
@@ -1137,7 +1150,11 @@ class FleetDispatcher:
         """Candidate priority, unmerged limit and the no-merge pause. Resumptions already ran."""
 
         from core.orchestrator.cycle_viability import load_cycle_estimate
-        from core.orchestrator.work_admission import prioritize_fleet_queue, scheduling_limit_from_environment
+        from core.orchestrator.work_admission import (
+            discover_work_signals,
+            prioritize_fleet_queue,
+            scheduling_limit_from_environment,
+        )
 
         brake = self._pause_brake()
         decision = brake.admission_decision("BUILD")
@@ -1168,6 +1185,7 @@ class FleetDispatcher:
             new_builds_paused=not decision.admitted,
             pause_reason=decision.reason,
             max_unmerged_candidates=scheduling_limit_from_environment(),
+            work_signals=discover_work_signals(queue),
         )
 
     def _observe_quota_consumption(self, job: InFlight, *, produced_own_merge: bool) -> None:
