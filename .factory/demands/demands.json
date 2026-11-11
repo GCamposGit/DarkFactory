@@ -11093,7 +11093,7 @@
     "project_id": "darkfac",
     "title": "Qualidade continua 1/3: ciclo recorrente comum com documentacao, seguranca e eficiencia",
     "origin": "user",
-    "status": "implementing",
+    "status": "planned",
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
@@ -11106,6 +11106,7 @@
       "initiative:continuous-quality-20261101",
       "handoff:cq-01"
     ],
+    "express_causes": [],
     "problem_statement": "Objetivo aprovado pelo owner: a fabrica e seus projetos precisam descobrir e encaminhar melhorias rotineiramente sem pedido manual, usando plenamente capacidade elegivel dentro dos tetos atuais. Ha coordenador, feeder, cadastro, fila persistente, roteador, canario, sentinela, docs-sync e retrospectiva; falta liga-los em um ciclo reutilizavel de observar, qualificar, priorizar, remediar e medir. Reconciliar baseline operacional antes de alterar e reutilizar implementacoes atuais; o caminho sugerido quality_cycle.py so nasce se a funcao nao existir de forma reaproveitavel. Entregar dominio headless com politica por projeto, disparo por mudanca e vencimento de evidencia, execucao devida persistida, cobertura explicita, retomada, cache e deduplicacao. Conectar primeiro documentacao, avisos de seguranca aplicaveis e telemetria de eficiencia. Cadencias iniciais tecnicas: consolidacao diaria barata de avisos/telemetria e revisao semanal de lacunas documentais, alem de eventos relevantes; configuraveis e ajustadas por evidencia. Essas cadencias operacionais nao sao prazo de implantacao. Achados aptos entram na mesma fila com origem e criterios verificaveis; correcoes pequenas dentro de objetivos aprovados usam a autonomia atual. Acionamento recorrente nao autoriza gasto novo, acesso novo ou mudanca de objetivos. Aceite desta entrega: automatico pelo fluxo normal quando criterios abaixo e prova real estiverem atendidos. Sem espera artificial para trabalho elegivel; usar slots e hosts aptos existentes e respeitar piso de cota. Pesquisa primaria: https://www.anthropic.com/research/building-effective-agents ; https://sre.google/workbook/eliminating-toil/ ; https://csrc.nist.gov/projects/ssdf/publications ; https://diataxis.fr/ . Handoff autocontido: este texto, fronteiras e criterios sao suficientes para o worker, sem depender dos arquivos locais nao publicados da conversa.\n\nPolitica de validacao e entrega: [\"Executar os comandos na worktree imutavel do candidato, nunca no checkout compartilhado.\", \"python -m core.harness.runner --quick\", \"lint-imports\", \"python scripts/complexity_ratchet.py\", \"python -m core.harness.docs_sync --base origin/main --head HEAD\", \"Revisao por familia diferente, CI verde, merge, deploy, smoke e evidencia real conforme fluxo vigente.\"]\nDiretriz do owner: Abrir os tickets no roadmap de implantacao e deixar a esteira em andamento assumir. Utilizar capacidade maxima elegivel dentro do orcamento vigente para avancar o mais rapido possivel, sem prazos estimados no plano.\n\nBaseline observado: Hub nao encontra ticket presente na fila persistente: GET https://darkhub.ggcampos.com/api/demands/tickets/USR-449 retornou HTTP 404 com detail Demand ticket USR-449 not found, enquanto get_ticket no PostgreSQL retorna a linha planned e o BacklogFeeder a considera elegivel. Mesmo resultado de leitura publica para os demais tickets desta implantacao. Causa ainda nao confirmada; reconciliar fonte/configuracao e versao do Hub antes de criar adapter ou fila nova. Este defeito integra a reconciliacao operacional desta entrega.",
     "core_journey": [
       "Coordenador identifica rotina devida ou insumo alterado de projeto cadastrado.",
@@ -11141,7 +11142,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-11-01T21:46:18.369650Z",
-    "updated_at": "2026-11-01T23:50:48.910227Z"
+    "updated_at": "2026-11-09T22:03:20.189454Z"
   },
   {
     "id": "USR-45",
