@@ -8,6 +8,13 @@ de ``line_lock``); hosts remotos fixam o worker do portao via ``DARKFAC_TEST_WOR
 ``DARKFAC_FLEET_GATE_REMOTE=1`` (``--remote-required``). Falha de infra reenfileira (o ticket segue
 ``planned`` e entra em cooldown); deploy pos-merge e deduplicado por janela de silencio.
 
+A tag ``line-block`` e a unica marca de via expressa. Um ticket elegivel com ela fura a fila regular
+e a lista de recuperacao e sai no primeiro host livre. Tag excluida, dependencia aberta e cooldown
+continuam de fora. Com recuperacao global ativa ha um unico slot: o ``line-block`` o ocupa quando
+ninguem esta em voo e nao abre segunda entrega quando ja ha uma. A segunda falha classificada
+``self_modification`` do mesmo ticket alerta o owner uma vez, com a causa e o comando unico.
+O alerta nao liga a recuperacao global.
+
 Uso::
 
     python -m core.line.fleet_dispatcher --loop
@@ -31,6 +38,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
+
+from core.demands.models import TAG_LINE_BLOCK
 from core.paths import state_root
 
 logger = logging.getLogger("darkfac.line.fleet_dispatcher")
@@ -163,6 +172,63 @@ def select_tickets(
         else:
             eligible.append((str(d.get("created_at", "")), tid))
     return [t for _, t in sorted(eligible)], skipped
+
+
+def demand_has_line_block(demand: Mapping[str, Any]) -> bool:
+    """True somente quando a tag canonica ``line-block`` esta na lista de tags.
+
+    Titulo, status e qualquer outro campo nao marcam a via expressa. Uma string
+    solta nao e lista de tags.
+    """
+    tags = demand.get("tags")
+    if isinstance(tags, (str, bytes)) or not isinstance(tags, (list, tuple)):
+        return False
+    return TAG_LINE_BLOCK in tags
+
+
+def order_fleet_queue(
+    queue: Sequence[str],
+    demands: Sequence[Mapping[str, Any]],
+    *,
+    recovery_tickets: Sequence[str] = (),
+    recovery_list_live: bool = False,
+    recovery_active: bool = False,
+    delivery_in_flight: bool = False,
+) -> tuple[list[str], dict[str, str]]:
+    """Ordena a fila do ciclo. A preempcao nao reabre quem ``select_tickets`` tirou.
+
+    Faixas, quando a lista de recuperacao esta viva: ``line-block``, depois a
+    lista, depois o restante. Sem a lista, ``line-block`` ainda fura a fila
+    regular. Com recuperacao global e entrega ou retomada ja em voo, a lista
+    viva nao admite ninguem; sem a lista, so o ``line-block`` fica de fora.
+    Dentro de cada faixa vale a ordem recebida; a lista de recuperacao mantem
+    a ordem configurada.
+    """
+    queued = [str(tid) for tid in queue]
+    if recovery_list_live and recovery_active and delivery_in_flight:
+        allowed = {str(tid) for tid in recovery_tickets if str(tid) in queued}
+        return [], {tid: "recuperacao_prioritaria" for tid in queued if tid not in allowed}
+
+    by_id: dict[str, Mapping[str, Any]] = {}
+    for row in demands:
+        tid = str(row.get("id", ""))
+        if tid and tid not in by_id:
+            by_id[tid] = row
+    blocks = [tid for tid in queued if tid in by_id and demand_has_line_block(by_id[tid])]
+    block_ids = set(blocks)
+    ordinary = [tid for tid in queued if tid not in block_ids]
+    if recovery_active and delivery_in_flight:
+        # Sem lista viva a reserva global pode nao estar presa na entrega que
+        # ja voa. O line-block ainda assim nao abre a segunda entrega.
+        return ordinary, {tid: "recuperacao_prioritaria" for tid in blocks}
+    if not recovery_list_live:
+        return blocks + ordinary, {}
+
+    allowed_order = [str(tid) for tid in recovery_tickets if str(tid) in queued]
+    allowed_ids = set(allowed_order)
+    recovery_rest = [tid for tid in allowed_order if tid not in block_ids]
+    regular = [tid for tid in queued if tid not in block_ids and tid not in allowed_ids]
+    return blocks + recovery_rest + regular, {}
 
 
 def default_demands_loader() -> list[dict[str, Any]]:
@@ -397,7 +463,11 @@ _CAUSE_HUMAN_RE = re.compile(r"\[ERRO NA ENTREGA\][^\n]*?causa:\s*([a-z0-9_]+)")
 
 
 def classify_log_cause(log_tail: str) -> str:
-    """The official delivery line takes precedence over nested gate output."""
+    """The official delivery line takes precedence over nested gate output.
+
+    ``self_modification`` counts only on that line (USR-494). A mention in the
+    tail, including a JSON envelope, is not this cause.
+    """
     official = list(_CAUSE_HUMAN_RE.finditer(log_tail or ""))
     if official:
         return official[0].group(1)
@@ -408,7 +478,10 @@ def classify_log_cause(log_tail: str) -> str:
         except ValueError:
             continue
         if isinstance(payload, dict) and payload.get("ok") is False and payload.get("cause"):
-            return str(payload["cause"])
+            cause = str(payload["cause"])
+            if cause == "self_modification":
+                continue
+            return cause
     return ""
 
 
@@ -461,6 +534,7 @@ class FleetDispatcher:
         digest_hook: Optional[Callable[[], Any]] = None,
         sentinel_hook: Optional[Callable[[], Any]] = None,
         admission_store: Any = None,
+        express_alert: Optional[Callable[[Any], bool]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -483,6 +557,7 @@ class FleetDispatcher:
                 logger.error("admission store indisponivel na inicializacao (%s)", type(exc).__name__)
                 admission_store = None
         self.admission_store = admission_store
+        self.express_alert = express_alert  # None usa o alerta ALL da via expressa (USR-494 T4)
         self.in_flight: dict[str, InFlight] = {}  # trava por host: no maximo um ticket por host
         self.cooldown: dict[str, float] = {}
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
@@ -508,6 +583,7 @@ class FleetDispatcher:
         }])[-FAILURE_HISTORY_LIMIT:]
         logger.error("%s falhou em %s: exit_code=%s kind=%s motivo=%s", job.ticket_id, job.host_id, rc, kind,
                      " | ".join(reason.splitlines()))
+        cause = ""
         try:
             from core.line.admission_store import TICKET_CAUSES, make_fingerprint
 
@@ -531,6 +607,37 @@ class FleetDispatcher:
                              ticket_cause or fingerprint.error_class, occurrences)
         except Exception:  # noqa: BLE001 - no admission can be trusted after persistence failure
             logger.exception("falha ao persistir circuit breaker de %s", job.ticket_id)
+        self._note_express_failure(job.ticket_id, cause)
+
+    def _express_episode_store(self) -> Any:
+        from core.line.express_lane import ExpressEpisodeStore
+
+        return ExpressEpisodeStore(self.config.state_path.with_name("express_episodes.json"))
+
+    def _note_express_failure(self, ticket_id: str, cause: str) -> None:
+        """Registra o episodio da causa classificada. Falha de aviso nao apaga o hold."""
+
+        try:
+            from core.line.express_lane import observe_express_failure
+
+            observe_express_failure(
+                ticket_id,
+                cause,
+                store=self._express_episode_store(),
+                notify=self.express_alert,
+            )
+        except Exception:  # noqa: BLE001 - o alerta nao desfaz o hold nem a falha ja registrada
+            logger.exception("episodio da via expressa falhou para %s", ticket_id)
+
+    def _close_express_episode(self, ticket_id: str) -> None:
+        """Entrega concluida encerra o episodio self_modification deste ticket."""
+
+        try:
+            from core.line.express_lane import observe_express_success
+
+            observe_express_success(ticket_id, store=self._express_episode_store())
+        except Exception:  # noqa: BLE001 - o encerramento do episodio nao desfaz a entrega
+            logger.exception("falha ao encerrar episodio da via expressa de %s", ticket_id)
 
     def _release_reservation(self, job: InFlight) -> None:
         if not job.admission_token:
@@ -564,6 +671,7 @@ class FleetDispatcher:
                 tail = _tail(job.log_path)
                 in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
                 if _delivery_evidence(tail):
+                    self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
                     if in_recovery:
                         pending = {"ticket_id": job.ticket_id, "run_id": job.run_id}
@@ -946,18 +1054,20 @@ class FleetDispatcher:
         queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
         terminal = {str(d.get("id")) for d in demands if d.get("status") in _TERMINAL_STATUSES}
         recovery_list = self._recovery_list_status(terminal, busy, queue, now)
-        if recovery_list.get("live"):
-            allowed = [tid for tid in self.config.recovery_tickets if tid in queue]
-            rest = [tid for tid in queue if tid not in allowed]
-            if not self.recovery.get("active"):
-                queue = allowed + rest  # lista so prioriza: todo host livre e usado
-            else:
-                active_resume = any(r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions)
-                if active_resume or self.in_flight:
-                    skipped.update({tid: "recuperacao_prioritaria" for tid in rest})
-                    queue = []
-                elif allowed:
-                    queue = allowed + rest
+        list_live = bool(recovery_list.get("live"))
+        recovery_active = bool(self.recovery.get("active"))
+        delivery_in_flight = bool(self.in_flight) or any(
+            r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions
+        )
+        queue, preempt_skips = order_fleet_queue(
+            queue,
+            demands,
+            recovery_tickets=self.config.recovery_tickets,
+            recovery_list_live=list_live,
+            recovery_active=recovery_active,
+            delivery_in_flight=delivery_in_flight,
+        )
+        skipped.update(preempt_skips)
         dispatched: list[dict[str, str]] = []
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}

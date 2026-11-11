@@ -97,6 +97,10 @@ O roteador valida as capacidades com `agent_cli.supports(harness, mode)` antes d
 
 Na recuperacao USR-452, uma falha real de teste com contagem no HARNESS_RESULT nao e tratada como worker indisponivel por conter essa mensagem no traceback. O launcher corrige o candidato antes de repetir o portao; nao chama o owner para resolver essa classificacao tecnica.
 
+## Negação ao alterar o motor no chat (USR-494 T2)
+
+Self-Modification, ou `permission denied` ao editar `core/line`, `core/harness`, `run_ticket.py` ou `scripts/line_validate.py`, grava `self_modification` e a tag `line-block` no control store, uma vez. O run não relança essa edição. `protected_path` e `permission denied` de banco ou ACL não entram nessa causa. A linha impressa é `[ERRO NA ENTREGA] causa: self_modification`. A fábrica abre uma ação do owner com um único comando, `python -m core.line.express_lane run --ticket <ID>`. Registrar de novo devolve a mesma ação aberta. O comando lista todas as falhas do host, inclusive o piso de cota, e só então executa o ticket.
+
 ## Diagnostico de holds por ticket (USR-484)
 
 `python -m core.ops.briefing` inclui holds duraveis por ticket com a causa e a

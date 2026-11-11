@@ -19,6 +19,8 @@ from core.roadmap.models import (
 TAG_USER_DEMAND = "user-demand"
 TAG_CODE_REVIEW = "code-review"
 TAG_AGENT_FEATURE = "agent-feature"
+# Via expressa da frota (USR-494). O despachante lê só esta tag, não outro campo.
+TAG_LINE_BLOCK = "line-block"
 
 
 class DemandOrigin(str, Enum):
@@ -62,6 +64,8 @@ class UserTicket(BaseModel):
     lifecycle_stage: LifecycleStage = Field(default=LifecycleStage.EXECUTION)
     horizon: PlanningHorizon = Field(default=PlanningHorizon.NOW)
     tags: list[str] = Field(default_factory=lambda: [TAG_USER_DEMAND], validate_default=True)
+    # Causas da via expressa (USR-494). A gravacao repetida nao duplica o item.
+    express_causes: list[str] = Field(default_factory=list)
 
     problem_statement: str = Field(default="")
     core_journey: list[str] = Field(default_factory=list)
@@ -82,6 +86,16 @@ class UserTicket(BaseModel):
         if TAG_USER_DEMAND not in cleaned:
             cleaned.insert(0, TAG_USER_DEMAND)
         return cleaned
+
+    @field_validator("express_causes")
+    @classmethod
+    def dedupe_express_causes(cls, values: list[str]) -> list[str]:
+        seen: list[str] = []
+        for item in values:
+            cleaned = str(item).strip()
+            if cleaned and cleaned not in seen:
+                seen.append(cleaned)
+        return seen
 
     @property
     def is_live_deploy(self) -> bool:

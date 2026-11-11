@@ -1,4 +1,4 @@
-<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 # Operação da frota
 
@@ -47,6 +47,27 @@ python -m core.line.fleet_dispatcher --loop --recovery-tickets "USR-1,USR-2"
 continua pela fila regular e usa os hosts livres, sempre respeitando reservas e `suite_lock`.
 Com `recovery.active=true`, o modo global de recuperação mantém no máximo uma entrega em
 andamento e a lista segue serializada. Retomadas em execução têm precedência.
+
+A tag `line-block` é a única marca de via expressa lida pelo despachante (USR-494). Um ticket
+elegível com essa tag sai antes da lista de recuperação e do restante da fila, no primeiro host
+livre. Título, campo extra ou outra tag não mudam a ordem. Tag excluída, dependência aberta e
+cooldown deixam o ticket fora da fila mesmo com `line-block`. Com `recovery.active=false`, os
+hosts livres seguintes seguem a lista e depois a fila regular. Com `recovery.active=true` e
+nenhuma entrega em voo, o `line-block` ocupa o único slot e o item da lista espera o ciclo
+seguinte. Com uma entrega ou retomada já em voo, o `line-block` não abre segunda entrega. O
+comando lançado continua `run_ticket.py <id> --fleet --host-id <host>`.
+
+Negação ao editar o motor no chat (USR-494 T2) grava a causa `self_modification` e acrescenta a tag `line-block` no control store. A frase Self-Modification, ou `permission denied` cujo caminho é `core/line`, `core/harness`, `run_ticket.py` ou `scripts/line_validate.py`, entra nessa causa. A mesma gravação não duplica a tag nem a causa. `protected_path` e `permission denied` de banco ou ACL ficam de fora. O run que recebeu a negação não relança a mesma edição. `classify_log_cause` lê `self_modification` na linha `[ERRO NA ENTREGA] causa:`; menção só na cauda do log não conta. Portão, revisão e piso de cota permanecem.
+
+Quando a causa é `self_modification`, a fábrica abre uma ação do owner com um único comando (USR-494 T3), implementado em `core/line/express_lane.py`. Registrar de novo devolve a mesma ação aberta. O comando é:
+
+```powershell
+python -m core.line.express_lane run --ticket USR-494
+```
+
+Troque `USR-494` pelo id do ticket. O comando percorre todos os requisitos do host e imprime cada falha, inclusive o piso de cota de 15%. Com qualquer requisito ausente, não lança o ticket. Com o host válido, lança exatamente `run_ticket.py <ID> --fleet --host-id <host deste host>`, uma vez. Ticket já em voo (`implementing`, `validating` ou processo vivo) ou terminal (`completed`, `cancelled`) termina com sucesso e não cria outro processo. Portão, revisão e o piso de cota do `run_ticket.py` continuam valendo.
+
+A segunda ocorrência da mesma causa `self_modification` alerta o owner uma vez (USR-494 T4). A primeira só grava o episódio em `express_episodes.json`, ao lado do estado do despachante, e fica em silêncio. O alerta sai pelo `NotificationService` no canal ALL, com a causa `self_modification` e o comando único `python -m core.line.express_lane run --ticket <ID>` como próximo passo. Outra ocorrência desse episódio não gera outro alerta. A chave é o ticket e a causa classificada: o texto da cauda do log não abre episódio nem muda a chave. Entrega com `[DELIVERY_MERGED]` ou `merged_awaiting_deploy`, ou uma causa classificada diferente no mesmo ticket, apaga o episódio; duas falhas novas da mesma causa podem alertar outra vez. O alerta não liga `recovery.active`. O hold do ticket continua no `recovery_failure_threshold` já configurado.
 
 Falha repetida do mesmo ticket (qualquer causa) cria hold so desse ticket; o modo global de recuperação não é mais ativado por falhas, e os demais tickets seguem despachados.
 

@@ -84,6 +84,9 @@ ErrorKind = Optional[
         # Grok cancelled an edit of a guard.py protected path (USR-205). Not a transient crash:
         # the same prompt cancels again, so the launcher stops and asks the owner.
         "protected_path",
+        # Chat denied an edit of the line motor (USR-494). Not a transient crash and not
+        # protected_path: the same run must not repeat that edit.
+        "self_modification",
         # The harness's own CLI tooling (sandbox/terminal setup, not the model or the quota) failed to
         # even start the call, e.g. Codex's `helper_unknown_error: setup refresh had errors` when the
         # Codex Desktop app holds a lock on a sandboxed runtime binary (USR-188). Distinct from `crash`
@@ -375,6 +378,10 @@ def _classify_error(text: str) -> ErrorKind:
         return "rate_limited"
     if _AUTH_PATTERN.search(text):
         return "auth_expired"
+    from core.line.express_lane import CAUSE_SELF_MODIFICATION, classify_engine_denial
+
+    if classify_engine_denial(text) == CAUSE_SELF_MODIFICATION:
+        return "self_modification"
     return "crash"
 
 
@@ -1463,21 +1470,34 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
     if stop_reason == "cancelled":
-        from core.line.protected_edit import diagnose_grok_cancellation
+        from core.line.express_lane import cancelled_edit_kind
+        from core.line.protected_edit import diagnose_grok_cancellation, load_grok_chat_rows
 
         session_id = parsed.get("sessionId") if isinstance(parsed, dict) else None
         if not isinstance(session_id, str):
             session_id = None
+        try:
+            rows = load_grok_chat_rows(req.cwd, session_id)
+        except Exception as exc:  # a broken session stays on the ordinary diagnosis
+            logger.warning("Could not read the Grok session for a motor denial: %s", type(exc).__name__)
+            rows = None
         diagnosis = diagnose_grok_cancellation(
             cwd=req.cwd,
             session_id=session_id,
             permission_mode=grok_permission_mode(),
             agent_text=result_text,
+            rows=rows,
+        )
+        kind = cancelled_edit_kind(
+            diagnosis_kind=diagnosis.error_kind,
+            diagnosis_text=diagnosis.text,
+            stderr=stderr,
+            rows=rows,
         )
         return AgentResult(
             ok=False, text=redact_secrets(diagnosis.text), harness="grok", model=model, effort=effort,
             duration_s=duration, usage=usage, cost_usd=cost_usd,
-            error_kind=diagnosis.error_kind,  # type: ignore[arg-type]
+            error_kind=kind,  # type: ignore[arg-type]
             protected_path=diagnosis.protected_path,
             **diag,
         )

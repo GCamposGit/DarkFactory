@@ -15,6 +15,7 @@ from core.demands.models import (
     TAG_USER_DEMAND,
     TAG_CODE_REVIEW,
     TAG_AGENT_FEATURE,
+    TAG_LINE_BLOCK,
 )
 from core.demands.service import DemandsService, build_default_demands_service
 from core.demands.specifier import DemandSpecifier, HeuristicDemandSpecifier
@@ -28,6 +29,7 @@ __all__ = [
     "TAG_USER_DEMAND",
     "TAG_CODE_REVIEW",
     "TAG_AGENT_FEATURE",
+    "TAG_LINE_BLOCK",
     "DemandsService",
     "build_default_demands_service",
     "DemandSpecifier",

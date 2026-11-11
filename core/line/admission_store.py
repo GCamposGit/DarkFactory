@@ -29,7 +29,12 @@ def safe_digest(value: Any) -> str:
     return _canonical_hash(value)
 
 
-TICKET_CAUSES = frozenset({"gate_failed", "gate_dirty_worktree", "fix_agent_no_changes"})
+TICKET_CAUSES = frozenset({
+    "gate_failed",
+    "gate_dirty_worktree",
+    "fix_agent_no_changes",
+    "self_modification",
+})
 
 
 def normalize_error(error: BaseException | str) -> str:
