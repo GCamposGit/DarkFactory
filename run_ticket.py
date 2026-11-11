@@ -37,6 +37,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.line import agent_retry, cancellation, line_lock, local_cancel
+from core.line import host_preflight as host_preflight_mod
 from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
@@ -2781,6 +2782,47 @@ def _request_cancel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _requested_manual_harness(args: argparse.Namespace) -> Optional[str]:
+    raw = getattr(args, "harness", None)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw.lower().strip()
+
+
+def _emit_host_preflight(args: argparse.Namespace, report: Any) -> Optional[int]:
+    """Print quota gaps, or refuse with exit 2 before the line reservation (USR-486)."""
+    if report.ok:
+        if report.gaps and not args.json:
+            for gap in report.gaps:
+                label = "lacuna de cota" if gap.cause == "quota_unread" else "harness indisponivel"
+                print(
+                    f"[AVISO] {label} {gap.harness}: {gap.message}. Correcao: {gap.fix_command}",
+                    file=sys.stderr,
+                )
+        return None
+    payload = {
+        "status": "refused",
+        "reason": "host_preflight",
+        "cause": report.cause,
+        "fix_command": report.fix_command,
+        "message": report.message,
+        "gaps": [gap.to_dict() for gap in report.gaps],
+    }
+    ticket_id = getattr(args, "ticket_id", None)
+    if isinstance(ticket_id, str) and ticket_id.strip():
+        payload["ticket_id"] = ticket_id.strip()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+    else:
+        detail = report.message
+        if report.cause:
+            detail = f"{detail} (causa: {report.cause})"
+        if report.fix_command:
+            detail = f"{detail}. Correcao: {report.fix_command}"
+        print(f"[RECUSA] {detail}", file=sys.stderr)
+    return 2
+
+
 def _needs_line_lock(args: argparse.Namespace) -> bool:
     """False for invocations that never touch pytest/the Desktop worker/the agent (USR-250).
 
@@ -2816,6 +2858,13 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
     # set on its environment below) instead of trying to acquire it a second time.
     if not _needs_line_lock(args):
         return None
+    # USR-486: gh and the harness CLIs are checked before line_lock.guard reserves the run.
+    # A delivery child already holds the lock (ENV_INHERITED); its parent probed before reserving.
+    if not line_lock.is_inherited():
+        report = host_preflight_mod.run_host_preflight(requested_harness=_requested_manual_harness(args))
+        refused = _emit_host_preflight(args, report)
+        if refused is not None:
+            return refused
     recovery = bool(getattr(args, "recovery", False) or os.environ.get("DARKFAC_RECOVERY_MODE") == "1")
     if recovery:
         # This admission probe is best-effort: it reserves no slot and another run can
@@ -3992,6 +4041,29 @@ def _stage_build(
     }
 
 
+def _refuse_active_pr_lookup(args: argparse.Namespace, ticket: UserTicket, exc: PullRequestLookupError) -> int:
+    """Refuse before a worktree exists. JSON carries the classified cause and the fix command."""
+    refusal = {
+        "status": "refused",
+        "reason": "pull_request_lookup_unavailable",
+        "ticket_id": ticket.id,
+        "project_id": ticket.project_id,
+        "message": str(exc),
+        "cause": exc.cause,
+        "fix_command": exc.fix_command,
+    }
+    if args.json:
+        print(json.dumps(refusal, ensure_ascii=False), file=sys.stderr)
+    else:
+        detail = str(exc)
+        if exc.cause:
+            detail = f"{detail} (causa: {exc.cause})"
+        if exc.fix_command:
+            detail = f"{detail}. Correcao: {exc.fix_command}"
+        print(f"[RECUSA] {detail}", file=sys.stderr)
+    return 2
+
+
 def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: contextlib.ExitStack) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -4047,10 +4119,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
                 project_registry=ProjectRegistry(PROJECT_ROOT / ".factory" / "projects.json"),
             )
         except PullRequestLookupError as exc:
-            refusal = {"status": "refused", "reason": "pull_request_lookup_unavailable", "ticket_id": ticket.id,
-                       "project_id": ticket.project_id, "message": str(exc)}
-            print(json.dumps(refusal, ensure_ascii=False) if args.json else f"[RECUSA] {exc}", file=sys.stderr)
-            return 2
+            return _refuse_active_pr_lookup(args, ticket, exc)
         if active_pr is not None:
             refusal = {"status": "refused", "reason": "active_pull_request", "ticket_id": ticket.id,
                        "project_id": ticket.project_id, "existing_execution": active_pr.to_dict()}

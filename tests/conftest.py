@@ -89,6 +89,23 @@ def _disable_live_pull_request_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _skip_live_host_preflight(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Launcher tests must not execute gh, claude, codex or grok (USR-486).
+
+    A module that drives the real preflight sets ``REAL_HOST_PREFLIGHT = True``.
+    Tests that only replace ``run_host_preflight`` for one case override this stub.
+    """
+    if getattr(request.module, "REAL_HOST_PREFLIGHT", False):
+        return
+    import core.line.host_preflight as host_preflight
+
+    def _allow(*_args: object, **_kwargs: object) -> host_preflight.HostPreflightReport:
+        return host_preflight.HostPreflightReport(ok=True, cause=None, fix_command=None, message="", gaps=())
+
+    monkeypatch.setattr(host_preflight, "run_host_preflight", _allow)
+
+
+@pytest.fixture(autouse=True)
 def _allow_ticket_admission(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Launcher tests do not read live quotas or gate workers (USR-468).
 

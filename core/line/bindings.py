@@ -401,6 +401,23 @@ class PlanningStageHandler:
         )
 
 
+def _active_pr_lookup_result(exc: PullRequestLookupError) -> StageResult:
+    """Map a lookup failure to a stage result.
+
+    ``StageResult`` has no ``fix_command`` field, so a classified command is the
+    second evidence ref. A message-only error keeps the legacy cause and that
+    message as the only evidence.
+    """
+    evidence = [str(exc)]
+    if exc.fix_command:
+        evidence.append(exc.fix_command)
+    return StageResult(
+        outcome="failed",
+        cause_code=exc.cause or "active_pr_lookup_failed",
+        evidence_refs=evidence,
+    )
+
+
 class DevelopmentStageHandler:
     """Adapts `stage_build.DevelopmentStage.run(project, run_id)` to the `StageHandler` protocol."""
 
@@ -446,7 +463,7 @@ class DevelopmentStageHandler:
                 )
         except PullRequestLookupError as exc:
             logger.warning("Could not verify active PR before development of %s: %s", ticket_id, exc)
-            return StageResult(outcome="failed", cause_code="active_pr_lookup_failed", evidence_refs=[str(exc)])
+            return _active_pr_lookup_result(exc)
         if active_pr is not None:
             logger.info(
                 "Skipping development of %s because active PR #%s already owns the ticket",

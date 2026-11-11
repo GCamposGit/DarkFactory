@@ -172,6 +172,14 @@ Um piloto sem credencial não assume valor nem segue com mock: `require_pilot_se
 jeito do código do piloto obter um segredo e levanta `PilotSecretMissingError` quando a chave
 falta — falha fechada, igual ao resto da fábrica.
 
+## Consulta de PR ativo no intake (USR-486)
+
+`submit_ticket_to_line` consulta o PR aberto antes de abrir o store da linha. Se o `gh` falta, não está
+autenticado, estoura o tempo ou o GitHub devolve erro, a admissão volta `ok=False` com `state` igual à causa
+(`gh_missing`, `gh_unauthenticated`, `gh_timeout` ou `github_error`) e a `message` inclui o comando de
+correção. O store da linha não abre. Uma `PullRequestLookupError` só com a mensagem antiga continua sem causa
+e sem run.
+
 ## Rodar localmente
 
 ```powershell

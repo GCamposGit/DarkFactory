@@ -1,4 +1,4 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py, core/line/host_preflight.py, core/line/active_pull_request.py -->
 # Motor da esteira
 
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
@@ -262,10 +262,29 @@ entrega em `_deliver_sync`, `_deliver_external_project` e `_deliver_worktree`.
 
 Antes da rota e da criacao de worktree, `_run` adquire a guarda canonica do ticket e consulta os PRs abertos
 do repositorio. Se encontrar um PR que mencione o ticket exato no branch, titulo ou corpo, a execucao termina
-com recusa estruturada `active_pull_request` e referencia ao PR existente. Se a consulta ao GitHub falhar,
-tambem recusa com `pull_request_lookup_unavailable`; nao inicia uma segunda implementacao sem confirmar o estado.
-O intake da linha aplica a mesma verificacao e consulta a propriedade manual persistida antes de aceitar uma nova
-tentativa. Assim, o PR continua protegendo o ticket mesmo depois que o processo que abriu o PR encerra.
+com recusa estruturada `active_pull_request` e referencia ao PR existente. Se a consulta falhar, o processo
+sai com codigo 2 e `pull_request_lookup_unavailable`, sem criar worktree. O JSON traz `cause` e `fix_command`
+distintos (USR-486): `gh_missing` pede `winget install --id GitHub.cli -e`; `gh_unauthenticated` pede
+`gh auth login`; `gh_timeout` pede `gh auth status`; `github_error` repete `gh pr list --state open --repo <slug>`
+e a mensagem inclui o status HTTP (por exemplo 502) quando o `gh` o devolve. Uma falha sem causa classificada
+continua fail-closed. O intake da linha devolve `state` igual a essa causa e a mensagem com o comando, sem
+abrir o store. O desenvolvimento usa a causa como `cause_code` e, sem causa, mantem `active_pr_lookup_failed`.
+O intake tambem consulta a propriedade manual persistida antes de aceitar uma nova tentativa. Assim, o PR
+continua protegendo o ticket mesmo depois que o processo que abriu o PR encerra.
+
+Antes dessa reserva, quando `_needs_line_lock` e verdadeiro, `core/line/host_preflight` roda e reusa
+`classify_gh_call`. `gh auth status` ausente, sem autenticacao ou em timeout recusa com exit 2, `reason`
+`host_preflight`, `cause` e `fix_command`, e `line_lock.guard` nao e chamado. `github_error` nesse probe pede
+de novo `gh auth status`. Em seguida o host sonda `claude auth status --json`, `codex login status` e
+`grok models`. `--harness grok` sem autenticacao recusa com `grok_unauthenticated` e `grok login` antes da
+reserva; o mesmo vale para claude (`claude auth login`) e codex (`codex login`). Se nenhum dos tres esta
+utilizavel, a causa e `no_usable_harness` e a reserva nao acontece. Com `gh` e ao menos um harness autenticado,
+claude ou grok sem autenticacao entram em `gaps` como `quota_unread`, com o comando de correcao de cada um, e a
+execucao segue. Sem `--json`, cada lacuna sai como `[AVISO] lacuna de cota`. `--dry-run` nao chama esses
+runners. O filho de entrega com `DARKFAC_LINE_LOCK_HELD` ja faz parte da mesma execucao: nao sonda de
+novo e segue para o `guard`, cujo `acquire` e no-op. Um `--resume-delivery` avulso, sem essa variavel,
+ainda sonda antes de reservar. Binario ausente pede `npm install -g` do pacote
+(`@anthropic-ai/claude-code`, `@openai/codex`, `@xai-official/grok`).
 
 `core/line/ticket_stages.py` guarda os helpers sem dependencia de globais substituidas pelos testes
 (construtores de prompt, comando/ambiente da entrega, payloads e relatorios de falha, `GateState`).

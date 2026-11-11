@@ -74,7 +74,7 @@ class LineSubmission(BaseModel):
     demand_id: str | None = None
     replayed: bool = False
     attempt: int = 1
-    state: str = ""  # "submitted" | "in_flight" | "delivered" ("" when refused)
+    state: str = ""  # "submitted" | "in_flight" | "delivered" | lookup cause ("" when refused without one)
     message: str = ""
 
 
@@ -417,6 +417,20 @@ def _existing_attempt_submission(
     return latest_attempt + 1, False, None
 
 
+def _lookup_refusal(ticket: UserTicket, exc: PullRequestLookupError) -> LineSubmission:
+    """Fail closed before the line store opens, naming the gh cause and the fix command."""
+    logger.warning("Active PR lookup failed for %s: %s", ticket.id, exc)
+    command = exc.fix_command or ""
+    detail = f"{exc} Correcao: {command}" if command else str(exc)
+    return LineSubmission(
+        ok=False,
+        ticket_id=ticket.id,
+        project_id=ticket.project_id,
+        state=exc.cause or "",
+        message=f"Nao foi possivel verificar PRs ativos para {ticket.id}; admissao retida: {detail}",
+    )
+
+
 def submit_ticket_to_line(
     ticket_id: str,
     *,
@@ -532,8 +546,7 @@ def submit_ticket_to_line(
             replayed=True,
         )
     except PullRequestLookupError as exc:
-        logger.warning("Active PR lookup failed for %s: %s", ticket.id, exc)
-        return refused(f"Nao foi possivel verificar PRs ativos para {ticket.id}; admissao retida: {exc}")
+        return _lookup_refusal(ticket, exc)
     except Exception as exc:  # store down, schema, etc: fail closed, tell the caller
         logger.error("Line intake for ticket %s failed: %s", ticket.id, exc)
         return refused(f"Falha ao enfileirar {ticket.id} na linha: {exc}")
