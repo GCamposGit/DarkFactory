@@ -2,6 +2,28 @@
 
 O repositório é deliberadamente independente do editor ou do agente. O contrato comum está em `MISSION.md`, `FACTORY_RULES.md` e `AGENTS.md`.
 
+## Identidade da sessao, sessao ativa e coordenador (USR-483)
+
+Trocar de harness, de modelo ou de PC e trabalhar em paralelo sao comportamento esperado. Detectar quem executa a sessao nao torna essa sessao coordenadora.
+
+- **Identidade da sessao.** `core/line/session_identity.py` reconhece o harness pelo sinal do proprio processo. Codex confirma por `CODEX_THREAD_ID`. Antigravity confirma por `ANTIGRAVITY_SESSION_ID` e por `TERM_PROGRAM` antigravity. Claude usa `CLAUDECODE` ou `CLAUDE_CODE_SESSION_ID`. Grok usa `GROK_SESSION_ID` ou `GROK_AGENT`. Um valor antigo de `DARKFAC_OPERATING_HARNESS` nao define a identidade da sessao nem o coordenador. Sem sinal confiavel o registro grava `unknown`; o briefing nao reaproveita valor antigo para escolher harness. Override explicito vale so para a chamada atual.
+- **Sessao ativa.** A consulta registra a sessao em `line_sessions` com heartbeat de 900 segundos (15 minutos, `LEASE_TTL_SECONDS`). Varias sessoes ativas convivem, no mesmo harness ou em outro, no mesmo modelo ou em outro, no mesmo PC ou em outro.
+- **Coordenador.** No maximo uma lease, com sessao, harness, modelo, host, horario, origem `owner_decision` e heartbeat. O registro e `DARKFAC_SHARED_STATE_PATH` ou `<state root>/state/shared.sqlite3` e vale entre PCs.
+
+Consulta e troca usam `scripts/line_briefing.py`. O procedimento nao grava `DARKFAC_OPERATING_HARNESS` no ambiente do usuario:
+
+```powershell
+python C:\dev\DarkFac\scripts\line_briefing.py
+python C:\dev\DarkFac\scripts\line_briefing.py --json
+python C:\dev\DarkFac\scripts\line_briefing.py assumir --decisao-owner
+```
+
+`assumir --decisao-owner` troca a lease na hora, de qualquer harness, PC ou sessao, sem pedido de confirmacao. Sem a marca, o processo sai com codigo 2 e o registro nao muda. Consultar deixa a lease como esta. Quem ja coordena renova o heartbeat vigente ao consultar. Lease vencida nao se renova. A fabrica nao elege outro coordenador. A causa fica `no_coordinator` ou `heartbeat_expired`, e a frota segue. Fatos correntes (coordenador, sessoes paralelas, fila, cotas, runs vivos e PRs) saem desse estado gerado.
+
+Ficam reservadas ao coordenador: operar o despachante e a fila global, alterar a politica da frota e publicar o handoff de coordenacao. Sessao paralela segue o fluxo normal de ticket, worktree propria, `suite_lock` e reservas, inclusive planejamento, ticket com pendencia humana, analise, diagnostico e projeto feito pela fabrica, sem aviso de erro, sem bloqueio e sem pedido de confirmacao.
+
+Antigravity continua fora de headless e da frota (workers, `--fleet` e pump). No chat interativo pode escrever quando e o harness de operacao da sessao e a cota conhecida passa do piso de 15%. A revisao em outra familia e o piso de cota permanecem.
+
 ## Clone em outro PC
 
 ```bash
@@ -45,12 +67,12 @@ python -m pip install -r requirements-audio.txt
 
 ## Antigravity
 
-Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte canônica das 17 skills do projeto. Atua como harness de operacao interativo via chat (`DARKFAC_OPERATING_HARNESS=antigravity`), iniciando com `python -m core.ops.briefing`. Quando o harness do Antigravity for usado, adotar o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes.
+Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte canônica das 17 skills do projeto. A identidade da sessao sai do sinal do proprio processo. A consulta da operacao e `python C:\dev\DarkFac\scripts\line_briefing.py`. Quando o harness do Antigravity for usado, adotar o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes. Fora do chat interativo, Antigravity nao escreve: headless, workers, `--fleet` e pump seguem sem ele.
 
 ## Codex
 
 Abra a raiz clonada como workspace. O Codex le `AGENTS.md` diretamente e opera com paridade completa (USR-431):
-- Inicio de sessao: `python -m core.ops.briefing` e `$env:DARKFAC_OPERATING_HARNESS = 'codex'`.
+- Inicio de sessao: `python C:\dev\DarkFac\scripts\line_briefing.py`. A identidade da sessao reconhece `CODEX_THREAD_ID`. O procedimento nao grava variavel de ambiente para escolher o coordenador.
 - Medidor de cotas: `core/usage/adapters.py` lê buckets da sessao local via app-server do Codex (`openai.json`).
 - Guardas de fim de turno: `python -m core.ops.turn_guard --check` valida learning packs, handoff e ciclo de sessao.
 - Skills disponiveis em `.agents/skills/`.

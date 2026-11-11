@@ -1,5 +1,5 @@
-<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py -->
-# Operacao interativa por Antigravity e Codex (USR-431, USR-433)
+<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/line/briefing.py, core/line/coordination.py, core/line/session_identity.py, core/line/shared_state.py, scripts/line_briefing.py -->
+# Operacao interativa (USR-431, USR-433, USR-483)
 
 O briefing le OAs apenas da fonte configurada pelo `OwnerActionStore`: control store
 em producao, arquivo com modo local explicito. Nao consulta `dynamic.json` nem
@@ -25,22 +25,45 @@ são wire IDs e não declaram a disponibilidade de um gateway OpenRouter.
 
 Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
 confirmados, preservando revisão por outra família. `route_wait` fica persistido
-para o dispatcher retomar automaticamente; o operador não precisa voltar ao chat.
+para o dispatcher retomar automaticamente; quem opera não precisa voltar ao chat.
 Durante recuperação manter `--resume-only` ativo, conforme [frota.md](frota.md),
 em vez de desligar o controlador junto com os heartbeats de LLM (USR-473).
 
-## Inicio e roteamento
+## Identidade da sessao, sessao ativa e coordenador (USR-483)
 
-Antigravity e Codex atuam como interfaces de operacao interativa para coordenar a fabrica pelo chat. No inicio de uma sessao:
+Trocar de harness, de modelo ou de PC e trabalhar em paralelo sao comportamento esperado. Varias sessoes, no mesmo harness ou em outro, no mesmo modelo ou em outro, no mesmo PC ou em outro, podem planejar, tratar ticket com pendencia humana, analisar, diagnosticar e tocar projetos feitos pela fabrica ao mesmo tempo. Uma sessao coordena. Detectar o harness nao entrega esse papel.
+
+- **Identidade da sessao.** `core/line/session_identity.py` reconhece o harness que executa o processo. Os sinais confirmados em sessao real sao, para o Codex, `CODEX_THREAD_ID` e, para o Antigravity, `ANTIGRAVITY_SESSION_ID` (tambem `TERM_PROGRAM` antigravity). Claude usa `CLAUDECODE` ou `CLAUDE_CODE_SESSION_ID`; Grok usa `GROK_SESSION_ID` ou `GROK_AGENT`. Um valor antigo de `DARKFAC_OPERATING_HARNESS` nao define a identidade da sessao nem o coordenador. Sem sinal confiavel o harness da identidade fica vazio e o registro grava `unknown`; o briefing nao reaproveita valor antigo para escolher harness. Override explicito vale so para a chamada atual de `detect_session_harness` e nao e gravado no ambiente nem no registro compartilhado.
+- **Sessao ativa.** Consultar ou assumir grava a sessao em `line_sessions`, com sessao, harness, modelo, host e heartbeat. O prazo e 900 segundos (15 minutos, `LEASE_TTL_SECONDS`). Varias sessoes ativas convivem. Registrar a sessao ativa nao cria coordenador.
+- **Coordenador.** Ha no maximo uma lease, na linha `singleton_id = 1` de `coordination_lease`. A linha guarda sessao, harness, modelo, host, horario, origem `owner_decision` e heartbeat. O arquivo e `DARKFAC_SHARED_STATE_PATH` ou `<state root>/state/shared.sqlite3` e vale entre PCs que apontam para ele.
+
+### Consulta e troca pelo CLI agnostico
+
+O procedimento de consulta e de troca nao grava `DARKFAC_OPERATING_HARNESS` no ambiente do usuario. O mesmo comando serve para qualquer harness e qualquer PC:
 
 ```powershell
-$env:DARKFAC_OPERATING_HARNESS = 'antigravity' # ou 'codex'
-python -m core.ops.briefing
+python C:\dev\DarkFac\scripts\line_briefing.py
+python C:\dev\DarkFac\scripts\line_briefing.py --json
+python C:\dev\DarkFac\scripts\line_briefing.py assumir --decisao-owner
 ```
 
-O briefing e UTF-8 e somente leitura. Mostra a fila do control store, acoes abertas do backlog e fontes dinamicas, estado dos workers sem executar atualizacao/convergencia, PRs abertos, snapshots de quota e o handoff versionado em `docs/operacao/HANDOFF.md`. Cada secao tem fallback independente: falha do banco usa a fila local em memoria; `gh` ausente, sem autenticacao, com erro ou timeout informa que PRs estao indisponiveis. Falha de uma secao nao interrompe as demais. O briefing nao executa probes de quota.
+A consulta mostra o coordenador vigente ou a causa da ausencia (`no_coordinator` ou `heartbeat_expired`), as sessoes paralelas, a fila, as cotas, os runs vivos e os PRs. Cada bloco traz `observado_em`, `origem_em`, `idade_s` e `frescor` (`vigente`, `stale` ou `indisponivel`). `--json` imprime o mesmo estado para automacao, com `freshness` `current`, `stale` ou `unavailable`. Esses fatos correntes saem do estado gerado.
 
-Com `DARKFAC_OPERATING_HARNESS=antigravity`, o roteador pode eleger Antigravity para `development` somente nesta interface interativa e somente quando a cota conhecida excede o piso de 15%. Quando o harness do Antigravity for usado, adota-se o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes. Se eleito, implemente no proprio chat. Quando outro harness for eleito, encaminhe o ticket ao fluxo canonico:
+Os dados saem do registro compartilhado, do control store, dos provedores de cota sincronizados, da linha ao vivo e do GitHub. O comando nao le `docs/operacao/HANDOFF.md`, `docs/FASE_ATUAL.md` nem o ledger local `demands.json`. Cota sem leitura sincronizada fica `indisponivel`. Cota com `checked_at` acima de 600 segundos fica `stale` e `confirmado=nao`.
+
+`assumir --decisao-owner` troca a lease na hora, de qualquer harness, PC ou sessao, inclusive quando o harness nao foi reconhecido, e imprime o estado resultante. Nao ha pergunta de confirmacao. Sem `--decisao-owner` a assuncao termina com codigo 2 e o registro nao muda. Consultar registra a sessao ativa e deixa a lease como esta. O heartbeat da lease dura 900 segundos (15 minutos). A sessao que ja coordena renova o prazo ao consultar. Uma lease vencida nao se renova sozinha. A fabrica nao elege outro coordenador. A causa fica `heartbeat_expired` (ou `no_coordinator` quando nao houve lease) e a frota segue.
+
+`python -m core.ops.briefing` continua sendo o panorama somente leitura de fila, acoes abertas, nos, PRs com fallback e sentinela. Cada secao tem fallback independente. Ele nao escolhe coordenador e nao substitui o comando acima para fatos correntes de coordenacao.
+
+### Acoes exclusivas e sessoes paralelas
+
+Ficam reservadas ao coordenador: operar o despachante e a fila global, alterar a politica da frota e publicar o handoff de coordenacao (`docs/operacao/HANDOFF.md`).
+
+Sessao paralela segue o fluxo normal de ticket, worktree propria, `suite_lock` e reservas. Planejamento, ticket com pendencia humana, analise, diagnostico e projeto feito pela fabrica seguem sem aviso de erro, sem bloqueio e sem pedido de confirmacao. A ausencia de coordenador nao interrompe esse caminho.
+
+### Preferencia de escrita
+
+A preferencia de escrita do roteador (USR-109, `core/line/operating_harness.py`) e independente do coordenador. Se `DARKFAC_OPERATING_HARNESS` ja estiver no processo, aquele modulo ainda le o valor; o procedimento de coordenacao nao pede para grava-lo. No chat interativo, Antigravity pode ser eleito para `development` somente quando e o harness de operacao dessa sessao e a cota conhecida excede o piso de 15%. Quando o harness do Antigravity for usado, adota-se o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes. Se eleito, implemente no proprio chat. Quando outro harness for eleito, encaminhe o ticket ao fluxo canonico:
 
 ```powershell
 python C:\dev\DarkFac\run_ticket.py USR-XXX
@@ -98,7 +121,7 @@ O `turn_guard` valida se alteracoes em arquivos de codigo (`core/`, `hub/`, `scr
 
 ## Encerramento e continuidade
 
-Antes de encerrar uma sessao, atualize `docs/operacao/HANDOFF.md`: incremente a versao, atualize a data e registre estado, decisoes, pendencias e o proximo passo para o operador seguinte. Nao inclua segredos, prompts ou dados pessoais. Mantenha `docs/FASE_ATUAL.md` alinhado quando mudar um fato operacional persistente.
+Publicar o handoff de coordenacao e acao exclusiva do coordenador. `docs/operacao/HANDOFF.md` guarda o procedimento (identidade da sessao, sessao ativa, coordenador, heartbeat de 900 segundos e o caminho das sessoes paralelas). Coordenador, cotas, runs e PRs correntes ficam no estado gerado e nao sao copiados para esse arquivo. Uma sessao paralela encerra pelo `turn_guard` e pelo fluxo do proprio ticket, worktree, `suite_lock` e reservas. `docs/FASE_ATUAL.md` muda quando um fato duravel da fase muda. Nao inclua segredos, prompts ou dados pessoais.
 
 ## Respeito a hosts desabilitados (USR-430)
 

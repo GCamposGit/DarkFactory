@@ -1,0 +1,11 @@
+{
+  "description": "Sanitized signals observed in an Antigravity terminal session",
+  "environment": {
+    "TERM_PROGRAM": "Antigravity",
+    "ANTIGRAVITY_SESSION_ID": "ag-session-sanitized-001",
+    "ANTIGRAVITY_MODEL": "antigravity-test-model",
+    "DARKFAC_OPERATING_HARNESS": "codex"
+  },
+  "expected_harness": "antigravity",
+  "expected_signal": "ANTIGRAVITY_SESSION_ID"
+}
