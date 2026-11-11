@@ -3510,6 +3510,33 @@ def _stage_refused(
     return 1
 
 
+def _refuse_plan_outside_host_contract(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    progress: ProgressPublisher,
+) -> Optional[int]:
+    """Exit 2 before PLAN when this interpreter is outside the gate's Python contract."""
+    from core.orchestrator.manual_host_preflight import enforce_manual_host_contract
+
+    if enforce_manual_host_contract():
+        return None
+    message = "preflight do host recusou Python ou dependencia do portao antes de PLAN"
+    progress.phase("agent", "failed", message, cause="host_preflight_failed")
+    progress.set_outcome(message, "host_preflight_failed")
+    print(f"[ERRO] {message}.", file=sys.stderr)
+    _report_workspace_fate(workspace, args.json)
+    if args.json:
+        print(json.dumps({
+            "ok": False,
+            "cause": "host_preflight_failed",
+            "error": message,
+            "ticket_id": ticket.id,
+            "workspace": str(workspace.path),
+        }, ensure_ascii=False))
+    return 2
+
+
 def _stage_plan(
     args: argparse.Namespace,
     ticket: UserTicket,
@@ -3518,6 +3545,9 @@ def _stage_plan(
     progress: ProgressPublisher,
 ) -> Optional[int]:
     """INTAKE, GRILL (skipped for a small fix) and PLAN, each validated before the next; None to proceed."""
+    refused = _refuse_plan_outside_host_contract(args, ticket, workspace, progress)
+    if refused is not None:
+        return refused
     rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
     ticket_engine.reset(rws)
     stage = Stage.INTAKE

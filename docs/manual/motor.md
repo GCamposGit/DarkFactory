@@ -262,6 +262,10 @@ Sem modelo alto disponivel (cota, cooldown ou capacidade do host), `pick()` devo
 espera pela semantica de `core/line/route_wait.py` (`retry` com `not_before`, e `waiting_human` somente
 apos o orcamento de relogio). Nunca ha queda para modelo barato e nenhum agente e invocado.
 
+## Contrato Python antes de PLAN (USR-489)
+
+`_stage_plan` chama `enforce_manual_host_contract` (`core/orchestrator/manual_host_preflight.py`) antes de INTAKE, GRILL e PLAN. Python anterior a 3.12, modulo ausente ou `requirements.txt` ilegivel encerra com exit 2 e nao chama PLAN. As dependencias sao as linhas desse arquivo, o mesmo que o portao instala; `import-linter` e conferido como o modulo `importlinter`. A mensagem traz `host_preflight_failed` e o comando de correcao (`py -3.12 -m pip install -r requirements.txt` no Windows, ou `pip install` da distribuicao ausente no interpretador selecionado).
+
 ## Estrutura do run_ticket (USR-375 S3)
 
 `run_ticket.py` e o launcher headless; `_run` agora so orquestra estagios, cada um com no maximo 150 linhas:

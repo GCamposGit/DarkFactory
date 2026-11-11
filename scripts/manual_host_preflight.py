@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Entrada executável do preflight do host manual."""
+"""CLI do mesmo preflight que `run_ticket` executa antes de PLAN."""
 
 from core.orchestrator.manual_host_preflight import main
 
