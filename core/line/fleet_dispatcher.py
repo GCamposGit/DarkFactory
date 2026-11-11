@@ -1,15 +1,18 @@
 """Despachante continuo da frota (USR-366).
 
-Roda sem sessao de chat (tarefa agendada) e mantem grokbox, Notebook e Desktop ocupados: a cada
+Roda sem sessao de chat (tarefa agendada) e mantem Notebook, Grokbox e Desktop ocupados: a cada
 ciclo le ``demands.json`` de ``origin/main``, escolhe tickets ``planned`` executaveis e despacha UM
-por host livre, na ordem de ``line_fleet.json`` (grokbox > notebook > desktop). Cada despacho e um
+por host livre, na ordem de ``line_fleet.json`` (notebook > grokbox > desktop). Cada despacho e um
 ``run_ticket.py --fleet --host-id <host>`` (que escolhe o harness por cota e usa a reserva por host
 de ``line_lock``); hosts remotos fixam o worker do portao em ``DARKFAC_TEST_WORKERS``
 (só a URL daquele host) com ``DARKFAC_FLEET_GATE_REMOTE=1`` (``--remote-required``).
 Esse pin de execução não é a lista da admissão: o filho recebe
 ``DARKFAC_ADMISSION_WORKERS`` com a lista que o despachante já tinha, ou o default
-grokbox+desktop se ela estava vazia, mais a URL do pin, sem repetir. Falha de infra reenfileira (o ticket segue
-``planned`` e entra em cooldown); deploy pos-merge e deduplicado por janela de silencio.
+da frota se ela estava vazia, mais a URL do pin, sem repetir.
+Grokbox inacessivel e pulado sem alerta e sem espera de wake. Queda do Grokbox (exit 75 ou
+``[REMOTE_JOB_LOST]``) libera a reserva, mantem o ticket ``planned`` e nao aplica backoff
+global: o ciclo seguinte lanca no proximo host livre. Sonda sem health nao alerta. Outra
+infra entra em backoff. Deploy pos-merge e deduplicado por janela de silencio.
 
 A tag ``line-block`` e a unica marca de via expressa. Um ticket elegivel com ela fura a fila regular
 e a lista de recuperacao e sai no primeiro host livre. Tag excluida, dependencia aberta e cooldown
@@ -62,7 +65,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from core.demands.models import TAG_LINE_BLOCK
 from core.line import run_outcome
@@ -93,6 +96,9 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 USAGE_PUBLISH_SEC = 300.0
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
 MIN_NOTEBOOK_WORKERS = 1
+INFRA_EXIT_CODES = frozenset({75})
+OPPORTUNISTIC_HOST_IDS = frozenset({"grokbox"})
+ROUTE_WAIT_MARKERS = ("harness_infra_error: route_wait", '"cause": "route_wait"', "causa: route_wait")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 FAILURE_HISTORY_LIMIT = 20
@@ -564,6 +570,37 @@ def is_infra_failure(rc: int, log_tail: str) -> bool:
     return rc == 75 or classify(classify_log_cause(log_tail) or log_tail) == "infra"
 
 
+def is_route_wait_log(log_tail: str) -> bool:
+    """Espera de rota nao e queda de host: continua no cooldown global."""
+    text = log_tail or ""
+    return any(marker in text for marker in ROUTE_WAIT_MARKERS)
+
+
+def is_opportunistic_host_loss(host_id: str, rc: int, log_tail: str) -> bool:
+    """Queda esperada do Grokbox: exit 75 ou ``[REMOTE_JOB_LOST]``, sem espera de rota.
+
+    O ticket volta a fila sem cooldown global. O mesmo recurso do Grokbox segue no disjuntor
+    ate a versao mudar; os outros hosts continuam elegiveis no ciclo seguinte.
+    """
+    if str(host_id or "").lower() not in OPPORTUNISTIC_HOST_IDS:
+        return False
+    if is_route_wait_log(log_tail):
+        return False
+    text = log_tail or ""
+    return rc in INFRA_EXIT_CODES or "[REMOTE_JOB_LOST]" in text
+
+
+def note_unavailable_host(host: HostSpec, probe: HostProbe) -> None:
+    """Registra host indisponivel. Grokbox sem health nao chama notify nem alerta o owner.
+
+    Nao grava offline: o ciclo seguinte sonda o host de novo.
+    """
+    if str(host.id).lower() in OPPORTUNISTIC_HOST_IDS and probe.reason == "health_indisponivel":
+        logger.info("grokbox sem health; sem alerta; sonda de novo no proximo ciclo")
+        return
+    logger.info("host %s indisponivel: %s", host.id, probe.reason or "sem motivo")
+
+
 def failure_reason(rc: int, log_tail: str, lines: int = 8, chars: int = 800) -> str:
     """Select the actual error line, excluding quota banners and secrets."""
     return run_outcome.error_detail(log_tail, f"sem saida no log; exit_code={rc}")[:chars]
@@ -871,10 +908,11 @@ class FleetDispatcher:
                 resource_version=job.resource_version, main_sha=run_outcome.main_sha(PROJECT_ROOT),
             )
             self.admission_store.record_failure(fingerprint)
-            self.admission_store.record_attempt(
-                job.project_id, job.ticket_id, cause, run_id=job.run_id or uuid.uuid4().hex,
-                main_sha=fingerprint.main_sha, detail=reason, log_path=str(job.log_path or ""),
-            )
+            if not (kind == "infra" and is_opportunistic_host_loss(job.host_id, rc, tail)):
+                self.admission_store.record_attempt(
+                    job.project_id, job.ticket_id, cause, run_id=job.run_id or uuid.uuid4().hex,
+                    main_sha=fingerprint.main_sha, detail=reason, log_path=str(job.log_path or ""),
+                )
         except Exception:
             logger.exception("falha ao persistir orcamento de %s", job.ticket_id)
         self._note_express_failure(job.ticket_id, "" if cause == "unknown" else cause)
@@ -970,7 +1008,13 @@ class FleetDispatcher:
             elif (outcome.cause_class == "infra" if outcome else is_infra_failure(rc, tail)):
                 self._record_failure(job, rc, "infra", tail)
                 self._release_reservation(job)
-                logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
+                if is_opportunistic_host_loss(host_id, rc, tail):
+                    logger.warning(
+                        "infra oportunista em %s (%s); %s volta a fila sem backoff global",
+                        host_id, rc, job.ticket_id,
+                    )
+                else:
+                    logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
             else:
                 self._record_failure(job, rc, "failure", tail)
                 self._release_reservation(job)
@@ -1079,6 +1123,8 @@ class FleetDispatcher:
             context_key = safe_digest(context)
             resource_key = safe_digest(resource_version)
             reason = self.admission_store.retry_reason(project_id, tid, main_sha=self._main_sha, now=self.clock())
+            if not reason and self._opportunistic_failure_open(host.id, project_id, tid, resource_key):
+                reason = "identical_failure_open"
             if reason:
                 idle[host.id] = skipped[tid] = reason
                 return
@@ -1221,6 +1267,17 @@ class FleetDispatcher:
             except Exception:  # noqa: BLE001
                 logger.exception("falha ao liberar reserva global apos erro de launcher %s", tid)
 
+    def _opportunistic_failure_open(self, host_id: str, project_id: str, tid: str, resource_key: str) -> bool:
+        if str(host_id).lower() not in OPPORTUNISTIC_HOST_IDS:
+            return False
+        return any(
+            row.get("open")
+            and row.get("project_id") == project_id
+            and row.get("ticket_id") == tid
+            and row.get("resource_version") == resource_key
+            for row in self.admission_store.snapshot()
+        )
+
     def _dispatch_hosts(
         self,
         queue: list[str],
@@ -1251,6 +1308,7 @@ class FleetDispatcher:
                 continue
             pr = self.probe(host)
             if not pr.free:
+                note_unavailable_host(host, pr)
                 idle[host.id] = f"host_indisponivel:{pr.reason}"
                 continue
             if not queue:
@@ -1259,6 +1317,7 @@ class FleetDispatcher:
             if self.recovery.get("active") and dispatched:
                 idle[host.id] = "recovery_single_delivery_reserved"
                 continue
+            carried: list[str] = []
             while queue:
                 tid = queue.pop(0)
                 demand = next((row for row in demands if str(row.get("id", "")) == tid), None)
@@ -1268,8 +1327,15 @@ class FleetDispatcher:
                     break
                 self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now,
                                       reservation_state)
-                if skipped.get(tid) != "backoff_infra" and not skipped.get(tid, "").startswith("ticket_hold:"):
-                    break
+                reason = skipped.get(tid, "")
+                if reason == "identical_failure_open":
+                    carried.append(tid)
+                    continue
+                if reason == "backoff_infra" or reason.startswith("ticket_hold:"):
+                    continue
+                break
+            if carried:
+                queue[:0] = carried
             if any(row.get("host") == host.id for row in dispatched):
                 idle.pop(host.id, None)
 

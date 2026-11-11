@@ -30,7 +30,7 @@ Todo canal passa pelo mesmo caminho e pelo mesmo registro.
 ## 4. Despachante da frota
 
 - `core/line/fleet_dispatcher.py` (`--loop` / `--once --dry-run`) roda sem sessão de chat: lê `demands.json` de `origin/main`, escolhe tickets `planned` executáveis e despacha **um por host livre** com `run_ticket.py --fleet --host-id <host>`.
-- Topologia em `.factory/config/line_fleet.json`: `grokbox` (prioridade 1), `notebook` (2), `desktop` (3), um slot cada, máximo 3 simultâneos.
+- Topologia em `.factory/config/line_fleet.json`: `notebook` (prioridade 1), `grokbox` (2), `desktop` (3), um slot cada, máximo 3 simultâneos.
 - `DARKFAC_FLEET_DISABLED_HOSTS` (ids separados por vírgula) tira hosts da frota sem editar o JSON.
 - Falha de infra reenfileira o ticket (continua `planned`, com cooldown). Ver [`manual/frota.md`](manual/frota.md).
 

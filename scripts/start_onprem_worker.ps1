@@ -7,7 +7,7 @@
     with capabilities, priority, and capacity appropriate for this fleet host.
     Enforces the distributed fleet topology:
     - 1 cycle per host (MaxSlots: 1)
-    - Grokbox (priority: primary / 1) > Notebook (secondary / 2) > Desktop (fallback / 3)
+    - Notebook (priority: primary / 1) > Grokbox (secondary / 2) > Desktop (fallback / 3)
     - Non-pinned model/harness routing via core.line.routing.pick
     - Supports -Drain, -Status, -Probe, -Rollback actions.
 
@@ -25,7 +25,7 @@
 
 .PARAMETER Priority
     One of "primary", "secondary", "fallback" (DARKFAC_WORKER_PRIORITY).
-    Auto-derived from HostId if omitted (grokbox: primary, notebook: secondary, desktop: fallback).
+    Auto-derived from HostId if omitted (notebook: primary, grokbox: secondary, desktop: fallback).
 
 .PARAMETER MaxSlots
     Maximum concurrent demand cycles for this host (default: 1, per fleet topology).
@@ -104,8 +104,8 @@ if ([string]::IsNullOrWhiteSpace($resolvedHostId)) {
 $resolvedPriority = $Priority
 if (-not $PSBoundParameters.ContainsKey('Priority')) {
     switch ($resolvedHostId) {
-        "grokbox" { $resolvedPriority = "primary" }
-        "notebook" { $resolvedPriority = "secondary" }
+        "notebook" { $resolvedPriority = "primary" }
+        "grokbox" { $resolvedPriority = "secondary" }
         "desktop" { $resolvedPriority = "fallback" }
         default { $resolvedPriority = "secondary" }
     }

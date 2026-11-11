@@ -116,8 +116,23 @@ automaticamente ao chegar a três falhas de candidato; abaixo disso, retoma depo
 Uma falha ao reabrir o ledger não apaga o contador nem permite repetir a correção com orçamento novo.
 
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
-para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
-de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e
+na ordem Notebook, Grokbox e Desktop. Com tickets elegíveis, o Notebook livre recebe trabalho
+antes do Grokbox e do Desktop. O serviço não depende de sessão interativa.
+
+Queda do Grokbox é esperada (USR-492). Uma sonda sem `/health` (`health_indisponivel`) não chama
+`notify`, não abre alerta nem ação do owner e não interrompe o ciclo. O Notebook livre segue
+recebendo o ticket; com o Notebook cheio, o Desktop ainda recebe. O ciclo seguinte sonda o
+Grokbox de novo. Não há memória de offline entre ciclos.
+
+Um job em voo no Grokbox que termina por infraestrutura (`exit 75` ou `[REMOTE_JOB_LOST]` no log)
+libera a reserva de admissão, mantém o ticket `planned` e não entra em cooldown global. O ciclo
+seguinte lança esse ticket no próximo host livre da ordem. O mesmo recurso do Grokbox continua
+no disjuntor até a versão do recurso mudar, para não repetir a tentativa idêntica; isso não tira
+o ticket dos outros hosts. Espera de rota (`harness_infra_error: route_wait`) no Grokbox continua
+em cooldown. Falha de lançamento e infra dos outros hosts também continuam em cooldown. O alerta
+da segunda `self_modification` permanece só na via expressa.
+
+Uma reserva de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e
 o job volta a ser elegível para admissão em outro host. A indisponibilidade de uma VM é
 tratada como falha normal de infraestrutura, sem concluir o ticket.
 
@@ -341,8 +356,11 @@ sudo tail -n 100 -f /var/log/darkfac/fleet-dispatcher.log
 
 Se grokbox ou a VM ficar indisponível, não apague nem altere manualmente a reserva:
 heartbeats cessam, o TTL expira, o reconciliador libera o slot e o ticket `planned` volta
-a ser elegível em outro host. `Restart=always` cobre falhas do processo local; a
-recuperação de host morto vem do lease e da admissão normal da frota.
+a ser elegível em outro host. O despachante não espera esse TTL quando o job em voo no
+Grokbox termina com `exit 75` ou `[REMOTE_JOB_LOST]`: libera a reserva no mesmo ciclo,
+sem alerta e sem cooldown global, e o ciclo seguinte escolhe o próximo host livre.
+`Restart=always` cobre falhas do processo local; a recuperação de host morto vem do
+lease e da admissão normal da frota.
 
 ## Frota e VPS enxuta (USR-369)
 

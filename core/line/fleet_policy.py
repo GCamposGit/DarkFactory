@@ -1,7 +1,7 @@
 """Pure admission policy and host selection for the distributed DarkFac fleet (USR-280 / USR-277).
 
 Governs admission of tickets across up to three independent hosts:
-Grokbox (Priority 1) > Notebook (Priority 2) > Desktop (Priority 3).
+Notebook (Priority 1) > Grokbox (Priority 2) > Desktop (Priority 3).
 
 Key contracts:
 1. Pure policy: operates on in-memory representations (HostConfig, HostState, TicketCandidate).
@@ -40,7 +40,7 @@ class HostConfig(BaseModel):
 
     id: str = Field(description="Logical host identifier: grokbox, notebook, desktop")
     name: str = Field(description="Human-readable machine name")
-    priority: int = Field(ge=1, description="Selection priority (1 is highest: Grokbox > Notebook > Desktop)")
+    priority: int = Field(ge=1, description="Selection priority (1 is highest: Notebook > Grokbox > Desktop)")
     max_slots: int = Field(default=1, ge=1, description="Maximum concurrent demand cycles allowed on this host (default: 1)")
     platform: str = Field(default="windows", description="OS platform: linux or windows")
     tags: list[str] = Field(default_factory=list, description="Descriptive tags (e.g. remote, local, worker)")
@@ -133,8 +133,8 @@ def load_fleet_config(path: Optional[Path] = None) -> FleetConfig:
     return FleetConfig(
         max_fleet_slots=3,
         hosts=[
-            HostConfig(id="grokbox", name="Grokbox", priority=1, max_slots=1, platform="linux", tags=["remote", "grokbox"]),
-            HostConfig(id="notebook", name="Notebook", priority=2, max_slots=1, platform="windows", tags=["local", "notebook"]),
+            HostConfig(id="notebook", name="Notebook", priority=1, max_slots=1, platform="windows", tags=["local", "notebook"]),
+            HostConfig(id="grokbox", name="Grokbox", priority=2, max_slots=1, platform="linux", tags=["remote", "grokbox"]),
             HostConfig(id="desktop", name="Desktop", priority=3, max_slots=1, platform="windows", tags=["remote", "desktop", "test_worker"]),
         ],
     )
@@ -189,7 +189,7 @@ def select_host_for_ticket(
     if current_fleet_slots >= max_fleet_slots:
         return None, f"fleet_capacity_full: {current_fleet_slots}/{max_fleet_slots} slots active"
 
-    # Sort hosts strictly by priority (1 Grokbox > 2 Notebook > 3 Desktop)
+    # Sort hosts strictly by priority (1 Notebook > 2 Grokbox > 3 Desktop)
     sorted_hosts = sorted(hosts, key=lambda h: (h.priority, h.id))
 
     compatible_found = False

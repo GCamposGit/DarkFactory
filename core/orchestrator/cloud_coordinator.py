@@ -27,7 +27,7 @@ from core.workflow.reconciliation import reconcile_portfolio_state
 
 logger = logging.getLogger("darkfac.cloud_coordinator")
 
-DEFAULT_FLEET_HOSTS: tuple[str, ...] = ("grokbox", "notebook", "desktop")
+DEFAULT_FLEET_HOSTS: tuple[str, ...] = ("notebook", "grokbox", "desktop")
 
 
 class CoordinatorStatus(BaseModel):
@@ -76,7 +76,7 @@ class CloudCoordinator:
         if fleet_hosts is not None:
             self.fleet_hosts = list(fleet_hosts)
         else:
-            raw_hosts = os.environ.get("DARKFAC_FLEET_HOSTS", "grokbox,notebook,desktop")
+            raw_hosts = os.environ.get("DARKFAC_FLEET_HOSTS", "notebook,grokbox,desktop")
             self.fleet_hosts = [h.strip() for h in raw_hosts.split(",") if h.strip()]
         self._dbos_instance: Any = None
         self._running = False
@@ -171,7 +171,7 @@ class CloudCoordinator:
 
         Enforces:
         - At most 3 concurrent cycles across the fleet.
-        - First healthy, free, and compatible host in order Grokbox, Notebook, Desktop.
+        - First healthy, free, and compatible host in order Notebook, Grokbox, Desktop.
         - Real availability check without fixed priority delays.
         - Human blocks (waiting_human) remain parked without exceeding ceiling.
         - Idempotent: tickets already reserved stay on their reserved host.

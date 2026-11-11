@@ -13,7 +13,7 @@ Layout atual:
 - Jobs e catalogo: `catalog_jobs.py`, `planning_jobs.py`, `job_board.py`, `execution_registry.py`.
 - Estagios ainda ativos: `integration_handler.py`, `research_handler.py`.
 - Politica e rotas: `capacity_policy.py`, `effective_policy.py`, `policy_binding.py`, `qualified_routes.py`.
-- Apoio: `readiness.py`, `reconciliation.py`, `verification.py`, `manual_resolution.py`, `line_live.py`. `safe_export.py` e `cli.py` foram removidos em USR-377 S2.
+- Apoio: `readiness.py`, `reconciliation.py`, `verification.py`, `manual_resolution.py`, `line_live.py`. `safe_export.py` e `cli.py` foram removidos em USR-377 S2. O snapshot da frota em `line_live.py` publica os hosts de `line_fleet.json` na ordem Notebook (prioridade 1), Grokbox (2) e Desktop (3).
 
 Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
 `SQLiteControlStore` (implementacao); nao e duplicata. Em `successors.materialize_result`,

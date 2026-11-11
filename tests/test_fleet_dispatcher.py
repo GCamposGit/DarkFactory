@@ -11,7 +11,7 @@ import pytest
 from core.line import fleet_dispatcher as fd
 from core.line.admission_store import AdmissionStore
 
-HOSTS = [fd.HostSpec("grokbox", 1, "http://g"), fd.HostSpec("notebook", 2, None), fd.HostSpec("desktop", 3, "http://d")]
+HOSTS = [fd.HostSpec("notebook", 1, None), fd.HostSpec("grokbox", 2, "http://g"), fd.HostSpec("desktop", 3, "http://d")]
 
 
 def _d(i, status="planned", tags=(), deps=()):
@@ -502,7 +502,7 @@ def test_main_preserves_empty_recovery_and_resume_only_modes(monkeypatch, capsys
 def test_three_tickets_three_hosts_in_parallel(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03"), _d("USR-04")])
     cyc = e.d.run_cycle()
-    assert e.launched == [("USR-01", "grokbox"), ("USR-02", "notebook"), ("USR-03", "desktop")]
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "grokbox"), ("USR-03", "desktop")]
     assert cyc["queue_remaining"] == ["USR-04"]
     assert (tmp_path / "state.json").exists()
 
@@ -512,6 +512,157 @@ def test_host_order_skips_unavailable_and_reports_idle(tmp_path: Path):
     cyc = e.d.run_cycle()
     assert e.launched == [("USR-01", "desktop")]
     assert cyc["idle_reasons"]["grokbox"].startswith("host_indisponivel")
+
+
+def _silence_spies(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
+
+    def _spy(name: str):
+        def _record(*_args, **_kwargs):
+            calls.append(name)
+            return False
+        return _record
+
+    monkeypatch.setattr("core.notifications.service.NotificationService.notify", _spy("notify"))
+    monkeypatch.setattr("core.owner_actions.notify.notify_owner_action", _spy("owner"))
+    monkeypatch.setattr("core.line.human.notify_human_request", _spy("human"))
+    monkeypatch.setattr(
+        "core.line.express_lane.notify_repeated_self_modification", _spy("express_notify"),
+    )
+    return calls
+
+
+def test_free_notebook_launches_before_grokbox_and_desktop(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03")])
+    e.d.run_cycle()
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "grokbox"), ("USR-03", "desktop")]
+
+
+def test_grokbox_without_health_is_silent_and_does_not_block_the_cycle(tmp_path: Path, monkeypatch):
+    calls = _silence_spies(monkeypatch)
+    alerts: list[object] = []
+    probes: list[str] = []
+    demands = [_d("USR-01"), _d("USR-02"), _d("USR-03")]
+    e = Env(tmp_path, demands)
+
+    def probe(host):
+        probes.append(host.id)
+        if host.id == "grokbox":
+            return fd.HostProbe(False, "health_indisponivel", f"{host.id}:health_unavailable")
+        return fd.HostProbe(True, "ok", f"{host.id}:ok")
+
+    e.d.probe = probe
+    e.d.express_alert = lambda alert: alerts.append(alert) or True
+    cycle = e.d.run_cycle()
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "desktop")]
+    assert cycle["queue_remaining"] == ["USR-03"]
+    assert probes.count("grokbox") == 1
+    assert calls == [] and alerts == []
+    for demand in demands:
+        assert demand["status"] == "planned"
+
+    # Notebook e Desktop ocupados: o ciclo segue e sonda o Grokbox de novo.
+    e.d.run_cycle()
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "desktop")]
+    assert probes.count("grokbox") == 2
+    assert calls == [] and alerts == []
+
+    # Notebook cheio e Grokbox ainda sem health: o Desktop livre recebe o ticket.
+    e.handles["USR-02"].rc = 0
+    log = tmp_path / "USR-02.log"
+    log.write_text("fim sem merge\n", encoding="utf-8")
+    e.d.in_flight["desktop"].log_path = log
+    finished = e.d.run_cycle()
+    assert e.launched[-1] == ("USR-03", "desktop")
+    assert finished["in_flight"]["notebook"] == "USR-01"
+    assert probes.count("grokbox") == 3
+    assert calls == [] and alerts == []
+
+
+def test_default_probe_grokbox_without_health_does_not_notify(monkeypatch):
+    calls = _silence_spies(monkeypatch)
+    monkeypatch.setattr("core.harness.remote_dispatch.probe_health", lambda _url, timeout=None: None)
+    probe = fd.default_probe(fd.HostSpec("grokbox", 2, "http://g"), stable_probes=3)
+    assert probe == fd.HostProbe(False, "health_indisponivel", "grokbox:health_unavailable")
+    assert calls == []
+
+
+def _lost_grokbox(env: Env, ticket_id: str, rc: int, tail: str) -> None:
+    job = env.d.in_flight["grokbox"]
+    if tail:
+        log = env.tmp / f"{ticket_id}-lost.log"
+        log.write_text(tail, encoding="utf-8")
+        job.log_path = log
+    env.handles[ticket_id].rc = rc
+
+
+def _reservation_tokens(path: Path) -> list[str]:
+    import sqlite3
+
+    with sqlite3.connect(path) as con:
+        return [row[0] for row in con.execute("SELECT token FROM reservations")]
+
+
+@pytest.mark.parametrize(("rc", "tail"), [(75, ""), (2, "[REMOTE_JOB_LOST] worker sumiu\n")])
+def test_grokbox_infra_loss_relaunches_on_the_next_free_host(tmp_path: Path, monkeypatch, rc, tail):
+    calls = _silence_spies(monkeypatch)
+    alerts: list[object] = []
+    demands = [_d("USR-01")]
+    e = Env(tmp_path, demands, free=("grokbox",))
+    e.d.express_alert = lambda alert: alerts.append(alert) or True
+    e.d.run_cycle()
+    assert e.launched == [("USR-01", "grokbox")]
+    lost = e.d.in_flight["grokbox"].admission_token
+    assert lost
+    _lost_grokbox(e, "USR-01", rc, tail)
+    e.free = {"notebook", "grokbox", "desktop"}
+    cycle = e.d.run_cycle()
+    assert demands[0]["status"] == "planned"
+    assert "USR-01" not in cycle["cooldown"]
+    assert e.launched == [("USR-01", "grokbox"), ("USR-01", "notebook")]
+    assert lost not in _reservation_tokens(tmp_path / "admission.sqlite3")
+    assert e.d.admission_store.ticket_holds() == []
+    assert calls == [] and alerts == []
+
+
+def test_grokbox_loss_with_notebook_full_uses_desktop(tmp_path: Path):
+    demands = [_d("USR-01"), _d("USR-02")]
+    e = Env(tmp_path, demands, free=("notebook", "grokbox"))
+    e.d.run_cycle()
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "grokbox")]
+    _lost_grokbox(e, "USR-02", 75, "")
+    e.free = {"notebook", "grokbox", "desktop"}
+    cycle = e.d.run_cycle()
+    assert demands[1]["status"] == "planned"
+    assert "USR-02" not in cycle["cooldown"]
+    assert e.launched[-1] == ("USR-02", "desktop")
+    assert cycle["in_flight"]["notebook"] == "USR-01"
+    assert cycle["in_flight"]["desktop"] == "USR-02"
+
+
+def test_grokbox_route_wait_keeps_the_global_cooldown(tmp_path: Path):
+    demands = [_d("USR-01")]
+    e = Env(tmp_path, demands, free=("grokbox",))
+    e.d.run_cycle()
+    _lost_grokbox(e, "USR-01", 75, "harness_infra_error: route_wait\n")
+    e.free = {"notebook", "grokbox", "desktop"}
+    cycle = e.d.run_cycle()
+    assert cycle["cooldown"] == ["USR-01"]
+    assert e.launched == [("USR-01", "grokbox")]
+
+
+def test_self_modification_alert_stays_on_the_express_path(tmp_path: Path):
+    alerts: list[object] = []
+    e = Env(tmp_path, [])
+    e.d.express_alert = lambda alert: alerts.append(alert) or True
+    log = "[ERRO NA ENTREGA] causa: self_modification; erro: x\n"
+    job = fd.InFlight("USR-01", "notebook", Handle(), candidate_digest="candidate", context_digest="ctx")
+    e.d._record_failure(job, 1, "failure", log)
+    assert alerts == []
+    e.d._record_failure(job, 1, "failure", log)
+    assert len(alerts) == 1
+    assert alerts[0].cause == "self_modification"
+    assert "USR-01" in alerts[0].command
 
 
 def test_host_lock_no_overlap(tmp_path: Path):
@@ -604,14 +755,14 @@ def test_line_block_takes_the_only_slot_when_recovery_is_active(tmp_path: Path):
     demands = [_d("USR-12"), _d("USR-13"), _d("USR-30", tags=["line-block"])]
     e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"), active=True)
     cyc = e.d.run_cycle()
-    assert e.launched == [("USR-30", "grokbox")]
+    assert e.launched == [("USR-30", "notebook")]
     assert cyc["queue_remaining"] == ["USR-12", "USR-13"]
     assert "recovery_single_delivery_reserved" in cyc["idle_reasons"].values()
 
     e.handles["USR-30"].rc = 75
     cyc = e.d.run_cycle()
-    assert e.launched == [("USR-30", "grokbox"), ("USR-12", "grokbox")]
-    assert cyc["in_flight"].get("grokbox") == "USR-12"
+    assert e.launched == [("USR-30", "notebook"), ("USR-12", "notebook")]
+    assert cyc["in_flight"].get("notebook") == "USR-12"
     assert "USR-30" in cyc["cooldown"]
 
 
@@ -619,12 +770,12 @@ def test_line_block_does_not_open_a_second_delivery_while_one_is_in_flight(tmp_p
     demands = [_d("USR-12"), _d("USR-13")]
     e = _recovery_env(tmp_path, demands, ("USR-12",), active=True)
     e.d.run_cycle()
-    assert e.launched == [("USR-12", "grokbox")]
+    assert e.launched == [("USR-12", "notebook")]
 
     demands.append(_d("USR-30", tags=["line-block"]))
     cyc = e.d.run_cycle()
-    assert e.launched == [("USR-12", "grokbox")]
-    assert cyc["in_flight"] == {"grokbox": "USR-12"}
+    assert e.launched == [("USR-12", "notebook")]
+    assert cyc["in_flight"] == {"notebook": "USR-12"}
     assert cyc["skipped"]["USR-30"] == "recuperacao_prioritaria"
     assert "USR-30" not in cyc["queue_remaining"]
 
@@ -690,7 +841,7 @@ def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
     ]
     e = _recovery_env(tmp_path, demands, ("USR-11",))
     e.d.run_cycle()
-    assert e.launched == [("USR-30", "grokbox"), ("USR-11", "notebook"), ("USR-31", "desktop")]
+    assert e.launched == [("USR-30", "notebook"), ("USR-11", "grokbox"), ("USR-31", "desktop")]
 
 
 @pytest.fixture(autouse=True)
@@ -1132,7 +1283,9 @@ def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
 
 def test_disabled_hosts_env_removes_host(monkeypatch):
     monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "Desktop, ")
-    assert [h.id for h in fd.default_hosts()] == ["grokbox", "notebook"]
+    hosts = fd.default_hosts()
+    assert [h.id for h in hosts] == ["notebook", "grokbox"]
+    assert [h.priority for h in hosts] == [1, 2]
 
 
 def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkeypatch):
@@ -1566,7 +1719,7 @@ def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypat
         return dispatch(host, probe, tid, demand, queue, idle, skipped, dispatched, now, reservation_state)
     monkeypatch.setattr(e.d, "_dispatch_ticket", attempt)
     cycle = e.d.run_cycle()
-    assert e.launched == [("USR-02", "grokbox")]
+    assert e.launched == [("USR-02", "notebook")]
     assert cycle["skipped"]["USR-01"] == blocked
 
 
