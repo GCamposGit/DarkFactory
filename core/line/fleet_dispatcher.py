@@ -15,6 +15,21 @@ ninguem esta em voo e nao abre segunda entrega quando ja ha uma. A segunda falha
 ``self_modification`` do mesmo ticket alerta o owner uma vez, com a causa e o comando unico.
 O alerta nao liga a recuperacao global.
 
+Entre ciclos, o loop compara o HEAD completo do checkout em execucao (``PROJECT_ROOT``,
+via ``current_git_sha`` com ``use_env`` falso) com o SHA lido na largada. Se os dois sao
+completos e diferentes, o processo se substitui com ``sys.executable -m
+core.line.fleet_dispatcher`` e os argumentos originais, sem encerrar runs em voo.
+``DARKFAC_GIT_SHA`` e ``origin/main`` nao entram na comparacao. SHA igual, SHA ilegivel,
+``--once`` e ``--dry-run`` nao substituem o processo por essa comparacao.
+
+Se ``pending_delivery.tick`` devolve a causa ``stale_dispatcher_import`` (``ImportError``
+ou ``ModuleNotFoundError`` na retomada), ``run_forever`` substitui o processo depois do
+ciclo e antes do resumo e do sentinela, uma vez por SHA, mesmo com o HEAD inalterado.
+Grava ``DARKFAC_DISPATCHER_IMPORT_RESTART_SHA`` com o HEAD completo desta geracao antes
+do exec. Com a variavel igual ao HEAD atual, a ocorrencia seguinte registra a causa e o
+loop dorme, sem segundo exec. A troca de SHA do checkout nao define essa variavel.
+``--dry-run``, ``--once`` e um ``launch`` presente tambem nao disparam esse reinicio.
+
 Uso::
 
     python -m core.line.fleet_dispatcher --loop
@@ -40,12 +55,26 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from core.demands.models import TAG_LINE_BLOCK
+from core.infra.git_sha import current_git_sha, normalize_sha
 from core.paths import state_root
 
 logger = logging.getLogger("darkfac.line.fleet_dispatcher")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATE_PATH = state_root() / "runs" / "fleet_dispatcher_state.json"
+
+
+def _default_checkout_sha() -> str | None:
+    """HEAD completo do checkout em execucao. Ignora ``DARKFAC_GIT_SHA`` e ``origin/main``."""
+    return current_git_sha(PROJECT_ROOT, use_env=False)
+
+
+def _checkout_sha_changed(startup: str | None, current: str | None) -> bool:
+    """True somente quando os dois SHAs ja normalizados sao completos e diferentes."""
+    return bool(startup and current and startup != current)
+
+
+IMPORT_RESTART_SHA_ENV = "DARKFAC_DISPATCHER_IMPORT_RESTART_SHA"
 LOG_DIR = state_root() / "runs" / "fleet_dispatcher_logs"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -535,6 +564,9 @@ class FleetDispatcher:
         sentinel_hook: Optional[Callable[[], Any]] = None,
         admission_store: Any = None,
         express_alert: Optional[Callable[[Any], bool]] = None,
+        code_sha_reader: Optional[Callable[[], object]] = None,
+        exec_fn: Optional[Callable[[str, Sequence[str]], Any]] = None,
+        launch_argv: Optional[Sequence[str]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -573,6 +605,87 @@ class FleetDispatcher:
         self.failures: list[dict[str, Any]] = []  # ultimas falhas: ticket, host, exit_code, motivo, classe
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
+        self._code_sha_reader = code_sha_reader or _default_checkout_sha
+        self._exec_fn = exec_fn or os.execv
+        self._launch_argv = tuple(launch_argv) if launch_argv is not None else tuple(sys.argv[1:])
+        self._startup_sha = self._read_checkout_sha()
+
+    def _read_checkout_sha(self) -> str | None:
+        try:
+            raw = self._code_sha_reader()
+        except Exception:  # noqa: BLE001 - SHA ilegivel nao substitui o processo
+            logger.exception("falha ao ler o SHA do checkout em execucao")
+            return None
+        return normalize_sha(raw)
+
+    def _exec_if_checkout_sha_changed(self) -> bool:
+        """Substitui este processo quando o HEAD do checkout mudou desde a largada.
+
+        Nao chama kill, terminate nem wait em handles em voo ou filhos de
+        pending_delivery, e nao remove checkout operacional. Retorna True so se
+        o exec voltou; se ele levanta, o erro fica no log e o ciclo segue.
+        """
+        if self.dry_run:
+            return False
+        current = self._read_checkout_sha()
+        if not _checkout_sha_changed(self._startup_sha, current):
+            return False
+        command = [sys.executable, "-m", "core.line.fleet_dispatcher", *self._launch_argv]
+        logger.info(
+            "SHA do checkout mudou de %s para %s; reiniciando o despachante sem encerrar runs em voo",
+            self._startup_sha, current,
+        )
+        try:
+            self._exec_fn(sys.executable, command)
+        except Exception:  # noqa: BLE001 - falha de exec nao pode derrubar o daemon
+            logger.exception(
+                "reinicio do despachante falhou apos mudanca de SHA %s -> %s",
+                self._startup_sha, current,
+            )
+            return False
+        return True
+
+    def _exec_if_stale_dispatcher_import(self, cycle: dict[str, Any] | None) -> bool:
+        """Substitui o processo uma vez por SHA apos import obsoleto na retomada.
+
+        So age com launch ausente e fora de dry_run, depois do ciclo. Nao define
+        ``IMPORT_RESTART_SHA_ENV`` no caminho de mudanca de checkout. Nao chama
+        kill, terminate nem wait. Retorna True so se o exec voltou.
+        """
+        if self.dry_run or self.launch is not None or not cycle:
+            return False
+        from core.line.pending_delivery import STALE_DISPATCHER_IMPORT
+
+        resumptions = cycle.get("resumptions")
+        if not isinstance(resumptions, list) or not any(
+            isinstance(row, Mapping) and row.get("cause") == STALE_DISPATCHER_IMPORT for row in resumptions
+        ):
+            return False
+        current = self._read_checkout_sha()
+        if current is None:
+            logger.error("import obsoleto na retomada sem SHA completo; sem reinicio")
+            return False
+        if os.environ.get(IMPORT_RESTART_SHA_ENV) == current:
+            logger.info(
+                "import obsoleto na retomada ja reiniciou o despachante na geracao %s",
+                current,
+            )
+            return False
+        command = [sys.executable, "-m", "core.line.fleet_dispatcher", *self._launch_argv]
+        logger.info(
+            "import obsoleto na retomada com SHA %s; reiniciando o despachante uma vez nesta geracao",
+            current,
+        )
+        os.environ[IMPORT_RESTART_SHA_ENV] = current
+        try:
+            self._exec_fn(sys.executable, command)
+        except Exception:  # noqa: BLE001 - falha de exec nao pode derrubar o daemon
+            logger.exception(
+                "reinicio do despachante falhou apos import obsoleto na geracao %s",
+                current,
+            )
+            return False
+        return True
 
     def _record_failure(self, job: InFlight, rc: int, kind: str, tail: str) -> None:
         reason = failure_reason(rc, tail)
@@ -1019,10 +1132,8 @@ class FleetDispatcher:
         from core.line.pending_delivery import tick, acknowledge_deploy
         resumptions = tick(PROJECT_ROOT) if self.launch is None and not self.dry_run else []
         if any(r.get("status") == "dispatcher_busy" for r in resumptions):
-            self.last_cycle = {"ts": datetime.now(timezone.utc).isoformat(), "resumptions": resumptions,
-                               "dispatched": [], "deployed": False}
-            self._write_state()
-            return self.last_cycle
+            return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "resumptions": resumptions,
+                                       "dispatched": [], "deployed": False})
         awaiting_deploy = any(r["status"] == "merged_awaiting_deploy" for r in resumptions)
         if awaiting_deploy and not self.pending_deploy:
             self.pending_deploy, self.last_merge_at = True, self.clock()
@@ -1030,10 +1141,9 @@ class FleetDispatcher:
         if deployed_resume:
             acknowledge_deploy(PROJECT_ROOT, resumptions)
         if self.config.resume_only:
-            self.last_cycle = {"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
-                               "resumptions": resumptions, "dispatched": [], "deployed": deployed_resume}
-            self._write_state()
-            return self.last_cycle
+            return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
+                                       "resumptions": resumptions, "dispatched": [],
+                                       "deployed": deployed_resume})
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
         if self.recovery.get("active"):
@@ -1075,7 +1185,7 @@ class FleetDispatcher:
         self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now)
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
-        self.last_cycle = {
+        return self._finish_cycle({
             "resumptions": resumptions,
             "ts": datetime.now(timezone.utc).isoformat(),
             "free_hosts": [h.id for h in self.config.hosts if h.id not in self.in_flight],
@@ -1098,9 +1208,15 @@ class FleetDispatcher:
                          "receipt_cause": self.recovery.get("receipt_cause", ""),
                          "receipt_digest": self.recovery.get("receipt_digest", ""),
                          "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")},
-        }
+        })
+
+    def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
+        observed = self._read_checkout_sha()
+        cycle["code_sha"] = observed
+        cycle["code_sha_changed"] = _checkout_sha_changed(self._startup_sha, observed)
+        self.last_cycle = cycle
         self._write_state()
-        return self.last_cycle
+        return cycle
 
     def _ticket_holds(self) -> list[dict[str, Any]]:
         try:
@@ -1136,10 +1252,17 @@ class FleetDispatcher:
 
     def run_forever(self, stop: Callable[[], bool] = lambda: False) -> None:
         while not stop():
+            # --once nao entra aqui. Mudanca de SHA substitui antes do ciclo.
+            # Import obsoleto substitui depois do ciclo, uma vez por geracao.
+            if self._exec_if_checkout_sha_changed():
+                return
             try:
-                self.run_cycle()
+                cycle = self.run_cycle()
             except Exception:  # noqa: BLE001 - o daemon nunca morre por um ciclo ruim
                 logger.exception("ciclo do despachante falhou")
+                cycle = None
+            if self._exec_if_stale_dispatcher_import(cycle):
+                return
             self.run_digest_hook()
             self.run_sentinel_hook()
             time.sleep(self.config.cycle_sec)
@@ -1174,7 +1297,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                                         recovery_tickets=recovery), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
-                        busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts)
+                        busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
+                        launch_argv=list(sys.argv[1:] if argv is None else argv))
     if args.loop and not args.once:
         d.run_forever()
         return 0

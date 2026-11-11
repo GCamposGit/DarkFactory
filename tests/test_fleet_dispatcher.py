@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1089,3 +1092,619 @@ def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypat
     cycle = e.d.run_cycle()
     assert e.launched == [("USR-02", "grokbox")]
     assert cycle["skipped"]["USR-01"] == blocked
+
+
+_SHA_A = "a" * 40
+_SHA_B = "b" * 40
+
+
+class _ShaSeq:
+    def __init__(self, values: list[object]) -> None:
+        self._values = list(values)
+        self.calls = 0
+
+    def __call__(self) -> object:
+        index = min(self.calls, len(self._values) - 1)
+        self.calls += 1
+        return self._values[index]
+
+
+class _LiveHandle:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def poll(self) -> None:
+        self.calls.append("poll")
+        return None
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+
+    def wait(self, *_args: object, **_kwargs: object) -> int:
+        self.calls.append("wait")
+        return 0
+
+
+def _no_dispatch(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("o reinicio nao despacha ticket")
+
+
+_KEEP_LAUNCH = object()
+
+
+def _sha_dispatcher(
+    tmp_path: Path,
+    reader: object,
+    *,
+    dry_run: bool = False,
+    launch_argv: list[str] | None = None,
+    exec_fn: object | None = None,
+    launch: object = _KEEP_LAUNCH,
+    digest_hook: object | None = None,
+    sentinel_hook: object | None = None,
+):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    execs: list[tuple[str, list[str]]] = []
+
+    def record(executable: str, argv: list[str]) -> None:
+        execs.append((executable, list(argv)))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(hosts=HOSTS[:1], state_path=tmp_path / "state.json", cycle_sec=0, deploy_window_sec=100),
+        demands_loader=list,
+        probe=lambda _host: fd.HostProbe(False, "ocupado"),
+        launch=_no_dispatch if launch is _KEEP_LAUNCH else launch,
+        deploy=lambda: 0,
+        clock=lambda: 0.0,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        dry_run=dry_run,
+        digest_hook=digest_hook,
+        sentinel_hook=sentinel_hook,
+        code_sha_reader=reader,
+        exec_fn=exec_fn or record,
+        launch_argv=["--loop"] if launch_argv is None else launch_argv,
+    )
+    return dispatcher, execs
+
+
+def _stop_after(limit: int):
+    state = {"n": 0}
+
+    def stop() -> bool:
+        state["n"] += 1
+        return state["n"] > limit
+
+    return stop
+
+
+def _one_cycle(dispatcher):
+    seen: list[dict] = []
+    original = dispatcher.run_cycle
+
+    def wrapped():
+        seen.append(original())
+        return seen[-1]
+
+    dispatcher.run_cycle = wrapped
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert seen, "o ciclo nao rodou"
+    return seen[0]
+
+
+def _plant_live_work(dispatcher, tmp_path: Path, monkeypatch):
+    from core.line import pending_delivery as pending
+
+    checkout = tmp_path / "operational-checkout"
+    checkout.mkdir()
+    (checkout / "keep.txt").write_text("stay", encoding="utf-8")
+    handle = _LiveHandle()
+    child = _LiveHandle()
+    dispatcher.in_flight["grokbox"] = fd.InFlight("USR-508", "grokbox", handle, operational_checkout=checkout)
+    pending._children[508508] = child
+    removed: list[bool] = []
+    monkeypatch.setattr(fd, "_remove_operational_checkout", lambda *_a, **_k: removed.append(True))
+    return handle, child, checkout, removed, pending
+
+
+def _assert_live_work_untouched(handle, child, checkout: Path, removed: list[bool]) -> None:
+    for actor in (handle, child):
+        assert "kill" not in actor.calls
+        assert "terminate" not in actor.calls
+        assert "wait" not in actor.calls
+    assert removed == []
+    assert (checkout / "keep.txt").read_text(encoding="utf-8") == "stay"
+
+
+def test_changed_checkout_sha_reexecs_before_cycle_and_leaves_live_work(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path, _ShaSeq([_SHA_A, _SHA_B]), launch_argv=["--loop", "--resume-only"],
+    )
+    handle, child, checkout, removed, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    cycles: list[str] = []
+    dispatcher.run_cycle = lambda: cycles.append("cycle")
+    try:
+        dispatcher.run_forever(stop=_stop_after(1))
+    finally:
+        pending._children.pop(508508, None)
+    assert cycles == []
+    assert execs == [(
+        sys.executable,
+        [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop", "--resume-only"],
+    )]
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+    _assert_live_work_untouched(handle, child, checkout, removed)
+    assert dispatcher.in_flight["grokbox"].operational_checkout == checkout
+
+
+def test_exec_failure_is_logged_and_the_loop_continues(tmp_path: Path, monkeypatch, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="darkfac.line.fleet_dispatcher")
+
+    def boom(_executable: str, _argv: list[str]) -> None:
+        raise OSError("exec recusado")
+
+    dispatcher, _execs = _sha_dispatcher(tmp_path, _ShaSeq([_SHA_A, _SHA_B]), exec_fn=boom)
+    handle, child, checkout, removed, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    try:
+        cycle = _one_cycle(dispatcher)
+    finally:
+        pending._children.pop(508508, None)
+    assert "exec recusado" in caplog.text
+    assert "reinicio do despachante falhou" in caplog.text
+    assert cycle["code_sha"] == _SHA_B
+    assert cycle["code_sha_changed"] is True
+    _assert_live_work_untouched(handle, child, checkout, removed)
+
+
+@pytest.mark.parametrize("startup,later", [(_SHA_A, _SHA_A), ("A" * 40, "a" * 40)])
+def test_equal_checkout_sha_does_not_replace_and_cycle_exposes_it(tmp_path: Path, startup: str, later: str) -> None:
+    dispatcher, execs = _sha_dispatcher(tmp_path, _ShaSeq([startup, later]))
+    cycle = _one_cycle(dispatcher)
+    assert execs == []
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+
+
+@pytest.mark.parametrize(
+    "startup,later,exposed",
+    [
+        (None, None, None),
+        ("abc", "def", None),
+        (_SHA_A, None, None),
+        (None, _SHA_B, _SHA_B),
+        (_SHA_A, "abc", None),
+        ("abc", _SHA_B, _SHA_B),
+        ("", _SHA_B, _SHA_B),
+    ],
+)
+def test_unreadable_checkout_sha_does_not_replace(
+    tmp_path: Path, startup: object, later: object, exposed: str | None,
+) -> None:
+    dispatcher, execs = _sha_dispatcher(tmp_path, _ShaSeq([startup, later]))
+    cycle = _one_cycle(dispatcher)
+    assert execs == []
+    assert cycle["code_sha"] == exposed
+    assert cycle["code_sha_changed"] is False
+
+
+def test_dry_run_and_once_expose_sha_change_without_replacing(tmp_path: Path) -> None:
+    dry, dry_execs = _sha_dispatcher(tmp_path / "dry", _ShaSeq([_SHA_A, _SHA_B]), dry_run=True)
+    dry_cycle = _one_cycle(dry)
+    assert dry_execs == []
+    assert dry_cycle["code_sha"] == _SHA_B
+    assert dry_cycle["code_sha_changed"] is True
+
+    once, once_execs = _sha_dispatcher(tmp_path / "once", _ShaSeq([_SHA_A, _SHA_B]))
+    once_cycle = once.run_cycle()
+    assert once_execs == []
+    assert once_cycle["code_sha"] == _SHA_B
+    assert once_cycle["code_sha_changed"] is True
+
+    resume, resume_execs = _sha_dispatcher(tmp_path / "resume", _ShaSeq([_SHA_A, _SHA_B]))
+    resume.config.resume_only = True
+    resume_cycle = resume.run_cycle()
+    assert resume_execs == []
+    assert resume_cycle["mode"] == "resume_only"
+    assert resume_cycle["code_sha"] == _SHA_B
+    assert resume_cycle["code_sha_changed"] is True
+
+
+def test_reader_error_counts_as_unreadable_sha(tmp_path: Path, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="darkfac.line.fleet_dispatcher")
+
+    class _BoomAfterStart:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                return _SHA_A
+            raise OSError("git explodiu")
+
+    dispatcher, execs = _sha_dispatcher(tmp_path, _BoomAfterStart())
+    cycle = _one_cycle(dispatcher)
+    assert execs == []
+    assert cycle["code_sha"] is None
+    assert cycle["code_sha_changed"] is False
+    assert "git explodiu" in caplog.text
+
+
+def test_sha_comparison_uses_project_root_head_without_env_or_origin_main(tmp_path: Path, monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake(root: Path, **kwargs: object) -> str:
+        calls.append({"root": root, "use_env": kwargs.get("use_env"), "env": kwargs.get("env")})
+        return _SHA_A
+
+    commands: list[object] = []
+    real_run = fd.subprocess.run
+
+    def spy(cmd: object, *args: object, **kwargs: object):
+        commands.append(cmd)
+        return real_run(cmd, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(fd, "current_git_sha", fake)
+    monkeypatch.setattr(fd.subprocess, "run", spy)
+    monkeypatch.setenv("DARKFAC_GIT_SHA", _SHA_B)
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(hosts=HOSTS[:1], state_path=tmp_path / "state.json", cycle_sec=0),
+        demands_loader=list,
+        probe=lambda _host: fd.HostProbe(False, "ocupado"),
+        launch=_no_dispatch,
+        deploy=lambda: 0,
+        clock=lambda: 0.0,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        digest_hook=None,
+        sentinel_hook=None,
+        exec_fn=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("exec inesperado")),
+        launch_argv=["--loop"],
+    )
+    cycle = _one_cycle(dispatcher)
+    assert calls
+    assert all(row["root"] == fd.PROJECT_ROOT and row["use_env"] is False and row["env"] is None for row in calls)
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+    assert not any("origin/main" in str(cmd) for cmd in commands)
+
+
+def _plant_wait(directory: Path, *, status: str = "running", pid: int | None = 4242):
+    from core.line import pending_delivery as pending
+
+    directory.mkdir(parents=True, exist_ok=True)
+    row = pending.PendingDelivery(
+        ticket_id="USR-447",
+        worktree="C:/dev/DarkFac/wt-usr-447",
+        stage="development",
+        status=status,
+        pid=pid,
+        started_at=10.0,
+        cause="route_wait",
+        next_check=0,
+    )
+    path = directory / "USR-447.json"
+    pending._save(path, row)
+    return pending, path
+
+
+def _raise_from_tick(monkeypatch, directory: Path, exc: BaseException, *, mutate: bool):
+    pending, path = _plant_wait(directory)
+    before = path.read_bytes()
+
+    def boom(file_path: Path, _repo: object, _now: object) -> dict:
+        if mutate:
+            current = pending.PendingDelivery.model_validate_json(file_path.read_text(encoding="utf-8"))
+            current.status = "blocked"
+            current.pid = None
+            current.cause = "mutated"
+            pending._save(file_path, current)
+        raise exc
+
+    monkeypatch.setattr(pending, "_tick_row", boom)
+    return pending, path, before
+
+
+@pytest.mark.parametrize(
+    ("exc", "missing"),
+    [
+        (ImportError("cannot import name 'fresh'", name="core.line.routing"), "core.line.routing"),
+        (ModuleNotFoundError("No module named 'core.line.fresh'", name="core.line.fresh"), "core.line.fresh"),
+        (ImportError("cannot import name 'fresh'"), None),
+        (ModuleNotFoundError("No module named 'core.line.fresh'"), None),
+    ],
+)
+def test_import_error_in_tick_is_stale_cause_and_keeps_wait_json(
+    tmp_path: Path, monkeypatch, exc: ImportError, missing: str | None,
+) -> None:
+    pending, path, before = _raise_from_tick(monkeypatch, tmp_path / "pending", exc, mutate=True)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=0)[0]
+    assert result["status"] == "check_failed"
+    assert result["cause"] == pending.STALE_DISPATCHER_IMPORT
+    if missing is None:
+        assert "missing" not in result
+        assert not exc.name
+    else:
+        assert result["missing"] == exc.name == missing
+    assert path.read_bytes() == before
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.pid == 4242
+
+
+def test_real_importerror_name_is_the_missing_field(tmp_path: Path, monkeypatch) -> None:
+    try:
+        from core.line.fleet_dispatcher import _usr508_symbol_absent  # type: ignore[attr-defined]  # noqa: F401
+    except ImportError as exc:
+        caught = exc
+    else:
+        raise AssertionError("o simbolo ausente deveria falhar")
+    pending, path, before = _raise_from_tick(monkeypatch, tmp_path / "pending", caught, mutate=True)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=0)[0]
+    assert result["cause"] == "stale_dispatcher_import"
+    assert result["status"] == "check_failed"
+    assert caught.name
+    assert result["missing"] == caught.name
+    assert path.read_bytes() == before
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.pid == 4242
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("store down"), OSError("disk"), ValueError("bad row")])
+def test_other_tick_exceptions_keep_the_class_name(tmp_path: Path, monkeypatch, exc: Exception) -> None:
+    pending, path, before = _raise_from_tick(monkeypatch, tmp_path / "pending", exc, mutate=True)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=0)[0]
+    assert result == {"ticket": "USR-447", "status": "check_failed", "cause": type(exc).__name__}
+    assert path.read_bytes() != before
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    assert saved.pid is None
+    assert saved.cause == "mutated"
+
+
+def _track_cycle(dispatcher, events: list[str]):
+    original = dispatcher.run_cycle
+    seen: list[dict] = []
+
+    def wrapped():
+        events.append("cycle")
+        cycle = original()
+        seen.append(cycle)
+        return cycle
+
+    dispatcher.run_cycle = wrapped
+    original_exec = dispatcher._exec_fn
+
+    def tracking(executable: str, argv: list[str]):
+        events.append("exec")
+        return original_exec(executable, argv)
+
+    dispatcher._exec_fn = tracking
+    return seen
+
+
+def test_stale_import_restarts_once_after_cycle_when_head_is_unchanged(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    directory = tmp_path / "pending"
+    _pending, path, before = _raise_from_tick(
+        monkeypatch, directory,
+        ImportError("cannot import name 'fresh'", name="core.line.routing"),
+        mutate=True,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        lambda: _SHA_A,
+        launch=None,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+    handle, child, checkout, removed, planted = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    try:
+        dispatcher.run_forever(stop=_stop_after(1))
+        assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == dispatcher._startup_sha == _SHA_A
+    finally:
+        os.environ.pop(fd.IMPORT_RESTART_SHA_ENV, None)
+        planted._children.pop(508508, None)
+    assert events == ["cycle", "exec"]
+    assert execs == [(
+        sys.executable,
+        [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop"],
+    )]
+    cycle = seen[0]
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+    assert cycle["resumptions"][0]["status"] == "check_failed"
+    assert cycle["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert cycle["resumptions"][0]["missing"] == "core.line.routing"
+    assert path.read_bytes() == before
+    _assert_live_work_untouched(handle, child, checkout, removed)
+
+
+def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.setenv(fd.IMPORT_RESTART_SHA_ENV, _SHA_A)
+    directory = tmp_path / "pending"
+    _pending, path, before = _raise_from_tick(
+        monkeypatch, directory,
+        ModuleNotFoundError("No module named 'core.line.fresh'", name="core.line.fresh"),
+        mutate=True,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        lambda: _SHA_A,
+        launch=None,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert execs == []
+    assert events == ["cycle", "digest", "sentinel", "sleep:0"]
+    cycle = seen[0]
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+    assert cycle["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert cycle["resumptions"][0]["missing"] == "core.line.fresh"
+    assert cycle["resumptions"][0]["status"] == "check_failed"
+    assert path.read_bytes() == before
+    assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
+
+
+def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(tmp_path, _ShaSeq([_SHA_A, _SHA_B]), launch=None)
+    dispatcher.run_cycle = lambda: events.append("cycle")
+    dispatcher.digest_hook = lambda: events.append("digest")
+    dispatcher.sentinel_hook = lambda: events.append("sentinel")
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert events == []
+    assert execs == [(
+        sys.executable,
+        [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop"],
+    )]
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+
+
+def test_stale_import_does_not_restart_in_dry_run_or_when_launch_is_present(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: None)
+    forged = {"resumptions": [{"ticket": "USR-447", "status": "check_failed", "cause": "stale_dispatcher_import"}]}
+
+    dry, dry_execs = _sha_dispatcher(tmp_path / "dry", lambda: _SHA_A, dry_run=True, launch=None)
+    dry.run_cycle = lambda: forged
+    dry.run_forever(stop=_stop_after(1))
+    assert dry_execs == []
+
+    launched, launched_execs = _sha_dispatcher(tmp_path / "launch", lambda: _SHA_A)
+    launched.run_cycle = lambda: forged
+    launched.run_forever(stop=_stop_after(1))
+    assert launched_execs == []
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+
+
+def test_stale_import_exec_failure_is_logged_and_does_not_exec_twice(
+    tmp_path: Path, monkeypatch, caplog,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    caplog.set_level(logging.ERROR, logger="darkfac.line.fleet_dispatcher")
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    directory = tmp_path / "pending"
+    _pending, path, before = _raise_from_tick(
+        monkeypatch, directory, ImportError("cannot import name 'fresh'", name="core.line.routing"), mutate=True,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+
+    def boom(_executable: str, _argv: list[str]) -> None:
+        raise OSError("exec recusado")
+
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        lambda: _SHA_A,
+        launch=None,
+        exec_fn=boom,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    try:
+        dispatcher.run_forever(stop=_stop_after(2))
+        assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
+    finally:
+        os.environ.pop(fd.IMPORT_RESTART_SHA_ENV, None)
+    assert execs == []
+    assert events == [
+        "cycle", "exec", "digest", "sentinel", "sleep:0",
+        "cycle", "digest", "sentinel", "sleep:0",
+    ]
+    assert seen[0]["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert seen[1]["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert seen[0]["code_sha_changed"] is False
+    assert path.read_bytes() == before
+    assert "exec recusado" in caplog.text
+    assert "reinicio do despachante falhou apos import obsoleto" in caplog.text
+
+
+def test_stale_import_without_complete_sha_does_not_replace(tmp_path: Path, monkeypatch) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    directory = tmp_path / "pending"
+    _raise_from_tick(
+        monkeypatch, directory, ImportError("cannot import name 'fresh'", name="core.line.routing"), mutate=False,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        _ShaSeq([_SHA_A, _SHA_A, None]),
+        launch=None,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert execs == []
+    assert events == ["cycle", "digest", "sentinel", "sleep:0"]
+    assert seen[0]["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert seen[0]["code_sha"] is None
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+
+
+def test_main_forwards_original_argv_and_once_skips_the_loop(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Dispatcher:
+        def __init__(self, _config: object, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run_cycle(self) -> dict[str, bool]:
+            captured["cycle"] = True
+            return {"ok": True}
+
+        def run_forever(self) -> None:
+            captured["forever"] = True
+
+    monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
+    monkeypatch.setattr(fd, "configure_logging", lambda *_a, **_k: None)
+
+    assert fd.main(["--loop", "--cycle-sec", "7", "--resume-only"]) == 0
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["launch_argv"] == ["--loop", "--cycle-sec", "7", "--resume-only"]
+    assert captured.get("forever") is True
+    assert "cycle" not in captured
+
+    captured.clear()
+    assert fd.main(["--once", "--dry-run", "--loop"]) == 0
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["launch_argv"] == ["--once", "--dry-run", "--loop"]
+    assert kwargs["dry_run"] is True
+    assert captured.get("cycle") is True
+    assert "forever" not in captured
