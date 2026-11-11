@@ -27,8 +27,11 @@ o launcher usam essa propriedade persistida para recusar uma segunda execucao. A
 a guarda local do launcher, que nao representa sessoes em outros hosts.
 
 O launcher, o intake do owner e a etapa de desenvolvimento tambem consultam PRs abertos do repositorio GitHub
-pelo identificador exato do ticket em branch, titulo ou corpo. Encontrar um PR produz recusa com sua URL;
-indisponibilidade da consulta falha fechado. Projetos com remoto conhecido fora do GitHub nao fazem essa consulta.
+pelo identificador exato do ticket em branch, titulo ou corpo. Encontrar um PR produz recusa com sua URL.
+Se o `gh` falta, nao esta autenticado, estoura o tempo ou o GitHub devolve erro, a recusa continua fail-closed
+e nomeia a causa (`gh_missing`, `gh_unauthenticated`, `gh_timeout`, `github_error`) com o comando de correcao.
+Uma falha so com a mensagem antiga permanece `active_pr_lookup_failed`. Projetos com remoto conhecido fora do
+GitHub nao fazem essa consulta.
 No dispatch, a etapa de desenvolvimento consulta tambem a reserva canonica: bloqueia uma reserva pertencente a
 outro run e falha fechado se nao conseguir verificar a propriedade; o run que possui a reserva pode continuar.
 Esse sinal persiste depois que o lease do processo termina e impede que um PR ativo seja confundido com ausencia

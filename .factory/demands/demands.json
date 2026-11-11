@@ -14428,5 +14428,36 @@
     "dependencies": [],
     "created_at": "2026-11-09T09:30:45.287241Z",
     "updated_at": "2026-11-11T00:57:13.060069Z"
+  },
+  {
+    "id": "USR-486",
+    "project_id": "darkfac",
+    "title": "Launcher esconde causa da falha do gh e host pode ficar sem gh",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 08/11 run_ticket.py USR-484 no Desktop, usuario Guilherme, recusou com GitHub PR lookup failed; retry when GitHub is available. A causa real era gh nao reconhecido no PowerShell. core/line/active_pull_request.py transforma OSError, timeout e codigo diferente de zero na mesma mensagem, sugerindo indisponibilidade do GitHub. O mesmo usuario tambem nao tem leitura de cota de Claude e Grok.",
+    "core_journey": [
+      "Em 08/11 run_ticket.py USR-484 no Desktop, usuario Guilherme, recusou com GitHub PR lookup failed; retry when GitHub is available. A causa real era gh nao reconhecido no PowerShell. core/line/active_pull_request.py transforma OSError, timeout e codigo diferente de zero na mesma mensagem, sugerindo indisponibilidade do GitHub. O mesmo usuario tambem nao tem leitura de cota de Claude e Grok."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Recusa distingue gh ausente, gh sem autenticacao, timeout e erro do GitHub, com causa estruturada e comando de correcao",
+      "Bootstrap ou preflight do host verifica gh e autenticacao das CLIs de harness e informa o que falta antes de aceitar execucao manual",
+      "Teste de comportamento cobre gh ausente, sem autenticacao e timeout"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-08T14:32:53.462968Z",
+    "updated_at": "2026-11-08T14:32:53.462968Z"
   }
 ]

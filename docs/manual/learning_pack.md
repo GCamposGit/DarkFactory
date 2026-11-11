@@ -17,6 +17,10 @@ Verificacao: se um redator (`llm`) for injetado em `build_for_delivery`, cada fr
 
 `scripts/stop_hook_artifacts.py`, registrado em `.claude/settings.json` (hooks.Stop), impede o Claude Code de encerrar quando o diff contra `origin/main` (ou a worktree suja) toca `core/`, `hub/`, `scripts/`, `tests/` ou `run_ticket.py` e a branch/ultimo commit cita `USR-NNN`, sem `.factory/learning_packs/USR-NNN.md` (ou `.json`). Bloqueia com exit 2 e o comando de geracao em stderr. Com `stop_hook_active` ou falha inesperada (git ausente etc.) libera com exit 0.
 
+## Aprendizado da entrega USR-486 T2
+
+O launcher manual confere o host antes de reservar a linha. `gh auth status` usa o mesmo classificador da consulta de PR: binario ausente, sessao ausente, timeout e erro do GitHub saem com causa e comando, e a reserva nao acontece. Claude, Codex e Grok sao sondados na sequencia. Se o harness pedido nao autentica, ou se nenhum dos tres autentica, a execucao para ali. Se outro CLI ainda roda, a falta de sessao do Claude ou do Grok fica registrada como lacuna de cota, com o comando de login de cada um, e o ticket segue. `--dry-run` nao dispara essas sondas. O filho de entrega que ja herda a trava nao sonda de novo; um `--resume-delivery` avulso ainda sonda antes de reservar.
+
 ## Aprendizado da entrega USR-456 T2
 
 O preflight continua consultando a saúde do grokbox, mas o wake por email só ocorre com autorização
