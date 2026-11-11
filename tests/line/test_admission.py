@@ -291,6 +291,157 @@ def test_remote_stale_reading_stays_stale_when_status_is_ok() -> None:
     assert classify_gate(observation, NOW) == (CODE_GATE_STALE, "gate://notebook")
 
 
+def _clear_admission_worker_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("DARKFAC_HARNESS_WORKER_JOB", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.delenv(admission.ENV_ADMISSION_WORKERS, raising=False)
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+
+
+def _fresh_remote(**extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "workers": 2,
+        "busy": False,
+        "observed_at": NOW.isoformat(),
+        "node_id": "grokbox",
+        "hostname": "grokbox",
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_remote_harness_off_still_reads_the_fleet(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.harness import remote_dispatch as dispatch
+
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv(admission.ENV_ADMISSION_WORKERS, "http://admit:9")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://test:9")
+    assert admission._remote_worker_urls() == ["http://admit:9"]
+
+    monkeypatch.setenv(admission.ENV_ADMISSION_WORKERS, "")
+    assert admission._remote_worker_urls() == []
+
+    monkeypatch.delenv(admission.ENV_ADMISSION_WORKERS)
+    assert admission._remote_worker_urls() == ["http://test:9"]
+
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS")
+    assert admission._remote_worker_urls() == list(dispatch.worker_urls())
+
+
+def test_ci_and_worker_job_keep_the_admission_list_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "auto")
+    monkeypatch.setenv(admission.ENV_ADMISSION_WORKERS, "http://admit:9")
+    monkeypatch.setenv("CI", "true")
+    assert admission._remote_worker_urls() == []
+
+    monkeypatch.delenv("CI")
+    monkeypatch.setenv("DARKFAC_HARNESS_WORKER_JOB", "1")
+    assert admission._remote_worker_urls() == []
+
+
+def test_disabled_url_is_not_probed_and_reported_node_leaves_the_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop,notebook")
+    monkeypatch.setenv(
+        admission.ENV_ADMISSION_WORKERS,
+        "http://100.78.181.90:8080,http://10.9.9.9:8080,http://grokbox:8080",
+    )
+    assert admission._remote_worker_urls() == ["http://10.9.9.9:8080", "http://grokbox:8080"]
+
+    probed: list[str] = []
+
+    def probe(url: str) -> dict[str, Any]:
+        probed.append(url)
+        if "10.9.9.9" in url:
+            return _fresh_remote(workers=4, node_id="desktop", hostname="somewhere-else")
+        return _fresh_remote(workers=3, node_id="grokbox", hostname="grokbox")
+
+    by_node = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=lambda: ["http://100.78.181.90:8080", "http://10.9.9.9:8080", "http://grokbox:8080"],
+        probe=probe,
+    )
+    assert probed == ["http://10.9.9.9:8080", "http://grokbox:8080"]
+    refs = [worker.evidence_ref for worker in by_node.workers]
+    assert refs == ["gate://local", "gate://grokbox"]
+
+    def probe_hostname(url: str) -> dict[str, Any]:
+        return _fresh_remote(workers=4, node_id="other", hostname="ai-notebook")
+
+    by_hostname = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=lambda: ["http://10.8.8.8:8080"],
+        probe=probe_hostname,
+    )
+    assert [worker.evidence_ref for worker in by_hostname.workers] == ["gate://local"]
+    assert classify_gate(by_hostname, NOW) == (CODE_GATE_ZERO, "gate://local")
+
+
+def test_local_zero_admits_on_one_free_remote_when_dispatch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://grokbox:8080")
+    probed: list[str] = []
+
+    def probe(url: str) -> dict[str, Any]:
+        probed.append(url)
+        return _fresh_remote()
+
+    observation = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=admission._remote_worker_urls,
+        probe=probe,
+    )
+    assert probed == ["http://grokbox:8080"]
+    decision = decide(
+        planning=_hit("planning", "claude"),
+        build=_hit("build", "codex"),
+        review=_hit("review", "grok"),
+        gate=observation,
+        now=NOW,
+        not_before_for=lambda _kind: NOW,
+    )
+    assert decision.outcome == "allow" and decision.not_before is None
+    assert decision.evidence_ref.endswith(";gate://grokbox")
+    assert "gate://local" not in decision.evidence_ref
+
+
+def test_status_ok_remote_does_not_cover_local_zero_on_the_fleet_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://grokbox:8080,http://desktop:8080")
+    observation = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=admission._remote_worker_urls,
+        probe=lambda _url: {"status": "ok"},
+    )
+    assert classify_gate(observation, NOW) == (CODE_GATE_ZERO, "gate://local")
+    decision = decide(
+        planning=_hit("planning", "claude"),
+        build=_hit("build", "codex"),
+        review=_hit("review", "grok"),
+        gate=observation,
+        now=NOW,
+        not_before_for=lambda _kind: NOW,
+    )
+    assert decision.outcome == "wait" and decision.code == CODE_GATE_ZERO
+    assert decision.evidence_ref == "gate://local"
+
+
 def test_pytest_does_not_probe_the_suite_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     probes: list[str] = []
     import core.harness.suite_lock as suite_lock

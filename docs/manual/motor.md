@@ -65,6 +65,17 @@ observação com menos de 90 segundos. As causas de espera são `gate_capacity_z
 falhas, a causa segue a ordem zero, busy, stale, genérico: coleção vazia e health genérico permanecem
 espera e não cobrem um zero, um busy ou um stale.
 
+`DARKFAC_REMOTE_HARNESS=off` não tira os workers da leitura da admissão: o modo off só
+impede o despacho do portão. A fonte é `DARKFAC_ADMISSION_WORKERS` quando a variável está
+definida, mesmo vazia; senão `DARKFAC_TEST_WORKERS` quando definida; senão o default de
+`worker_urls`. URL em `DARKFAC_FLEET_DISABLED_HOSTS` não é sondada. Health cujo `node_id` ou
+`hostname` cai em host desabilitado sai da coleção e não admite. `CI` e
+`DARKFAC_HARNESS_WORKER_JOB` continuam com lista vazia. Worker local com `workers` 0 não
+bloqueia a frota quando um remoto está livre (`workers` > 0, `busy` false, observação com
+menos de 90 segundos): o `evidence_ref` do gate nesse allow é `gate://<host>` desse remoto.
+Health só `{"status": "ok"}` não cobre o zero local; sem worker utilizável a espera segue
+`gate_capacity_zero` com `gate://local`.
+
 `allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
 novo na leitura daquele momento.
 
