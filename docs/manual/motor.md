@@ -107,6 +107,10 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    Correcao pequena (`estimate_ticket_size == small`) pula SOMENTE o GRILL.
 2. **PLAN** chama `stage_planning.run_planning` (modelo de nivel alto) e grava `SPEC.md` + `tickets.json`;
    correcao pequena grava um plano minimo (um sub-ticket igual a demanda), sem agente.
+   Toda gravacao de PLAN deixa tambem `plan_origin.json` (`PlanOrigin` em `core/line/ticket_engine.py`, USR-447)
+   no mesmo diretorio de artefatos: `ticket_id`, `origin`, `branch`, `recorded_at` e `evidence`
+   (`SPEC.md:sha256:<hex>` e `tickets.json:sha256:<hex>` dos arquivos presentes).
+   `origin` e `planning_agent` depois do agente de planejamento e `minimal_small_fix` no plano minimo.
 3. **RESEARCH** (USR-376, entre PLAN e BUILD) chama `research.policy.run_research_stage` com o ledger
    `.factory/research/` do checkout principal e grava `research.json`. Sem busca web deterministica neste
    processo o estagio registra `research_skipped` com o motivo "busca web indisponivel neste host"; nunca
@@ -131,7 +135,25 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    `_discard_untouched_workspace` e `_report_workspace_fate` não rodam nesse caminho e portanto não removem
    a worktree. O ticket volta a `planned` se estava `implementing` ou `validating`; um ticket que já estava
    `planned` permanece na fila.
-5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD. O id e resolvido nesta
+5. Na entrega (`--resume-delivery`, processo novo): exige PLAN, RESEARCH e BUILD.
+   Launcher e frota (entrega com processo pai) nao preenchem artefato faltante.
+   So o `--resume-delivery` avulso do operador preenche, e apenas o estagio cujo artefato nao valida (USR-447).
+   Um arquivo deixado por tentativa anterior nao dispensa os demais estagios.
+   INTAKE ausente regrava `DEMAND.md` a partir do ticket e em seguida `require_artifact` confirma.
+   Antes de confiar num PLAN ja em disco, `ensure_plan_provenance` le `plan_origin.json`.
+   Sem arquivo, arquivo ilegivel ou registro sem `ticket_id`, e com `SPEC.md` ou `tickets.json` no disco,
+   o PLAN legado e vinculado uma vez ao ticket corrente (`origin` `legacy_migrated`, evidencia dos hashes atuais).
+   Sem PLAN nesse caso nao ha migracao: o preenchimento seguinte grava a propria origem.
+   Registro do proprio `ticket_id` fica intocado. Registro de outro ticket recusa o resume
+   (`StageArtifactMissing` em PLAN; motivo `plan_origin.json pertence ao ticket <outro>, nao a <este>`).
+   O vinculo nao e reescrito para a checagem passar.
+   PLAN ausente ou invalido grava o plano minimo (`origin` `minimal_small_fix`).
+   RESEARCH ausente grava `research.json` legado (`research_skipped`, worktree anterior ao USR-376).
+   BUILD ausente so grava `progress.json` quando `_has_build_evidence` acha ao menos um commit a frente de
+   `origin/<base>` (`git fetch` da base e `rev-list --count`). Worktree ausente, ref remoto inexistente ou
+   zero commits a frente recusam BUILD (`artefato ausente e sem commit a frente da base: implementacao nao verificavel`)
+   e nao inventam `progress.json`.
+   O id e resolvido nesta
    ordem: arquivo do ledger da worktree; fila duravel do control store (mesmo id, uma linha materializada
    no ledger da worktree, sem `next_ticket_id` e sem o agente de correcao); arquivo do checkout
    compartilhado (segue para a entrega sem gravar a worktree e sem criar linha na fila); `origin/main`
@@ -201,8 +223,11 @@ A entrega reexecuta a validacao quando o `candidate_digest` nao cobre o candidat
 coincidente, o portao nao roda de novo. Quando o portao roda, o runner so reutiliza o veredito cacheado
 se o hash da arvore, a configuracao e as etapas selecionadas ainda correspondem. Worktree suja,
 digest/politica diferentes ou artefato ausente/invalido seguem pelo fluxo normal de planejamento e desenvolvimento.
-Um `--resume-delivery` digitado pelo operador numa worktree anterior ao S4 (sem nenhum artefato) registra
-plano/build minimos e segue por VALIDATE, REVIEW e MERGE.
+Um `--resume-delivery` avulso preenche cada estagio ausente na ordem INTAKE, PLAN, RESEARCH e BUILD (USR-447).
+O portao antigo `has_any` (qualquer arquivo no diretorio pulava o preenchimento inteiro) nao existe mais:
+worktree so com INTAKE/GRILL e implementacao ja commitada recebe o PLAN que faltava, sem regravar o que ja valida.
+BUILD continua dependente de commit a frente da base. Sem esse commit a entrega para em BUILD e nao segue
+para VALIDATE, REVIEW nem MERGE.
 
 Na linha, `bindings.IntegrationStageAdapter` recusa a integracao (`stage_artifact_missing:<ESTAGIO>`) sem
 `SPEC.md`/`tickets.json` e sem `review_verdict.json`, que o `ReviewStage` passou a gravar ao aprovar.
