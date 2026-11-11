@@ -18,8 +18,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Keep below pytest.ini ``timeout = 120`` while allowing this nested suite to
 # run on loaded Windows workers. The test is serial because it starts pytest.
 _PYTEST_DEADLINE_SEC = 110
+# pytest's format_session_duration appends " (H:MM:SS)" once the session
+# reaches 60s. This focus is allowed to run up to _PYTEST_DEADLINE_SEC, so
+# both the short form and the clock form are real summaries.
 _SUMMARY_LINE = re.compile(
-    r"^(?:=+\s+)?\d+ [A-Za-z]\w*(?:, \d+ [A-Za-z]\w*)* in \d+(?:\.\d+)?s(?:\s+=+)?$"
+    r"^(?:=+\s+)?"
+    r"\d+ [A-Za-z]\w*(?:, \d+ [A-Za-z]\w*)*"
+    r" in \d+(?:\.\d+)?s"
+    r"(?: \(\d+:\d{2}:\d{2}\))?"
+    r"(?:\s+=+)?$"
 )
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _FOCUS_FILE = "tests/test_fleet_dispatcher.py"
@@ -51,6 +58,19 @@ def _pytest_summary_line(output: str) -> str:
         if _SUMMARY_LINE.fullmatch(stripped):
             return stripped
     raise AssertionError(f"pytest summary line missing\n{output}")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "1 failed in 0.12s",
+        "1 failed, 1 passed in 0.20s",
+        "55 passed in 71.20s (0:01:11)",
+        "=== 2 passed, 1 skipped in 65.00s (0:01:05) ===",
+    ],
+)
+def test_summary_line_accepts_pytest_short_and_clock_duration(line: str) -> None:
+    assert _pytest_summary_line(line) == line
 
 
 def test_external_cache_dir_is_stable_and_per_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
