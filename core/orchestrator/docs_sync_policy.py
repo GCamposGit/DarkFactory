@@ -1,10 +1,15 @@
-"""Política de sincronização da documentação de entregas.
+"""Politica de sincronizacao da documentacao de entregas (USR-499).
 
-``docs/FASE_ATUAL.md`` é um snapshot do estado corrente do produto. Ele não
-deve receber changelogs ou seções históricas por ticket.
+``docs/FASE_ATUAL.md`` e o snapshot da fase atual (canais, maquinas,
+orcamento, metas, piloto). Nao recebe secao de historico nem entrada
+datada por ticket: esse trecho e reescrito por toda entrega e conflita
+no rebase.
 
-O histórico permanente das entregas continua sendo mantido no manual e no
-learning pack.
+O registro de cada entrega continua no manual (``docs/manual/``) e no
+learning pack (``.factory/learning_packs/`` e
+``docs/manual/learning_pack.md``). Atualizar um deles nao exige
+atualizar o outro. Nao existem ``docs/MANUAL.md`` nem
+``docs/LEARNING_PACK.md``.
 """
 
 from __future__ import annotations
@@ -13,9 +18,13 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 
 CURRENT_PHASE_DOCUMENT = "docs/FASE_ATUAL.md"
-DELIVERY_HISTORY_DOCUMENTS = (
-    "docs/MANUAL.md",
-    "docs/LEARNING_PACK.md",
+MANUAL_DIR = "docs/manual/"
+LEARNING_PACK_MANUAL = "docs/manual/learning_pack.md"
+LEARNING_PACK_DIR = ".factory/learning_packs/"
+DELIVERY_RECORD_LOCATIONS = (
+    MANUAL_DIR,
+    LEARNING_PACK_MANUAL,
+    LEARNING_PACK_DIR,
 )
 
 _TICKET_HEADING = re.compile(
@@ -23,70 +32,74 @@ _TICKET_HEADING = re.compile(
     re.IGNORECASE,
 )
 _HISTORY_HEADING = re.compile(
-    r"^\s{0,3}#{1,6}\s+hist[oó]rico(?:\s+(?:de|por)\s+tickets?)?\s*$",
+    r"^\s{0,3}#{1,6}\s+hist[oó]rico\b",
     re.IGNORECASE,
+)
+# Item de lista cuja primeira informacao e a data do registro: o formato
+# do antigo changelog por ticket ("- 10/11/2026: USR-494" ou
+# "- 05/11/2026 (USR-473): ...").
+_DIARY_LINE = re.compile(
+    r"^\s*(?:[-*+]|\d+\.)\s+\d{1,2}/\d{1,2}/\d{4}\s*[:\(]",
+)
+_DIARY_ISO = re.compile(
+    r"^\s*(?:[-*+]|\d+\.)\s+\d{4}-\d{2}-\d{2}\s*[:\(]",
 )
 
 
 class DocsSyncPolicyError(ValueError):
-    """Raised when a delivery violates the documentation sync policy."""
+    """A entrega violou a politica de documentacao."""
 
 
 def is_ticket_history_heading(line: str) -> bool:
-    """Return whether a Markdown line introduces ticket-by-ticket history."""
+    """True se a linha e um titulo de secao de historico ou de ticket."""
 
     return bool(_TICKET_HEADING.match(line) or _HISTORY_HEADING.match(line))
+
+
+def is_ticket_history_line(line: str) -> bool:
+    """True se a linha e historico por ticket e nao um fato consolidado da fase."""
+
+    return bool(
+        is_ticket_history_heading(line)
+        or _DIARY_LINE.match(line)
+        or _DIARY_ISO.match(line)
+    )
+
+
+def ticket_history_lines(text: str) -> list[str]:
+    """Linhas de ``text`` que sao historico por ticket, na ordem do documento."""
+
+    return [line.strip() for line in text.splitlines() if is_ticket_history_line(line)]
 
 
 def validate_docs_sync(
     changed_paths: Iterable[str],
     added_lines: Mapping[str, Sequence[str]] | None = None,
 ) -> None:
-    """Validate documentation changes made by a delivery.
+    """Recusa historico por ticket acrescentado em ``docs/FASE_ATUAL.md``.
 
-    The phase snapshot may still be updated when the current phase actually
-    changes. Only ticket-history headings are forbidden there. Ticket records
-    belong to the manual and learning pack.
-
-    ``added_lines`` is intentionally optional so callers that only calculate
-    required documentation can use the same policy without reading diffs.
+    ``changed_paths`` fica na assinatura para o gate informar o diff, mas
+    nao exige que o manual e o learning pack mudem juntos. ``added_lines``
+    e opcional: sem ele, a funcao nao tem texto para julgar.
     """
 
-    normalized_paths = {path.replace("\\", "/") for path in changed_paths}
     normalized_added_lines = {
         path.replace("\\", "/"): lines
         for path, lines in (added_lines or {}).items()
     }
-
-    offending_lines = [
-        line.strip()
-        for line in normalized_added_lines.get(CURRENT_PHASE_DOCUMENT, ())
-        if is_ticket_history_heading(line)
-    ]
-    if offending_lines:
-        formatted = ", ".join(repr(line) for line in offending_lines)
-        raise DocsSyncPolicyError(
-            f"{CURRENT_PHASE_DOCUMENT} is a current-state snapshot and cannot "
-            f"receive ticket history headings: {formatted}. Record the "
-            "delivery in the manual and learning pack instead."
-        )
-
-    changed_history_documents = normalized_paths.intersection(
-        DELIVERY_HISTORY_DOCUMENTS
+    offending = ticket_history_lines(
+        "\n".join(normalized_added_lines.get(CURRENT_PHASE_DOCUMENT, ()))
     )
-    if changed_history_documents and changed_history_documents != set(
-        DELIVERY_HISTORY_DOCUMENTS
-    ):
-        missing = sorted(
-            set(DELIVERY_HISTORY_DOCUMENTS) - changed_history_documents
-        )
+    if offending:
+        formatted = ", ".join(repr(line) for line in offending)
         raise DocsSyncPolicyError(
-            "Delivery history must keep the manual and learning pack in sync; "
-            f"missing: {', '.join(missing)}."
+            f"{CURRENT_PHASE_DOCUMENT} e o snapshot da fase atual e nao recebe "
+            f"historico por ticket: {formatted}. Registre a entrega no manual "
+            f"({MANUAL_DIR}) e no learning pack ({LEARNING_PACK_DIR})."
         )
 
 
 def delivery_history_documents() -> tuple[str, ...]:
-    """Return the documents that persist delivery history."""
+    """Onde a entrega fica registrada. Qualquer subconjunto pode mudar sozinho."""
 
-    return DELIVERY_HISTORY_DOCUMENTS
+    return DELIVERY_RECORD_LOCATIONS
