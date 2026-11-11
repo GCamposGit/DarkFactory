@@ -14490,5 +14490,35 @@
     "dependencies": [],
     "created_at": "2026-11-11T07:37:45.029296Z",
     "updated_at": "2026-11-11T09:37:27.206352Z"
+  },
+  {
+    "id": "USR-489",
+    "project_id": "darkfac",
+    "title": "Host manual usa Python fora do contrato e sem dependencias do portao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 08/11 a entrega do USR-484 no Desktop parou em stage_artifact_missing:DOCS porque python apontava para Program Files Python311, sem importlinter, depois de PLAN e BUILD concluidos. O contrato exige Python 3.12+ e o preflight nao verificou.",
+    "core_journey": [
+      "Em 08/11 a entrega do USR-484 no Desktop parou em stage_artifact_missing:DOCS porque python apontava para Program Files Python311, sem importlinter, depois de PLAN e BUILD concluidos. O contrato exige Python 3.12+ e o preflight nao verificou."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Preflight recusa antes de PLAN com causa e comando de correcao quando Python ou dependencias do portao nao atendem o contrato",
+      "Teste de comportamento cobre versao antiga e modulo ausente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-08T15:17:14.859816Z",
+    "updated_at": "2026-11-08T15:17:14.859816Z"
   }
 ]
