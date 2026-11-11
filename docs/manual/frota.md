@@ -108,6 +108,50 @@ ele encerrar, uma execução posterior da limpeza pode removê-lo. Para checkout
 limpeza ocorre normalmente após o término do job. A deduplicação do deploy continua agrupando
 merges pela janela de silêncio configurada.
 
+## Reinício quando o SHA do checkout muda (USR-508)
+
+Na largada, o despachante lê o HEAD completo do checkout em execução (`PROJECT_ROOT`) com
+`current_git_sha` e `use_env` falso. `DARKFAC_GIT_SHA` e `origin/main` não entram nessa
+comparação. Entre ciclos, antes de `run_cycle`, o loop lê o mesmo HEAD de novo.
+
+Se os dois SHAs têm 40 hexadecimais e são diferentes, o processo se substitui com o
+interpretador que já está rodando e os argumentos originais da largada:
+
+```text
+<python> -m core.line.fleet_dispatcher <argumentos originais>
+```
+
+A substituição não chama `kill`, `terminate` nem `wait` nos handles em voo nem nos filhos
+de `pending_delivery`, e não remove o checkout operacional. Esses runs continuam no
+sistema; o processo novo os enxerga pelo inventário de processos.
+
+SHA igual, SHA ilegível, `--once` e `--dry-run` não substituem o processo por essa
+comparação. O estado do ciclo (`.factory/runs/fleet_dispatcher_state.json`) publica
+`code_sha` (HEAD observado, ou nulo se ilegível) e `code_sha_changed` (verdadeiro só
+quando os dois SHAs completos diferem). Se o exec falha, o erro fica em
+`fleet-dispatcher.log` e o loop segue para o ciclo com o código que já estava em
+memória. Essa comparação não grava `DARKFAC_DISPATCHER_IMPORT_RESTART_SHA`.
+
+## Import obsoleto na retomada (USR-508)
+
+`ImportError` e `ModuleNotFoundError` dentro de `pending_delivery.tick` fecham aquela
+retomada com status `check_failed` e causa `stale_dispatcher_import`. Quando a exceção
+traz `name`, o resultado inclui `missing` com esse nome. O JSON da espera permanece no
+disco, com o mesmo status e o mesmo pid de antes da exceção. `RuntimeError` e as demais
+exceções do tick seguem com a causa igual ao nome da classe.
+
+No `--loop`, com o despacho real (`launch` ausente) e fora de `--dry-run`, o
+despachante se substitui depois do ciclo e antes do resumo diário e do sentinela, mesmo
+com o HEAD igual ao da largada. A substituição grava
+`DARKFAC_DISPATCHER_IMPORT_RESTART_SHA` com o HEAD completo desta geração e usa o mesmo
+comando do reinício por mudança de checkout. Handles em voo e filhos de
+`pending_delivery` continuam sem `kill`, `terminate` ou `wait`.
+
+A variável é gravada antes da substituição. Com ela igual ao HEAD atual, uma nova
+ocorrência só registra a causa no ciclo e o loop dorme: não há segundo exec nessa
+geração. Se o exec falha, o erro fica no log e essa geração também não tenta outro
+exec. `--once`, `--dry-run` e um `launch` presente não disparam esse reinício.
+
 ## Notebook e Desktop (Windows)
 
 Instale a tarefa a partir do checkout principal atualizado, nunca de uma worktree.

@@ -17,6 +17,7 @@ from core.paths import state_root
 
 logger = logging.getLogger(__name__)
 RECHECK_SECONDS = 900
+STALE_DISPATCHER_IMPORT = "stale_dispatcher_import"
 _children: dict[int, subprocess.Popen] = {}
 
 
@@ -228,6 +229,28 @@ def acknowledge_deploy(repo_root: Path, rows: list[dict]) -> None:
         (queue_dir() / f"{row['ticket']}.json").unlink(missing_ok=True)
 
 
+def _restore_wait_snapshot(path: Path, snapshot: bytes | None) -> None:
+    """Put the wait file back to the bytes captured before a stale import."""
+    if snapshot is None:
+        return
+    try:
+        if path.is_file() and path.read_bytes() == snapshot:
+            return
+        temporary = path.with_suffix(f".{os.getpid()}.restore.tmp")
+        temporary.write_bytes(snapshot)
+        os.replace(temporary, path)
+    except OSError:
+        logger.exception("failed to restore wait %s after stale import", path.name)
+
+
+def _import_failure_result(path: Path, exc: ImportError) -> dict:
+    """``check_failed`` with the stable stale-import cause. ``missing`` follows ``exc.name``."""
+    result = {"ticket": path.stem, "status": "check_failed", "cause": STALE_DISPATCHER_IMPORT}
+    if isinstance(exc.name, str) and exc.name:
+        result["missing"] = exc.name
+    return result
+
+
 def tick(repo_root: Path, *, directory: Path | None = None, now: float | None = None) -> list[dict]:
     """Probe due waits and launch at most one resume, serialized across dispatchers."""
     from core.demands.store import DemandsLockTimeout, _PathMutex
@@ -239,7 +262,19 @@ def tick(repo_root: Path, *, directory: Path | None = None, now: float | None = 
         with _PathMutex(directory / "dispatch", timeout=0.1):
             for path in sorted(directory.glob("*.json")):
                 try:
+                    snapshot = path.read_bytes()
+                except OSError:
+                    snapshot = None
+                try:
                     result = _tick_row(path, repo_root, time.time() if now is None else now)
+                except ImportError as exc:
+                    # ModuleNotFoundError subclasses ImportError and shares this cause.
+                    logger.warning(
+                        "Resume check failed for %s: %s missing=%s",
+                        path.name, STALE_DISPATCHER_IMPORT, exc.name,
+                    )
+                    _restore_wait_snapshot(path, snapshot)
+                    result = _import_failure_result(path, exc)
                 except Exception as exc:
                     logger.warning("Resume check failed for %s: %s", path.name, type(exc).__name__)
                     result = {"ticket": path.stem, "status": "check_failed", "cause": type(exc).__name__}

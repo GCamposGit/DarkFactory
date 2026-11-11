@@ -14428,5 +14428,36 @@
     "dependencies": [],
     "created_at": "2026-11-09T09:30:45.287241Z",
     "updated_at": "2026-11-11T00:57:13.060069Z"
+  },
+  {
+    "id": "USR-508",
+    "project_id": "darkfac",
+    "title": "Despachante reinicia sozinho quando o main muda para nao rodar codigo misto",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "7511481da318a359db227d808dba2c27db5b7df3",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 11/11 as retomadas de entrega USR-447 e USR-493 falharam com check_failed/ImportError: o processo do despachante, iniciado antes dos merges #841-#843, mantinha modulos antigos em memoria enquanto pending_delivery importava nomes novos do disco. Reiniciar manualmente resolveu.",
+    "core_journey": [
+      "Em 11/11 as retomadas de entrega USR-447 e USR-493 falharam com check_failed/ImportError: o processo do despachante, iniciado antes dos merges #841-#843, mantinha modulos antigos em memoria enquanto pending_delivery importava nomes novos do disco. Reiniciar manualmente resolveu."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Despachante detecta novo sha no checkout que executa e se reinicia entre ciclos, sem matar runs em voo",
+      "ImportError em retomada vira causa estruturada e dispara o reinicio",
+      "Teste de comportamento cobre troca de sha"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-11T05:39:38.852722Z",
+    "updated_at": "2026-11-11T08:15:02.755412Z"
   }
 ]
