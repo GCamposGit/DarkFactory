@@ -6,10 +6,10 @@ Atualizado em: 2026-11-11 (Claude Code, coordenador de 09/11 a 11/11)
 ## Estado
 
 - Fase: V0 da Dark Factory (0/5 entregas qualificadas; piloto M1 bloqueado na OA-082).
-- `main` em `14d8d7ef` (#848), CI verde, Hub em producao no mesmo sha da ultima verificacao.
+- `main` em `ac848437` (#850) em 11/11 10:35Z, CI do merge anterior verde.
 - Despachante: tarefa agendada `DarkFac-Fleet-Dispatcher` (loop) com `--recovery-tickets USR-510,USR-509,USR-508,USR-506,USR-498,USR-503,USR-499,USR-500,USR-502,USR-492,USR-483,USR-504`. Desde o USR-508 ele se reinicia sozinho quando o `main` muda.
 - Hosts: Desktop executa; Grokbox oscila (cai e volta); Notebook frequentemente com `workers=0` porque a RAM livre fica abaixo de 4 GiB com os apps do owner abertos.
-- Cotas (11/11 ~06:40): Claude semanal 6% (abaixo do piso), Codex 15% (no piso, renova 12/11 09:58 BRT), Grok ~21% e caindo rapido (owner confirmou saldo oficial em 10/11 e autorizou uso a vontade). Abaixo do piso, a escrita vai para o OpenRouter (teto US$ 2 por execucao, US$ 10 por mes).
+- Cotas (11/11 ~07:36 BRT): Claude semanal 5% e Grok 12,6% (ambos abaixo do piso), Codex 15% (no piso, renova 12/11 09:58 BRT; Grok renova 12/11 14:50 BRT). Toda escrita agora cai no OpenRouter. Abaixo do piso, a escrita vai para o OpenRouter (teto US$ 2 por execucao, US$ 10 por mes).
 - Revisao: cascata do USR-488 (outra familia por harness; outra familia via OpenRouter; mesma familia com outro modelo; mesmo modelo com persona adversarial). Admissao compara familia do modelo, nao nome do harness (#834).
 
 ## Decisoes do owner em vigor (09-10/11)
@@ -23,13 +23,13 @@ Atualizado em: 2026-11-11 (Claude Code, coordenador de 09/11 a 11/11)
 ## O que foi entregue (09-11/11)
 
 - Correcoes feitas pela coordenacao via subagente: #831 e #834 (USR-488, cascata de revisao e familia do modelo), #833 (estado runtime no `.gitignore`), #835/#836/#837/#838 (espera 75, trava de linha, reserva de frota e PR ativo nao contam como falha), #839 (falha repetida segura so o ticket; `set_recovery` saiu de `_record_failure`), #830 (plano Frente 7).
-- Entregas da propria frota, sem toque humano: USR-501 (#841, sentinela de fila ociosa), USR-497 (#842, fechar falhas quando o `main` muda), USR-494 (#843, via expressa de autorreparo), USR-508 (#848, despachante reinicia ao mudar o `main`).
+- Entregas da propria frota, sem toque humano: USR-501 (#841, sentinela de fila ociosa), USR-497 (#842, fechar falhas quando o `main` muda), USR-494 (#843, via expressa de autorreparo), USR-508 (#848, despachante reinicia ao mudar o `main`), USR-510 (#849, admissao considera todos os workers de portao), USR-489 (#850).
 - Varredura de 09/11: 159 worktrees removidas (84 commits soltos preservados em tags `archive/worktree-*`), 5 PRs antigos fechados, 6 tickets orfaos devolvidos a fila.
 
 ## O que esta em voo
 
-- USR-510 (Desktop): admissao deve considerar todos os workers de portao, nao so o local. E o maior gargalo de vazao: com o Notebook sem RAM, todo lancamento sai com `gate_capacity_zero` (`gate://local`).
-- USR-492 (Grokbox): ordem de hosts Notebook, Grokbox oportunista, Desktop.
+- USR-483 (Grokbox): identidade de sessao e papel de coordenador. O processo do USR-489 no Desktop pode seguir vivo apos o merge; confirmar e encerrar se for orfao.
+- Conferir que o USR-510 (#849) acabou com as esperas `gate_capacity_zero` vindas de `gate://local` quando o Notebook esta sem RAM.
 - Em seguida na prioridade: USR-509 (entregas com PR de CI vermelho ficam `blocked deploy_evidence_missing` e nao corrigem: USR-447 #845, USR-449 #846, USR-493 #844, USR-486 #847), USR-506 (motivo de falha grava trecho de codigo).
 
 ## Pendencias
