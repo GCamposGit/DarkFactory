@@ -14396,5 +14396,37 @@
     "dependencies": [],
     "created_at": "2026-11-09T22:17:15.435878Z",
     "updated_at": "2026-11-11T00:23:51.311652Z"
+  },
+  {
+    "id": "USR-494",
+    "project_id": "darkfac",
+    "title": "Via expressa de autorreparo para defeito que trava a propria linha",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "6fce41d81f5ab7e3ede24909397aa4aa599d10d2",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 08/11 USR-484, que destravava a frota, ficou atras da lista de recuperacao, o subagente foi negado por Self-Modification e o owner executou cerca de 20 comandos manuais revelando um requisito de host por tentativa.",
+    "core_journey": [
+      "Em 08/11 USR-484, que destravava a frota, ficou atras da lista de recuperacao, o subagente foi negado por Self-Modification e o owner executou cerca de 20 comandos manuais revelando um requisito de host por tentativa."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ticket marcado como bloqueio da linha fura a fila, inclusive durante lista de recuperacao, sem burlar portao, revisao ou piso",
+      "Negacao de permissao no chat ao alterar o motor encaminha o ticket a essa via com causa registrada",
+      "Quando depender do owner, a fabrica gera um unico comando idempotente que valida o host e executa o ticket",
+      "Falha repetida alerta o owner uma vez com causa e proximo passo",
+      "Testes de comportamento cobrem preempcao, negacao e comando unico"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T09:30:45.287241Z",
+    "updated_at": "2026-11-11T00:57:13.060069Z"
   }
 ]

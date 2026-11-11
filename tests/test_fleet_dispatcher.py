@@ -256,6 +256,145 @@ def test_recovery_list_completes_and_expires_persistently(tmp_path: Path):
     assert [t for t, _ in again.launched] == ["USR-11"]
 
 
+def test_line_block_preempts_live_recovery_list_on_first_free_host(tmp_path: Path):
+    """Com a lista viva e recovery inativo, line-block sai antes dela no primeiro host livre."""
+    demands = [
+        _d("USR-10", "completed"),
+        _d("USR-11"),
+        _d("USR-12"),
+        _d("USR-13"),
+        _d("USR-30", tags=["line-block"], deps=["USR-10"]),
+    ]
+    e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"))
+    e.free.discard("grokbox")
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-30", "notebook"), ("USR-12", "desktop")]
+    assert cyc["queue_remaining"] == ["USR-11", "USR-13"]
+    assert "recuperacao_prioritaria" not in cyc["skipped"].values()
+    assert cyc["recovery_list"]["pending"] == ["USR-12", "USR-11"]
+
+
+def test_line_block_takes_the_only_slot_when_recovery_is_active(tmp_path: Path):
+    """Sem job em voo, line-block ocupa o slot unico; o recovery sai no ciclo seguinte."""
+    demands = [_d("USR-12"), _d("USR-13"), _d("USR-30", tags=["line-block"])]
+    e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"), active=True)
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-30", "grokbox")]
+    assert cyc["queue_remaining"] == ["USR-12", "USR-13"]
+    assert "recovery_single_delivery_reserved" in cyc["idle_reasons"].values()
+
+    e.handles["USR-30"].rc = 1
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-30", "grokbox"), ("USR-12", "grokbox")]
+    assert cyc["in_flight"].get("grokbox") == "USR-12"
+    assert "USR-30" in cyc["cooldown"]
+
+
+def test_line_block_does_not_open_a_second_delivery_while_one_is_in_flight(tmp_path: Path):
+    demands = [_d("USR-12"), _d("USR-13")]
+    e = _recovery_env(tmp_path, demands, ("USR-12",), active=True)
+    e.d.run_cycle()
+    assert e.launched == [("USR-12", "grokbox")]
+
+    demands.append(_d("USR-30", tags=["line-block"]))
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-12", "grokbox")]
+    assert cyc["in_flight"] == {"grokbox": "USR-12"}
+    assert cyc["skipped"]["USR-30"] == "recuperacao_prioritaria"
+    assert "USR-30" not in cyc["queue_remaining"]
+
+
+def test_line_block_does_not_open_second_delivery_if_recovery_latches_mid_flight(tmp_path: Path):
+    """Entrega lancada antes do latch nao segura a reserva; line-block ainda fica de fora."""
+    demands = [_d("USR-11")]
+    e = Env(tmp_path, demands, free=("grokbox",))
+    e.d.run_cycle()
+    assert e.launched == [("USR-11", "grokbox")]
+    assert not e.d.in_flight["grokbox"].recovery_token
+
+    e.d.admission_store.set_recovery(active=True, cause="gate_failed", fingerprint="fp")
+    e.free = {"grokbox", "notebook", "desktop"}
+    demands.append(_d("USR-30", tags=["line-block"]))
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-11", "grokbox")]
+    assert cyc["in_flight"] == {"grokbox": "USR-11"}
+    assert cyc["skipped"]["USR-30"] == "recuperacao_prioritaria"
+
+
+def test_line_block_stays_out_for_excluded_tag_open_dependency_and_cooldown(tmp_path: Path):
+    demands = [
+        _d("USR-20", tags=["line-block", "congelado-v0"]),
+        _d("USR-21", tags=["line-block", "waiting_human"]),
+        _d("USR-22", tags=["line-block", "planning-only"]),
+        _d("USR-23", tags=["line-block", "not-authorized-for-execution"]),
+        _d("USR-24", tags=["line-block"], deps=["USR-99"]),
+        _d("USR-25", tags=["line-block"]),
+        _d("USR-12"),
+        _d("USR-13"),
+    ]
+    e = _recovery_env(tmp_path, demands, ("USR-12",))
+    e.free = {"grokbox"}
+    e.d.cooldown["USR-25"] = e.now + 500
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-12", "grokbox")]
+    assert cyc["queue_remaining"] == ["USR-13"]
+    for tid in ("USR-20", "USR-21", "USR-22", "USR-23"):
+        assert cyc["skipped"][tid].startswith("tag:")
+    assert cyc["skipped"]["USR-24"] == "dependencia_aberta"
+    assert cyc["skipped"]["USR-25"] == "cooldown_infra"
+
+
+def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
+    from core.demands.models import TAG_LINE_BLOCK, UserTicket
+
+    assert TAG_LINE_BLOCK == "line-block"
+    ticket = UserTicket(id="USR-30", title="Destrava a linha", tags=[TAG_LINE_BLOCK])
+    assert ticket.tags == ["user-demand", TAG_LINE_BLOCK]
+    assert fd.demand_has_line_block(ticket.model_dump(mode="json"))
+    assert not fd.demand_has_line_block({"id": "USR-31", "tags": "line-block", "line_block": True, "title": "line-block"})
+
+    impostor = _d("USR-31")
+    impostor["line_block"] = True
+    impostor["title"] = "line-block"
+    demands = [
+        _d("USR-11"),
+        _d("USR-32", tags=["line_block"]),
+        _d("USR-33", tags=["line-block-urgent"]),
+        impostor,
+        _d("USR-30", tags=["line-block"]),
+    ]
+    e = _recovery_env(tmp_path, demands, ("USR-11",))
+    e.d.run_cycle()
+    assert e.launched == [("USR-30", "grokbox"), ("USR-11", "notebook"), ("USR-31", "desktop")]
+
+
+def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
+    calls: list[list[str]] = []
+
+    class Process:
+        def poll(self):
+            return None
+
+    def popen(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return Process()
+
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
+    monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {
+        "Popen": staticmethod(popen),
+        "STDOUT": -2,
+    })())
+    host = fd.HostSpec("grokbox", 1, "http://g")
+    fd.default_launch("USR-11", host, {"id": "USR-11", "tags": []})
+    fd.default_launch("USR-30", host, {"id": "USR-30", "tags": ["user-demand", "line-block"]})
+    assert len(calls) == 2
+    for cmd, tid in zip(calls, ("USR-11", "USR-30"), strict=True):
+        assert Path(cmd[1]).name == "run_ticket.py"
+        assert cmd[2:] == [tid, "--fleet", "--host-id", host.id]
+        assert "line-block" not in cmd
+
+
 def test_identical_failure_open_does_not_idle_host_with_other_admissible_ticket(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
     e.d.admission_store.is_failure_open = lambda **kw: kw["ticket_id"] == "USR-01"

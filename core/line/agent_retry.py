@@ -105,6 +105,40 @@ def is_protected_path_block(result: AgentResult) -> bool:
     return not result.ok and result.error_kind == "protected_path"
 
 
+def is_self_modification_block(result: AgentResult) -> bool:
+    """True when this run was denied while editing the line motor (USR-494).
+
+    Callers stop on the first attempt. Another harness would repeat the same edit.
+    ``protected_path`` stays on its own path and is not this block.
+    """
+    from core.line.express_lane import CAUSE_SELF_MODIFICATION, classify_result
+
+    return classify_result(result) == CAUSE_SELF_MODIFICATION
+
+
+def _stop_denied_edit(
+    result: AgentResult,
+    route: Route,
+    attempts: list[AgentAttempt],
+    emit: Callable[[str], None],
+) -> Optional[RetryReport]:
+    """Stop the run on a protected path or a motor denial. None lets the loop continue."""
+
+    if is_protected_path_block(result):
+        emit(
+            "Protected-path edit was cancelled"
+            + (f" ({result.protected_path})" if result.protected_path else "")
+            + "; stopping on the first attempt without retry or another harness"
+        )
+        return RetryReport(
+            ok=False, result=result, route=route, attempts=attempts, preserve_worktree=True,
+        )
+    if is_self_modification_block(result):
+        emit("Motor edit was denied; not repeating that edit in this run")
+        return RetryReport(ok=False, result=result, route=route, attempts=attempts)
+    return None
+
+
 def exclude_route(excluded: set[Route], harness: str, model: Optional[str]) -> None:
     """Remember a (harness, model) pair that failed, so the next pick for this job skips it."""
     excluded.add((harness, model))
@@ -167,7 +201,7 @@ def backoff_delay(
     `not_installed`, `unsupported_mode`, login failures and quota failures return None, so the loop falls
     straight through to the next healthy route without a single sleep.
     """
-    if result.error_kind in {"cancelled", "protected_path"}:
+    if result.error_kind in {"cancelled", "protected_path", "self_modification"}:
         return None
     if classify_failure(result) != "transient":
         return None
@@ -304,17 +338,9 @@ def run_with_retry(
                 # USR-152: the run was cancelled; never retry, back off or fall back to another route.
                 return RetryReport(ok=False, result=result, route=route, attempts=attempts)
 
-            if is_protected_path_block(result):
-                # USR-205: the same edit is cancelled again on every harness. Stop on the first
-                # attempt and leave whatever the agent already wrote in the worktree.
-                emit(
-                    "Protected-path edit was cancelled"
-                    + (f" ({result.protected_path})" if result.protected_path else "")
-                    + "; stopping on the first attempt without retry or another harness"
-                )
-                return RetryReport(
-                    ok=False, result=result, route=route, attempts=attempts, preserve_worktree=True,
-                )
+            denied = _stop_denied_edit(result, route, attempts, emit)
+            if denied is not None:
+                return denied
 
             failure = classify_failure(result)
             emit(

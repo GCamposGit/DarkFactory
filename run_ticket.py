@@ -1784,6 +1784,60 @@ def _finish_protected_path(
     return 1
 
 
+def _finish_self_modification(
+    progress: ProgressPublisher,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    report: agent_retry.RetryReport,
+    *,
+    as_json: bool,
+    harness: str,
+    before_headroom: Optional[float],
+    ticket_size: str,
+) -> int:
+    """Record the motor denial and stop. This run does not edit that path again (USR-494)."""
+    from core.line.express_lane import (
+        official_cause_line,
+        record_self_modification,
+        register_express_owner_action,
+    )
+
+    try:
+        record_self_modification(ticket.id, project_id=ticket.project_id)
+    except Exception as exc:  # the denial still stops the run when the store write fails
+        logger.warning("Could not record the motor denial for %s: %s", ticket.id, exc)
+    try:
+        register_express_owner_action(ticket.id)
+    except Exception as exc:  # the official line still prints when the backlog write fails
+        logger.warning("Could not open the express owner action for %s: %s", ticket.id, exc)
+    message = official_cause_line(ticket.id)
+    progress.phase("agent", "failed", message, cause="self_modification", harness=harness)
+    print(message, file=sys.stderr)
+    print(f"[i] Worktree: {workspace.path}", file=sys.stderr)
+    cost_record = record_ticket_quota_cost(
+        ticket_id=ticket.id,
+        harness=harness,
+        before_headroom=before_headroom,
+        after_headroom=inspect_quotas().get(harness, {}).get("headroom"),
+        duration_s=report.total_duration_s,
+        success=False,
+    )
+    if not as_json:
+        print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
+    else:
+        print(json.dumps({
+            "ok": False,
+            "cause": "self_modification",
+            "ticket_id": ticket.id,
+            "estimated_size": ticket_size,
+            "quota_usage": cost_record,
+            "workspace": str(workspace.path),
+            "branch": workspace.branch,
+            "attempts": [a.model_dump() for a in report.attempts],
+        }, indent=2, ensure_ascii=False))
+    return 1
+
+
 def resume_delivery(
     ticket_id: str,
     worktree_path: Optional[Path | str] = None,
@@ -3129,6 +3183,17 @@ def _stage_agent_early_exit(
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
     if report.result is not None and agent_retry.is_protected_path_block(report.result):
         return _finish_protected_path(
+            progress,
+            ticket,
+            workspace,
+            report,
+            as_json=args.json,
+            harness=report.result.harness or selected_harness or "unknown",
+            before_headroom=before_headroom,
+            ticket_size=ticket_size,
+        )
+    if report.result is not None and agent_retry.is_self_modification_block(report.result):
+        return _finish_self_modification(
             progress,
             ticket,
             workspace,
