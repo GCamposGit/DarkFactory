@@ -156,6 +156,11 @@ quando `delivery_evidence` traz uma URL; slots vazios aparecem como um cartão t
 `degraded_sources` não está vazio, uma linha de nota aparece abaixo dos slots com o que falta e,
 se for o caso, quais fontes estão indisponíveis nessa leitura.
 
+Essa tolerância é deliberada e local a este painel (nunca `500`, degrada o conteúdo). As rotas
+`GET /api/demands/tickets[/{id}]`, no mesmo `hub/backend/api.py`, seguem a política oposta desde
+o USR-449: um control store configurado mas inacessível responde `503`, nunca um `200`/`404`
+que pareça "sem tickets" — ver `docs/manual/fila.md`.
+
 ## Prontidao de segredos do piloto (USR-279 T4)
 
 O produto real que fecha a prova da V0 e o piloto da mansaodolago.com (seção acima do

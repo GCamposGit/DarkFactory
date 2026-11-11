@@ -1194,8 +1194,18 @@ def list_demand_tickets(
     status: Optional[str] = Query(default=None),
     service: HubService = Depends(get_hub_service),
 ) -> List[UserTicket]:
-    """List user demand tickets in the backlog."""
-    return service.list_demand_tickets(project_id=project_id, status=status)
+    """List user demand tickets in the backlog. 503 (never a silently short list) if the
+    control store the tickets are merged from is configured but unreachable (USR-449)."""
+    from core.workflow.control_contracts import StoreUnavailableError
+
+    try:
+        return service.list_demand_tickets(project_id=project_id, status=status)
+    except StoreUnavailableError as err:
+        # `status` is this function's own query parameter here, shadowing the fastapi module.
+        raise HTTPException(
+            status_code=503,
+            detail=f"Underlying control store unavailable: {err}",
+        )
 
 
 @router.get("/demands/tickets/{ticket_id}", response_model=UserTicket)
@@ -1203,8 +1213,21 @@ def get_demand_ticket(
     ticket_id: str,
     service: HubService = Depends(get_hub_service),
 ) -> UserTicket:
-    """Retrieve details for a single demand ticket."""
-    ticket = service.get_demand_ticket(ticket_id)
+    """Retrieve details for a single demand ticket.
+
+    404 only when the id is genuinely absent from both the ledger file and the control
+    store; a store that is configured but unreachable raises 503 instead of a false 404
+    (USR-449: a Postgres outage must never read as "ticket not found").
+    """
+    from core.workflow.control_contracts import StoreUnavailableError
+
+    try:
+        ticket = service.get_demand_ticket(ticket_id)
+    except StoreUnavailableError as err:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Underlying control store unavailable: {err}",
+        )
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Demand ticket '{ticket_id}' not found")
     return ticket

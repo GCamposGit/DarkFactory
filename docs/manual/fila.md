@@ -1,8 +1,12 @@
-<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py -->
+<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py, core/line/store_selection.py -->
 # Fila de tickets (USR-343)
 
-A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
-está definida, senão o SQLite local `.factory/control.db`. Tabelas (criadas com
+A fila de desenvolvimento vive no control store: Postgres quando um URL de linha está
+configurado (`core.line.owner_intake.line_database_url`, ordem `DARKHUB_LINE_DATABASE_URL` ->
+`DARKFAC_HF02_DATABASE_URL` -> `DARKHUB_CONTROL_DATABASE_URL`, primeira definida vale), senão o
+SQLite local `.factory/control.db`. O Hub (Dokploy) so define as variaveis `DARKHUB_*`; ler so
+`DARKFAC_HF02_DATABASE_URL` (como antes do USR-449) apontava a leitura do Hub para o SQLite local
+vazio em vez do Postgres do coordenador/worker. Tabelas (criadas com
 `CREATE TABLE IF NOT EXISTS`):
 
 - `tickets (project_id, ticket_id, status, payload, updated_at)`
@@ -22,14 +26,43 @@ O comando grava o ticket (status `planned`) no control store e termina. Não cri
 `core.demands.store.DemandsStore` (usado pelo despachante, Hub e `/tickets`) lê o control store
 primeiro e complementa com `.factory/demands/demands.json` (fallback e histórico). Em conflito
 de ID vale o control store, exceto quando o ledger já marca o ticket como `completed` ou
-`cancelled`. Se o control store estiver inacessível, a leitura cai para o `demands.json`.
-Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
+`cancelled`. Com `DARKFAC_DEMANDS_PATH` definida, só o arquivo indicado é lido.
+
+Um store configurado (URL de linha definido, ou `control.db` local já existente) que falha ao
+responder levanta `StoreUnavailableError` (USR-449); a leitura só cai silenciosamente para `[]`/
+`demands.json` quando o store nunca existiu (sem URL e sem `control.db`). Uma exceção genérica
+de `list_tickets()` (não só `StoreUnavailableError` já pronta) é normalizada para esse mesmo
+erro: `list_queue_tickets` e `get_ticket` não devolvem `[]` nem `None` nesse caso.
+
+No Hub, os dois GET propagam esse erro e respondem 503 (nunca 404 nem uma lista vazia):
+`GET /api/demands/tickets` via `HubService.list_demand_tickets`, e
+`GET /api/demands/tickets/{id}` via `HubService.get_demand_ticket`. Esses dois métodos não
+capturam `StoreUnavailableError`; quem traduz o erro em 503 é a rota. Um id que não está no
+arquivo nem na fila continua 404 só quando o store responde.
+
+`default_control_store` recusa o mock em memória do `PostgresControlStore` quando o URL
+configurado não é o esquema explícito `mock:` / `mock://` e `mock_mode` é verdadeiro. O
+adaptador trata qualquer URL que comece com as letras `mock` como offline (então `mockery://`
+não disca), mas isso não é a saída autorizada: essa função levanta `StoreUnavailableError`.
+O adaptador real publica `mock_mode`; se o atributo faltar, a leitura assume que não houve
+fallback em memória e não levanta `AttributeError`. URL inválida ou Postgres inacessível nesse
+caminho levanta `StoreUnavailableError` (o construtor degrada para mock e esta função recusa
+o mock). O `connect_timeout` de 5 segundos vale na abertura do schema
+(`PostgresControlStore._init_db`) e nas três leituras de identidade e posse
+(`get_run_identity`, `get_manual_ticket_owner`, `get_active_ticket_reservation`). `accept`,
+`claim`, `list_tickets` e as demais operações do adaptador abrem a conexão sem esse timeout.
+
+`queue_store._store` guarda até quatro stores num `lru_cache` cuja chave é o URL já resolvido
+e o caminho do SQLite. Trocar a variável de ambiente muda a chave e não reaproveita o store
+anterior. A mesma chave devolve o objeto já construído. Falha de construção não entra no cache.
 
 ## Resolver para entrega (USR-424)
 
 `queue_store.get_ticket(ticket_id)` devolve o `UserTicket` da control store.
 Retorna `None` sem exceção quando o id não existe ou quando o store ainda não
-foi criado, e não cria `control.db` nesse caminho.
+foi criado (sem URL e sem `control.db` local), e não cria `control.db` nesse
+caminho. Com o store configurado, uma falha de leitura levanta
+`StoreUnavailableError` em vez de devolver `None` (USR-449).
 
 `DemandsStore.materialize_ticket(ticket_id)` e `resolve_for_delivery(ticket_id)`
 copiam esse mesmo id para o `demands.json` da worktree, uma única vez, sem

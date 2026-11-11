@@ -17,6 +17,10 @@ Verificacao: se um redator (`llm`) for injetado em `build_for_delivery`, cada fr
 
 `scripts/stop_hook_artifacts.py`, registrado em `.claude/settings.json` (hooks.Stop), impede o Claude Code de encerrar quando o diff contra `origin/main` (ou a worktree suja) toca `core/`, `hub/`, `scripts/`, `tests/` ou `run_ticket.py` e a branch/ultimo commit cita `USR-NNN`, sem `.factory/learning_packs/USR-NNN.md` (ou `.json`). Bloqueia com exit 2 e o comando de geracao em stderr. Com `stop_hook_active` ou falha inesperada (git ausente etc.) libera com exit 0.
 
+## Aprendizado da entrega USR-449 (revisão 2)
+
+Uma fila configurada que não abre não pode parecer fila vazia. O `HubService` de produção deixa `StoreUnavailableError` subir em `list_demand_tickets` e `get_demand_ticket`; a rota responde 503. A saída de mock é o esquema `mock:`, não qualquer texto que comece com essas letras. O teste que prova o Postgres inacessível injeta `psycopg.connect` e não espera a rede. O limite de 5 segundos vale na criação do schema e em três leituras de posse, não em todo `connect` do adaptador. O cache da fila lembra o URL já resolvido: URL novo, store novo; a mesma chave reusa o objeto. Esta lição não afirma CI, merge ou deploy.
+
 ## Aprendizado da entrega USR-456 T2
 
 O preflight continua consultando a saúde do grokbox, mas o wake por email só ocorre com autorização
