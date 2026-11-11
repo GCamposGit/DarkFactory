@@ -4,8 +4,11 @@ Roda sem sessao de chat (tarefa agendada) e mantem grokbox, Notebook e Desktop o
 ciclo le ``demands.json`` de ``origin/main``, escolhe tickets ``planned`` executaveis e despacha UM
 por host livre, na ordem de ``line_fleet.json`` (grokbox > notebook > desktop). Cada despacho e um
 ``run_ticket.py --fleet --host-id <host>`` (que escolhe o harness por cota e usa a reserva por host
-de ``line_lock``); hosts remotos fixam o worker do portao via ``DARKFAC_TEST_WORKERS`` +
-``DARKFAC_FLEET_GATE_REMOTE=1`` (``--remote-required``). Falha de infra reenfileira (o ticket segue
+de ``line_lock``); hosts remotos fixam o worker do portao em ``DARKFAC_TEST_WORKERS``
+(só a URL daquele host) com ``DARKFAC_FLEET_GATE_REMOTE=1`` (``--remote-required``).
+Esse pin de execução não é a lista da admissão: o filho recebe
+``DARKFAC_ADMISSION_WORKERS`` com a lista que o despachante já tinha, ou o default
+grokbox+desktop se ela estava vazia, mais a URL do pin, sem repetir. Falha de infra reenfileira (o ticket segue
 ``planned`` e entra em cooldown); deploy pos-merge e deduplicado por janela de silencio.
 
 A tag ``line-block`` e a unica marca de via expressa. Um ticket elegivel com ela fura a fila regular
@@ -397,6 +400,31 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
         logger.exception("falha ao remover checkout operacional %s", path)
 
 
+def _admission_workers_for_pin(previous: str | None, pin_url: str) -> str:
+    """Lista que a admissão lê: workers já no despachante, ou o default da frota, mais o pin.
+
+    URLs repetidas saem uma vez, na primeira ocorrência. O pin entra no fim quando ainda
+    não estava na lista. ``DARKFAC_TEST_WORKERS`` do filho continua só com a URL do host.
+    """
+    from core.harness.remote_dispatch import DEFAULT_WORKERS
+
+    def _urls(raw: str) -> list[str]:
+        found: list[str] = []
+        for part in raw.split(","):
+            url = part.strip()
+            if url and url not in found:
+                found.append(url)
+        return found
+
+    urls = _urls(previous or "")
+    if not urls:
+        urls = _urls(DEFAULT_WORKERS)
+    pin = pin_url.strip()
+    if pin and pin not in urls:
+        urls.append(pin)
+    return ",".join(urls)
+
+
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
                    run_id: Optional[str] = None, recovery: bool = False,
                    candidate_digest: str = "unknown") -> InFlight:
@@ -415,6 +443,10 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
         env["DARKFAC_RECOVERY_MODE"] = "1"
     env["DARKFAC_CANDIDATE_DIGEST"] = candidate_digest
     if host.worker_url:
+        # Gate pin stays on DARKFAC_TEST_WORKERS. Admission reads the fleet list.
+        env["DARKFAC_ADMISSION_WORKERS"] = _admission_workers_for_pin(
+            env.get("DARKFAC_TEST_WORKERS"), host.worker_url,
+        )
         env["DARKFAC_TEST_WORKERS"] = host.worker_url
         env["DARKFAC_REMOTE_HARNESS"] = "required"
         env["DARKFAC_FLEET_GATE_REMOTE"] = "1"

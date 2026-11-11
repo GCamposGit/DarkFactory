@@ -14459,5 +14459,36 @@
     "dependencies": [],
     "created_at": "2026-11-11T05:39:38.852722Z",
     "updated_at": "2026-11-11T08:15:02.755412Z"
+  },
+  {
+    "id": "USR-510",
+    "project_id": "darkfac",
+    "title": "Admissao avalia so o worker de portao local e trava a frota quando o Notebook esta sem RAM",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 10-11/11 dezenas de lancamentos sairam com exit 75 gate_capacity_zero e evidence gate://local, inclusive para runs no Grokbox e no Desktop, enquanto o worker do Desktop (DARKFAC_TEST_WORKERS) estava disponivel. Com o Notebook sem RAM livre (apps do owner), a admissao zera a capacidade de toda a frota.",
+    "core_journey": [
+      "Em 10-11/11 dezenas de lancamentos sairam com exit 75 gate_capacity_zero e evidence gate://local, inclusive para runs no Grokbox e no Desktop, enquanto o worker do Desktop (DARKFAC_TEST_WORKERS) estava disponivel. Com o Notebook sem RAM livre (apps do owner), a admissao zera a capacidade de toda a frota."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Admissao considera todos os workers de DARKFAC_TEST_WORKERS respeitando DARKFAC_FLEET_DISABLED_HOSTS e admite com um livre",
+      "Worker local sem RAM nao bloqueia quando ha remoto saudavel e livre",
+      "Teste de comportamento cobre local zero com remoto livre"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-11T07:37:45.029296Z",
+    "updated_at": "2026-11-11T07:37:45.029296Z"
   }
 ]

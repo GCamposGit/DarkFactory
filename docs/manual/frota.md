@@ -100,6 +100,12 @@ da execução. Falhas ao atualizar a referência ou criar o worktree aparecem co
 lançamento no estado do ciclo e colocam o ticket em cooldown; não são tratadas como despacho
 bem-sucedido.
 
+## Pin de execução e admissão (USR-510)
+
+Em host com `worker_url`, o filho do despacho recebe `DARKFAC_TEST_WORKERS` igual só a essa URL, `DARKFAC_REMOTE_HARNESS=required` e `DARKFAC_FLEET_GATE_REMOTE=1`. Esse valor é o pin de execução do portão. O pin de execução não é a lista que a admissão lê. O mesmo filho recebe `DARKFAC_ADMISSION_WORKERS` com a lista que já estava em `DARKFAC_TEST_WORKERS` no ambiente do despachante, ou o default grokbox+desktop (`http://100.77.130.5:8080,http://100.78.181.90:8080`) quando essa lista estava vazia, mais a URL do pin, sem repetir uma URL.
+
+No Notebook, host sem `worker_url`, o filho segue com `DARKFAC_REMOTE_HARNESS=off` e o despacho não substitui `DARKFAC_TEST_WORKERS`.
+
 Ao encerrar um job, ou desfazer um checkout criado parcialmente, o despachante usa
 `core.git.ticket_workspace.cleanup`. Antes de remover o registro Git ou os arquivos, a rotina
 verifica processos com o diretório atual dentro do checkout. Se encontrar um holder, deixa o

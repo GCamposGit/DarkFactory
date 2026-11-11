@@ -773,6 +773,107 @@ def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkey
     assert captured["env"]["DARKFAC_STATE_ROOT"] == str((tmp_path / "shared-state").resolve())
 
 
+def _capture_launch_env(monkeypatch, tmp_path: Path, host: fd.HostSpec) -> dict[str, str]:
+    captured: dict[str, object] = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
+    monkeypatch.setattr(
+        fd,
+        "subprocess",
+        type(
+            "Subprocess",
+            (),
+            {"Popen": staticmethod(lambda _cmd, **kwargs: captured.update(kwargs) or Process()), "STDOUT": -2},
+        )(),
+    )
+    fd.default_launch("USR-510", host, {"id": "USR-510"})
+    env = captured.get("env")
+    assert isinstance(env, dict)
+    return env
+
+
+@pytest.mark.parametrize(
+    ("previous", "pin", "expected"),
+    [
+        (
+            "http://custom:1,http://custom:2",
+            "http://pin:9",
+            "http://custom:1,http://custom:2,http://pin:9",
+        ),
+        (
+            "http://a:1, http://pin:9 ,http://b:2",
+            "http://pin:9",
+            "http://a:1,http://pin:9,http://b:2",
+        ),
+        (
+            "http://a:1,http://a:1,http://b:2",
+            "http://b:2",
+            "http://a:1,http://b:2",
+        ),
+        (
+            "http://100.77.130.5:8080,http://100.78.181.90:8080",
+            "http://100.77.130.5:8080",
+            "http://100.77.130.5:8080,http://100.78.181.90:8080",
+        ),
+    ],
+)
+def test_default_launch_pins_gate_worker_and_keeps_admission_list(
+    tmp_path: Path, monkeypatch, previous: str, pin: str, expected: str,
+):
+    """The gate pin is one URL. Admission keeps the dispatcher list plus that URL."""
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", previous)
+    monkeypatch.delenv("DARKFAC_ADMISSION_WORKERS", raising=False)
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("grokbox", 1, pin))
+    assert env["DARKFAC_TEST_WORKERS"] == pin
+    assert env["DARKFAC_REMOTE_HARNESS"] == "required"
+    assert env["DARKFAC_FLEET_GATE_REMOTE"] == "1"
+    assert env["DARKFAC_ADMISSION_WORKERS"] == expected
+
+
+@pytest.mark.parametrize("previous", [None, "", "   ", ","])
+def test_default_launch_admission_uses_fleet_default_when_worker_list_is_empty(
+    tmp_path: Path, monkeypatch, previous: str | None,
+):
+    from core.harness.remote_dispatch import DEFAULT_WORKERS
+
+    assert DEFAULT_WORKERS == "http://100.77.130.5:8080,http://100.78.181.90:8080"
+    if previous is None:
+        monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("DARKFAC_TEST_WORKERS", previous)
+    monkeypatch.delenv("DARKFAC_ADMISSION_WORKERS", raising=False)
+    pin = "http://pin:9"
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("desktop", 3, pin))
+    assert env["DARKFAC_TEST_WORKERS"] == pin
+    assert env["DARKFAC_REMOTE_HARNESS"] == "required"
+    assert env["DARKFAC_FLEET_GATE_REMOTE"] == "1"
+    assert env["DARKFAC_ADMISSION_WORKERS"] == f"{DEFAULT_WORKERS},{pin}"
+
+
+def test_default_launch_notebook_does_not_replace_test_workers(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://keep:1,http://keep:2")
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "required")
+    monkeypatch.delenv("DARKFAC_ADMISSION_WORKERS", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_GATE_REMOTE", raising=False)
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("notebook", 2, None))
+    assert env["DARKFAC_REMOTE_HARNESS"] == "off"
+    assert env["DARKFAC_TEST_WORKERS"] == "http://keep:1,http://keep:2"
+    assert "DARKFAC_ADMISSION_WORKERS" not in env
+    assert "DARKFAC_FLEET_GATE_REMOTE" not in env
+
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("notebook", 2, None))
+    assert env["DARKFAC_REMOTE_HARNESS"] == "off"
+    assert "DARKFAC_TEST_WORKERS" not in env
+    assert "DARKFAC_ADMISSION_WORKERS" not in env
+
+
 def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):
     import psutil
 
