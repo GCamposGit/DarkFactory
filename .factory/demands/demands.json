@@ -11035,14 +11035,15 @@
     "project_id": "darkfac",
     "title": "Retomada de entrega perde artefato PLAN e exige replanejamento de trabalho implementado",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "\n2026-11-01T18:18Z canonical resume-delivery exit2 gate_remote_unavailable: only enabled remote worker100.77.130.5:8080 unreachable after retries15s/45s. Candidate7a4e414642470ee98cd19e65c670c80e176b00d8 preserved; resume own-worktree run_ticket.py --resume-delivery USR-447 --worktree C:/dev/DarkFac/.worktrees/usr-447-20261101T160022Z when capacity returns. No gate bypass or Desktop use.",
+    "status": "completed",
+    "delivery_evidence": "408b079622395064a7dd2319500c514ae6339e29",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand"
     ],
+    "express_causes": [],
     "problem_statement": "USR446 ja implementado commit30a43c30; conflito documental resolvido autonomamente por rebase09920280 preservando ambas entregas. Resume-delivery recusou stage_artifact_missing:PLAN artefato ausente SPEC.md em2026-11-01T15:54Z. Tentativa normal de retomada antes disso reexecutou PLAN e falhou plan_invalid. Preservar origem e vinculo do plano original durante rebase/retomada sem fabricar aprovacao e sem repetir implementacao. Worktree C:/dev/DarkFac/.worktrees/usr-446-20261101T134328Z; USR445 tambem aguardando conflito tecnico de docs.\nRecovery evidence2026-11-01T20:08Z: own candidate launcher resume-delivery rejects PLAN provenance ticket mismatch (core/line/ticket_engine.py292). Previously18:04 resume succeeded to gate; latest automatic full replan changed provenance binding. Fix in existing447 scope: preserve correct original per-ticket provenance and reject foreign artifacts; never rewrite binding merely to pass guard. Worktree preserved; no merge.\nRoot cause confirmed21:14Z: existing plan_origin.json under own worktree/.factory/artifacts/ticket_runs/USR-447/.darkfac/runs/USR-447 has origin=minimal_small_fix, branch=ticket/usr-447, evidence=[], recorded_at=2026-11-01T18:04:35.759985+00:00; NO ticket_id field (legacy minimal schema), not an observed foreign ticket. New validator treats absent ticket_id as mismatch. Implement explicit safe legacy migration/compatibility using existing bound evidence; do not relax foreign ticket rejection or fabricate original PLAN.",
     "core_journey": [
       "USR446 ja implementado commit30a43c30; conflito documental resolvido autonomamente por rebase09920280 preservando ambas entregas. Resume-delivery recusou stage_artifact_missing:PLAN artefato ausente SPEC.md em2026-11-01T15:54Z. Tentativa normal de retomada antes disso reexecutou PLAN e falhou plan_invalid. Preservar origem e vinculo do plano original durante rebase/retomada sem fabricar aprovacao e sem repetir implementacao. Worktree C:/dev/DarkFac/.worktrees/usr-446-20261101T134328Z; USR445 tambem aguardando conflito tecnico de docs."
@@ -11058,7 +11059,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-01T15:59:35.649152Z",
-    "updated_at": "2026-11-01T15:59:35.649152Z"
+    "updated_at": "2026-11-11T04:52:46.423620Z"
   },
   {
     "id": "USR-448",
