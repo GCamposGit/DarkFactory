@@ -87,6 +87,20 @@ O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só
 a espera após verificar o SHA saudável de produção incluindo o candidato. Falha de
 deploy permanece pendente para nova tentativa, sem chamar um agente para supervisionar.
 
+## CI vermelho sem recibo de merge (USR-509)
+
+Uma espera com causa `ci_fix_requires_revalidation` ou `ci_fix_route_wait`, sem
+`merge.json` e sem `deploy_report.json`, é retomada de entrega mesmo quando o control
+store já está `completed`. O tick lança `run_ticket.py --resume-delivery` na worktree
+da espera. A linha fica `waiting` ou `running` com a mesma causa de recuperação de CI.
+
+`merge.json` com `merge_sha` permanece na trilha de evidência de deploy. Divergência
+de SHA, digest, veredito ou família fica `deploy_evidence_mismatch`. Evidência coerente
+fica `merged_awaiting_deploy`.
+
+Ticket `completed` com outra causa e sem prova de deploy fica `blocked` com causa
+`deploy_evidence_missing`.
+
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
 de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e

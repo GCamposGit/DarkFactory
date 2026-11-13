@@ -502,6 +502,142 @@ def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_p
     assert active.d.run_cycle()["dispatched"] == []
 
 
+def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str):
+    """Pending row for a completed ticket, with the dispatcher collaborators stubbed."""
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pd
+
+    monkeypatch.setattr(pd, "_children", {})
+    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
+    context = tmp_path / "artifacts" / "USR-99" / ".darkfac" / "runs" / "USR-99"
+    context.mkdir(parents=True)
+    (context / "progress.json").write_text('{"harness":"codex"}', encoding="utf-8")
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    directory = tmp_path / "pending"
+    row = pd.schedule(
+        "USR-99", candidate, "review", resume_delivery=True, cause=cause, directory=directory,
+    )
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr(
+        "core.demands.queue_store.control_store",
+        lambda: SimpleNamespace(
+            mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}],
+        ),
+    )
+    monkeypatch.setattr(
+        "core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}],
+    )
+    monkeypatch.setattr(pd, "_route", lambda _row: ("grok", "grok"))
+    calls: list[list[str]] = []
+    handle = SimpleNamespace(pid=424242, poll=lambda: None)
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append(list(cmd)) or handle)
+    return pd, directory, context, candidate, row, calls
+
+
+def _coherent_release(context: Path, *, merge_sha: str, report_sha: str | None = None) -> None:
+    import json
+
+    if report_sha is not None:
+        (context / "deploy_report.json").write_text(
+            json.dumps({"sha": report_sha, "deployed": False}), encoding="utf-8",
+        )
+    (context / "merge.json").write_text(
+        json.dumps({"merge_sha": merge_sha, "candidate_digest": "candidate"}), encoding="utf-8",
+    )
+    (context / "validation.json").write_text(
+        json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8",
+    )
+    (context / "review_state.json").write_text(
+        json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}),
+        encoding="utf-8",
+    )
+    (context / "review_execution.json").write_text(
+        json.dumps({
+            "candidate_digest": "candidate",
+            "implementer_family": "openai",
+            "reviewer_family": "anthropic",
+        }),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("cause", ["ci_fix_requires_revalidation", "ci_fix_route_wait"])
+def test_ci_recovery_without_merge_resumes_completed_ticket(tmp_path: Path, monkeypatch, cause: str):
+    pd, directory, _context, candidate, row, calls = _arm_completed_wait(tmp_path, monkeypatch, cause=cause)
+    assert row.cause == cause and row.status == "waiting"
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.cause == cause
+
+
+def test_ci_recovery_with_merge_sha_keeps_the_deploy_evidence_trail(tmp_path: Path, monkeypatch):
+    pd, directory, context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    _coherent_release(context, merge_sha="b" * 40, report_sha="a" * 40)
+
+    assert pd.tick(tmp_path, directory=directory, now=row.next_check + 1)[0]["cause"] == "deploy_evidence_mismatch"
+    assert calls == []
+
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "waiting"
+    pd._save(directory / "USR-99.json", saved)
+    _coherent_release(context, merge_sha="a" * 40, report_sha="a" * 40)
+    assert pd.tick(tmp_path, directory=directory, now=row.next_check + 2)[0]["status"] == "merged_awaiting_deploy"
+    assert calls == []
+
+
+def test_completed_ticket_with_another_cause_stays_blocked_without_deploy_proof(tmp_path: Path, monkeypatch):
+    pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_red_twice",
+    )
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["cause"] == "deploy_evidence_missing"
+    assert result[0]["status"] == "blocked"
+    assert calls == []
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    assert saved.cause == "deploy_evidence_missing"
+
+
+@pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
+def test_exhausted_ci_recovery_closes_wait_without_deploy_block(
+    tmp_path: Path, monkeypatch, finish_mode: str,
+):
+    from types import SimpleNamespace
+
+    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    recovery = context / "ci_recovery.json"
+    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
+    path = directory / "USR-99.json"
+    if finish_mode == "child_exit":
+        row.pid = 424242
+        row.status = "running"
+        pd._save(path, row)
+        pd._children[424242] = SimpleNamespace(poll=lambda: 1)
+    else:
+        row.status = "blocked"
+        row.cause = "launcher_exit:1"
+        pd._save(path, row)
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result == [{"ticket": "USR-99", "status": "terminal"}]
+    assert not path.exists()
+    assert not path.with_suffix(".log").exists()
+
+
 def test_verified_resource_change_reopens_breaker(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
     resource = {"version": "worker-v1"}

@@ -18,6 +18,8 @@ from core.paths import state_root
 logger = logging.getLogger(__name__)
 RECHECK_SECONDS = 900
 STALE_DISPATCHER_IMPORT = "stale_dispatcher_import"
+# Red CI repair is still a delivery, even after the ledger was marked completed (USR-509).
+CI_RECOVERY_CAUSES = frozenset({"ci_fix_requires_revalidation", "ci_fix_route_wait"})
 _children: dict[int, subprocess.Popen] = {}
 
 
@@ -94,6 +96,21 @@ def _route(row: PendingDelivery):
                 execution_context="headless")
 
 
+def _ci_recovery_without_merge(row: PendingDelivery, release: Path, merge_path: Path) -> bool:
+    """True when a red-CI wait has no merge receipt and no deploy report."""
+    return row.cause in CI_RECOVERY_CAUSES and not release.is_file() and not merge_path.is_file()
+
+
+def _ci_recovery_is_exhausted(row: PendingDelivery) -> bool:
+    """Whether run_ticket recorded that this wait has no more CI repair attempts."""
+    from core.line.ticket_engine import artifacts_root
+    record = artifacts_root() / row.ticket_id / ".darkfac" / "runs" / row.ticket_id / "ci_recovery.json"
+    try:
+        return json.loads(record.read_text(encoding="utf-8")).get("exhausted") is True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _pid_running(row: PendingDelivery) -> bool:
     try:
         process = psutil.Process(row.pid)
@@ -121,6 +138,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             current = PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
             if current.pid != row.pid:
                 return {"ticket": row.ticket_id, "status": current.status}
+            if _ci_recovery_is_exhausted(row):
+                path.unlink(missing_ok=True)
+                return {"ticket": row.ticket_id, "status": "terminal"}
             if rc == 0:
                 row.pid, row.status, row.next_check = None, "waiting", 0
                 _save(path, row)
@@ -134,6 +154,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             return {"ticket": row.ticket_id, "status": "running", "pid": row.pid}
         else:
             row.pid, row.status = None, "waiting"
+    if _ci_recovery_is_exhausted(row):
+        path.unlink(missing_ok=True)
+        return {"ticket": row.ticket_id, "status": "terminal"}
     if row.status == "blocked" or row.next_check > now or is_locked():
         return {"ticket": row.ticket_id, "status": row.status, "next_check": row.next_check}
     store = control_store()
@@ -171,13 +194,17 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
         return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     if ticket.get("status") in {"completed", "cancelled", "canceled"}:
-        if ticket.get("status") == "completed" and (
+        if ticket.get("status") == "completed" and _ci_recovery_without_merge(row, release, merge_path):
+            # The ledger was closed when the PR opened. CI is still red and nothing merged.
+            row.resume_delivery = True
+        elif ticket.get("status") == "completed" and (
                 not release.is_file() or not report.get("deployed") or not report.get("sha")):
             row.status, row.cause = "blocked", "deploy_evidence_missing"
             _save(path, row)
             return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
-        path.unlink()
-        return {"ticket": row.ticket_id, "status": "terminal"}
+        else:
+            path.unlink()
+            return {"ticket": row.ticket_id, "status": "terminal"}
     if ticket.get("status") == "waiting_human":
         return {"ticket": row.ticket_id, "status": "waiting_human"}
     allowed = {Path(w["worktree"]).resolve() for w in list_worktrees(repo_root)}

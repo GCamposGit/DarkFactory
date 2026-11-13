@@ -311,7 +311,9 @@ CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
 retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
 nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
 fica preservada para retomada automatica. Esgotar essa tentativa registra falha
-tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+tecnica, reabre o ticket em `planned` com causa `ci_recovery_budget_exhausted` e
+comenta o PR aberto com a causa e o ID do ticket. A falha ao comentar nao impede
+a reabertura; a espera de CI termina sem exigir evidencia de deploy.
 
 USR-473: espera de deploy exige SHA do recibo de merge e evidencia coincidente
 do candidato validado e aprovado. Recibo inconsistente permanece visivel como

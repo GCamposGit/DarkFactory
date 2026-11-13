@@ -118,7 +118,9 @@ CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
 retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
 nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
 fica preservada para retomada automatica. Esgotar essa tentativa registra falha
-tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+tecnica, reabre o ticket em `planned` com causa `ci_recovery_budget_exhausted` e
+comenta o PR aberto com a causa e o ID do ticket. A falha ao comentar nao impede
+a reabertura; a espera de CI termina sem exigir evidencia de deploy.
 `run_ticket.py --recovery --run-id <id>` ativa a reserva canonica de uma entrega global e usa a identidade recebida do dispatcher. O launcher verifica o gate antes de iniciar qualquer agente; `gate_busy` retorna como espera estruturada.
 
 ## Revisao sem outra familia disponivel

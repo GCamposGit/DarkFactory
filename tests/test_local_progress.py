@@ -322,9 +322,16 @@ class _Store:
         return [_TICKET]
 
     parked: list[tuple[Any, ...]] = []
+    requeued: list[tuple[Any, ...]] = []
+    requeued_status: Any = None
 
     def update_status(self, ticket_id: str, status: Any, notes: Any = None, delivery_evidence: Any = None) -> None:
         _Store.parked.append((ticket_id, status, delivery_evidence))
+
+    def requeue_ticket(self, ticket_id: str, reason: str = "", *, reopen: bool = False) -> tuple[Any, bool]:
+        _Store.requeued_status = run_ticket.DeliveryStatus.PLANNED
+        _Store.requeued.append((ticket_id, reason, reopen))
+        return _TICKET.model_copy(update={"status": _Store.requeued_status}), True
 
 
 class _Launcher:
@@ -546,28 +553,106 @@ def test_red_ci_goes_back_to_the_agent_once_then_revalidates(
     capsys.readouterr()
 
 
+def test_ci_failed_pr_births_recovery_wait_and_the_next_tick_resumes(
+    launcher: Callable[[Any], _Launcher], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A red PR opens a CI-recovery wait; the due tick resumes delivery on a completed ledger."""
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pd
+    from core.line.ticket_engine import artifacts_root
+    from core.paths import state_root
+
+    launcher(RecordingSink())
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *_a, **_k: "fixed")
+    monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *_a, **_k: (True, None))
+    monkeypatch.setattr(
+        GitAutonomyManager, "complete_ticket",
+        lambda _self, **kwargs: _red(kwargs["ticket_id"], "FAILED tests/test_x.py::t"),
+    )
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 75
+    capsys.readouterr()
+
+    wait_path = state_root() / "pending_delivery" / "USR-99.json"
+    row = pd.PendingDelivery.model_validate_json(wait_path.read_text(encoding="utf-8"))
+    assert row.cause == "ci_fix_requires_revalidation"
+    assert row.status == "waiting"
+    assert row.resume_delivery is True
+    context = artifacts_root() / "USR-99" / ".darkfac" / "runs" / "USR-99"
+    assert not (context / "merge.json").exists()
+    assert not (context / "deploy_report.json").exists()
+
+    monkeypatch.setattr(pd, "_children", {})
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr(
+        "core.demands.queue_store.control_store",
+        lambda: SimpleNamespace(
+            mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}],
+        ),
+    )
+    monkeypatch.setattr(
+        "core.git.ticket_workspace.list_worktrees",
+        lambda _root: [{"worktree": row.worktree}],
+    )
+    monkeypatch.setattr(pd, "_route", lambda _row: ("grok", "grok"))
+    calls: list[list[str]] = []
+    handle = SimpleNamespace(pid=424242, poll=lambda: None)
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **_kw: calls.append(list(cmd)) or handle)
+
+    early = pd.tick(tmp_path, directory=wait_path.parent, now=row.next_check - 1)
+    assert early[0]["status"] == "waiting"
+    assert calls == []
+    held = pd.PendingDelivery.model_validate_json(wait_path.read_text(encoding="utf-8"))
+    assert held.status == "waiting"
+    assert held.cause == "ci_fix_requires_revalidation"
+
+    result = pd.tick(tmp_path, directory=wait_path.parent, now=row.next_check + 1)
+    assert result[0]["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", "USR-99", "--worktree", row.worktree]
+    saved = pd.PendingDelivery.model_validate_json(wait_path.read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.cause == "ci_fix_requires_revalidation"
+
+
 def test_red_ci_twice_requeues_with_cause_and_log(
     launcher: Callable[[Any], _Launcher], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     sink = RecordingSink()
     env = launcher(sink)
+    _Store.requeued.clear()
+    _Store.requeued_status = None
     fixes: list[str] = []
     monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda wt, t, stage, fb: fixes.append(fb))
     monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *a: (True, None))
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", lambda self, **k: _red("USR-99", "FAILED again"))
+    comments: list[list[str]] = []
+    def gh_run(command, **kwargs):
+        if command[:3] == ["git", "branch", "--show-current"]:
+            return SimpleNamespace(returncode=0, stdout="ticket/usr-99\n", stderr="")
+        comments.append(list(command))
+        return SimpleNamespace(returncode=1, stdout="", stderr="gh unavailable")
 
     assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 75
+    record = run_ticket.ticket_engine.workspace.context_dir(run_ticket.ticket_engine.run_workspace(_TICKET)) / "ci_recovery.json"
+    assert json.loads(record.read_text(encoding="utf-8")) == {"attempts": 1}
     _, exhausted = run_ticket._retry_red_ci(
         GitAutonomyManager(env.workspace.main_root), _TICKET, env.workspace.path,
         _red("USR-99", "FAILED again"), False, _publisher(sink),
     )
     assert exhausted.startswith("ci_recovery_budget_exhausted")
+    assert json.loads(record.read_text(encoding="utf-8")) == {"attempts": 1, "exhausted": True}
+    monkeypatch.setattr(run_ticket.subprocess, "run", gh_run)
     run_ticket._ci_red_twice_result(_TICKET, exhausted, env.workspace.path, env.workspace.branch,
                                    "resume", _publisher(sink), True, True)
-    assert _Store.parked[-1][:2] == ("USR-99", run_ticket.DeliveryStatus.VALIDATING)
-    assert "FAILED again" in _Store.parked[-1][2]
+    assert _Store.requeued[-1] == ("USR-99", "ci_recovery_budget_exhausted", True)
+    assert _Store.requeued_status == run_ticket.DeliveryStatus.PLANNED
+    assert comments and comments[0][-1] == "ticket/usr-99"
+    assert "ci_recovery_budget_exhausted" in " ".join(comments[0])
+    assert "USR-99" in " ".join(comments[0])
     assert len(fixes) == 1
-    assert sink.events[-1].cause_code == "ci_red_twice"
+    assert sink.events[-1].cause_code == "ci_recovery_budget_exhausted"
     assert "FAILED again" in sink.events[-1].message
     capsys.readouterr()
 
