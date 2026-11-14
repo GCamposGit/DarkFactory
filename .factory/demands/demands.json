@@ -14877,5 +14877,35 @@
     "dependencies": [],
     "created_at": "2026-11-10T21:56:52.263658Z",
     "updated_at": "2026-11-20T04:36:00.312076Z"
+  },
+  {
+    "id": "USR-514",
+    "project_id": "darkfac",
+    "title": "Atualizar instalacao Windows do SOPS e do age no manual",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Na configuracao da OA-082 em 14/11, o manual orienta instalar Mozilla.SOPS, cujo diretorio no repositorio WinGet so contem metadados de validacao. O pacote atual esta em SecretsOPerationS.SOPS. O age v1.3.2 executa pelo caminho de WinGet Packages, mas o shell verificado nao resolve age.exe ou age-keygen.exe pelo nome.",
+    "core_journey": [
+      "Na configuracao da OA-082 em 14/11, o manual orienta instalar Mozilla.SOPS, cujo diretorio no repositorio WinGet so contem metadados de validacao. O pacote atual esta em SecretsOPerationS.SOPS. O age v1.3.2 executa pelo caminho de WinGet Packages, mas o shell verificado nao resolve age.exe ou age-keygen.exe pelo nome."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Manual usa o pacote atual do SOPS e diferencia instalacao de resolucao pelo PATH, com comandos Windows verificados.",
+      "Passo a passo confere sops, age e age-keygen sem tocar em credenciais e orienta o fallback quando as versoes nao aparecem."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-14T09:42:08.769411Z",
+    "updated_at": "2026-11-14T09:42:08.769411Z"
   }
 ]
