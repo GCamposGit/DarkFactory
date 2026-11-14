@@ -168,6 +168,9 @@ O pin pode ser o ancestral publicado: o ultimo SHA que esse workflow publica, de
 - Live desconhecido e alvo fora dos paths: sem espera da tag ausente, sem POST, saida diferente de zero, nomeando o SHA alvo.
 - `--force` implanta o SHA explicito e nao troca o pin por um ancestral.
 - O pin nunca e um SHA anterior ao que ja esta em producao.
+- Se Git nao consegue provar a linha de commits, o diff acumulado nao basta para escolher o pin. O deploy recusa com o SHA alvo e o alcance conhecido, sem consultar a tag do alvo.
+- Se o Hub avanca enquanto o GHCR e consultado, o comando recalcula o pin sob lock antes de atualizar o compose ou disparar qualquer servico; pin ultrapassado e recusado, inclusive no retrigger apos deploy joined.
+- `darkfac-cloud` usa a propria historia do Dokploy para reconhecer convergencia parcial. O titulo e comparado ao subject do SHA da imagem, que pode diferir do alvo do sync.
 
 O comando termina com codigo de saida `0` nesse caso (`echo $LASTEXITCODE`
 no PowerShell logo depois confirma). Se algum servico aparecer com

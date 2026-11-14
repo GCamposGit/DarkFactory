@@ -35,12 +35,14 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import logging
 import os
+import sys
 import subprocess
 import threading
-import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -740,6 +742,52 @@ def set_compose_git_sha(
 CLOUD_SHA_ENV = "DARKFAC_GIT_SHA"
 EXPECTED_SHA_ENV = "DARKFAC_EXPECTED_SHA"
 CLOUD_IMAGE_REPOSITORY = "gcamposgit/darkfac-cloud"
+# Serialize the last live-pin check with Dokploy's update and deploy trigger.
+DEPLOY_PIN_LOCK = threading.Lock()
+
+
+@contextmanager
+def _deploy_pin_lock() -> Any:
+    """Cross-process lock for the final pin check + Dokploy mutation."""
+    lock_path = Path(tempfile.gettempdir()) / "darkfac-dokploy-image-pin.lock"
+    fd: Optional[int] = None
+    acquired = False
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"0")
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        acquired = True
+    except OSError as exc:
+        if fd is not None:
+            os.close(fd)
+        raise DokployUsageError(f"cannot acquire cloud pin lock: {exc}") from None
+    try:
+        with DEPLOY_PIN_LOCK:
+            yield
+    finally:
+        if fd is not None:
+            try:
+                if acquired and os.name == "nt":
+                    import msvcrt
+
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                elif acquired:
+                    import fcntl
+
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError as exc:
+                logger.warning("cloud pin lock release failed: %s", type(exc).__name__)
+            os.close(fd)
 
 
 def merge_env_var(env_text: str, name: str, value: str) -> str:
@@ -1255,6 +1303,13 @@ def load_first_parent_commits(
     shas = [line.strip().lower() for line in listed.stdout.splitlines() if line.strip()]
     if not shas or shas[-1] != target:
         return None
+    # ``rev-list --first-parent`` can begin at a merge whose first parent does
+    # not include live when live is reachable only through the merge's second
+    # parent.  Every candidate must still be strictly after live and before
+    # target in the actual commit graph.
+    for sha in shas:
+        if _is_ancestor(live, sha, repo_root) is not True or _is_ancestor(sha, target, repo_root) is not True:
+            return None
     commits = [deploy_classifier.CommitTouch(live, ())]
     for sha in shas:
         paths = commit_changed_paths(sha, repo_root)
@@ -1291,20 +1346,43 @@ def resolve_image_lag(
         )
     if not SHA_PATTERN.fullmatch(live):
         return None
+    target_ahead = _is_ancestor(live, target, REPO_ROOT)
+    if target_ahead is False:
+        return deploy_classifier.ImageLagDecision(
+            action=deploy_classifier.ACTION_HOLD, published_sha=None, reach=(),
+            reason=deploy_classifier.REASON_NOT_AHEAD, live_sha=live, target_sha=target,
+        )
     commits = load_first_parent_commits(live, target)
     if commits is None:
-        diff = get_changed_paths(live, target)
-        if diff is not None and not _paths_publish_image(diff):
-            return deploy_classifier.ImageLagDecision(
-                action=deploy_classifier.ACTION_SKIP,
-                published_sha=live,
-                reach=tuple(diff),
-                reason=deploy_classifier.REASON_NO_IMAGE_LAG,
-                live_sha=live,
-                target_sha=target,
-            )
-        return None
+        # The accumulated diff says only whether the target is outside the
+        # image workflow; it cannot identify the latest published ancestor.
+        diff = get_changed_paths(live, target) if target_ahead is True else None
+        reason = (deploy_classifier.REASON_UNPROVEN if target_ahead is None
+                  else deploy_classifier.REASON_NO_DIFF if diff is None
+                  else deploy_classifier.REASON_PIN_PUBLISHED)
+        return deploy_classifier.ImageLagDecision(
+            action=deploy_classifier.ACTION_HOLD, published_sha=None,
+            reach=tuple(diff or ()), reason=reason, live_sha=live, target_sha=target,
+        )
     return deploy_classifier.classify_image_lag(live_sha=live, target_sha=target, commits=commits)
+
+
+def validate_selected_image_pin(expected_sha: str, image_sha: str) -> None:
+    """Refuse an ancestor pin that ceased to be current while GHCR was pending."""
+    if image_sha == expected_sha:
+        return
+    current = resolve_image_lag(probe_deployed_sha(), expected_sha)
+    still_current = bool(
+        current and (
+            current.pin_sha == image_sha
+            or (current.action == deploy_classifier.ACTION_SKIP and current.published_sha == image_sha)
+        )
+    )
+    if not still_current:
+        raise DokployUsageError(
+            f"image pin {image_sha} became stale while waiting for GHCR; "
+            f"target={expected_sha} current_pin={current.pin_sha if current else 'unknown'}"
+        )
 
 
 def format_image_lag(decision: deploy_classifier.ImageLagDecision) -> str:
@@ -1328,7 +1406,9 @@ def format_image_lag(decision: deploy_classifier.ImageLagDecision) -> str:
     )
 
 
-def choose_image_sha(expected_sha: str, *, out: Any, err: Any) -> Tuple[str, Optional[int]]:
+def choose_image_sha(
+    expected_sha: str, *, out: Any, err: Any,
+) -> Tuple[str, Optional[int], Optional[str]]:
     """Apply the lag decision before any tag wait.
 
     ``(image_sha, None)`` deploys ``image_sha``. ``(sha, 0)`` exits with nothing
@@ -1336,17 +1416,17 @@ def choose_image_sha(expected_sha: str, *, out: Any, err: Any) -> Tuple[str, Opt
     """
     decision = resolve_image_lag(probe_deployed_sha(), expected_sha)
     if decision is None:
-        return expected_sha, None
+        return expected_sha, None, None
     line = format_image_lag(decision)
     print(line, file=out, flush=True)
     if decision.action == deploy_classifier.ACTION_SKIP:
-        return expected_sha, EXIT_OK
+        return decision.published_sha or expected_sha, EXIT_OK, decision.action
     if decision.action == deploy_classifier.ACTION_PIN_TARGET:
-        return expected_sha, None
+        return expected_sha, None, decision.action
     if decision.pin_sha:
-        return decision.pin_sha, None
+        return decision.pin_sha, None, decision.action
     print(line, file=err, flush=True)
-    return expected_sha, EXIT_DEPLOY_FAILED
+    return expected_sha, EXIT_DEPLOY_FAILED, decision.action
 
 
 def _run_main(
@@ -1426,20 +1506,25 @@ def _run_main(
             print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
     image_sha = expected_sha
+    image_lag_action: Optional[str] = None
     consult_image = bool(expected_sha) and not getattr(args, "force", False) and (
         code_selected or (darkhub_selected and image_source == IMAGE_SOURCE_GHCR)
     )
     if consult_image and expected_sha is not None:
-        image_sha, early_exit = choose_image_sha(expected_sha, out=out, err=err)
+        image_sha, early_exit, image_lag_action = choose_image_sha(expected_sha, out=out, err=err)
+        # A no-image-change result cannot certify that darkfac-cloud itself
+        # converged. Let its service history be inspected and repaired below.
         if early_exit is not None:
-            return early_exit
+            if early_exit != EXIT_OK or not code_selected:
+                return early_exit
+            early_exit = None
     if darkhub_selected:
         try:
             if not image_sha:
                 raise DokployUsageError("Darkhub build requires a full origin/main SHA")
             darkhub_compose = get_origin_main_compose(image_sha)
             render_darkhub_compose(darkhub_compose, image_sha, image_source)
-            if image_source == IMAGE_SOURCE_GHCR:
+            if image_source == IMAGE_SOURCE_GHCR and image_lag_action != deploy_classifier.ACTION_SKIP:
                 print(f"Waiting for {ghcr_image_ref(image_sha)} on GHCR...", file=out, flush=True)
                 wait_for_ghcr_tag(image_sha, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn)
         except (DokployUsageError, ComposeRenderError) as exc:
@@ -1531,6 +1616,9 @@ def _run_main(
             baseline_payload = fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
             if svc.name.lower() == "darkhub" and svc.kind == "compose":
+                if image_lag_action == deploy_classifier.ACTION_SKIP:
+                    print(f"[{svc.name}] deploy skipped (USR-515): no image change", file=out, flush=True)
+                    continue
                 action, reason = plan_darkhub_deploy(
                     expected_sha=expected_sha or "",
                     deployed_sha=probe_deployed_sha(),
@@ -1550,19 +1638,39 @@ def _run_main(
                     baselines[svc.name] = None
                     joined_darkhub = True
                     continue
-                _start_darkhub(svc, baseline_payload)
+                with _deploy_pin_lock():
+                    if consult_image and expected_sha and image_sha and image_sha != expected_sha:
+                        validate_selected_image_pin(expected_sha, image_sha)
+                    _start_darkhub(svc, baseline_payload)
                 if is_bluegreen(baseline_payload.get("composeFile"), env):
                     continue
             else:
                 if svc.name.lower() == "darkfac-cloud":
                     cloud_sha = image_sha or expected_sha
+                    # Dokploy's service history is independent evidence from
+                    # Hub /health. Skip only when the selected cloud service
+                    # already completed a deploy for the exact image pin.
+                    prior = latest_deployment(baseline_payload)
+                    cloud_subject = get_commit_subject(cloud_sha) if cloud_sha else None
+                    if (prior and prior.status.strip().lower() in {"done", "success", "successful"}
+                            and cloud_subject and prior.title.splitlines()[0].strip() == cloud_subject.strip()):
+                        print(f"[{svc.name}] deploy skipped: service already serves image pin {cloud_sha}", file=out, flush=True)
+                        continue
                     # USR-397: never move DARKFAC_GIT_SHA (nor deploy) before the image exists;
                     # on timeout the previous sha keeps running.
                     print(f"Waiting for ghcr.io/{CLOUD_IMAGE_REPOSITORY}:{cloud_sha} on GHCR...", file=out, flush=True)
                     wait_for_ghcr_tag(cloud_sha or "", probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn,
                                       repository=CLOUD_IMAGE_REPOSITORY)
-                    pin_cloud_git_sha(transport, svc, baseline_payload, cloud_sha)
-                trigger_deploy(transport, svc)
+                    # GHCR may take minutes to publish. Recheck that the fixed
+                    # pin remains the latest published ancestor before writing
+                    # Dokploy's env or triggering a deploy.
+                    with _deploy_pin_lock():
+                        if consult_image and expected_sha and cloud_sha != expected_sha:
+                            validate_selected_image_pin(expected_sha, cloud_sha)
+                        pin_cloud_git_sha(transport, svc, baseline_payload, cloud_sha)
+                        trigger_deploy(transport, svc)
+                else:
+                    trigger_deploy(transport, svc)
         except (DokployUsageError, BlueGreenError) as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
             all_ok = False
@@ -1592,10 +1700,12 @@ def _run_main(
         # compare and print only its subject line.
         title = result.deployment.title.splitlines()[0] if result.deployment and result.deployment.title else "(unknown)"
         match_note = ""
-        if local_subject and result.deployment and result.deployment.title:
+        deploy_sha = image_sha if svc.name.lower() == "darkfac-cloud" else expected_sha
+        deploy_subject = get_commit_subject(deploy_sha) if deploy_sha else local_subject
+        if deploy_subject and result.deployment and result.deployment.title:
             match_note = (
                 " [matches deploy candidate]"
-                if title.strip() == local_subject.strip()
+                if title.strip() == deploy_subject.strip()
                 else " [does not match deploy candidate]"
             )
         print(
@@ -1634,7 +1744,10 @@ def _run_main(
                     dh = next(x for x in triggered if x.name.lower() == "darkhub")
                     payload = fetch_service_status(transport, dh)
                     base = latest_deployment(payload)
-                    _start_darkhub(dh, payload)
+                    with _deploy_pin_lock():
+                        if consult_image and expected_sha and image_sha and image_sha != expected_sha:
+                            validate_selected_image_pin(expected_sha, image_sha)
+                        _start_darkhub(dh, payload)
                     if not is_bluegreen(payload.get("composeFile"), env):
                         wait_for_service(transport, dh, base, args.timeout,
                                          poll_interval_seconds=args.poll_interval,
@@ -1758,7 +1871,9 @@ def _run_main(
             title = ""
             if result is not None and result.deployment is not None and result.deployment.title:
                 title = result.deployment.title.splitlines()[0].strip()
-            matches = title == local_subject.strip()
+            service_sha = image_sha if svc.name.lower() == "darkfac-cloud" else expected_sha
+            service_subject = get_commit_subject(service_sha) if service_sha else local_subject
+            matches = bool(service_subject) and title == service_subject.strip()
             if svc.name in CODE_BEARING_SERVICES:
                 # Weaker than a runtime SHA, so a missing/different title fails closed.
                 if not matches:

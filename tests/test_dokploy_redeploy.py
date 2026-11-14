@@ -2165,13 +2165,13 @@ def test_hub_image_paths_come_from_workflow_and_gate_root_only_diffs() -> None:
     assert deploy_classifier.needs_rebuild(["docs/x.md"])
 
 
-def test_darkhub_root_only_merge_skips_ghcr_wait_and_exits_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_darkhub_root_only_merge_with_unprovable_history_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "probe_deployed_sha", lambda: "b" * 40)
     monkeypatch.setattr(mod, "get_changed_paths", lambda base, head: ["AGENTS.md"])
     seen: List[Any] = []
     code, transport, out, err = _ghcr_run(monkeypatch, lambda repo, tag: seen.append(tag) or 404)
-    assert code == mod.EXIT_OK, err
-    assert "sem mudanca de imagem" in out
+    assert code == mod.EXIT_DEPLOY_FAILED, err
+    assert "ancestralidade nao comprovada" in out + err
     assert seen == [] and transport.post_calls == []
 
 
@@ -2489,6 +2489,61 @@ def test_resolve_image_lag_pins_ancestor_and_skips_clean_interval(monkeypatch: p
     assert held is not None and held.action == deploy_classifier.ACTION_HOLD and held.target_sha == _TARGET
     monkeypatch.setattr(mod, "commit_changed_paths", lambda sha, repo_root=None: ["requirements.txt"])
     assert mod.resolve_image_lag(None, _TARGET) is None
+
+
+def test_history_failure_refuses_known_outside_target_without_waiting_for_tip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mod, "_is_ancestor", lambda ancestor, descendant, root: True)
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "get_changed_paths", lambda live, target: ["AGENTS.md"])
+    decision = mod.resolve_image_lag(_LIVE, _TARGET)
+    assert decision is not None and decision.action == deploy_classifier.ACTION_HOLD
+    assert decision.target_sha == _TARGET and decision.live_sha == _LIVE
+    assert decision.reach == ("AGENTS.md",)
+
+
+def test_target_outside_live_history_is_refused_before_fallback_diff(monkeypatch: pytest.MonkeyPatch) -> None:
+    diffs: List[tuple[str, str]] = []
+    monkeypatch.setattr(mod, "_is_ancestor", lambda ancestor, descendant, root: False)
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "get_changed_paths", lambda live, target: diffs.append((live, target)) or ["AGENTS.md"])
+    decision = mod.resolve_image_lag(_LIVE, _TARGET)
+    assert decision is not None and decision.action == deploy_classifier.ACTION_HOLD
+    assert decision.reason == deploy_classifier.REASON_NOT_AHEAD
+    assert diffs == []
+
+
+def test_cloud_pin_is_revalidated_after_ghcr_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    def load(live: str, target: str, repo_root: Any = None) -> list[deploy_classifier.CommitTouch]:
+        del repo_root
+        if live == _LIVE:
+            return [
+                deploy_classifier.CommitTouch(_LIVE, ()),
+                deploy_classifier.CommitTouch(_PUBLISHED, ("core/runtime.py",)),
+                deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md",)),
+            ]
+        assert live == _TARGET and target == _TARGET
+        return [deploy_classifier.CommitTouch(_TARGET, ())]
+
+    monkeypatch.setattr(mod, "load_first_parent_commits", load)
+    monkeypatch.setattr(mod, "probe_deployed_sha", iter((_LIVE, _TARGET)).__next__)
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: _TARGET)
+    monkeypatch.setattr(node_sync, "sync", lambda **kwargs: (_ for _ in ()).throw(AssertionError("sync")))
+    probes: List[str] = []
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"}, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        ghcr_probe=lambda repo, tag: probes.append(tag) or 200,
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert probes == [_PUBLISHED]
+    assert transport.post_calls == []
+    assert "became stale" in err.getvalue()
     monkeypatch.setattr(mod, "commit_changed_paths", lambda sha, repo_root=None: None)
     assert mod.resolve_image_lag(None, _TARGET) is None
 
@@ -2534,6 +2589,43 @@ def test_load_first_parent_commits_reads_the_authoritative_line(tmp_path: Any) -
     assert mod.load_first_parent_commits("a" * 40, "b" * 40, tmp_path) is None
 
 
+def test_load_first_parent_rejects_candidates_outside_second_parent_live_line(tmp_path: Any) -> None:
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "usr515", "GIT_AUTHOR_EMAIL": "usr515@example.com",
+        "GIT_COMMITTER_NAME": "usr515", "GIT_COMMITTER_EMAIL": "usr515@example.com",
+    })
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True,
+            text=True, encoding="utf-8", env=env,
+        )
+        return result.stdout.strip()
+
+    git("init", "-b", "main")
+    (tmp_path / "base.txt").write_text("base\n", encoding="utf-8")
+    git("add", "base.txt")
+    git("commit", "-m", "base")
+    git("branch", "live-line")
+    git("checkout", "live-line")
+    (tmp_path / "live.txt").write_text("live\n", encoding="utf-8")
+    git("add", "live.txt")
+    git("commit", "-m", "live")
+    live = git("rev-parse", "HEAD")
+    git("checkout", "main")
+    (tmp_path / "first-parent.txt").write_text("not descended from live\n", encoding="utf-8")
+    git("add", "first-parent.txt")
+    git("commit", "-m", "first parent")
+    git("merge", "--no-ff", "live-line", "-m", "merge live as second parent")
+    target = git("rev-parse", "HEAD")
+
+    assert mod.load_first_parent_commits(live, target, tmp_path) is None
+
+
 def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     """GHCR, compose, blue-green and cloud use the published ancestor; sync stays on origin/main."""
     from core.infra import node_sync
@@ -2543,6 +2635,8 @@ def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest
         deploy_classifier.CommitTouch(_PUBLISHED, ("core/pending.py",)),
         deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md", "tests/test_usr515.py")),
     ))
+    # The target commit and the GHCR pin intentionally have different titles.
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "published image" if sha == _PUBLISHED else "target commit")
     synced: List[str] = []
 
     def sync(**kwargs: Any) -> node_sync.SyncReport:
@@ -2563,6 +2657,12 @@ def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest
     monkeypatch.setattr(mod, "wait_for_darkhub_sha", wait_health)
     probes: List[tuple[str, str]] = []
     transport = _usr515_transport()
+    transport.program_get("/api/compose.one?composeId=compose_cloud", [
+        {"deployments": [{"deploymentId": "old", "status": "done", "title": "old",
+                           "createdAt": "2026-09-12T09:00:00Z"}], "env": "KEEP=secret-value\n"},
+        {"deployments": [{"deploymentId": "new", "status": "done", "title": "published image",
+                           "createdAt": "2026-09-12T09:10:00Z"}], "env": "KEEP=secret-value\n"},
+    ])
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
         ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene"],
@@ -2587,6 +2687,7 @@ def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest
     assert health_seen == [_PUBLISHED]
     assert f"converged sha={_PUBLISHED}" in text
     assert f"published={_PUBLISHED}" in text
+    assert "[darkfac-cloud] status=done" in text and "[matches deploy candidate]" in text
     assert _reach_of(text) == ["AGENTS.md", "tests/test_usr515.py"]
     assert not deploy_classifier.touches_hub_image(_reach_of(text), deploy_classifier.hub_image_paths())
     assert synced == [_TARGET]
@@ -2601,6 +2702,12 @@ def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest
         assert kwargs["sha_is_serving"](_TARGET) is False
 
     transport_bg = _usr515_transport(marker)
+    transport_bg.program_get("/api/compose.one?composeId=compose_cloud", [
+        {"deployments": [{"deploymentId": "old", "status": "done", "title": "old",
+                           "createdAt": "2026-09-12T09:00:00Z"}], "env": "KEEP=secret-value\n"},
+        {"deployments": [{"deploymentId": "new", "status": "done", "title": "published image",
+                           "createdAt": "2026-09-12T09:10:00Z"}], "env": "KEEP=secret-value\n"},
+    ])
     out_bg, err_bg = io.StringIO(), io.StringIO()
     code_bg = mod.main(
         ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene"],
@@ -2627,24 +2734,39 @@ def test_outside_tip_without_runtime_exits_without_probe_or_post(monkeypatch: py
         deploy_classifier.CommitTouch(_LIVE, ()),
         deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md", "README.md")),
     ))
-    monkeypatch.setattr(node_sync, "sync", lambda **kw: (_ for _ in ()).throw(AssertionError("sync")))
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "live image" if sha == _LIVE else "target")
+    monkeypatch.setattr(node_sync, "sync", lambda **kwargs: node_sync.SyncReport(
+        expected_sha=kwargs["expected_sha"], nodes=[
+            node_sync.NodeStatus(name=name, state="converged", git_sha=kwargs["expected_sha"])
+            for name in ("Notebook", "Desktop", "VPS")
+        ],
+    ))
     transport = _usr515_transport()
+    transport.program_get("/api/compose.one?composeId=compose_cloud", [
+        {"deployments": [{"deploymentId": "old", "status": "done", "title": "live image",
+                           "createdAt": "2026-09-12T09:00:00Z"}], "env": "KEEP=secret-value\n"},
+    ])
     out, err = io.StringIO(), io.StringIO()
 
+    probes: List[tuple[str, str]] = []
+
     def probe(repo: str, tag: str) -> int:
-        raise AssertionError(f"probe {repo}:{tag}")
+        probes.append((repo, tag))
+        raise AssertionError(f"unexpected probe {repo}:{tag}")
 
     code = mod.main(
-        ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup"],
+        ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup", "--skip-check-main"],
         env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": _LIVE},
         ghcr_probe=probe,
         stdout=out, stderr=err,
     )
     text = out.getvalue()
     assert code == mod.EXIT_OK, err.getvalue()
     assert transport.post_calls == []
+    assert probes == []
     assert f"published={_LIVE}" in text
     assert _reach_of(text) == ["AGENTS.md", "README.md"]
     assert not deploy_classifier.touches_hub_image(_reach_of(text), deploy_classifier.hub_image_paths())
@@ -2714,8 +2836,11 @@ def test_unknown_live_and_outside_tip_does_not_wait_or_post(monkeypatch: pytest.
     transport = _usr515_transport()
     out, err = io.StringIO(), io.StringIO()
 
+    probes: List[tuple[str, str]] = []
+
     def probe(repo: str, tag: str) -> int:
-        raise AssertionError(f"probe {repo}:{tag}")
+        probes.append((repo, tag))
+        raise AssertionError(f"unexpected probe {repo}:{tag}")
 
     code = mod.main(
         ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup"],
@@ -2727,7 +2852,9 @@ def test_unknown_live_and_outside_tip_does_not_wait_or_post(monkeypatch: pytest.
     )
     assert code != mod.EXIT_OK
     assert transport.post_calls == []
+    assert probes == []
     assert _TARGET in out.getvalue() or _TARGET in err.getvalue()
+    assert "live ausente" in out.getvalue() or "live ausente" in err.getvalue()
 
 
 def test_target_behind_live_does_not_roll_back(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2743,8 +2870,11 @@ def test_target_behind_live_does_not_roll_back(monkeypatch: pytest.MonkeyPatch) 
     transport = _usr515_transport()
     out, err = io.StringIO(), io.StringIO()
 
+    probes: List[tuple[str, str]] = []
+
     def probe(repo: str, tag: str) -> int:
-        raise AssertionError(f"probe {repo}:{tag}")
+        probes.append((repo, tag))
+        raise AssertionError(f"unexpected probe {repo}:{tag}")
 
     code = mod.main(
         ["--only", "Darkhub", "--skip-backup"],
@@ -2756,5 +2886,7 @@ def test_target_behind_live_does_not_roll_back(monkeypatch: pytest.MonkeyPatch) 
     )
     assert code != mod.EXIT_OK
     assert transport.post_calls == []
+    assert probes == []
     assert _TARGET in out.getvalue() or _TARGET in err.getvalue()
+    assert "descendente do live" in out.getvalue() or "descendente do live" in err.getvalue()
     assert _PUBLISHED not in out.getvalue()
