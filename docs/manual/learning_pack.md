@@ -17,6 +17,16 @@ Verificacao: se um redator (`llm`) for injetado em `build_for_delivery`, cada fr
 
 `scripts/stop_hook_artifacts.py`, registrado em `.claude/settings.json` (hooks.Stop), impede o Claude Code de encerrar quando o diff contra `origin/main` (ou a worktree suja) toca `core/`, `hub/`, `scripts/`, `tests/` ou `run_ticket.py` e a branch/ultimo commit cita `USR-NNN`, sem `.factory/learning_packs/USR-NNN.md` (ou `.json`). Bloqueia com exit 2 e o comando de geracao em stderr. Com `stop_hook_active` ou falha inesperada (git ausente etc.) libera com exit 0.
 
+## Aprendizado da entrega USR-512 T3
+
+Uma revisão que ficou bloqueada por falta de rota não precisa de um BUILD novo quando a rota aparece. O dispatcher olha de novo a espera, e se o revisor cabe no CLI e na política, retoma o mesmo ticket na mesma worktree com `--resume-delivery`. O portão que já passou e o artefato do BUILD continuam no lugar até a revisão daquele candidato existir. Só então a entrega pode publicar.
+
+O caso antigo do USR-467, gravado como `launcher_exit:1`, segue essa retomada só se três coisas ainda forem verdade: o candidato está lá, o gate vigente é o desse candidato, e a revisão dele ainda não foi feita. Prova faltando, prova que não bate, ou família de quem implementou desconhecida, continuam paradas. Um exit qualquer do launcher não vira desculpa para reabrir.
+
+## Aprendizado da entrega USR-512 T2
+
+Uma revisão que cai por crash, timeout, saída vazia ou JSON inválido não repete a mesma rota naquele candidato. A rota sai da lista daquele digest e daquela política, e a cascata pede a próxima combinação que o CLI aceita. Se nenhuma sobra, a entrega espera com `no_route_available` e código 75, com a worktree, o BUILD e o `validation.json` no lugar. Não nasce `review_verdict.json` nem `review_execution.json`. Retomar só chega ao merge quando a aprovação aponta para o mesmo digest do candidato.
+
 ## Aprendizado da entrega USR-456 T2
 
 O preflight continua consultando a saúde do grokbox, mas o wake por email só ocorre com autorização

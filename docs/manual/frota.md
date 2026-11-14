@@ -18,7 +18,14 @@ consultada no máximo a cada15 minutos; o estado sobrevive ao reinício. REVIEW 
 `run_ticket.py --resume-delivery` na mesma worktree; o launcher preserva validação
 vinculada ao candidato. PLAN/BUILD usam a retomada canônica do ticket, com suas reservas.
 Processo vivo não é duplicado, ticket terminal sai da fila e falha diferente de
-`route_wait` fica bloqueada com causa explícita. Decisão material `waiting_human`
+`route_wait` fica bloqueada com causa explícita. Uma espera de REVIEW bloqueada por
+`no_route_available`, `review_agent_exhausted` ou `route_wait` é reavaliada no ciclo
+seguinte (USR-512 T3). Com rota compatível, o dispatcher lança
+`run_ticket.py --resume-delivery <ticket> --worktree <a mesma>`, sem PLAN e sem BUILD.
+`deploy_evidence_missing`, `deploy_evidence_mismatch` e `implementing_family_unknown`
+continuam bloqueadas. O `launcher_exit:1` deixado por USR-467 só reabre depois de
+confirmar candidato, gate vigente e revisão ainda ausente; os outros `launcher_exit`
+não usam essa reabertura. Decisão material `waiting_human`
 continua dependendo do owner. Nenhuma espera compra créditos nem aumenta o teto.
 
 Durante recuperação, o mesmo serviço admite só retomadas:

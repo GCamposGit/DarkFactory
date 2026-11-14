@@ -838,6 +838,19 @@ def test_resume_candidate_change_runs_gate_and_review(
 
     def review(*_args: object, **_kwargs: object) -> object:
         seen["review"] = True
+        from core.line import workspace as line_workspace
+
+        line_workspace.write_context(
+            rws,  # type: ignore[arg-type]
+            "review_state.json",
+            json.dumps({"rounds": [{
+                "round": 1, "verdict": "approve", "forced": False,
+                "candidate_digest": candidate, "policy_digest": policy,
+            }]}),
+        )
+        line_workspace.write_context(
+            rws, "review_verdict.json", json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),  # type: ignore[arg-type]
+        )
         return type("ReviewHit", (), {"outcome": "success", "cause_code": None})()
 
     with patch("run_ticket.PROJECT_ROOT", repo), \
@@ -872,6 +885,19 @@ def test_resume_policy_change_keeps_validation_and_runs_review(
 
     def review(*_args: object, **_kwargs: object) -> object:
         seen["review"] = True
+        from core.line import workspace as line_workspace
+
+        line_workspace.write_context(
+            rws,  # type: ignore[arg-type]
+            "review_state.json",
+            json.dumps({"rounds": [{
+                "round": 1, "verdict": "approve", "forced": False,
+                "candidate_digest": candidate, "policy_digest": _policy,
+            }]}),
+        )
+        line_workspace.write_context(
+            rws, "review_verdict.json", json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),  # type: ignore[arg-type]
+        )
         return type("ReviewHit", (), {"outcome": "success", "cause_code": None})()
 
     with patch("run_ticket.PROJECT_ROOT", repo), \
@@ -891,6 +917,91 @@ def test_resume_policy_change_keeps_validation_and_runs_review(
     out = capsys.readouterr().out
     assert "portao nao reexecutado" in out
     assert "revisor nao reexecutado" not in out
+
+
+def test_resume_review_exhaustion_waits_and_preserves_gate_and_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No compatible reviewer is a route wait: pending delivery, exit 75, same BUILD and gate."""
+    from core.line.pending_delivery import queue_dir
+    from core.paths import state_root
+    from core.workflow.control_contracts import StageResult
+
+    repo, _ticket, rws, candidate, _policy = _candidate_repo(tmp_path, monkeypatch)
+    ctx, validation_before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "detail": "kept", "candidate_digest": candidate},
+        [],
+    )
+    (ctx / "review_verdict.json").unlink()
+    build_before = (ctx / "progress.json").read_bytes()
+    from core.line import workspace as line_workspace
+
+    assert not (ctx / "review_execution.json").exists()
+
+    def review(*_args: object, **_kwargs: object) -> StageResult:
+        return StageResult(
+            outcome="retry",
+            cause_code="no_route_available not_before=2026-11-13T01:00:00+00:00",
+        )
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", side_effect=AssertionError("merge")), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._review_candidate", side_effect=review), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        result = run_ticket.resume_delivery(
+            "USR-424", worktree_path=repo, skip_validation=False, return_result=True,
+        )
+
+    assert result["exit_code"] == run_ticket.EXIT_ROUTE_WAIT
+    assert result["cause"] == "route_wait"
+    assert repo.is_dir()
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert (ctx / "progress.json").read_bytes() == build_before
+    assert json.loads(build_before.decode("utf-8"))["harness"] == "grok"
+    assert not (ctx / "review_verdict.json").exists()
+    assert not (ctx / "review_execution.json").exists()
+    assert line_workspace.context_dir(rws) == ctx  # type: ignore[arg-type]
+    pending = queue_dir() / "USR-424.json"
+    assert state_root() == tmp_path / "state"
+    row = json.loads(pending.read_text(encoding="utf-8"))
+    assert row["resume_delivery"] is True
+    assert row["stage"] == "review"
+    assert row["status"] == "waiting"
+    assert row["implementing_harness"] == "grok"
+    assert "no_route_available" in row["cause"]
+
+
+def test_resume_without_bound_approval_does_not_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An approve file for another candidate does not publish this tree."""
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    ctx, validation_before = _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "detail": "kept", "candidate_digest": candidate},
+        [{"round": 1, "verdict": "approve", "candidate_digest": "0" * 64, "policy_digest": policy}],
+    )
+
+    def review(*_args: object, **_kwargs: object) -> object:
+        return type("ReviewHit", (), {"outcome": "success", "cause_code": None})()
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", side_effect=AssertionError("merge")), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._review_candidate", side_effect=review), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")):
+        result = run_ticket.resume_delivery(
+            "USR-424", worktree_path=repo, skip_validation=False, return_result=True,
+        )
+
+    assert result["exit_code"] == 1
+    assert "review_not_bound_to_candidate" in result["error"]
+    assert repo.is_dir()
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert (ctx / "progress.json").is_file()
+    assert not (ctx / "merge.json").exists()
 
 
 @pytest.mark.parametrize("prior", [None, {"verdict": "changes_required", "blocking": [], "non_blocking": []}])
@@ -927,3 +1038,201 @@ def test_resume_reuses_approval_and_writes_approve_verdict(
     assert (ctx / "validation.json").read_bytes() == validation_before
     assert "previous-attempt" not in (ctx / "merge.json").read_text(encoding="utf-8")
     assert "previous-attempt" not in (ctx / "deploy_report.json").read_text(encoding="utf-8")
+
+
+def _usr467_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Preserved USR-467 shape: built candidate, current gate, review still absent."""
+    _isolate_resume_queue(monkeypatch, tmp_path / "state")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ticket = UserTicket(
+        id="USR-467", project_id="darkfac", title="Retomar revisao preservada",
+        problem_statement="launcher_exit:1 com gate vigente e revisao ausente",
+        status=DeliveryStatus.IMPLEMENTING,
+    )
+    ledger = repo / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    DemandsStore(ledger).save_ticket(ticket)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ledger")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-b", "ticket/usr-467")
+    (repo / "impl.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "impl.py")
+    _git(repo, "commit", "-m", "feat: impl")
+    rws = run_ticket.ticket_engine.run_workspace(ticket, "ticket/usr-467")
+    from core.research.policy import ResearchArtifact
+
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_minimal_plan(rws, ticket)
+    run_ticket.ticket_engine.write_research(
+        rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix"),
+    )
+    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    candidate, policy = run_ticket._candidate_binding(rws, repo, run_ticket._review_base_branch(ticket))
+    assert candidate
+    run_ticket.ticket_engine.write_validation(
+        rws, True, "core/harness/runner.py --quick", candidate_digest=candidate,
+    )
+    return repo, ticket, rws, candidate, policy
+
+
+def _git_head(repo: Path) -> str:
+    done = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    )
+    return done.stdout.strip()
+
+
+def test_usr467_preserved_exit_reopens_without_another_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatcher resumes USR-467 in place. Digest, BUILD and the gate stay until the bound review."""
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pending
+    from core.line.recovery_receipt import route_family
+    from core.workflow.control_contracts import StageResult
+
+    repo, _ticket, rws, candidate, policy = _usr467_repo(tmp_path, monkeypatch)
+    from core.line import workspace as line_workspace
+
+    ctx = line_workspace.context_dir(rws)  # type: ignore[arg-type]
+    build_before = (ctx / "progress.json").read_bytes()
+    validation_before = (ctx / "validation.json").read_bytes()
+    head_before = _git_head(repo)
+    assert not (ctx / "review_verdict.json").exists()
+    assert not (ctx / "review_execution.json").exists()
+    worktree = str(repo.resolve())
+    directory = tmp_path / "pending"
+    row = pending.PendingDelivery(
+        ticket_id="USR-467", worktree=worktree, stage="review", status="blocked",
+        implementing_harness="grok", resume_delivery=True, cause="launcher_exit:1", next_check=0,
+    )
+    pending._save(directory / "USR-467.json", row)
+    calls: list[list[str]] = []
+    handle = SimpleNamespace(pid=467467, poll=lambda: None)
+    store = SimpleNamespace(mock_mode=False, list_tickets=lambda: [{"id": "USR-467", "status": "planned"}])
+    real_popen = subprocess.Popen
+
+    def popen(cmd: list[str], **kwargs: object) -> object:
+        if any(str(part).endswith("run_ticket.py") for part in cmd):
+            calls.append(list(cmd))
+            return handle
+        return real_popen(cmd, **kwargs)  # type: ignore[arg-type]
+
+    with patch("core.line.line_lock.is_locked", return_value=False), \
+            patch("core.demands.queue_store.control_store", return_value=store), \
+            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree}]), \
+            patch.object(pending, "_route", return_value=None), \
+            patch.object(pending.subprocess, "Popen", side_effect=popen):
+        held = pending.tick(tmp_path, directory=directory, now=50)[0]
+    assert held["status"] == "blocked"
+    assert held["cause"] == "launcher_exit:1"
+    assert calls == []
+    assert (ctx / "progress.json").read_bytes() == build_before
+    assert (ctx / "validation.json").read_bytes() == validation_before
+
+    saved = pending.PendingDelivery.model_validate_json((directory / "USR-467.json").read_text(encoding="utf-8"))
+    with patch("core.line.line_lock.is_locked", return_value=False), \
+            patch("core.demands.queue_store.control_store", return_value=store), \
+            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree}]), \
+            patch.object(pending, "_route", return_value=("claude", "claude-sonnet")), \
+            patch.object(pending.subprocess, "Popen", side_effect=popen):
+        opened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]
+    try:
+        assert opened["status"] == "running"
+        assert calls[0][2:] == ["--resume-delivery", "USR-467", "--worktree", worktree]
+        assert "--fleet" not in calls[0]
+        assert "PLAN" not in calls[0] and "BUILD" not in calls[0]
+        assert (ctx / "progress.json").read_bytes() == build_before
+        assert (ctx / "validation.json").read_bytes() == validation_before
+        assert _git_head(repo) == head_before
+    finally:
+        pending._children.pop(handle.pid, None)
+
+    def review_waiting(*_args: object, **_kwargs: object) -> StageResult:
+        return StageResult(
+            outcome="retry", cause_code="no_route_available not_before=2026-11-13T01:00:00+00:00",
+        )
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", side_effect=AssertionError("published without review")), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._stage_plan", side_effect=AssertionError("PLAN")), \
+            patch("run_ticket._stage_build", side_effect=AssertionError("BUILD")), \
+            patch("run_ticket.ticket_engine.write_build", side_effect=AssertionError("second BUILD")), \
+            patch("run_ticket._review_candidate", side_effect=review_waiting), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")), \
+            patch("run_ticket.ticket_extras.pre_review_feedback", return_value=None):
+        waiting = run_ticket.resume_delivery(
+            "USR-467", worktree_path=repo, skip_validation=False, return_result=True,
+        )
+    assert waiting["exit_code"] == run_ticket.EXIT_ROUTE_WAIT
+    assert waiting["cause"] == "route_wait"
+    assert (ctx / "progress.json").read_bytes() == build_before
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert run_ticket._candidate_binding(rws, repo, "main")[0] == candidate
+    assert _git_head(repo) == head_before
+    assert not (ctx / "review_verdict.json").exists()
+    assert not (ctx / "review_execution.json").exists()
+    assert not (ctx / "merge.json").exists()
+
+    route = {"level": 1, "harness": "claude", "model": "claude-sonnet", "reason": "other_family"}
+
+    def review_bound(*_args: object, **_kwargs: object) -> StageResult:
+        line_workspace.write_context(rws, "review_route.json", json.dumps(route))  # type: ignore[arg-type]
+        line_workspace.write_context(rws, "review_state.json", json.dumps({"rounds": [{  # type: ignore[arg-type]
+            "round": 1, "verdict": "approve", "forced": False,
+            "candidate_digest": candidate, "policy_digest": policy, "route": route,
+        }]}))
+        line_workspace.write_context(
+            rws, "review_verdict.json",  # type: ignore[arg-type]
+            json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),
+        )
+        line_workspace.write_context(rws, "review_execution.json", json.dumps({  # type: ignore[arg-type]
+            "candidate_digest": candidate,
+            "implementer_family": route_family("grok", None),
+            "reviewer_family": route_family("claude", "claude-sonnet"),
+            "implementation_families": [route_family("grok", None)],
+            "review_route": route,
+        }))
+        return StageResult(outcome="success", output_refs=["review:USR-467:1"])
+
+    def publish(*_args: object, **_kwargs: object) -> TicketCompletionReport:
+        recorded_route = json.loads((ctx / "review_route.json").read_text(encoding="utf-8"))
+        execution = json.loads((ctx / "review_execution.json").read_text(encoding="utf-8"))
+        state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+        assert recorded_route["harness"] == "claude"
+        assert recorded_route["harness"] != "grok"
+        assert execution["candidate_digest"] == candidate
+        assert execution["reviewer_family"] != execution["implementer_family"]
+        assert state["rounds"][-1]["verdict"] == "approve"
+        assert state["rounds"][-1]["candidate_digest"] == candidate
+        assert (ctx / "progress.json").read_bytes() == build_before
+        assert (ctx / "validation.json").read_bytes() == validation_before
+        assert not (ctx / "merge.json").exists()
+        return TicketCompletionReport(
+            ok=True, ticket_id="USR-467", commit_sha="c" * 40, message="ok",
+        )
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", side_effect=publish), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._stage_plan", side_effect=AssertionError("PLAN")), \
+            patch("run_ticket._stage_build", side_effect=AssertionError("BUILD")), \
+            patch("run_ticket.ticket_engine.write_build", side_effect=AssertionError("second BUILD")), \
+            patch("run_ticket._review_candidate", side_effect=review_bound), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")), \
+            patch("run_ticket.ticket_extras.pre_review_feedback", return_value=None):
+        code = run_ticket.resume_delivery("USR-467", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    assert (ctx / "progress.json").read_bytes() == build_before
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert json.loads((ctx / "validation.json").read_text(encoding="utf-8"))["candidate_digest"] == candidate
+    assert run_ticket._candidate_binding(rws, repo, "main")[0] == candidate
+    assert _git_head(repo) == head_before
+    assert (ctx / "merge.json").is_file()
+    assert "review_route" in (ctx / "review_execution.json").read_text(encoding="utf-8")

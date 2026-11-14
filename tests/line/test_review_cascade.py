@@ -52,6 +52,60 @@ def test_level_four_same_model_adversarial_persona_records_unsupported_temperatu
     assert valid_contingency(route.record())
 
 
+def test_multifamily_fallback_skips_grok_model_for_codex_after_grok_excluded() -> None:
+    from core.models.registry import resolve
+
+    calls = 0
+
+    def pick(stage: str, caps: list[str], **kwargs: Any) -> Optional[tuple[str, Optional[str]]]:
+        nonlocal calls
+        if kwargs.get("implementing_harness") is not None:
+            return None
+        calls += 1
+        excluded = set(kwargs.get("exclude", ()))
+        if "grok" not in excluded:
+            return "grok", resolve("development.grok")
+        if "codex" not in excluded:
+            return "codex", resolve("development.codex")
+        return None
+
+    route = select_review_route(
+        pick, ["harness:claude", "harness:codex", "harness:grok"],
+        implementing_harness="grok", families={"openai", "xai"},
+        exclude=("grok",),
+    )
+
+    assert route is not None
+    assert route.harness == "codex"
+    assert route.model is None or route.model == resolve("development.codex")
+    assert route.level == 4 and route.persona == "adversarial_distinct"
+    assert calls >= 2
+
+
+def test_codex_fallback_with_native_model_is_adversarial_for_multifamily_candidate() -> None:
+    from core.models.registry import resolve
+
+    route = select_review_route(
+        _pick(None, ("codex", resolve("development.codex"))),
+        ["harness:codex", "harness:grok"], implementing_harness="grok",
+        families={"openai", "xai"}, exclude=("grok",),
+    )
+
+    assert route is not None
+    assert (route.level, route.harness, route.model) == (4, "codex", resolve("development.codex"))
+    assert route.persona == "adversarial_distinct"
+
+
+def test_codex_fallback_omits_grok_writer_model_when_pick_has_no_model() -> None:
+    route = select_review_route(
+        _pick(None, ("codex", None)), ["harness:codex", "harness:grok"],
+        implementing_harness="grok", families={"openai", "xai"}, exclude=("grok",),
+    )
+
+    assert route is not None
+    assert (route.level, route.harness, route.model) == (4, "codex", None)
+
+
 def test_no_route_at_any_level_returns_none() -> None:
     assert _select("claude", "anthropic", None, None) is None
 

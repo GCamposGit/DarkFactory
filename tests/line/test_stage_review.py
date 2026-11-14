@@ -261,8 +261,11 @@ def test_claude_invalid_structured_response_records_sanitized_diagnostic_and_ret
     )
     result = stage.run(project, run_id)
 
+    # The only returned route is the one that just failed the schema. That route is
+    # excluded for this candidate, so the stage waits instead of calling Claude again.
     assert result.outcome == "retry"
-    assert result.cause_code.startswith("review_invalid_json:harness=claude:next=")
+    assert result.cause_code.startswith("no_route_available")
+    assert "review_agent_exhausted" not in (result.cause_code or "")
     ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
     diagnostic_path = ctx / "review_invalid_response.json"
     diagnostic = json.loads(diagnostic_path.read_text(encoding="utf-8"))
@@ -296,7 +299,10 @@ def test_invalid_review_response_excludes_harness_for_same_candidate_and_fails_o
         picks.append(excluded)
         return next(((name, None) for name in choices if name not in excluded), None)
 
+    calls: list[str] = []
+
     def agent(req: AgentRequest) -> AgentResult:
+        calls.append(req.harness)
         if req.harness == "claude":
             return AgentResult(ok=True, text="invalid", harness=req.harness, duration_s=0.01)
         return AgentResult(
@@ -314,11 +320,17 @@ def test_invalid_review_response_excludes_harness_for_same_candidate_and_fails_o
     assert not (ctx / "review_verdict.json").exists()
     state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
     assert state["invalid_response_routes"][0]["harness"] == "claude"
+    assert calls == ["claude"]
 
     second = stage.run(project, run_id)
     assert second.outcome == "success"
     assert picks[0] == []
-    assert picks[2] == ["claude"]
+    assert any(
+        item == "claude" or (isinstance(item, (tuple, list)) and item and item[0] == "claude")
+        for excluded in picks[1:]
+        for item in excluded
+    )
+    assert calls == ["claude", "codex"]
     assert (ctx / "review_verdict.json").is_file()
 
 
@@ -527,37 +539,181 @@ def test_delivery_review_copies_spec_into_the_worktree_and_restores_it(
     ).read_text(encoding="utf-8")
 
 
-def test_consecutive_agent_errors_fail_after_max_retries(
+def _exclude_blocks(exclude: object, harness: str, model: str | None) -> bool:
+    if not isinstance(exclude, (list, tuple)):
+        return False
+    for item in exclude:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            if item[0] == harness and item[1] == model:
+                return True
+        elif str(item) == harness:
+            return True
+    return False
+
+
+def test_infra_failure_excludes_route_before_the_next_compatible_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A crash drops that harness/model for this candidate, then the next run uses another route."""
+    from core.line import stage_review
+
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
-    run_id = "run-agent-fail"
-    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+    run_id = "run-infra-failover"
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    monkeypatch.setattr(stage_review, "record_result", lambda *_args, **_kwargs: None)
+    choices = [("claude", "claude-sonnet-5-5"), ("grok", None)]
+    picks: list[list[object]] = []
+    calls: list[tuple[str, str | None]] = []
+
+    def picking(_stage, _caps, *, exclude=(), **_kwargs):
+        picks.append(list(exclude))
+        for harness, model in choices:
+            if not _exclude_blocks(exclude, harness, model):
+                return harness, model
+        return None
+
+    def agent(req: AgentRequest) -> AgentResult:
+        calls.append((req.harness, req.model))
+        if req.harness == "claude":
+            return AgentResult(
+                ok=False, text="", error_kind="crash", harness=req.harness, model=req.model, duration_s=0.01,
+            )
+        return AgentResult(
+            ok=True,
+            text=json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),
+            harness=req.harness,
+            model=req.model,
+            duration_s=0.01,
+        )
+
+    stage = ReviewStage(run_agent_func=agent, pick_func=picking, routing_config=load_routing_config())
+    first = stage.run(project, run_id)
+    assert first.outcome == "retry"
+    assert first.cause_code == "review_agent_crash"
+    assert calls == [("claude", "claude-sonnet-5-5")]
+    assert picks[0] == []
+    assert _exclude_blocks(picks[1], "claude", "claude-sonnet-5-5")
+
+    ctx = ws_mod.context_dir(ws)
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    failed = state["failed_routes"][0]
+    digest = stage_review._candidate_digest(ws, "main")
+    policy = stage_review._policy_digest(load_routing_config())
+    assert failed["harness"] == "claude"
+    assert failed["model"] == "claude-sonnet-5-5"
+    assert failed["candidate_digest"] == digest
+    assert failed["policy_digest"] == policy
+    assert not (ctx / "review_verdict.json").exists()
+    assert not (ctx / "review_execution.json").exists()
+
+    second = stage.run(project, run_id)
+    assert second.outcome == "success"
+    assert calls[-1][0] == "grok"
+    assert _exclude_blocks(picks[2], "claude", "claude-sonnet-5-5")
+
+
+def test_exhausted_review_routes_wait_and_preserve_gate_and_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no compatible route left, review waits and does not rewrite the gate or the candidate."""
+    from core.line import stage_review
+
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-review-wait"
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    monkeypatch.setattr(stage_review, "record_result", lambda *_args, **_kwargs: None)
+    ctx = ws_mod.context_dir(ws)
+    validation_before = (ctx / "validation.json").read_bytes()
+    digest_before = stage_review._candidate_digest(ws, "main")
+
+    def picking(_stage, _caps, *, exclude=(), **_kwargs):
+        if _exclude_blocks(exclude, "claude", None):
+            return None
+        return "claude", None
 
     def failing_agent(req: AgentRequest) -> AgentResult:
         return AgentResult(ok=False, text="", error_kind="empty_output", harness=req.harness, duration_s=0.01)
 
     stage = ReviewStage(
-        run_agent_func=failing_agent,
-        pick_func=_isolated_pick(tmp_path),
+        run_agent_func=failing_agent, pick_func=picking, routing_config=load_routing_config(),
+    )
+    result = stage.run(project, run_id)
+
+    assert result.outcome == "retry"
+    assert (result.cause_code or "").startswith("no_route_available")
+    assert "review_agent_exhausted" not in (result.cause_code or "")
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert stage_review._candidate_digest(ws, "main") == digest_before
+    assert not (ctx / "review_verdict.json").exists()
+    assert not (ctx / "review_execution.json").exists()
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["failed_routes"][0]["harness"] == "claude"
+    assert state["failed_routes"][0]["candidate_digest"] == digest_before
+    assert state["rounds"] == []
+    assert state["agent_error_streak"] == 1
+
+
+def test_cancelled_review_keeps_the_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-review-cancelled"
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    monkeypatch.setattr("core.line.stage_review.record_result", lambda *_args, **_kwargs: None)
+
+    def agent(req: AgentRequest) -> AgentResult:
+        return AgentResult(ok=False, text="", error_kind="cancelled", harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=agent,
+        pick_func=lambda *_args, **_kwargs: ("claude", None),
         routing_config=load_routing_config(),
     )
+    result = stage.run(project, run_id)
+    assert result.outcome == "failed"
+    assert result.cause_code == "review_agent_cancelled"
+    state = json.loads((ws_mod.context_dir(ws) / "review_state.json").read_text(encoding="utf-8"))
+    assert state["failed_routes"] == []
+    assert state["agent_error_streak"] == 0
 
-    ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
 
-    # 5 consecutive retries allowed
-    for attempt in range(1, 6):
-        res = stage.run(project, run_id)
-        assert res.outcome == "retry"
-        assert res.cause_code == "review_agent_empty_output"
-        state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
-        assert state["agent_error_streak"] == attempt
+def test_failed_route_exclusion_expires_when_candidate_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.line import stage_review
 
-    # 6th attempt: ceiling exceeded (5 retries already exhausted)
-    res = stage.run(project, run_id)
-    assert res.outcome == "failed"
-    assert res.cause_code == "review_agent_exhausted"
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-infra-new-candidate"
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="codex")
+    monkeypatch.setattr(stage_review, "record_result", lambda *_args, **_kwargs: None)
+    calls: list[str] = []
+
+    def agent(req: AgentRequest) -> AgentResult:
+        calls.append(req.harness)
+        return AgentResult(ok=False, text="", error_kind="crash", harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=agent,
+        pick_func=lambda *_args, **_kwargs: ("claude", None),
+        routing_config=load_routing_config(),
+    )
+    stage.run(project, run_id)
+    ctx = ws_mod.context_dir(ws)
+    first = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    first_digest = first["failed_routes"][0]["candidate_digest"]
+
+    (ws.path / "feature.py").write_text("def add(a, b):\n    return a + b + 1\n", encoding="utf-8")
+    ws_mod.commit(ws, "change candidate", job_key=f"{run_id}:candidate-change")
+    stage.run(project, run_id)
+
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert calls == ["claude", "claude"]
+    assert state["failed_routes"][0]["candidate_digest"] != first_digest
+    assert state["failed_routes"][0]["harness"] == "claude"
 
 
 def test_agent_error_streak_resets_on_agent_success(

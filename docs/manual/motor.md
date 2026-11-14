@@ -147,7 +147,11 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    `passed=false`, veredito diferente de `approve` ou digest vazio sem esse binding apagam
    `validation.json` e o portao roda. O veredito so entra nessa decisao quando o digest gravado esta
    vazio: um digest coincidente permanece mesmo se a ultima rodada nao for `approve`. **REVIEW** roda `stage_review.ReviewStage`
-   com familia diferente do implementador e grava `review_verdict.json` so na aprovacao. Aprovacao
+   com familia diferente do implementador e grava `review_verdict.json` so na aprovacao. Falha de
+   infraestrutura ou JSON invalido exclui essa rota para o mesmo candidato e a mesma politica. Sem outra
+   rota compativel, a espera e `no_route_available` (codigo 75), sem `review_verdict.json`, sem
+   `review_execution.json` e sem alterar o portao nem o digest. A DarkFac so faz merge com aprovacao
+   ligada a esse digest. Aprovacao
    vigente (ultima rodada `approve`, binding valido, sem `forced`) nao chama o agente revisor:
    `review_verdict.json` approve e mantido ou reescrito como `approve`. Mudanca de candidato (digest
    diferente) segue o fluxo normal de gate e revisao. Mudanca so de politica, com digest coincidente,
@@ -158,8 +162,8 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    pos-merge continua unico, pelo `fleet_dispatcher`/`scripts/dokploy_redeploy.py`, entao o relatorio sai com
    `deployed=false` e `smoke_ok=null`: `require_artifact` aceita isso SO como "deploy pendente" e o ticket e
    reportado como `merged_awaiting_deploy` (`[MERGE] ... aguardando deploy`), nunca como entregue. Um
-   `smoke_ok=null` com `deployed=true` e invalido. Sem plano ou veredito nao ha merge; sem relatorio de deploy
-   a execucao falha.
+   `smoke_ok=null` com `deployed=true` e invalido. Sem plano ou veredito nao ha merge; na DarkFac, veredito
+   approve de outro `candidate_digest` tambem nao chega ao merge. Sem relatorio de deploy a execucao falha.
    O fechamento pos-merge remove apenas a worktree da propria entrega (responsabilidade do ciclo Git) e nao
    executa varredura global de worktrees. O launcher grava o resumo final com URL do PR, SHA de merge,
    estado do deploy e caminho de `deploy_report.json`; `merge.json` e o relatorio ficam no state root, fora
@@ -219,9 +223,39 @@ sem itens bloqueantes e continua vinculada ao digest do candidato e à política
 
 Uma falha de formato registra o harness como inelegível para a combinação atual de `candidate_digest` e
 `policy_digest`. O retry pede outra rota ao roteador, mantendo o modo `read`, o limite de cota e a família
-independente já aplicados por `pick()`. Se não houver outra rota elegível, REVIEW aguarda a próxima rota;
-nenhum veredito é criado. Uma alteração no candidato ou na política descarta a exclusão anterior e exige
-uma nova revisão independente.
+independente já aplicados por `pick()`. Crash, timeout, saída vazia, cota, autenticação e as demais
+falhas de infraestrutura do agente entram na mesma espera: o par harness/modelo fica inelegível para
+esse candidato e essa política, e o timeout também tira o harness da lista. Cancelamento, caminho
+protegido e self-modification não excluem a rota. Se não houver outra rota compatível, REVIEW devolve
+`no_route_available` (`RouteWaiter`), não `review_agent_exhausted`. Essa espera não cria
+`review_verdict.json` nem `review_execution.json` e não reescreve `validation.json` nem o digest do
+candidato. O launcher agenda `pending_delivery` e sai com o código 75. Uma alteração no candidato ou na
+política descarta a exclusão anterior e exige uma nova revisão independente. Sem aprovação ligada ao
+mesmo `candidate_digest`, a retomada da DarkFac não chega ao merge.
+
+### Reabertura da espera de revisão (USR-512 T3)
+
+Uma espera de REVIEW em `blocked` com causa retomável volta a ser consultada quando o `next_check` vence.
+Causas retomáveis trazem `no_route_available`, `review_agent_exhausted` ou `route_wait`. Se nesse ciclo
+existe rota compatível, o status passa a `running` e o processo é
+
+```powershell
+python C:\dev\DarkFac\run_ticket.py --resume-delivery <TICKET> --worktree <mesma worktree>
+```
+
+Esse comando não inicia PLAN nem BUILD. Sem rota, a espera continua `blocked`, com a mesma causa, até o
+próximo ciclo.
+
+`deploy_evidence_missing`, `deploy_evidence_mismatch` e `implementing_family_unknown` não reabrem, mesmo
+com rota disponível. Outros `launcher_exit:*` e esperas que não são REVIEW também ficam bloqueadas.
+
+O `launcher_exit:1` preservado por USR-467 é a exceção estreita. Ele só reabre depois de três
+confirmações no artefato do ticket: existe `progress.json` do BUILD, `validation.json` está `passed` com
+`candidate_digest` igual ao digest atual da worktree, e a revisão desse digest ainda não existe
+(`review_verdict.json`, `review_execution.json` ou rodada `approve` ligada ao digest). Faltando qualquer
+uma, o bloqueio e a causa permanecem. A publicação só ocorre depois que a retomada grava a rota elegível
+e a revisão ligada a esse mesmo digest. Até lá, o digest, o BUILD e o `validation.json` vigente ficam
+iguais.
 
 ### Payload verificável da revisão (USR-474 T1)
 
