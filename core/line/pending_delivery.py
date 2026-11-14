@@ -99,8 +99,17 @@ def _route(row: PendingDelivery):
 
 
 def _ci_recovery_without_merge(row: PendingDelivery, release: Path, merge_path: Path) -> bool:
-    """True when a red-CI wait has no merge receipt and no deploy report."""
-    return row.cause in CI_RECOVERY_CAUSES and not release.is_file() and not merge_path.is_file()
+    """True when a red-CI wait has no SHA-bearing merge or deploy receipt."""
+    if row.cause not in CI_RECOVERY_CAUSES:
+        return False
+    for path, sha_field in ((release, "sha"), (merge_path, "merge_sha")):
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(receipt, dict) and receipt.get(sha_field):
+            return False
+    return True
 
 
 def _ci_recovery_path(row: PendingDelivery) -> Path:

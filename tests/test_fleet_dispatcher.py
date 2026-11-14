@@ -577,6 +577,19 @@ def test_ci_recovery_without_merge_resumes_completed_ticket(tmp_path: Path, monk
     assert saved.cause == cause
 
 
+def test_ci_recovery_resumes_when_merge_and_deploy_files_have_no_sha(tmp_path: Path, monkeypatch):
+    pd, directory, context, candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    (context / "deploy_report.json").write_text('{"deployed": false}', encoding="utf-8")
+    (context / "merge.json").write_text('{"candidate_digest": "candidate"}', encoding="utf-8")
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+
+
 def test_ci_recovery_with_merge_sha_keeps_the_deploy_evidence_trail(tmp_path: Path, monkeypatch):
     pd, directory, context, _candidate, row, calls = _arm_completed_wait(
         tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
