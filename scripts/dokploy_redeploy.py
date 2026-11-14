@@ -1180,6 +1180,175 @@ def run_check_main_bounded(
     return box["result"]
 
 
+def _git_text(args: Sequence[str], repo_root: Path, timeout: float = 30) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run git and return the completed process, or None when git cannot answer."""
+    try:
+        return subprocess.run(
+            list(args), cwd=repo_root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _is_ancestor(ancestor: str, descendant: str, repo_root: Path) -> Optional[bool]:
+    result = _git_text(["git", "merge-base", "--is-ancestor", ancestor, descendant], repo_root)
+    if result is None:
+        return None
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
+def commit_changed_paths(sha: str, repo_root: Path = REPO_ROOT) -> Optional[List[str]]:
+    """Paths this commit changed against its first parent, or None when git cannot show it."""
+    if not SHA_PATTERN.fullmatch(sha):
+        return None
+    result = _git_text(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", sha],
+        repo_root,
+    )
+    if result is None or result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _paths_publish_image(paths: Sequence[str]) -> bool:
+    """True when ``paths`` is a diff ``hub-image.yml`` publishes. Empty does not."""
+    cleaned = [p for p in paths if p and p.strip()]
+    if not cleaned:
+        return False
+    patterns = deploy_classifier.hub_image_paths()
+    if not patterns:
+        return True
+    return deploy_classifier.touches_hub_image(cleaned, patterns)
+
+
+def load_first_parent_commits(
+    live_sha: str, target_sha: str, repo_root: Path = REPO_ROOT,
+) -> Optional[List[deploy_classifier.CommitTouch]]:
+    """Oldest-first first-parent line from ``live_sha`` through ``target_sha``.
+
+    None when git cannot prove that line. A target behind live is returned as
+    ``[target, live]`` so the classifier can refuse the rollback. The live
+    commit's own paths are not required and stay empty.
+    """
+    live = (live_sha or "").strip().lower()
+    target = (target_sha or "").strip().lower()
+    if not (SHA_PATTERN.fullmatch(live) and SHA_PATTERN.fullmatch(target)):
+        return None
+    if live == target:
+        return [deploy_classifier.CommitTouch(live, ())]
+    ahead = _is_ancestor(live, target, repo_root)
+    if ahead is None:
+        return None
+    if not ahead:
+        behind = _is_ancestor(target, live, repo_root)
+        if behind is not True:
+            return None
+        return [deploy_classifier.CommitTouch(target, ()), deploy_classifier.CommitTouch(live, ())]
+    listed = _git_text(["git", "rev-list", "--first-parent", "--reverse", f"{live}..{target}"], repo_root)
+    if listed is None or listed.returncode != 0:
+        return None
+    shas = [line.strip().lower() for line in listed.stdout.splitlines() if line.strip()]
+    if not shas or shas[-1] != target:
+        return None
+    commits = [deploy_classifier.CommitTouch(live, ())]
+    for sha in shas:
+        paths = commit_changed_paths(sha, repo_root)
+        if paths is None:
+            return None
+        commits.append(deploy_classifier.CommitTouch(sha, tuple(paths)))
+    return commits
+
+
+def resolve_image_lag(
+    live_sha: Optional[str], target_sha: str,
+) -> Optional[deploy_classifier.ImageLagDecision]:
+    """Image decision for one redeploy, or None when the target tag must be awaited.
+
+    None means the line is unproven and the tip was not shown to be outside the
+    workflow: the caller keeps the target SHA (fail closed to the previous wait).
+    A proven tip outside the workflow never asks the caller to wait for that tag.
+    """
+    target = (target_sha or "").strip().lower()
+    live = (live_sha or "").strip().lower() or None
+    if not SHA_PATTERN.fullmatch(target):
+        return None
+    if live is None:
+        tip = commit_changed_paths(target)
+        if tip is None or _paths_publish_image(tip):
+            return None
+        return deploy_classifier.ImageLagDecision(
+            action=deploy_classifier.ACTION_HOLD,
+            published_sha=None,
+            reach=tuple(tip),
+            reason=deploy_classifier.REASON_LIVE_ABSENT,
+            live_sha=None,
+            target_sha=target,
+        )
+    if not SHA_PATTERN.fullmatch(live):
+        return None
+    commits = load_first_parent_commits(live, target)
+    if commits is None:
+        diff = get_changed_paths(live, target)
+        if diff is not None and not _paths_publish_image(diff):
+            return deploy_classifier.ImageLagDecision(
+                action=deploy_classifier.ACTION_SKIP,
+                published_sha=live,
+                reach=tuple(diff),
+                reason=deploy_classifier.REASON_NO_IMAGE_LAG,
+                live_sha=live,
+                target_sha=target,
+            )
+        return None
+    return deploy_classifier.classify_image_lag(live_sha=live, target_sha=target, commits=commits)
+
+
+def format_image_lag(decision: deploy_classifier.ImageLagDecision) -> str:
+    """One stdout line: the published SHA and the lag paths (``reach``)."""
+    published = decision.published_sha or "-"
+    reach = ",".join(decision.reach) if decision.reach else "-"
+    if decision.action == deploy_classifier.ACTION_SKIP:
+        return (
+            "sem mudanca de imagem (USR-515): "
+            f"published={published} target={decision.target_sha} reach={reach}"
+        )
+    if decision.action == deploy_classifier.ACTION_HOLD:
+        return (
+            f"[IMAGE] recusado target={decision.target_sha} "
+            f"published={published} reach={reach} reason={decision.reason}"
+        )
+    pin = decision.pin_sha or published
+    return (
+        f"[IMAGE] pin={pin} published={published} target={decision.target_sha} "
+        f"reach={reach} reason={decision.reason}"
+    )
+
+
+def choose_image_sha(expected_sha: str, *, out: Any, err: Any) -> Tuple[str, Optional[int]]:
+    """Apply the lag decision before any tag wait.
+
+    ``(image_sha, None)`` deploys ``image_sha``. ``(sha, 0)`` exits with nothing
+    to deploy. ``(sha, EXIT_DEPLOY_FAILED)`` names the refusal and posts nothing.
+    """
+    decision = resolve_image_lag(probe_deployed_sha(), expected_sha)
+    if decision is None:
+        return expected_sha, None
+    line = format_image_lag(decision)
+    print(line, file=out, flush=True)
+    if decision.action == deploy_classifier.ACTION_SKIP:
+        return expected_sha, EXIT_OK
+    if decision.action == deploy_classifier.ACTION_PIN_TARGET:
+        return expected_sha, None
+    if decision.pin_sha:
+        return decision.pin_sha, None
+    print(line, file=err, flush=True)
+    return expected_sha, EXIT_DEPLOY_FAILED
+
+
 def _run_main(
     *,
     argv: Optional[Sequence[str]],
@@ -1229,8 +1398,9 @@ def _run_main(
     darkhub_selected = any(svc.name.lower() == "darkhub" and svc.kind == "compose" for svc in selected)
     code_selected = any(svc.name.lower() in CODE_BEARING_SERVICES for svc in selected)
     candidate_required = darkhub_selected or code_selected
-    # One immutable candidate for pin, GHCR, health, node_sync and backup.
-    # An explicit SHA never falls through to origin/main, even when main moves.
+    # The candidate (origin/main or --expected-sha) stays the node_sync target.
+    # The image pin may be the published ancestor (USR-515) and is chosen
+    # before any GHCR wait. An explicit SHA never falls through to origin/main.
     resolved_sha, candidate_error = resolve_deploy_candidate(
         getattr(args, "expected_sha", None),
         env.get(EXPECTED_SHA_ENV),
@@ -1251,19 +1421,27 @@ def _run_main(
     image_source = IMAGE_SOURCE_GHCR
     if darkhub_selected:
         try:
-            darkhub_compose = get_origin_main_compose(expected_sha)
             image_source = resolve_hub_image_source(env)
-            render_darkhub_compose(darkhub_compose, expected_sha, image_source)
-            if image_source == IMAGE_SOURCE_GHCR and not getattr(args, "force", False):
-                patterns = deploy_classifier.hub_image_paths()
-                base = probe_deployed_sha()
-                diff = get_changed_paths(base, expected_sha) if patterns and base else None
-                if diff is not None and not deploy_classifier.touches_hub_image(diff, patterns):
-                    print("sem mudanca de imagem (USR-405): merge nao toca paths do hub-image; Hub segue na imagem atual", file=out, flush=True)
-                    return EXIT_OK
+        except ComposeRenderError as exc:
+            print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
+            return EXIT_DEPLOY_FAILED
+    image_sha = expected_sha
+    consult_image = bool(expected_sha) and not getattr(args, "force", False) and (
+        code_selected or (darkhub_selected and image_source == IMAGE_SOURCE_GHCR)
+    )
+    if consult_image and expected_sha is not None:
+        image_sha, early_exit = choose_image_sha(expected_sha, out=out, err=err)
+        if early_exit is not None:
+            return early_exit
+    if darkhub_selected:
+        try:
+            if not image_sha:
+                raise DokployUsageError("Darkhub build requires a full origin/main SHA")
+            darkhub_compose = get_origin_main_compose(image_sha)
+            render_darkhub_compose(darkhub_compose, image_sha, image_source)
             if image_source == IMAGE_SOURCE_GHCR:
-                print(f"Waiting for {ghcr_image_ref(expected_sha)} on GHCR...", file=out, flush=True)
-                wait_for_ghcr_tag(expected_sha, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn)
+                print(f"Waiting for {ghcr_image_ref(image_sha)} on GHCR...", file=out, flush=True)
+                wait_for_ghcr_tag(image_sha, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn)
         except (DokployUsageError, ComposeRenderError) as exc:
             print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
@@ -1329,7 +1507,7 @@ def _run_main(
             print(f"[{svc.name}] blue-green deploy (USR-339)", file=out, flush=True)
             (bluegreen_runner or run_bluegreen_via_dokploy)(
                 request=transport, compose_id=svc.service_id, source=darkhub_compose,
-                new_sha=expected_sha,
+                new_sha=image_sha,
                 sha_is_serving=_bluegreen_serving(health_client, log=lambda m: print(m, file=err, flush=True)),
                 color_is_serving=_bluegreen_color_serving(color_health_client, log=lambda m: print(m, file=err, flush=True)),
                 restore_allowed=hub_restore_is_secure,
@@ -1339,7 +1517,7 @@ def _run_main(
             )
             print(f"[{svc.name}] blue-green ok", file=out, flush=True)
             return
-        set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose, image_source)
+        set_compose_git_sha(transport, svc, baseline_payload, image_sha or "", darkhub_compose, image_source)
         trigger_deploy(transport, svc)
 
     joined_darkhub = False
@@ -1361,6 +1539,8 @@ def _run_main(
                     now=_utcnow(),
                     force=getattr(args, "force", False),
                 )
+                if action == DEPLOY_SKIP and image_sha and image_sha != expected_sha:
+                    action, reason = DEPLOY_TRIGGER, deploy_classifier.REASON_PIN_PUBLISHED
                 if action == DEPLOY_SKIP:
                     print(f"[{svc.name}] deploy skipped (USR-207): {reason}", file=out, flush=True)
                     continue
@@ -1375,7 +1555,7 @@ def _run_main(
                     continue
             else:
                 if svc.name.lower() == "darkfac-cloud":
-                    cloud_sha = expected_sha
+                    cloud_sha = image_sha or expected_sha
                     # USR-397: never move DARKFAC_GIT_SHA (nor deploy) before the image exists;
                     # on timeout the previous sha keeps running.
                     print(f"Waiting for ghcr.io/{CLOUD_IMAGE_REPOSITORY}:{cloud_sha} on GHCR...", file=out, flush=True)
@@ -1440,10 +1620,10 @@ def _run_main(
 
     if darkhub_selected and any(svc.name.lower() == "darkhub" for svc in triggered):
         if wait_for_darkhub_sha(
-            expected_sha, health=health_client or fetch_darkhub_health, timeout=args.timeout,
+            image_sha or "", health=health_client or fetch_darkhub_health, timeout=args.timeout,
             interval=args.poll_interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
         ):
-            print(f"[NODE SYNC] VPS: converged sha={expected_sha}", file=out, flush=True)
+            print(f"[NODE SYNC] VPS: converged sha={image_sha}", file=out, flush=True)
         else:
             recovered = False
             if joined_darkhub:
@@ -1460,15 +1640,15 @@ def _run_main(
                                          poll_interval_seconds=args.poll_interval,
                                          sleep_fn=sleep_fn, clock_fn=clock_fn)
                     recovered = wait_for_darkhub_sha(
-                        expected_sha, health=health_client or fetch_darkhub_health, timeout=args.timeout,
+                        image_sha or "", health=health_client or fetch_darkhub_health, timeout=args.timeout,
                         interval=args.poll_interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
                     )
                 except (DokployUsageError, BlueGreenError, StopIteration) as exc:
                     print(f"[NODE SYNC] VPS: recovery retrigger failed: {exc}", file=err, flush=True)
             if recovered:
-                print(f"[NODE SYNC] VPS: converged sha={expected_sha} (after recovery)", file=out, flush=True)
+                print(f"[NODE SYNC] VPS: converged sha={image_sha} (after recovery)", file=out, flush=True)
             else:
-                print(f"[NODE SYNC] VPS: divergent; /health did not report candidate sha={expected_sha}", file=err, flush=True)
+                print(f"[NODE SYNC] VPS: divergent; /health did not report candidate sha={image_sha}", file=err, flush=True)
                 all_ok = False
                 other_failure = True
         try:

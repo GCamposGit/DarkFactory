@@ -154,7 +154,20 @@ Triggering redeploy for 4 service(s) in darkfac-core/production...
 
 ### Alvo imutavel (USR-420)
 
-`--expected-sha` vence `DARKFAC_EXPECTED_SHA` e vale para pin, GHCR, `/health`, sync e backup. Sem os dois, `origin/main` e lido uma vez. Contrato em `docs/manual/fila.md`.
+`--expected-sha` vence `DARKFAC_EXPECTED_SHA` e vale para o alvo do sync e do backup. Sem os dois, `origin/main` e lido uma vez. Contrato em `docs/manual/fila.md`.
+
+### Pin da imagem quando o alvo nao publica (USR-515)
+
+Antes de esperar qualquer tag no GHCR, o comando separa o diff do ultimo commit do atraso entre o SHA que `/health` serve e o alvo. A lista de paths e a de `.github/workflows/hub-image.yml`.
+
+O pin pode ser o ancestral publicado: o ultimo SHA que esse workflow publica, descendente do SHA live e ancestral do alvo. Compose, blue-green, `darkfac-cloud` e `/health` usam esse pin. O sync continua no SHA alvo (`origin/main` ou `--expected-sha`). O alcance do atraso sai no stdout (`published=<sha>` e `reach=<paths>`).
+
+- Alvo que toca os paths do workflow: a espera e a tag do proprio alvo.
+- Alvo fora desses paths, com runtime no intervalo: implanta o SHA publicado. Nao espera a tag do alvo.
+- Alvo fora desses paths, sem runtime no intervalo: saida 0, sem consulta de tag e sem POST. O stdout traz o SHA live em `published=` e o alcance em `reach=`, sem path do workflow.
+- Live desconhecido e alvo fora dos paths: sem espera da tag ausente, sem POST, saida diferente de zero, nomeando o SHA alvo.
+- `--force` implanta o SHA explicito e nao troca o pin por um ancestral.
+- O pin nunca e um SHA anterior ao que ja esta em producao.
 
 O comando termina com codigo de saida `0` nesse caso (`echo $LASTEXITCODE`
 no PowerShell logo depois confirma). Se algum servico aparecer com

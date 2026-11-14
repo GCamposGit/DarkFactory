@@ -48,8 +48,8 @@ Todo canal passa pelo mesmo caminho e pelo mesmo registro.
 ## 7. Deploy do Hub
 
 - O Hub é publicado como imagem no GHCR por sha (`.github/workflows/hub-image.yml`) e implantado em **blue-green** no Traefik (`core/orchestrator/bluegreen.py`).
-- `scripts/dokploy_redeploy.py` é o passo pós-merge único; espera a imagem GHCR do sha e reporta o resultado por serviço. Runbook: [`runbooks/dokploy_redeploy.md`](runbooks/dokploy_redeploy.md).
-- `core/infra/deploy_classifier.py` decide se o merge exige rebuild: só caminhos embutidos na imagem (`core/`, `hub/`, `scripts/`, `deploy/`, `.factory/config/`, `requirements.txt`, `harness.config.json`) disparam; docs, testes e ledger não. Diff desconhecido ou vazio sempre reconstrói (fail closed).
+- `scripts/dokploy_redeploy.py` é o passo pós-merge único e reporta o resultado por serviço. Antes de esperar tag no GHCR, aplica `classify_image_lag`: implanta o SHA publicado (ancestral ou o próprio alvo) ou sai sem probe. Compose, blue-green, `darkfac-cloud` e `/health` usam esse pin; `node_sync` permanece no SHA alvo. O alcance sai no stdout. Runbook: [`runbooks/dokploy_redeploy.md`](runbooks/dokploy_redeploy.md).
+- `core/infra/deploy_classifier.py` lê `on.push.paths` de `.github/workflows/hub-image.yml` (`hub_image_paths`). `classify` decide o rebuild do intervalo inteiro: diff desconhecido ou vazio reconstrói (fail closed). `classify_image_lag` separa o diff do último commit do atraso entre o SHA live e o alvo: pula, pina o último SHA que o workflow publica (ancestral do alvo e descendente do live) ou pina o alvo. Não consulta GHCR nem Dokploy e não escolhe pin que não avance o live.
 
 ## 8. DarkHub
 

@@ -98,9 +98,12 @@ attempt anterior sao apagados.
   `DARKFAC_FLEET_DISABLED_HOSTS` e lida uma vez por `verify`/`sync` (virgula, borda e caixa ignoradas).
   Host sai `excluded` (`disabled_by_policy`, `target_sha`) sem git, health, update, restart ou redeploy.
   `ok` exige a VPS incluida e os nos incluidos convergidos. VPS excluida deixa `ok` falso; Desktop
-  excluido nao esconde VPS divergente. No redeploy, a flag vence o env e vale para pin, GHCR,
-  `/health`, sync e backup; SHA explicito invalido recusa sem POST. Sem os dois, `origin/main` e
+  excluido nao esconde VPS divergente. No redeploy, a flag vence o env e vale para o alvo do
+  sync e do backup; SHA explicito invalido recusa sem POST. Sem os dois, `origin/main` e
   lido uma vez. Backup so com a VPS `converged` nesse SHA. `check-main` nao troca o candidato.
+  USR-515: antes da espera de tag, o pin de GHCR, compose, blue-green, `darkfac-cloud` e `/health`
+  pode ser o ancestral publicado quando o alvo esta fora dos paths de `hub-image.yml` e ha runtime
+  no intervalo. O sync permanece no SHA alvo. O stdout traz `published=` e `reach=`.
 
 # Fila de demandas (entrada)
 
