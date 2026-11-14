@@ -782,9 +782,15 @@ def verify(
             from core.infra import deploy_classifier
 
             changed = [p for p in git(root, ["diff", "--name-only", vps.git_sha, expected]).splitlines() if p.strip()]
-            rebuild, why = deploy_classifier.classify(vps.git_sha, expected, changed)
-            if not rebuild:
-                vps = vps.model_copy(update={"state": "converged", "reason": f"imagem inalterada: {why}"})
+            if not changed:
+                # A successful Git diff returning no names proves that the
+                # two SHAs have identical trees. Empty is distinct from a
+                # failed diff (which is caught below and remains divergent).
+                vps = vps.model_copy(update={"state": "converged", "reason": "diff comprovadamente vazio"})
+            else:
+                rebuild, why = deploy_classifier.classify(vps.git_sha, expected, changed)
+                if not rebuild:
+                    vps = vps.model_copy(update={"state": "converged", "reason": f"imagem inalterada: {why}"})
         except Exception:
             pass
     if track_divergence:

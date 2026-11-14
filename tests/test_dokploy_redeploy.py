@@ -2165,13 +2165,13 @@ def test_hub_image_paths_come_from_workflow_and_gate_root_only_diffs() -> None:
     assert deploy_classifier.needs_rebuild(["docs/x.md"])
 
 
-def test_darkhub_root_only_merge_skips_ghcr_wait_and_exits_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_darkhub_root_only_merge_with_unprovable_history_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "probe_deployed_sha", lambda: "b" * 40)
     monkeypatch.setattr(mod, "get_changed_paths", lambda base, head: ["AGENTS.md"])
     seen: List[Any] = []
     code, transport, out, err = _ghcr_run(monkeypatch, lambda repo, tag: seen.append(tag) or 404)
-    assert code == mod.EXIT_OK, err
-    assert "sem mudanca de imagem" in out
+    assert code == mod.EXIT_DEPLOY_FAILED, err
+    assert "ancestralidade nao comprovada" in out + err
     assert seen == [] and transport.post_calls == []
 
 
@@ -2416,3 +2416,477 @@ def test_cloud_deploy_waits_for_ghcr_tag_and_does_nothing_when_absent() -> None:
     assert seen and set(seen) == {"gcamposgit/darkfac-cloud"}
     assert transport.post_calls == []  # no compose.update (sha unchanged), no deploy
     assert "darkfac-cloud:" in err.getvalue() and "not published" in err.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# USR-515: pin the published image before any GHCR wait
+# ---------------------------------------------------------------------------
+
+_LIVE = "1" * 40
+_PUBLISHED = "2" * 40
+_TARGET = "3" * 40
+_EXPLICIT = "4" * 40
+
+
+def _usr515_transport(compose_file: Optional[str] = None) -> QueueTransport:
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
+    hub_first: Dict[str, Any] = {"deployments": [old], "env": "KEEP=secret-value\n"}
+    hub_next: Dict[str, Any] = {"deployments": [new], "env": "KEEP=secret-value\n"}
+    if compose_file is not None:
+        hub_first["composeFile"] = compose_file
+        hub_next["composeFile"] = compose_file
+    transport.program_get(
+        "/api/compose.one?composeId=compose_cloud",
+        [{"deployments": [old], "env": "KEEP=secret-value\n"}, {"deployments": [new], "env": "KEEP=secret-value\n"}],
+    )
+    transport.program_get("/api/compose.one?composeId=compose_hub", [hub_first, hub_next])
+    return transport
+
+
+def _install_line(monkeypatch: pytest.MonkeyPatch, commits: Sequence[deploy_classifier.CommitTouch]) -> None:
+    def load(live: str, target: str, repo_root: Any = None) -> list[deploy_classifier.CommitTouch]:
+        del repo_root
+        assert live == _LIVE and target == _TARGET
+        return list(commits)
+
+    monkeypatch.setattr(mod, "load_first_parent_commits", load)
+    monkeypatch.setattr(mod, "probe_deployed_sha", lambda: _LIVE)
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: _TARGET)
+
+
+def _reach_of(text: str) -> list[str]:
+    line = next(item for item in text.splitlines() if "published=" in item and "reach=" in item)
+    raw = line.split("reach=", 1)[1].split()[0]
+    return [] if raw == "-" else raw.split(",")
+
+
+def test_resolve_image_lag_pins_ancestor_and_skips_clean_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    pending = (
+        deploy_classifier.CommitTouch(_LIVE, ()),
+        deploy_classifier.CommitTouch(_PUBLISHED, ("core/pending.py",)),
+        deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md",)),
+    )
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda live, target, repo_root=None: list(pending))
+    pinned = mod.resolve_image_lag(_LIVE, _TARGET)
+    assert pinned is not None and pinned.action == deploy_classifier.ACTION_PIN_PUBLISHED
+    assert pinned.pin_sha == _PUBLISHED and pinned.reach == ("AGENTS.md",)
+
+    clean = (
+        deploy_classifier.CommitTouch(_LIVE, ()),
+        deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md", "README.md")),
+    )
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda live, target, repo_root=None: list(clean))
+    skipped = mod.resolve_image_lag(_LIVE, _TARGET)
+    assert skipped is not None and skipped.action == deploy_classifier.ACTION_SKIP
+    assert skipped.published_sha == _LIVE
+    assert not deploy_classifier.touches_hub_image(skipped.reach, deploy_classifier.hub_image_paths())
+
+    monkeypatch.setattr(mod, "commit_changed_paths", lambda sha, repo_root=None: ["AGENTS.md"])
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda *a, **k: (_ for _ in ()).throw(AssertionError("linha")))
+    held = mod.resolve_image_lag(None, _TARGET)
+    assert held is not None and held.action == deploy_classifier.ACTION_HOLD and held.target_sha == _TARGET
+    monkeypatch.setattr(mod, "commit_changed_paths", lambda sha, repo_root=None: ["requirements.txt"])
+    assert mod.resolve_image_lag(None, _TARGET) is None
+
+
+def test_history_failure_refuses_known_outside_target_without_waiting_for_tip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mod, "_is_ancestor", lambda ancestor, descendant, root: True)
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "get_changed_paths", lambda live, target: ["AGENTS.md"])
+    decision = mod.resolve_image_lag(_LIVE, _TARGET)
+    assert decision is not None and decision.action == deploy_classifier.ACTION_HOLD
+    assert decision.target_sha == _TARGET and decision.live_sha == _LIVE
+    assert decision.reach == ("AGENTS.md",)
+
+
+def test_target_outside_live_history_is_refused_before_fallback_diff(monkeypatch: pytest.MonkeyPatch) -> None:
+    diffs: List[tuple[str, str]] = []
+    monkeypatch.setattr(mod, "_is_ancestor", lambda ancestor, descendant, root: False)
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "get_changed_paths", lambda live, target: diffs.append((live, target)) or ["AGENTS.md"])
+    decision = mod.resolve_image_lag(_LIVE, _TARGET)
+    assert decision is not None and decision.action == deploy_classifier.ACTION_HOLD
+    assert decision.reason == deploy_classifier.REASON_NOT_AHEAD
+    assert diffs == []
+
+
+def test_cloud_pin_is_revalidated_after_ghcr_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    def load(live: str, target: str, repo_root: Any = None) -> list[deploy_classifier.CommitTouch]:
+        del repo_root
+        if live == _LIVE:
+            return [
+                deploy_classifier.CommitTouch(_LIVE, ()),
+                deploy_classifier.CommitTouch(_PUBLISHED, ("core/runtime.py",)),
+                deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md",)),
+            ]
+        assert live == _TARGET and target == _TARGET
+        return [deploy_classifier.CommitTouch(_TARGET, ())]
+
+    monkeypatch.setattr(mod, "load_first_parent_commits", load)
+    monkeypatch.setattr(mod, "probe_deployed_sha", iter((_LIVE, _TARGET)).__next__)
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: _TARGET)
+    monkeypatch.setattr(node_sync, "sync", lambda **kwargs: (_ for _ in ()).throw(AssertionError("sync")))
+    probes: List[str] = []
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"}, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        ghcr_probe=lambda repo, tag: probes.append(tag) or 200,
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert probes == [_PUBLISHED]
+    assert transport.post_calls == []
+    assert "became stale" in err.getvalue()
+    monkeypatch.setattr(mod, "commit_changed_paths", lambda sha, repo_root=None: None)
+    assert mod.resolve_image_lag(None, _TARGET) is None
+
+
+def test_load_first_parent_commits_reads_the_authoritative_line(tmp_path: Any) -> None:
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "usr515",
+        "GIT_AUTHOR_EMAIL": "usr515@example.com",
+        "GIT_COMMITTER_NAME": "usr515",
+        "GIT_COMMITTER_EMAIL": "usr515@example.com",
+    })
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True, encoding="utf-8", env=env,
+        )
+        return result.stdout.strip()
+
+    git("init", "-b", "main")
+    (tmp_path / "README.md").write_text("live\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "live")
+    live = git("rev-parse", "HEAD")
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "a.py").write_text("x\n", encoding="utf-8")
+    git("add", "core/a.py")
+    git("commit", "-m", "runtime")
+    published = git("rev-parse", "HEAD")
+    (tmp_path / "AGENTS.md").write_text("tip\n", encoding="utf-8")
+    git("add", "AGENTS.md")
+    git("commit", "-m", "tip")
+    target = git("rev-parse", "HEAD")
+
+    commits = mod.load_first_parent_commits(live, target, tmp_path)
+    assert commits is not None
+    assert [item.sha for item in commits] == [live, published, target]
+    assert commits[1].paths == ("core/a.py",)
+    assert commits[2].paths == ("AGENTS.md",)
+    assert mod.load_first_parent_commits("a" * 40, "b" * 40, tmp_path) is None
+
+
+def test_load_first_parent_rejects_candidates_outside_second_parent_live_line(tmp_path: Any) -> None:
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "usr515", "GIT_AUTHOR_EMAIL": "usr515@example.com",
+        "GIT_COMMITTER_NAME": "usr515", "GIT_COMMITTER_EMAIL": "usr515@example.com",
+    })
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True,
+            text=True, encoding="utf-8", env=env,
+        )
+        return result.stdout.strip()
+
+    git("init", "-b", "main")
+    (tmp_path / "base.txt").write_text("base\n", encoding="utf-8")
+    git("add", "base.txt")
+    git("commit", "-m", "base")
+    git("branch", "live-line")
+    git("checkout", "live-line")
+    (tmp_path / "live.txt").write_text("live\n", encoding="utf-8")
+    git("add", "live.txt")
+    git("commit", "-m", "live")
+    live = git("rev-parse", "HEAD")
+    git("checkout", "main")
+    (tmp_path / "first-parent.txt").write_text("not descended from live\n", encoding="utf-8")
+    git("add", "first-parent.txt")
+    git("commit", "-m", "first parent")
+    git("merge", "--no-ff", "live-line", "-m", "merge live as second parent")
+    target = git("rev-parse", "HEAD")
+
+    assert mod.load_first_parent_commits(live, target, tmp_path) is None
+
+
+def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GHCR, compose, blue-green and cloud use the published ancestor; sync stays on origin/main."""
+    from core.infra import node_sync
+
+    _install_line(monkeypatch, (
+        deploy_classifier.CommitTouch(_LIVE, ()),
+        deploy_classifier.CommitTouch(_PUBLISHED, ("core/pending.py",)),
+        deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md", "tests/test_usr515.py")),
+    ))
+    # The target commit and the GHCR pin intentionally have different titles.
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "published image" if sha == _PUBLISHED else "target commit")
+    synced: List[str] = []
+
+    def sync(**kwargs: Any) -> node_sync.SyncReport:
+        synced.append(kwargs["expected_sha"])
+        return node_sync.SyncReport(expected_sha=kwargs["expected_sha"], nodes=[
+            node_sync.NodeStatus(name=name, state="converged", git_sha=kwargs["expected_sha"])
+            for name in ("Notebook", "Desktop", "VPS")
+        ])
+
+    monkeypatch.setattr(node_sync, "sync", sync)
+    health_seen: List[str] = []
+    real_wait = mod.wait_for_darkhub_sha
+
+    def wait_health(sha: str, **kwargs: Any) -> bool:
+        health_seen.append(sha)
+        return real_wait(sha, **kwargs)
+
+    monkeypatch.setattr(mod, "wait_for_darkhub_sha", wait_health)
+    probes: List[tuple[str, str]] = []
+    transport = _usr515_transport()
+    transport.program_get("/api/compose.one?composeId=compose_cloud", [
+        {"deployments": [{"deploymentId": "old", "status": "done", "title": "old",
+                           "createdAt": "2026-09-12T09:00:00Z"}], "env": "KEEP=secret-value\n"},
+        {"deployments": [{"deploymentId": "new", "status": "done", "title": "published image",
+                           "createdAt": "2026-09-12T09:10:00Z"}], "env": "KEEP=secret-value\n"},
+    ])
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": _PUBLISHED},
+        ghcr_probe=lambda repo, tag: probes.append((repo, tag)) or 200,
+        stdout=out, stderr=err,
+    )
+    text = out.getvalue()
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert {tag for _repo, tag in probes} == {_PUBLISHED}
+    assert {repo for repo, _tag in probes} >= {"gcamposgit/darkhub", mod.CLOUD_IMAGE_REPOSITORY}
+    hub_updates = [body for _m, path, body in transport.post_calls if path == "/api/compose.update" and body and "composeFile" in body]
+    assert hub_updates and f"ghcr.io/gcamposgit/darkhub:{_PUBLISHED}" in hub_updates[0]["composeFile"]
+    assert f"DARKFAC_GIT_SHA={_PUBLISHED}" in hub_updates[0]["composeFile"]
+    assert _TARGET not in hub_updates[0]["composeFile"]
+    cloud_updates = [body for _m, path, body in transport.post_calls if path == "/api/compose.update" and body and "env" in body]
+    assert cloud_updates and f"DARKFAC_GIT_SHA={_PUBLISHED}" in cloud_updates[0]["env"]
+    assert _TARGET not in cloud_updates[0]["env"]
+    assert health_seen == [_PUBLISHED]
+    assert f"converged sha={_PUBLISHED}" in text
+    assert f"published={_PUBLISHED}" in text
+    assert "[darkfac-cloud] status=done" in text and "[matches deploy candidate]" in text
+    assert _reach_of(text) == ["AGENTS.md", "tests/test_usr515.py"]
+    assert not deploy_classifier.touches_hub_image(_reach_of(text), deploy_classifier.hub_image_paths())
+    assert synced == [_TARGET]
+
+    marker = "# darkfac-bluegreen: active=blue blue=" + "b" * 40 + " green=" + "b" * 40 + "\nservices: {}\n"
+    bg: List[str] = []
+    bg_probes: List[str] = []
+
+    def runner(**kwargs: Any) -> None:
+        bg.append(kwargs["new_sha"])
+        assert kwargs["sha_is_serving"](_PUBLISHED) is True
+        assert kwargs["sha_is_serving"](_TARGET) is False
+
+    transport_bg = _usr515_transport(marker)
+    transport_bg.program_get("/api/compose.one?composeId=compose_cloud", [
+        {"deployments": [{"deploymentId": "old", "status": "done", "title": "old",
+                           "createdAt": "2026-09-12T09:00:00Z"}], "env": "KEEP=secret-value\n"},
+        {"deployments": [{"deploymentId": "new", "status": "done", "title": "published image",
+                           "createdAt": "2026-09-12T09:10:00Z"}], "env": "KEEP=secret-value\n"},
+    ])
+    out_bg, err_bg = io.StringIO(), io.StringIO()
+    code_bg = mod.main(
+        ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup", "--skip-check-main", "--skip-disk-hygiene"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport_bg,
+        health_client=lambda: {"git_sha": _PUBLISHED},
+        ghcr_probe=lambda repo, tag: bg_probes.append(tag) or 200,
+        bluegreen_runner=runner,
+        stdout=out_bg, stderr=err_bg,
+    )
+    assert code_bg == mod.EXIT_OK, err_bg.getvalue()
+    assert bg == [_PUBLISHED]
+    assert set(bg_probes) == {_PUBLISHED}
+    cloud_bg = [body for _m, path, body in transport_bg.post_calls if path == "/api/compose.update" and body and "env" in body]
+    assert cloud_bg and f"DARKFAC_GIT_SHA={_PUBLISHED}" in cloud_bg[0]["env"]
+    assert synced == [_TARGET, _TARGET]
+
+
+def test_outside_tip_without_runtime_exits_without_probe_or_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    _install_line(monkeypatch, (
+        deploy_classifier.CommitTouch(_LIVE, ()),
+        deploy_classifier.CommitTouch(_TARGET, ("AGENTS.md", "README.md")),
+    ))
+    monkeypatch.setattr(mod, "get_commit_subject", lambda sha: "live image" if sha == _LIVE else "target")
+    monkeypatch.setattr(node_sync, "sync", lambda **kwargs: node_sync.SyncReport(
+        expected_sha=kwargs["expected_sha"], nodes=[
+            node_sync.NodeStatus(name=name, state="converged", git_sha=kwargs["expected_sha"])
+            for name in ("Notebook", "Desktop", "VPS")
+        ],
+    ))
+    transport = _usr515_transport()
+    transport.program_get("/api/compose.one?composeId=compose_cloud", [
+        {"deployments": [{"deploymentId": "old", "status": "done", "title": "live image",
+                           "createdAt": "2026-09-12T09:00:00Z"}], "env": "KEEP=secret-value\n"},
+    ])
+    out, err = io.StringIO(), io.StringIO()
+
+    probes: List[tuple[str, str]] = []
+
+    def probe(repo: str, tag: str) -> int:
+        probes.append((repo, tag))
+        raise AssertionError(f"unexpected probe {repo}:{tag}")
+
+    code = mod.main(
+        ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup", "--skip-check-main"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": _LIVE},
+        ghcr_probe=probe,
+        stdout=out, stderr=err,
+    )
+    text = out.getvalue()
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert transport.post_calls == []
+    assert probes == []
+    assert f"published={_LIVE}" in text
+    assert _reach_of(text) == ["AGENTS.md", "README.md"]
+    assert not deploy_classifier.touches_hub_image(_reach_of(text), deploy_classifier.hub_image_paths())
+    assert "sem mudanca de imagem" in text
+
+
+def test_image_tip_still_waits_for_the_target_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_line(monkeypatch, (
+        deploy_classifier.CommitTouch(_LIVE, ()),
+        deploy_classifier.CommitTouch(_PUBLISHED, ("core/old.py",)),
+        deploy_classifier.CommitTouch(_TARGET, ("requirements.txt",)),
+    ))
+    probes: List[str] = []
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--skip-node-sync", "--skip-check-main", "--skip-disk-hygiene"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": _TARGET},
+        ghcr_probe=lambda repo, tag: probes.append(tag) or 200,
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert probes and set(probes) == {_TARGET}
+    assert _PUBLISHED not in probes
+    compose = next(body["composeFile"] for _m, path, body in transport.post_calls if path == "/api/compose.update" and body and "composeFile" in body)
+    assert f"ghcr.io/gcamposgit/darkhub:{_TARGET}" in compose
+
+
+def test_force_deploys_the_explicit_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refused(*_a: object, **_k: object) -> None:
+        raise AssertionError("classificador nao roda com --force")
+
+    monkeypatch.setattr(mod, "load_first_parent_commits", refused)
+    monkeypatch.setattr(mod, "commit_changed_paths", refused)
+    monkeypatch.setattr(mod, "probe_deployed_sha", lambda: _LIVE)
+    probes: List[str] = []
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup", "--skip-node-sync", "--skip-check-main", "--skip-disk-hygiene",
+         "--force", "--expected-sha", _EXPLICIT],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": _EXPLICIT},
+        ghcr_probe=lambda repo, tag: probes.append(tag) or 200,
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert set(probes) == {_EXPLICIT}
+    compose = next(body["composeFile"] for _m, path, body in transport.post_calls if path == "/api/compose.update" and body and "composeFile" in body)
+    assert f"ghcr.io/gcamposgit/darkhub:{_EXPLICIT}" in compose
+    assert _PUBLISHED not in compose and _TARGET not in compose
+
+
+def test_unknown_live_and_outside_tip_does_not_wait_or_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    monkeypatch.setattr(mod, "probe_deployed_sha", lambda: None)
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: _TARGET)
+    monkeypatch.setattr(mod, "commit_changed_paths", lambda sha, repo_root=None: ["AGENTS.md"] if sha == _TARGET else None)
+    monkeypatch.setattr(mod, "load_first_parent_commits", lambda *a, **k: (_ for _ in ()).throw(AssertionError("linha")))
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: (_ for _ in ()).throw(AssertionError("sync")))
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+
+    probes: List[tuple[str, str]] = []
+
+    def probe(repo: str, tag: str) -> int:
+        probes.append((repo, tag))
+        raise AssertionError(f"unexpected probe {repo}:{tag}")
+
+    code = mod.main(
+        ["--only", "Darkhub", "--only", "darkfac-cloud", "--skip-backup"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        ghcr_probe=probe,
+        stdout=out, stderr=err,
+    )
+    assert code != mod.EXIT_OK
+    assert transport.post_calls == []
+    assert probes == []
+    assert _TARGET in out.getvalue() or _TARGET in err.getvalue()
+    assert "live ausente" in out.getvalue() or "live ausente" in err.getvalue()
+
+
+def test_target_behind_live_does_not_roll_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mod, "probe_deployed_sha", lambda: _LIVE)
+    monkeypatch.setattr(mod, "get_origin_main_sha", lambda: _TARGET)
+    monkeypatch.setattr(
+        mod, "load_first_parent_commits",
+        lambda live, target, repo_root=None: [
+            deploy_classifier.CommitTouch(target, ("core/old.py",)),
+            deploy_classifier.CommitTouch(live, ()),
+        ],
+    )
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+
+    probes: List[tuple[str, str]] = []
+
+    def probe(repo: str, tag: str) -> int:
+        probes.append((repo, tag))
+        raise AssertionError(f"unexpected probe {repo}:{tag}")
+
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        ghcr_probe=probe,
+        stdout=out, stderr=err,
+    )
+    assert code != mod.EXIT_OK
+    assert transport.post_calls == []
+    assert probes == []
+    assert _TARGET in out.getvalue() or _TARGET in err.getvalue()
+    assert "descendente do live" in out.getvalue() or "descendente do live" in err.getvalue()
+    assert _PUBLISHED not in out.getvalue()

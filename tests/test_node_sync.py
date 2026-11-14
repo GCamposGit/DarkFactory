@@ -1241,3 +1241,29 @@ def test_disabled_policy_is_read_once_and_frozen_during_probes(monkeypatch: pyte
     assert checked.nodes[1].state == "divergent" and checked.nodes[1].git_sha == OLD
     _excluded(checked.nodes[2], blocks_backup=True)
     assert not checked.ok
+
+
+def test_verify_accepts_proven_empty_diff_between_deployed_and_target_sha(tmp_path: Path) -> None:
+    deployed, target = "1" * 40, "2" * 40
+
+    def git(_root: Path, args: list[str]) -> str:
+        assert args == ["diff", "--name-only", deployed, target]
+        return ""
+
+    report = mod.verify(
+        root=tmp_path, git=git, http=lambda *_args: {"git_sha": deployed},
+        expected_sha=target, disabled_hosts={"notebook", "desktop"}, retries=1,
+    )
+    vps = next(node for node in report.nodes if node.name == "VPS")
+    assert vps.state == "converged"
+    assert vps.reason == "diff comprovadamente vazio"
+
+    def failed_git(_root: Path, _args: list[str]) -> str:
+        raise RuntimeError("git unavailable")
+
+    failed = mod.verify(
+        root=tmp_path, git=failed_git, http=lambda *_args: {"git_sha": deployed},
+        expected_sha=target, disabled_hosts={"notebook", "desktop"}, retries=1,
+    )
+    failed_vps = next(node for node in failed.nodes if node.name == "VPS")
+    assert failed_vps.state == "divergent"

@@ -60,6 +60,171 @@ def test_run_hub_only_merge_is_data_only() -> None:
     assert dc.classify(A, B, ["run_hub.py"]) == (False, dc.REASON_DATA_ONLY)
 
 
+# USR-515: tip diff and accumulated image lag are separate decisions. No network.
+
+
+RUNTIME = "c" * 40
+OLDER = "d" * 40
+BEHIND = "e" * 40
+AFTER = "f" * 40
+
+
+def _lag(*commits: dc.CommitTouch, live: str = A, target: str = B) -> dc.ImageLagDecision:
+    return dc.classify_image_lag(live_sha=live, target_sha=target, commits=commits)
+
+
+def test_agents_tip_with_pending_runtime_pins_that_ancestor() -> None:
+    """Tip is only AGENTS.md; one core commit between live and the tip is the pin."""
+    commits = (
+        dc.CommitTouch(BEHIND, ("core/old.py",)),
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(RUNTIME, ("core/pending.py",)),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+        dc.CommitTouch(AFTER, ("core/future.py",)),
+    )
+    decision = dc.classify_image_lag(live_sha=A, target_sha=B, commits=commits)
+    order = [commit.sha for commit in commits]
+    patterns = dc.hub_image_paths()
+
+    assert decision.action == dc.ACTION_PIN_PUBLISHED
+    assert decision.pin_sha == RUNTIME
+    assert decision.published_sha == RUNTIME
+    assert order.index(A) < order.index(decision.published_sha) < order.index(B)
+    assert decision.published_sha not in {BEHIND, AFTER, A, B}
+    assert decision.reach == ("AGENTS.md",)
+    assert not dc.touches_hub_image(decision.reach, patterns)
+    assert dc.touches_hub_image(["core/pending.py"], patterns)
+
+
+def test_two_image_ancestors_pin_the_latest_one() -> None:
+    decision = _lag(
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(OLDER, ("core/first.py",)),
+        dc.CommitTouch(RUNTIME, ("hub/backend/main.py", "tests/test_a.py")),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+    )
+    assert decision.action == dc.ACTION_PIN_PUBLISHED
+    assert decision.published_sha == RUNTIME
+    assert decision.reach == ("AGENTS.md",)
+    assert not dc.touches_hub_image(decision.reach, dc.hub_image_paths())
+
+
+def test_agents_only_interval_skips_and_reports_live_as_published() -> None:
+    decision = _lag(
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+    )
+    patterns = dc.hub_image_paths()
+    assert decision.action == dc.ACTION_SKIP
+    assert decision.pin_sha is None
+    assert decision.published_sha == A
+    assert decision.reach == ("AGENTS.md",)
+    assert not dc.touches_hub_image(decision.reach, patterns)
+
+
+def test_image_commit_behind_live_is_not_selected_as_pin() -> None:
+    decision = _lag(
+        dc.CommitTouch(BEHIND, ("core/old.py",)),
+        dc.CommitTouch(A, ("README.md",)),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+    )
+    assert decision.action == dc.ACTION_SKIP
+    assert decision.pin_sha is None
+    assert decision.published_sha == A
+    assert decision.published_sha != BEHIND
+    assert "core/old.py" not in decision.reach
+    assert not dc.touches_hub_image(decision.reach, dc.hub_image_paths())
+
+
+def test_absent_live_selects_no_pin_even_when_target_publishes() -> None:
+    decision = dc.classify_image_lag(
+        live_sha=None,
+        target_sha=B,
+        commits=(
+            dc.CommitTouch(BEHIND, ("core/old.py",)),
+            dc.CommitTouch(B, ("core/pending.py",)),
+        ),
+    )
+    assert decision.action == dc.ACTION_HOLD
+    assert decision.pin_sha is None
+    assert decision.published_sha is None
+    assert decision.published_sha != BEHIND
+
+
+def test_target_behind_live_is_not_a_pin() -> None:
+    decision = _lag(
+        dc.CommitTouch(BEHIND, ("core/old.py",)),
+        dc.CommitTouch(A, ()),
+        live=A,
+        target=BEHIND,
+    )
+    assert decision.action == dc.ACTION_HOLD
+    assert decision.pin_sha is None
+    assert decision.published_sha == A
+    assert decision.published_sha != BEHIND
+
+
+def test_image_target_pins_the_target_sha() -> None:
+    decision = _lag(
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(OLDER, ("core/old.py",)),
+        dc.CommitTouch(B, ("requirements.txt",)),
+    )
+    assert decision.action == dc.ACTION_PIN_TARGET
+    assert decision.pin_sha == B
+    assert decision.published_sha == B
+    assert decision.reach == ()
+
+
+def test_image_lag_follows_hub_image_paths_and_does_not_query_ghcr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def patterns(workflow: Optional[Path] = None) -> list[str]:
+        calls.append("paths")
+        return ["special.txt"]
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("consulta de rede")
+
+    monkeypatch.setattr(dc, "hub_image_paths", patterns)
+    monkeypatch.setattr(mod, "wait_for_ghcr_tag", boom)
+    monkeypatch.setattr(mod, "fetch_darkhub_health", boom)
+    monkeypatch.setattr(mod, "probe_deployed_sha", boom)
+
+    outside = _lag(
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(RUNTIME, ("core/a.py",)),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+    )
+    assert calls
+    assert outside.action == dc.ACTION_SKIP
+    assert outside.published_sha == A
+
+    def core_patterns(workflow: Optional[Path] = None) -> list[str]:
+        calls.append("core")
+        return ["core/**"]
+
+    monkeypatch.setattr(dc, "hub_image_paths", core_patterns)
+    pinned = _lag(
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(RUNTIME, ("core/a.py",)),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+    )
+    assert pinned.action == dc.ACTION_PIN_PUBLISHED
+    assert pinned.published_sha == RUNTIME
+    assert pinned.reach == ("AGENTS.md",)
+
+    monkeypatch.setattr(dc, "hub_image_paths", lambda workflow=None: [])
+    closed = _lag(
+        dc.CommitTouch(A, ()),
+        dc.CommitTouch(B, ("AGENTS.md",)),
+    )
+    assert closed.action == dc.ACTION_PIN_TARGET
+    assert closed.published_sha == B
+
+
 def test_availability_probe_schedule_uses_absolute_pythonw_and_safe_powershell_arguments() -> None:
     proposal = (ROOT / "docs" / "proposals" / "USR-207-zero-downtime.md").read_text(encoding="utf-8")
     section = proposal.split("### Agendar a sonda", maxsplit=1)[1].split("## 2.", maxsplit=1)[0]

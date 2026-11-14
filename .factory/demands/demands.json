@@ -14551,5 +14551,36 @@
     "dependencies": [],
     "created_at": "2026-11-11T06:38:50.753108Z",
     "updated_at": "2026-11-14T01:03:41.370182Z"
+  },
+  {
+    "id": "USR-515",
+    "project_id": "darkfac",
+    "title": "Resolver deploy quando o main termina em commit sem imagem",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "82010a3a96c4460f4e21177285144a45f070fefb",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Regressao do USR-405 em 14/11. PR #832 integrou somente AGENTS.md em 142384b2, fora dos paths do workflow hub-image. Enquanto /health servia 296d914a, o diff acumulado incluiu mudanças de runtime de #852 e #853 e dokploy_redeploy aguardou uma tag 142384b2 que esse workflow nao publica. A ultima imagem publicada era c72d923f, descendente do SHA live e ancestral do alvo. A revisao automatica de permissoes recusou deploy desse SHA anterior ao alvo pelo risco de rollback; nenhuma troca foi disparada.",
+    "core_journey": [
+      "Regressao do USR-405 em 14/11. PR #832 integrou somente AGENTS.md em 142384b2, fora dos paths do workflow hub-image. Enquanto /health servia 296d914a, o diff acumulado incluiu mudanças de runtime de #852 e #853 e dokploy_redeploy aguardou uma tag 142384b2 que esse workflow nao publica. A ultima imagem publicada era c72d923f, descendente do SHA live e ancestral do alvo. A revisao automatica de permissoes recusou deploy desse SHA anterior ao alvo pelo risco de rollback; nenhuma troca foi disparada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Classificar separadamente o diff do ultimo merge e o atraso acumulado do ambiente usando o workflow autoritativo, sem esperar tag ausente.",
+      "Preservar a exigencia de SHA fixo e evidencias de convergencia, nunca recuar a versao em producao, e devolver estado acionavel com o SHA exato publicado e o alcance do atraso.",
+      "Testar alvo docs-only com runtime pendente entre o SHA live e o alvo, e alvo docs-only sem runtime pendente."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-14T10:46:48.835074Z",
+    "updated_at": "2026-11-14T23:14:10.950881Z"
   }
 ]

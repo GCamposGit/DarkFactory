@@ -6,6 +6,13 @@ suíte. A correção ajusta os prazos do runner e worker remoto à capacidade re
 aceita um worker na elegibilidade e preserva recusa com zero. O encerramento do
 incidente depende de entrega e retomada verificadas, não da existência do processo.
 
+USR-515 (14/11/2026): redeploy escolhe apenas pin com ancestralidade Git provada,
+recusa fallback por diff acumulado quando não pode identificar a imagem publicada,
+revalida o pin sob lock após a espera do GHCR e mede convergência do `darkfac-cloud`
+pela própria implantação. Diff Git comprovadamente vazio permite node_sync reconhecer
+árvores idênticas; falha de Git segue divergente. Suítes afetadas: 184 passaram, 2
+skipped nesta worktree; portão oficial ainda pendente.
+
 Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A missão de longo prazo está em [`MISSION.md`](../MISSION.md); as regras para agentes em [`AGENTS.md`](../AGENTS.md); o plano de execução vigente em [`docs/plans/PLANO_V0_2026-10-24.md`](plans/PLANO_V0_2026-10-24.md).
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
