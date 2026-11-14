@@ -1,0 +1,34 @@
+{
+  "assumptions": [
+    "Esta rodada é somente leitura: nenhum arquivo, ticket ou integração foi criado ou executado.",
+    "README, AGENTS.md, fase atual, FeederCycle, BacklogFeeder, detecção de projetos e registros locais de demandas foram consultados.",
+    "A busca local não encontrou QualityCycle nem analisadores de vulnerabilidades correspondentes; reconciliar a base entregue e suas dependências antes de planejar a demonstração, sem interpretar documentação como implementação.",
+    "Reutilizar coordenador, cadastro, control store, roteador e esteira existentes; não criar outro pipeline de revisão ou remediação.",
+    "Manter as decisões fornecidas: IaC cobre componentes e versões referenciados; SBOM deve ser consumido e gerado.",
+    "Definir tecnicamente a matriz explícita de versões dos lockfiles npm, pnpm e Yarn, cobrindo dependências resolvidas e transitivas; formatos não suportados devem aparecer como limitação.",
+    "Vincular o digest do índice multi-plataforma aos manifests, inventários e resultados de cada plataforma avaliada; não inferir cobertura apenas pelo digest.",
+    "Vincular SBOM a artefato, formato, versão e proveniência; dados insuficientes produzem cobertura parcial.",
+    "Combinar consultas reais a fontes de advisory com revisões controladas e rastreáveis para provar atualização e expiração sem depender de uma publicação externa durante a demonstração.",
+    "Provar cache, expiração, concorrência e retomada com estado persistido; deduplicar por projeto e vulnerabilidade canônica preservando todas as ocorrências por artefato e plataforma.",
+    "Demonstrar correção e rechecagem pela esteira existente; indisponibilidade, evidência vencida ou cobertura parcial não equivalem a ausência de vulnerabilidades.",
+    "Usar recursos e permissões existentes, sem presumir novos acessos, segredos ou gastos; atualizar manual, fase atual, learning pack e evidência operacional na entrega."
+  ],
+  "technical": [],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "A demonstração real pode usar um projeto de laboratório isolado, artefatos públicos e correções em fixtures, atravessando a esteira existente até a rechecagem?",
+      "kind": "intent",
+      "options": [
+        "Laboratório isolado com integrações reais",
+        "Projeto operacional indicado pelo owner"
+      ],
+      "recommended": "Laboratório isolado com integrações reais",
+      "why": "Permite demonstrar vulnerabilidades e correções reproduzíveis sem introduzir componentes vulneráveis em projetos operacionais."
+    }
+  ],
+  "deadline": "2026-11-15T10:55:25.889180Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
