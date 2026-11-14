@@ -291,6 +291,17 @@ continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_i
 
 Durante a validacao pelo portao oficial, `run_ticket.py` rotaciona os workers remotos quando uma tentativa falha (`_rotate_gate_workers`). Essa rotacao filtra estritamente hosts listados em `DARKFAC_FLEET_DISABLED_HOSTS` (ex.: `desktop` ocupado com indexacao), garantindo que nos desabilitados nao sejam reinseridos no pool ativo de validacao.
 
+## Raiz do candidato no portao de entrega (USR-516)
+
+O portao oficial de uma entrega parte da worktree do ticket e tambem fixa
+`DARKFAC_PROJECT_ROOT` para essa mesma worktree em cada tentativa, inclusive
+nos retries de worker remoto. Isso e necessario porque o runner resolve sua
+raiz por essa variavel antes de consultar o Git; herdar o valor do executor da
+frota pode fazer um checkout compartilhado sujo parecer o candidato e gerar
+`gate_dirty_worktree` com `TEST_COUNT=0`. A raiz de estado da frota e mantida
+pelas demais variaveis de ambiente. Um candidato realmente sujo continua sendo
+recusado pelo runner, que informa os caminhos da worktree do ticket.
+
 
 ## Recuperacao de CI sem repetir BUILD (USR-473)
 

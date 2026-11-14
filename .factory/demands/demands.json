@@ -14582,5 +14582,34 @@
     "dependencies": [],
     "created_at": "2026-11-14T10:46:48.835074Z",
     "updated_at": "2026-11-14T23:14:10.950881Z"
+  },
+  {
+    "id": "USR-516",
+    "project_id": "darkfac",
+    "title": "Fixar a raiz do candidato no portao da entrega em frota",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "USR-515 no Notebook em 14/11/2026: caixa de entrega recebeu gate_dirty_worktree e TEST_COUNT=0. O log mostrou exatamente os arquivos modificados no checkout principal, enquanto a worktree do ticket no candidato 88b432d5 estava limpa. O caso de producao reapareceu apos USR-425. Reproduzir o caminho real de frota e confirmar a origem da propagacao do checkout incorreto.",
+    "core_journey": [
+      "USR-515 no Notebook em 14/11/2026: caixa de entrega recebeu gate_dirty_worktree e TEST_COUNT=0. O log mostrou exatamente os arquivos modificados no checkout principal, enquanto a worktree do ticket no candidato 88b432d5 estava limpa. O caso de producao reapareceu apos USR-425. Reproduzir o caminho real de frota e confirmar a origem da propagacao do checkout incorreto."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A mesma entrega continua recusando uma worktree do candidato realmente suja e preserva o estado compartilhado da frota e os arquivos do checkout principal"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-14T21:52:09.597471Z",
+    "updated_at": "2026-11-14T21:52:09.597471Z"
   }
 ]
