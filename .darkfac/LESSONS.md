@@ -1,0 +1,1 @@
+- [canonical_ownership_conflict] Analisar causa raiz 'canonical_ownership_conflict' no estagio 'development' e incluir salvaguardas preventivas determinísticas.
