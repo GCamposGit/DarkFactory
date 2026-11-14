@@ -27,6 +27,13 @@ O caso antigo do USR-467, gravado como `launcher_exit:1`, segue essa retomada s�
 
 Uma revisão que cai por crash, timeout, saída vazia ou JSON inválido não repete a mesma rota naquele candidato. A rota sai da lista daquele digest e daquela política, e a cascata pede a próxima combinação que o CLI aceita. Se nenhuma sobra, a entrega espera com `no_route_available` e código 75, com a worktree, o BUILD e o `validation.json` no lugar. Não nasce `review_verdict.json` nem `review_execution.json`. Retomar só chega ao merge quando a aprovação aponta para o mesmo digest do candidato.
 
+## Aprendizado da correção USR-512
+
+Cancelamento, caminho protegido e `self_modification` encerram a revisão sem
+marcar a rota como falha de infraestrutura. O estágio ainda grava o estado atual
+da revisão antes de retornar, mantendo o contrato de retomada e deixando explícito
+que nenhuma rota foi excluída e que a sequência de falhas continua zerada.
+
 ## Aprendizado da entrega USR-456 T2
 
 O preflight continua consultando a saúde do grokbox, mas o wake por email só ocorre com autorização

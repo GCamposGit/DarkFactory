@@ -697,6 +697,8 @@ class ReviewStage:
     ) -> StageResult:
         """Exclude a failed route, then try the next compatible one or wait."""
         if result.error_kind in _KEEP_ROUTE_ERRORS:
+            # Persist the current candidate/policy scope even though these owner or
+            # safety stops do not count as an infrastructure failure or exclude a route.
             _write_review_state(ws, state)
             return StageResult(
                 outcome="failed", cause_code=f"review_agent_{result.error_kind}", output_refs=[],

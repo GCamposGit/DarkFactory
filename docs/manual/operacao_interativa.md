@@ -147,3 +147,21 @@ sem exigir evidencia de deploy.
 ## Revisao sem outra familia disponivel
 
 A sessao interativa e a frota usam a mesma cascata de revisao (USR-488): outra familia por harness, outra familia pelo OpenRouter, mesma familia com outro modelo e, por fim, o mesmo modelo com persona adversarial. O nivel usado fica registrado no veredito; a admissao nao exige mais rota de revisao nem de portao (so `development` e, sem plano, `planning`). Cota desconhecida degrada para tentar a assinatura antes do OpenRouter (USR-504). Detalhes em [roteamento](roteamento.md).
+
+### Falha de rota e retomada da revisao (USR-512)
+
+Durante REVIEW, uma falha de infraestrutura ou resposta JSON invalida torna a rota
+inelegivel para o mesmo candidato e a mesma politica de revisao. Falha de infraestrutura
+exclui o par harness/modelo; JSON invalido exclui o harness. Assim, um modelo Grok
+declarado por um harness Codex nao e tentado novamente como se fosse outra rota. Timeout
+tambem registra o harness em `timed_out_harnesses`. Cancelamento, caminho protegido e
+`self_modification` encerram pela causa correspondente, sem trocar de rota.
+
+Se restar uma rota compativel, REVIEW a tenta. Quando todas as rotas falham ou ficam
+indisponiveis, `run_ticket.py` grava uma espera retomavel (`no_route_available`) e
+preserva a worktree e a validacao do candidato. O dispatcher pode reabrir essa espera
+quando uma rota surgir, retomando com `--resume-delivery` na mesma worktree, sem repetir
+PLAN ou BUILD. A retomada exige que o gate continue ligado ao digest atual e que ainda
+nao exista revisao/aprovacao para esse candidato; evidencia ausente ou divergente
+permanece bloqueada. As exclusoes de rota deixam de valer quando muda o candidato ou a
+politica de revisao.
