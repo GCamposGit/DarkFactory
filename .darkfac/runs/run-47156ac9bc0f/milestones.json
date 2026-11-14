@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Lockfiles Node resolvidos",
+    "demand_text": "Adicionar adapters para package-lock.json lockfileVersion 2 e 3, pnpm-lock.yaml 6.0 e 9.0 e yarn.lock Classic v1 e Modern com __metadata.version 8. Cobrir workspaces/importers, dependências diretas, transitivas, opcionais, dev e peers, múltiplas resoluções do mesmo pacote e integridade quando disponível. Formato desconhecido ou entrada local/git sem versão verificável deve gerar limitação. Referências técnicas: [npm package-lock](https://docs.npmjs.com/files/package-lock.json/), [pnpm lockfile 9.0](https://github.com/pnpm/spec/blob/master/lockfile/9.0.md) e [Yarn Classic](https://classic.yarnpkg.com/en/docs/yarn-lock)."
+  },
+  {
+    "title": "Imagens imutáveis e inventário por plataforma",
+    "demand_text": "Inventariar imagens referenciadas por sha256 e resolver OCI Image Manifest v1 e Image Index v1, ambos schemaVersion 2, incluindo Docker schema 2 compatível. Registrar registry, digest do índice e do manifesto selecionado, os/architecture/variant, ambiente e digest do inventário de conteúdo. Tags podem ser observadas, mas não constituem identidade imutável; registry inacessível ou plataforma ausente vira limitação. Validar contra a [especificação OCI de manifest](https://github.com/opencontainers/image-spec/blob/main/manifest.md) e [image index](https://github.com/opencontainers/image-spec/blob/main/image-index.md)."
+  },
+  {
+    "title": "Consumo e geração de SBOM",
+    "demand_text": "Consumir e gerar CycloneDX JSON 1.6 e 1.7 e SPDX JSON 2.3.1. Validar schema, serialNumber/SPDXID, criação, ferramenta e versão, subject/artefato, purl/CPE, relações e hashes; componentes sem versão ou vínculo verificável não entram como cobertura confirmada. Preservar o SBOM original por digest e produzir SBOM gerado com ferramenta fixada e proveniência. Versões não suportadas são recusadas com limitação explícita. Referências: [CycloneDX](https://cyclonedx.org/specification/overview/) e [SPDX 2.3.1](https://spdx.github.io/spdx-spec/v2.3/)."
+  },
+  {
+    "title": "Componentes referenciados em IaC",
+    "demand_text": "Adicionar inventário inicial para Terraform HCL2 e .terraform.lock.hcl: providers com source, versão selecionada e hashes; módulos somente quando source e versão/ref imutável forem verificáveis. Adicionar Helm Chart.yaml/Chart.lock apiVersion v2 para charts resolvidos. Avaliar esses componentes pelo domínio canônico existente; regras de configuração, misconfiguration e policy-as-code permanecem fora deste marco. Referências sem versão exata geram limitação, não finding negativo."
+  },
+  {
+    "title": "Operação e prova cruzada dos ecossistemas",
+    "demand_text": "Executar uma demonstração real integrada com Python, cada formato Node suportado, uma imagem multi-plataforma por digest, SBOM consumido/gerado e fixtures IaC. Provar atualização de advisory, cache e expiração, concorrência, retomada, deduplicação da mesma vulnerabilidade entre artefatos, preservação das ocorrências e rechecagem após correção. Atualizar manual, fase atual e evidência operacional sem adicionar um segundo pipeline de revisão ou remediação."
+  }
+]

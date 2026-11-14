@@ -1,0 +1,160 @@
+[
+  {
+    "id": "T1",
+    "title": "Fixar contratos canônicos do marco Python",
+    "goal": "Criar os modelos e as regras de identidade, proveniência, validade, cobertura e deduplicação que todas as extensões reutilizarão.",
+    "files_hint": [
+      "core/security/models.py",
+      "core/security/canonical.py",
+      "tests/test_security_contracts.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "Modelos Pydantic v2 representam artefato, componente, snapshot de advisory, ocorrência, achado e limitação de cobertura sem campos ambíguos.",
+      "A chave persistente do achado combina projeto e vulnerabilidade canônica; artefato, componente, ambiente e plataforma continuam identificáveis nas ocorrências.",
+      "Normalização de aliases é determinística, versionada e não funde registros conflitantes sem evidência explícita.",
+      "Entradas incompletas, timestamps inválidos e versões não resolvidas falham fechado ou geram CoverageLimitation, nunca resultado limpo.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Casos positivos e negativos de validação dos contratos.",
+      "Estabilidade das chaves canônicas sob reordenação de aliases e ocorrências.",
+      "Contraexemplos de colisão entre projetos, artefatos e vulnerabilidades distintas.",
+      "Serialização UTF-8 e rejeição de timestamps ingênuos ou dados insuficientes."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Persistir evidência, cache e achados no control store",
+    "goal": "Adicionar persistência transacional equivalente em SQLite e PostgreSQL para execuções, snapshots, checkpoints, ocorrências e achados.",
+    "files_hint": [
+      "core/security/store.py",
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "tests/test_security_control_store.py"
+    ],
+    "acceptance": [
+      "SQLite e PostgreSQL implementam o mesmo contrato para iniciar, retomar e concluir uma análise vinculada ao projeto e ao digest do candidato.",
+      "Unique constraints e upserts idempotentes preservam um achado por projeto e vulnerabilidade canônica, agregando ocorrências sem apagá-las.",
+      "Lease expirado ou fencing token antigo não pode concluir nem alterar uma execução mais nova.",
+      "Cache persiste fonte, consulta, digest do conteúdo, ETag quando presente, coletado_em, válido_até e erro estruturado.",
+      "Falha do backend propaga StoreUnavailableError e não produz resultado de ausência.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Testes contratuais parametrizados para SQLite e PostgreSQL.",
+      "Duas gravações concorrentes da mesma vulnerabilidade convergem para um achado com todas as ocorrências.",
+      "Retomada após interrupção continua do último checkpoint confirmado.",
+      "Cache expirado, payload divergente e stale lease são rejeitados ou marcados corretamente."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Inventariar dependências Python resolvidas",
+    "goal": "Entregar o primeiro inventário aplicável usando o ambiente real do projeto registrado e versões exatas retornadas por pip inspect.",
+    "files_hint": [
+      "core/security/python_inventory.py",
+      "core/security/models.py",
+      "tests/test_python_inventory.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "O adapter executa pip inspect no ambiente declarado pelo projeto e produz componentes PyPI com versões exatas, relação direta/transitiva quando disponível, hash do inventário, plataforma e versão do Python/pip.",
+      "SHA do checkout, project_id e identidade do ambiente ficam vinculados ao inventário; dois ambientes do mesmo projeto não são confundidos.",
+      "Manifestos com ranges podem explicar intenção, mas não substituem o inventário resolvido nem são avaliados como versões instaladas.",
+      "Projeto sem caminho acessível, ambiente inválido, pip incompatível ou saída incompleta produz limitação de cobertura estruturada.",
+      "Nenhum comando de instalação ou modificação do projeto é executado pelo inventariador.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Fixtures de pip inspect com dependências diretas, transitivas, extras e múltiplas versões.",
+      "Vínculo do mesmo componente a ambientes e candidatos diferentes.",
+      "Saída truncada, JSON inválido, pacote sem versão e projeto inacessível.",
+      "Prova de que requirements com range não é convertido em versão resolvida."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Ingerir advisories com cache verificável",
+    "goal": "Consultar OSV para aplicabilidade PyPI e enriquecer prioridade com CISA KEV, preservando snapshots e alterações das fontes.",
+    "files_hint": [
+      "core/security/advisory_sources.py",
+      "core/security/store.py",
+      "tests/test_advisory_sources.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "Consultas OSV são feitas em lote por ecossistema, nome e versão exata e armazenam payload sanitizado, digest, versão/updated_at da fonte e validade.",
+      "CISA KEV apenas enriquece prioridade de CVEs vinculados; não cria aplicabilidade sem componente e advisory compatíveis.",
+      "Resposta vazia válida, fonte indisponível, timeout, payload inválido e cache expirado são estados distintos.",
+      "Alteração do advisory muda o digest do snapshot e invalida análises dependentes sem criar outra identidade canônica para a mesma vulnerabilidade.",
+      "Credenciais, headers sensíveis e URLs privadas não aparecem na evidência ou nos logs.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "HTTP fake para querybatch OSV, paginação/atualização KEV, timeout e respostas inválidas.",
+      "Cache hit válido, revalidação por ETag, expiração e conteúdo alterado.",
+      "Mapeamento CVE/GHSA/OSV e conflitos de aliases.",
+      "Indisponibilidade nunca convertida em zero vulnerabilidades."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Analisar aplicabilidade e emitir demanda deduplicada",
+    "goal": "Cruzar inventário e advisories, manter o ciclo de vida do achado e encaminhar trabalho acionável pela linha existente.",
+    "files_hint": [
+      "core/security/analyzer.py",
+      "core/security/demand_bridge.py",
+      "tests/test_security_analysis.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "Aplicabilidade exige versão resolvida, ecossistema compatível e faixa afetada do snapshot vigente; dados insuficientes geram limitação.",
+      "Um achado reúne ocorrências de múltiplos artefatos sem perder cada identidade, caminho, ambiente ou plataforma.",
+      "Reexecução idêntica não cria nova demanda; mudança material cria revisão do achado e no máximo uma demanda ativa para sua revisão.",
+      "Correção comprovada por inventário novo e fonte vigente encerra o achado somente após rechecagem; recorrência preserva histórico e reabre a identidade existente.",
+      "A demanda gerada contém referências verificáveis de evidência e segue DemandsStore, BacklogFeeder, roteador e revisão de família diferente existentes.",
+      "Nenhuma remediação, alteração de arquivo ou acesso adicional é realizado pelo analyzer.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Versões abaixo, dentro e acima das faixas afetadas, inclusive limites inclusivos/exclusivos.",
+      "Deduplicação entre aliases e agregação entre artefatos.",
+      "Reexecução, advisory alterado, correção, rechecagem e recorrência.",
+      "Integração com DemandsStore e BacklogFeeder sem contornar G1, dependências ou revisão."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T6",
+    "title": "Operar QualityCycle com retomada e demonstração real",
+    "goal": "Ligar o marco Python ao loop do CloudCoordinator e comprovar a jornada completa com fontes reais e replay determinístico.",
+    "files_hint": [
+      "core/security/quality_cycle.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_quality_cycle.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "QualityCycle usa o loop existente do CloudCoordinator, intervalo configurável e control store; não cria daemon, fila ou roteador paralelo.",
+      "Somente projetos registrados com caminho acessível são avaliados; cadastro não amplia permissões nem autoriza remediação.",
+      "Dois coordenadores concorrentes não processam o mesmo projeto/candidato simultaneamente, e interrupção após checkpoints permite retomada sem duplicação.",
+      "A demonstração real registra inventário Python, consulta OSV e KEV, cache hit, alteração controlada de advisory por replay, concorrência, retomada, correção e rechecagem.",
+      "A árvore final passa pela revisão independente existente e python scripts/line_validate.py termina com código 0.",
+      "Manual e docs/FASE_ATUAL.md descrevem operação, cobertura, limitações, evidências e procedimento de rechecagem."
+    ],
+    "tests_to_add": [
+      "Relógio injetado para intervalo, validade e rechecagem determinísticos.",
+      "Concorrência com lease/fencing e retomada após falha em cada checkpoint.",
+      "Cenário E2E determinístico de dependência vulnerável até demanda deduplicada e posterior resolução.",
+      "Teste de integração real opt-in que falha explicitamente quando a fonte está indisponível e grava evidência sanitizada para replay."
+    ],
+    "smoke": [
+      "https://darkhub.ggcampos.com/health"
+    ]
+  }
+]
