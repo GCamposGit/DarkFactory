@@ -1,0 +1,163 @@
+[
+  {
+    "id": "T1",
+    "title": "Contratos normalizados e manifests Node",
+    "goal": "Definir o resultado público, as limitações estruturadas e a leitura segura de manifests/importers compartilhada pelos adapters.",
+    "files_hint": [
+      "core/projects/node_inventory.py",
+      "core/projects/node_lockfiles/__init__.py",
+      "core/projects/node_lockfiles/common.py",
+      "tests/test_node_inventory_contracts.py"
+    ],
+    "acceptance": [
+      "Modelos Pydantic distinguem resolução, locator, origem, importer/workspace, relação, escopo, directness, contexto de peer e integridade declarada.",
+      "Identidades não colapsam resoluções com versão, origem ou contexto de peer diferentes; a serialização e a ordenação são determinísticas.",
+      "Leitura de package.json cobre raiz e workspaces/importers conhecidos, classificando dependencies, devDependencies, optionalDependencies e peerDependencies sem inferir campos ausentes.",
+      "Manifest ausente, malformado, fora da raiz ou inconsistente produz limitação localizada e preserva os demais dados.",
+      "Helpers classificam fontes registry, local e git; entrada local/git sem versão verificável não cria componente inventado.",
+      "Nenhum caminho executa comandos, scripts ou rede; python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Testar contratos, ordenação e preservação de duas resoluções do mesmo nome.",
+      "Testar manifests da raiz e workspaces com os quatro escopos.",
+      "Testar manifest ausente, JSON inválido e workspace escapando da raiz.",
+      "Testar limitações de fonte local/git sem versão e integridade declarada não verificada."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Adapter package-lock v2 e v3",
+    "goal": "Converter package-lock.json v2/v3 em resoluções e relações normalizadas usando packages como fonte autoritativa.",
+    "files_hint": [
+      "core/projects/node_lockfiles/npm.py",
+      "tests/test_node_lockfile_npm.py",
+      "tests/fixtures/node_lockfiles/npm/"
+    ],
+    "acceptance": [
+      "Aceita somente lockfileVersion 2 e 3; versão ausente ou desconhecida retorna cobertura unsupported com limitação estruturada.",
+      "Lê packages da raiz, workspaces e node_modules aninhados, resolvendo nomes scoped e relações dependencies, optionalDependencies e peers quando declarados.",
+      "Classifica dependências diretas pelos manifests e preserva contextos dev, opcionais e peer sem transformar flags globais em fatos por importer.",
+      "Mantém versões ou origens distintas do mesmo pacote em locators separados e produz limitação para referência sem alvo verificável.",
+      "Preserva resolved e cada SRI declarada com formato e algoritmo, sem afirmar validação.",
+      "Links, fontes locais ou git sem versão verificável geram limitação localizada; componentes independentes permanecem no resultado.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Fixtures v2 e v3 com raiz e workspace.",
+      "Pacote scoped, versão duplicada aninhada e relações transitivas.",
+      "Dependências diretas prod/dev/opcional/peer e peer não resolvido.",
+      "SRI sha1/sha512, link local e git sem versão verificável.",
+      "Versão desconhecida e referência inconsistente com cobertura parcial."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Adapter pnpm-lock 6.0 e 9.0",
+    "goal": "Interpretar importers, packages e snapshots pnpm sem perder locators ou contextos de peers.",
+    "files_hint": [
+      "core/projects/node_lockfiles/pnpm.py",
+      "tests/test_node_lockfile_pnpm.py",
+      "tests/fixtures/node_lockfiles/pnpm/"
+    ],
+    "acceptance": [
+      "Aceita lockfileVersion 6.0 e 9.0 e limita qualquer outra versão sem tentar conversão.",
+      "Em v6 lê importers e packages; em v9 combina metadados de packages com relações de snapshots.",
+      "Preserva cada importer, dependências diretas prod/dev/opcionais, relações transitivas e optionalDependencies.",
+      "Locators com sufixos de peers, inclusive contextos aninhados, permanecem distintos e peers ausentes geram limitação localizada.",
+      "Aliases e referências exatas são ligados à resolução correta; referência ambígua ou inexistente não escolhe alvo por aproximação.",
+      "Preserva resolution.integrity e origem declarada; local/git sem versão verificável permanece apenas como limitação.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Fixtures pnpm 6.0 e 9.0 com múltiplos importers.",
+      "Packages/snapshots com versões duplicadas e peer suffixes diferentes.",
+      "Dependências prod/dev/opcionais, transitivas e peer não resolvido.",
+      "Alias, integridade, fonte local/git e referência inconsistente.",
+      "Versão desconhecida com resultado unsupported."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Adapter Yarn Classic v1",
+    "goal": "Ler a gramática textual do yarn.lock Classic preservando seletores, resoluções e limitações próprias do formato.",
+    "files_hint": [
+      "core/projects/node_lockfiles/yarn_classic.py",
+      "tests/test_node_lockfile_yarn_classic.py",
+      "tests/fixtures/node_lockfiles/yarn_classic/"
+    ],
+    "acceptance": [
+      "Reconhece somente o cabeçalho Yarn lockfile v1 e limita formato desconhecido.",
+      "Interpreta chaves com um ou vários seletores, version, resolved, integrity, dependencies e optionalDependencies, incluindo nomes scoped e strings quoted.",
+      "Seletores distintos podem apontar à mesma resolução, enquanto versões ou origens distintas permanecem nós separados.",
+      "Manifests da raiz/workspaces fornecem classificação direta prod/dev/opcional/peer; metadata de peer indisponível no lockfile é explicitada como cobertura parcial, não inventada.",
+      "Entrada local/git sem versão verificável e seletor sem resolução geram limitações localizadas sem perder entradas válidas.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Fixture Classic v1 com seletores agrupados, pacote scoped e transitivos.",
+      "Múltiplas versões do mesmo pacote e optionalDependencies.",
+      "Classificação direta por manifests de raiz/workspaces.",
+      "Integridade SRI, resolved, local/git sem versão e seletor inconsistente.",
+      "Cabeçalho ausente ou versão não suportada."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Adapter Yarn Modern v8",
+    "goal": "Converter yarn.lock Modern com __metadata.version 8, incluindo locators virtuais, peers, workspaces e checksums.",
+    "files_hint": [
+      "core/projects/node_lockfiles/yarn_modern.py",
+      "tests/test_node_lockfile_yarn_modern.py",
+      "tests/fixtures/node_lockfiles/yarn_modern/"
+    ],
+    "acceptance": [
+      "Usa carregamento YAML seguro e aceita exclusivamente __metadata.version 8; ausência ou versão diferente produz limitação unsupported.",
+      "Interpreta descriptors, resolution, version, dependencies, peerDependencies, dependenciesMeta, checksum e linkType.",
+      "Locators virtual, npm, workspace, portal, file e git preservam origem e contexto; variantes virtuais do mesmo pacote não são colapsadas.",
+      "Workspaces e manifests classificam relações diretas prod/dev/opcionais/peer; peer ou descriptor sem alvo verificável gera limitação localizada.",
+      "Checksum Yarn é preservado em formato próprio e nunca rotulado como conteúdo verificado.",
+      "Entradas locais/git sem versão verificável não geram versão inferida nem consulta externa.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Fixture Modern v8 com workspace e resoluções npm.",
+      "Locators virtuais com dois contextos de peers para o mesmo nome/versão.",
+      "Dependências diretas nos quatro escopos, transitivas e peer ausente.",
+      "Checksum, portal/file/git e descriptor inconsistente.",
+      "Metadata ausente, YAML inválido e versão desconhecida."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T6",
+    "title": "Dispatcher, cobertura integrada e documentação",
+    "goal": "Entregar uma única API headless que descobre ou recebe o lockfile, combina o adapter correto e documenta garantias e limites.",
+    "files_hint": [
+      "core/projects/node_inventory.py",
+      "core/projects/__init__.py",
+      "tests/test_node_inventory_e2e.py",
+      "docs/manual/dependencias_node.md"
+    ],
+    "acceptance": [
+      "inventory_node_dependencies expõe um resultado serializável e determinístico para cada formato suportado sem importar módulos de transporte.",
+      "Autodetecção não escolhe silenciosamente entre lockfiles concorrentes; ausência, nome desconhecido ou múltiplos candidatos geram limitação estruturada.",
+      "Resultados mistos mantêm componentes verificáveis e cobertura partial quando há referências locais/git, peers ou manifests problemáticos.",
+      "A baseline do predecessor é relida: se houver port de inventário já integrado, esta API o implementa; se continuar ausente, nenhum QualityCycle, matcher de advisory ou scheduler paralelo é criado.",
+      "Teste end-to-end cobre raiz mais workspace/importer e comprova múltiplas resoluções, relações diretas/transitivas, dev, opcionais, peers e integridade em todos os adapters.",
+      "Manual, FASE_ATUAL e learning pack registram formatos, semântica, limitações e que inventário, integridade e aplicabilidade não foram verificados por instalação.",
+      "python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Matriz parametrizada executando a API pública sobre os cinco formatos suportados.",
+      "Determinismo de JSON e estabilidade de locators em duas execuções.",
+      "Ausência, nome desconhecido e múltiplos lockfiles sem escolha implícita.",
+      "Cobertura parcial preservando componentes válidos diante de limitações localizadas.",
+      "Teste negativo garantindo ausência de subprocesso, rede e escrita no projeto analisado."
+    ],
+    "smoke": []
+  }
+]
