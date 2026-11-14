@@ -502,7 +502,7 @@ def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_p
     assert active.d.run_cycle()["dispatched"] == []
 
 
-def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str):
+def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str = "completed"):
     """Pending row for a completed ticket, with the dispatcher collaborators stubbed."""
     from types import SimpleNamespace
 
@@ -523,7 +523,7 @@ def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str):
     monkeypatch.setattr(
         "core.demands.queue_store.control_store",
         lambda: SimpleNamespace(
-            mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}],
+            mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": status}],
         ),
     )
     monkeypatch.setattr(
@@ -610,14 +610,17 @@ def test_completed_ticket_with_another_cause_stays_blocked_without_deploy_proof(
 
 
 @pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
+@pytest.mark.parametrize("ledger", ["planned", "hold"])
 def test_exhausted_ci_recovery_closes_wait_without_deploy_block(
-    tmp_path: Path, monkeypatch, finish_mode: str,
+    tmp_path: Path, monkeypatch, finish_mode: str, ledger: str,
 ):
     from types import SimpleNamespace
 
     pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
         tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+        status="completed" if ledger == "hold" else "planned",
     )
+    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda ticket_id: ledger == "hold" and ticket_id == "USR-99")
     recovery = context / "ci_recovery.json"
     recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
     path = directory / "USR-99.json"
@@ -636,6 +639,102 @@ def test_exhausted_ci_recovery_closes_wait_without_deploy_block(
     assert result == [{"ticket": "USR-99", "status": "terminal"}]
     assert not path.exists()
     assert not path.with_suffix(".log").exists()
+
+
+@pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
+def test_exhausted_marker_without_durable_requeue_keeps_the_wait(
+    tmp_path: Path, monkeypatch, finish_mode: str,
+):
+    import json
+    from types import SimpleNamespace
+
+    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda _ticket_id: False)
+    recovery = context / "ci_recovery.json"
+    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
+    path = directory / "USR-99.json"
+    if finish_mode == "child_exit":
+        row.pid = 424242
+        row.status = "running"
+        pd._save(path, row)
+        pd._children[424242] = SimpleNamespace(poll=lambda: 1)
+    else:
+        row.status = "blocked"
+        row.cause = "launcher_exit:1"
+        pd._save(path, row)
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "waiting"
+    assert result[0]["cause"] == "ci_fix_requires_revalidation"
+    assert path.is_file()
+    saved = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "waiting"
+    assert saved.cause == "ci_fix_requires_revalidation"
+    assert saved.pid is None
+    assert json.loads(recovery.read_text(encoding="utf-8")) == {"attempts": 1}
+
+
+def test_requeue_ticket_failure_does_not_close_the_ci_wait(tmp_path: Path, monkeypatch):
+    """A raising requeue must not publish success or end the pending delivery."""
+    import json
+    from types import SimpleNamespace
+
+    import run_ticket
+    from core.roadmap.models import DeliveryStatus
+
+    pd, directory, context, candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda _ticket_id: False)
+    monkeypatch.setattr(pd, "queue_dir", lambda: directory)
+    recovery = context / "ci_recovery.json"
+    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
+    path = directory / "USR-99.json"
+    row.pid = 424242
+    row.status = "running"
+    pd._save(path, row)
+
+    comments: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        comments.append(list(command))
+        return SimpleNamespace(returncode=0, stdout="ticket/usr-99\n", stderr="")
+
+    monkeypatch.setattr(run_ticket.subprocess, "run", fake_run)
+
+    class BrokenStore:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def requeue_ticket(self, *_args, **_kwargs):
+            raise OSError("ledger unavailable")
+
+        def get_ticket(self, *_args, **_kwargs):
+            raise AssertionError("durable read must not run after requeue fails")
+
+    monkeypatch.setattr(run_ticket, "DemandsStore", BrokenStore)
+    ticket = run_ticket.UserTicket(
+        id="USR-99", project_id="darkfac", title="Ticket de teste",
+        problem_statement="problema de teste", status=DeliveryStatus.COMPLETED,
+    )
+
+    assert run_ticket._reopen_after_ci_budget(ticket, candidate, "ci_recovery_budget_exhausted") is False
+
+    assert comments == []
+    assert json.loads(recovery.read_text(encoding="utf-8")) == {"attempts": 1}
+    held = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert held.status == "waiting" and held.pid is None
+    assert held.cause == "ci_fix_requires_revalidation"
+    result = pd.tick(tmp_path, directory=directory, now=held.next_check - 1)
+    assert result[0]["status"] == "waiting"
+    assert path.is_file()
+    saved = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "waiting"
+    assert saved.pid is None
+    assert saved.cause == "ci_fix_requires_revalidation"
 
 
 def test_verified_resource_change_reopens_breaker(tmp_path: Path):

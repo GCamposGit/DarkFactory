@@ -101,6 +101,13 @@ fica `merged_awaiting_deploy`.
 Ticket `completed` com outra causa e sem prova de deploy fica `blocked` com causa
 `deploy_evidence_missing`.
 
+`ci_recovery.json` com `exhausted: true` so encerra a espera quando o control
+store ja esta em `planned` ou `hold`, ou quando a admissao tem um hold desse
+ticket. Sem essa transicao duravel, o tick devolve a linha para `waiting` com a
+causa de recuperacao de CI, apaga o marcador `exhausted` e nao grava
+`launcher_exit` nem `deploy_evidence_missing`. Falha de `requeue_ticket` no
+launcher faz o mesmo: nao comenta sucesso no PR e regrava a espera sem pid.
+
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
 de host tem prazo; quando o host desaparece, o próximo reconciliador expira a reserva e

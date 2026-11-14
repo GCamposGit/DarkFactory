@@ -2490,15 +2490,91 @@ def _retry_red_ci(
     return report, "ci_fix_requires_revalidation" if _changed else f"ci_fix_no_changes: {feedback}"
 
 
-def _reopen_after_ci_budget(ticket: UserTicket, target_worktree: Path, reason: str) -> None:
-    """Return an exhausted CI delivery to planned, then leave a note on its open PR."""
+def _status_name(status: Any) -> str:
+    return str(getattr(status, "value", status) or "")
+
+
+def _clear_ci_recovery_exhausted(ticket: UserTicket) -> None:
+    """Remove the exhausted marker so a failed requeue cannot end the wait."""
+    record = ticket_engine.workspace.context_dir(ticket_engine.run_workspace(ticket)) / "ci_recovery.json"
     try:
-        DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json").requeue_ticket(
-            ticket.id, reason=reason, reopen=True,
-        )
-    except Exception as exc:  # noqa: BLE001 - recording the park must not hide the failure itself
+        payload = json.loads(record.read_text(encoding="utf-8")) if record.is_file() else {}
+    except (OSError, ValueError, TypeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.pop("exhausted", None)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    temporary = record.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, record)
+
+
+def _keep_ci_recovery_wait(ticket: UserTicket, target_worktree: Path) -> None:
+    """Put the CI recovery wait back to waiting, without a live pid, so the dispatcher retries it."""
+    from core.line.pending_delivery import CI_RECOVERY_CAUSES, PendingDelivery, RECHECK_SECONDS, _save, queue_dir
+    path = queue_dir() / f"{ticket.id}.json"
+    cause = "ci_fix_requires_revalidation"
+    stage = "review"
+    harness = None
+    try:
+        if path.is_file():
+            current = PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+            stage = current.stage
+            harness = current.implementing_harness
+            if current.cause in CI_RECOVERY_CAUSES:
+                cause = current.cause
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read CI recovery wait for %s: %s", ticket.id, exc)
+    if harness is None:
+        progress = ticket_engine.artifacts_root() / ticket.id / ".darkfac" / "runs" / ticket.id / "progress.json"
+        try:
+            if progress.is_file():
+                harness = json.loads(progress.read_text(encoding="utf-8")).get("harness")
+        except (OSError, ValueError, TypeError):
+            harness = None
+    row = PendingDelivery(
+        ticket_id=ticket.id, worktree=str(target_worktree.resolve()), stage=stage,
+        implementing_harness=harness, resume_delivery=True, next_check=time.time() + RECHECK_SECONDS,
+        status="waiting", cause=cause,
+    )
+    try:
+        _save(path, row)
+    except OSError as exc:
+        logger.warning("Could not keep CI recovery wait for %s: %s", ticket.id, exc)
+
+
+def _release_failed_ci_requeue(ticket: UserTicket, target_worktree: Path) -> None:
+    _clear_ci_recovery_exhausted(ticket)
+    _keep_ci_recovery_wait(ticket, target_worktree)
+
+
+def _reopen_after_ci_budget(ticket: UserTicket, target_worktree: Path, reason: str) -> bool:
+    """Reopen an exhausted CI delivery. Comment only after planned or hold is durable.
+
+    A failed requeue clears ``exhausted`` and leaves the wait retryable. It does not
+    claim that the ticket returned to planned.
+    """
+    from core.line.pending_delivery import SETTLED_CI_REQUEUE_STATUSES
+    store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
+    try:
+        store.requeue_ticket(ticket.id, reason=reason, reopen=True)
+        durable = store.get_ticket(ticket.id)
+    except Exception as exc:  # noqa: BLE001 - the wait must stay retryable when the ledger write fails
         logger.warning("Could not requeue %s after exhausted CI recovery: %s", ticket.id, exc)
-    comment = f"{reason}: CI recovery budget exhausted for ticket {ticket.id}. The ticket is back in planned for another delivery attempt."
+        _release_failed_ci_requeue(ticket, target_worktree)
+        return False
+    status = _status_name(getattr(durable, "status", None)) if durable is not None else ""
+    if status not in SETTLED_CI_REQUEUE_STATUSES:
+        logger.warning(
+            "Requeue of %s did not reach planned or hold (status=%s)", ticket.id, status or "unknown",
+        )
+        _release_failed_ci_requeue(ticket, target_worktree)
+        return False
+    comment = (
+        f"{reason}: CI recovery budget exhausted for ticket {ticket.id}. "
+        f"The ticket is back in {status} for another delivery attempt."
+    )
     try:
         result = subprocess.run(
             ["gh", "pr", "comment", "--body", comment, _git_branch(target_worktree)],
@@ -2508,6 +2584,7 @@ def _reopen_after_ci_budget(ticket: UserTicket, target_worktree: Path, reason: s
             logger.warning("Could not comment on PR for %s: %s", ticket.id, (result.stderr or "gh failed").strip())
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         logger.warning("Could not comment on PR for %s: %s", ticket.id, type(exc).__name__)
+    return True
 
 
 def _park_waiting_human(ticket: UserTicket, evidence: str) -> None:
