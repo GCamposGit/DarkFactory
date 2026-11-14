@@ -1,0 +1,131 @@
+[
+  {
+    "id": "T1",
+    "title": "Reconciliar o domínio canônico entregue",
+    "goal": "Vincular esta extensão ao marco Python realmente entregue e confirmar que seus contratos representam ocorrências IaC e limitações sem criar identidade ou persistência paralela.",
+    "files_hint": [
+      "core/security/models.py",
+      "core/security/analyzer.py",
+      "tests/test_security_contracts.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "A implementação referencia o SHA ou receipt verificável do marco Python e importa seus contratos canônicos reais.",
+      "Ocorrências suportam source resolvido, versão exata, caminhos de evidência, digests e hashes declarados sem campos específicos duplicados por ecossistema.",
+      "Componente sem identidade ou correspondência confiável produz CoverageLimitation e não resultado limpo nem finding negativo.",
+      "Nenhum novo store, modelo de Finding ou mecanismo de deduplicação concorrente é criado.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Casos contratuais de ocorrências Terraform e Helm usando os modelos canônicos entregues.",
+      "Rejeição ou limitação para versão, origem ou evidência insuficiente.",
+      "Contraexemplo que prova que ecossistema desconhecido não gera conclusão de ausência de vulnerabilidade."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Inventariar providers Terraform resolvidos",
+    "goal": "Ler HCL2 e .terraform.lock.hcl sem executar Terraform, correlacionando providers declarados com source canônico, versão selecionada e hashes.",
+    "files_hint": [
+      "core/security/terraform_inventory.py",
+      "requirements.txt",
+      "tests/test_terraform_inventory.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "O adapter usa parser HCL2 compatível com Python 3.12 e não executa subprocessos, scripts ou rede.",
+      "required_providers é correlacionado ao provider correspondente no lockfile por source canônico, mantendo cada caminho HCL de ocorrência.",
+      "Somente a versão selecionada no lockfile forma componente avaliável; constraints isoladas geram limitação.",
+      "Hashes h1 e zh declarados são preservados como evidência sem afirmar download ou verificação de integridade.",
+      "Lock ausente, provider órfão, source divergente, HCL inválido ou entrada incompleta produz limitação estruturada sem perder ocorrências válidas.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Fixtures HCL2 com aliases, múltiplos arquivos e providers diretos e transitivos no lock.",
+      "Lockfile com versão exata e múltiplos hashes preservados na ordem canônica.",
+      "Constraints sem lock, divergência de source, lock órfão, sintaxe inválida e campos ausentes.",
+      "Teste que impede chamadas a Terraform, rede ou escrita no projeto."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Inventariar módulos Terraform imutáveis",
+    "goal": "Extrair módulos Terraform somente quando origem e versão exata ou referência Git imutável forem comprováveis estaticamente.",
+    "files_hint": [
+      "core/security/terraform_inventory.py",
+      "tests/test_terraform_inventory.py",
+      "core/security/analyzer.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "Módulo de registry com source identificável e constraint estritamente exata produz ocorrência resolvida.",
+      "Source Git somente é avaliável quando ref contém commit completo imutável; tag, branch, ref abreviada ou ausente produz limitação.",
+      "Ranges, caminhos locais, expressões dinâmicas e fontes sem identidade verificável não são enviados ao analyzer como componentes resolvidos.",
+      "Origem, versão ou commit, caminho e digest do HCL permanecem vinculados à ocorrência.",
+      "A inclusão de módulos não altera o comportamento dos providers já cobertos.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Módulos de registry com versão exata, prerelease e constraints não exatas.",
+      "Sources Git com SHA completa, SHA abreviada, tag, branch e ref ausente.",
+      "Módulos locais, source interpolado e blocos parcialmente inválidos como limitações.",
+      "Regressão conjunta de providers e módulos no mesmo projeto."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Inventariar dependências Helm v2 resolvidas",
+    "goal": "Correlacionar dependências de Chart.yaml apiVersion v2 com Chart.lock associado, preservando origem, versão resolvida e evidência do lock.",
+    "files_hint": [
+      "core/security/helm_inventory.py",
+      "tests/test_helm_inventory.py",
+      "core/security/models.py",
+      "docs/manual/quality_cycle.md"
+    ],
+    "acceptance": [
+      "Somente Chart.yaml apiVersion v2 com Chart.lock associado participa do inventário resolvido.",
+      "Dependências são correlacionadas por nome, repository e versão, preservando alias quando declarado, caminhos, digest do lock e digests dos arquivos.",
+      "A versão exata vem de Chart.lock; constraint de Chart.yaml isolada não comprova resolução.",
+      "appVersion não é usada como versão de dependência nem como prova das imagens do chart.",
+      "Lock ausente ou inconsistente, repository por alias não resolvido, origem local e versão não exata produzem limitações sem findings negativos.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "Chart v2 com dependências resolvidas, aliases e digest do lock.",
+      "Chart v1, lock ausente, dependência divergente, versão não exata e YAML inválido.",
+      "Prova de que appVersion e imagens em values/templates não entram no inventário.",
+      "Teste que impede execução de Helm, downloads e escrita no projeto."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Integrar IaC ao analyzer e ao ciclo existente",
+    "goal": "Registrar os adapters no fluxo canônico, invalidar evidência por conteúdo e provar avaliação e limitações ponta a ponta.",
+    "files_hint": [
+      "core/security/quality_cycle.py",
+      "core/security/analyzer.py",
+      "tests/test_quality_cycle.py",
+      "docs/FASE_ATUAL.md"
+    ],
+    "acceptance": [
+      "QualityCycle descobre Terraform e Helm pelos adapters existentes sem criar daemon, fila ou agendador adicional.",
+      "Somente ocorrências resolvidas chegam à avaliação canônica; referência incompleta ou ecossistema sem cobertura permanece como limitação observável.",
+      "Quando existir advisory canônico aplicável, a ocorrência IaC reutiliza a identidade, deduplicação, persistência e ciclo de vida do finding existente.",
+      "Alterar HCL, lockfile ou chart muda o digest relevante e invalida a análise dependente; reexecução idêntica reutiliza evidência válida.",
+      "Fixtures mistas demonstram finding aplicável, execução sem finding com cobertura comprovada e execução parcial com limitações, sem confundir esses estados.",
+      "Manual e fase atual descrevem formatos suportados, evidência preservada, limitações e exclusão de misconfiguration.",
+      "python scripts/line_validate.py termina com código 0."
+    ],
+    "tests_to_add": [
+      "E2E determinístico de provider e chart resolvidos contra snapshot de advisory do domínio existente.",
+      "Reexecução idempotente e invalidação após mudança em manifesto ou lockfile.",
+      "Projeto misto com componentes avaliáveis e referências incompletas preservando cobertura parcial.",
+      "Componente sem correspondência canônica produz limitação e nunca ausência declarada de vulnerabilidade."
+    ],
+    "smoke": []
+  }
+]
