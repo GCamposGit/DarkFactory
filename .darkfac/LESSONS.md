@@ -1,0 +1,3 @@
+- [no_route_available not_before=2026-11-14T22:55:28+00:00] Planejar janelas de execucao observando limites de cota e capacidade dos harnesses para prevenir degradacao de rotas.
+- [active_pull_request] Analisar causa raiz 'active_pull_request' no estagio 'development' e incluir salvaguardas preventivas determinísticas.
+- [planning_high_iterations] Estagio 'planning' exigiu 2 iteracoes; planejar diffs mais atomicos e validacoes unitarias intermediarias.
