@@ -14336,5 +14336,220 @@
     "dependencies": [],
     "created_at": "2026-11-08T14:05:58.351857Z",
     "updated_at": "2026-11-08T14:05:58.351857Z"
+  },
+  {
+    "id": "USR-501",
+    "project_id": "darkfac",
+    "title": "Sentinela alerta fila ociosa, status sem processo e trava mais antiga que o ultimo merge",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "a00e68bab05e494bf5e8fffb3cb6e66b90efdd64",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 09/11 a fila parou sem alerta. Ampliar USR-439 sem peca nova.",
+    "core_journey": [
+      "Em 09/11 a fila parou sem alerta. Ampliar USR-439 sem peca nova."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Alerta Telegram e Hub quando host livre, rota e ticket elegivel ficam sem execucao por mais de 15 min",
+      "Alerta de status ativo sem processo",
+      "Alerta de trava mais antiga que o ultimo merge relevante"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T22:21:13.663307Z",
+    "updated_at": "2026-11-10T22:51:32.474261Z"
+  },
+  {
+    "id": "USR-497",
+    "project_id": "darkfac",
+    "title": "Fechar falhas do circuito de admissao quando o main muda",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "dbfc60cc3810fefa120388a1f20bba3ea039b94b",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 09/11, 155 falhas ficaram abertas no circuito de admissao e o circuito nao as fecha quando o conserto entra no main. Complementa USR-468; PR 825 esta em conflito.",
+    "core_journey": [
+      "Em 09/11, 155 falhas ficaram abertas no circuito de admissao e o circuito nao as fecha quando o conserto entra no main. Complementa USR-468; PR 825 esta em conflito."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Falha aberta deixa de valer apos novo sha do main",
+      "Falha identica no mesmo sha continua bloqueando",
+      "Teste de comportamento cobre a transicao de sha"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T22:17:15.435878Z",
+    "updated_at": "2026-11-11T00:23:51.311652Z"
+  },
+  {
+    "id": "USR-494",
+    "project_id": "darkfac",
+    "title": "Via expressa de autorreparo para defeito que trava a propria linha",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "6fce41d81f5ab7e3ede24909397aa4aa599d10d2",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 08/11 USR-484, que destravava a frota, ficou atras da lista de recuperacao, o subagente foi negado por Self-Modification e o owner executou cerca de 20 comandos manuais revelando um requisito de host por tentativa.",
+    "core_journey": [
+      "Em 08/11 USR-484, que destravava a frota, ficou atras da lista de recuperacao, o subagente foi negado por Self-Modification e o owner executou cerca de 20 comandos manuais revelando um requisito de host por tentativa."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ticket marcado como bloqueio da linha fura a fila, inclusive durante lista de recuperacao, sem burlar portao, revisao ou piso",
+      "Negacao de permissao no chat ao alterar o motor encaminha o ticket a essa via com causa registrada",
+      "Quando depender do owner, a fabrica gera um unico comando idempotente que valida o host e executa o ticket",
+      "Falha repetida alerta o owner uma vez com causa e proximo passo",
+      "Testes de comportamento cobrem preempcao, negacao e comando unico"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T09:30:45.287241Z",
+    "updated_at": "2026-11-11T00:57:13.060069Z"
+  },
+  {
+    "id": "USR-508",
+    "project_id": "darkfac",
+    "title": "Despachante reinicia sozinho quando o main muda para nao rodar codigo misto",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "7511481da318a359db227d808dba2c27db5b7df3",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 11/11 as retomadas de entrega USR-447 e USR-493 falharam com check_failed/ImportError: o processo do despachante, iniciado antes dos merges #841-#843, mantinha modulos antigos em memoria enquanto pending_delivery importava nomes novos do disco. Reiniciar manualmente resolveu.",
+    "core_journey": [
+      "Em 11/11 as retomadas de entrega USR-447 e USR-493 falharam com check_failed/ImportError: o processo do despachante, iniciado antes dos merges #841-#843, mantinha modulos antigos em memoria enquanto pending_delivery importava nomes novos do disco. Reiniciar manualmente resolveu."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Despachante detecta novo sha no checkout que executa e se reinicia entre ciclos, sem matar runs em voo",
+      "ImportError em retomada vira causa estruturada e dispara o reinicio",
+      "Teste de comportamento cobre troca de sha"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-11T05:39:38.852722Z",
+    "updated_at": "2026-11-11T08:15:02.755412Z"
+  },
+  {
+    "id": "USR-510",
+    "project_id": "darkfac",
+    "title": "Admissao avalia so o worker de portao local e trava a frota quando o Notebook esta sem RAM",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "4682b9870ea9f3756cf2589432421e893045698b",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 10-11/11 dezenas de lancamentos sairam com exit 75 gate_capacity_zero e evidence gate://local, inclusive para runs no Grokbox e no Desktop, enquanto o worker do Desktop (DARKFAC_TEST_WORKERS) estava disponivel. Com o Notebook sem RAM livre (apps do owner), a admissao zera a capacidade de toda a frota.",
+    "core_journey": [
+      "Em 10-11/11 dezenas de lancamentos sairam com exit 75 gate_capacity_zero e evidence gate://local, inclusive para runs no Grokbox e no Desktop, enquanto o worker do Desktop (DARKFAC_TEST_WORKERS) estava disponivel. Com o Notebook sem RAM livre (apps do owner), a admissao zera a capacidade de toda a frota."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Admissao considera todos os workers de DARKFAC_TEST_WORKERS respeitando DARKFAC_FLEET_DISABLED_HOSTS e admite com um livre",
+      "Worker local sem RAM nao bloqueia quando ha remoto saudavel e livre",
+      "Teste de comportamento cobre local zero com remoto livre"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-11T07:37:45.029296Z",
+    "updated_at": "2026-11-11T09:37:27.206352Z"
+  },
+  {
+    "id": "USR-489",
+    "project_id": "darkfac",
+    "title": "Host manual usa Python fora do contrato e sem dependencias do portao",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "b5580edb0b836b2f05d68fb63cac97ab462e1f39",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 08/11 a entrega do USR-484 no Desktop parou em stage_artifact_missing:DOCS porque python apontava para Program Files Python311, sem importlinter, depois de PLAN e BUILD concluidos. O contrato exige Python 3.12+ e o preflight nao verificou.",
+    "core_journey": [
+      "Em 08/11 a entrega do USR-484 no Desktop parou em stage_artifact_missing:DOCS porque python apontava para Program Files Python311, sem importlinter, depois de PLAN e BUILD concluidos. O contrato exige Python 3.12+ e o preflight nao verificou."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Preflight recusa antes de PLAN com causa e comando de correcao quando Python ou dependencias do portao nao atendem o contrato",
+      "Teste de comportamento cobre versao antiga e modulo ausente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-08T15:17:14.859816Z",
+    "updated_at": "2026-11-11T10:32:31.279965Z"
+  },
+  {
+    "id": "USR-509",
+    "project_id": "darkfac",
+    "title": "Retomada de entrega fica blocked deploy_evidence_missing com PR de CI vermelho e nao corrige",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "33e0775414cf8aa827332eb533e2a51148e22b9f",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 11/11 as entregas USR-447 (#845), USR-493 (#844) e USR-449 (#846) abriram PR com CI vermelho (falhas reais e distintas). As linhas de pending_delivery passaram de waiting ci_fix_requires_revalidation para blocked deploy_evidence_missing, sem merge e sem nova tentativa de correcao; os PRs ficam parados e o ticket nao volta a fila.",
+    "core_journey": [
+      "Em 11/11 as entregas USR-447 (#845), USR-493 (#844) e USR-449 (#846) abriram PR com CI vermelho (falhas reais e distintas). As linhas de pending_delivery passaram de waiting ci_fix_requires_revalidation para blocked deploy_evidence_missing, sem merge e sem nova tentativa de correcao; os PRs ficam parados e o ticket nao volta a fila."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "PR aberto com CI vermelho leva a correcao de CI e nova validacao dentro do orcamento, nunca a blocked por falta de deploy",
+      "Esgotado o orcamento, o ticket volta a planned ou hold com causa clara e o PR e marcado",
+      "Teste de comportamento cobre CI vermelho apos PR"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-11T06:38:50.753108Z",
+    "updated_at": "2026-11-14T01:03:41.370182Z"
   }
 ]

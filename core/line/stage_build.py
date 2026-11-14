@@ -49,7 +49,7 @@ from typing import Any, Callable, Iterable, Optional
 from pydantic import BaseModel, Field
 
 from core.git import ci_checks
-from core.line import agent_retry, base_probe, base_sync, cancellation, diagnostics, workspace
+from core.line import agent_retry, base_probe, base_sync, cancellation, diagnostics, express_lane, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, harness_cli_pin, load_routing_config, pick, record_result
@@ -396,6 +396,7 @@ class DevelopmentStage:
         base_red_wait_minutes: int = ci_checks.BASE_RED_RETRY_MINUTES,
         base_red_max_retries: int = ci_checks.BASE_RED_MAX_RETRIES,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        express_port: Any = None,
     ) -> None:
         """`base_probe_func(ws, project, test_ids)` returns which failing tests also fail on the base
         branch (`None` = cannot tell); `base_red_attempts(run_id)` counts the `base_red` waits this run
@@ -414,6 +415,7 @@ class DevelopmentStage:
         self.base_red_wait_minutes = base_red_wait_minutes
         self.base_red_max_retries = base_red_max_retries
         self.clock = clock
+        self.express_port = express_port
 
     # -- prompt building ---------------------------------------------------
 
@@ -555,20 +557,9 @@ class DevelopmentStage:
                     return StageResult(
                         outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
                     )
-                if agent_retry.is_protected_path_block(agent_result):
-                    # USR-205: another iteration or harness edits the same protected path and is
-                    # cancelled again. Park the run for the owner and keep the worktree.
-                    owner_ref = _register_protected_path_block(project, ticket.id, agent_result, ws.path)
-                    self._persist_diagnostics(ws, run_id, ticket.id)
-                    return StageResult(
-                        outcome="waiting_human",
-                        cause_code="protected_path",
-                        output_refs=[],
-                        evidence_refs=[
-                            f"protected_path:{agent_result.protected_path or 'unknown'}",
-                            owner_ref,
-                        ],
-                    )
+                denied = self._stop_denied_edit(project, ticket.id, agent_result, ws, run_id)
+                if denied is not None:
+                    return denied
                 if not agent_result.ok:
                     if agent_result.error_kind == "timeout" and self._has_implementation_changes(ws):
                         logger.info(
@@ -825,6 +816,49 @@ class DevelopmentStage:
             return len(changes) > 0
         except Exception:
             return False
+
+    def _stop_denied_edit(
+        self,
+        project: ProjectDescriptor,
+        ticket_id: str,
+        agent_result: AgentResult,
+        ws: RunWorkspace,
+        run_id: str,
+    ) -> Optional[StageResult]:
+        """Park a protected path, or stop a motor denial without another edit in this run."""
+
+        if agent_retry.is_protected_path_block(agent_result):
+            owner_ref = _register_protected_path_block(project, ticket_id, agent_result, ws.path)
+            self._persist_diagnostics(ws, run_id, ticket_id)
+            return StageResult(
+                outcome="waiting_human",
+                cause_code="protected_path",
+                output_refs=[],
+                evidence_refs=[
+                    f"protected_path:{agent_result.protected_path or 'unknown'}",
+                    owner_ref,
+                ],
+            )
+        if not agent_retry.is_self_modification_block(agent_result):
+            return None
+        try:
+            express_lane.record_self_modification(
+                ticket_id, project_id=project.id, port=self.express_port,
+            )
+        except Exception as exc:  # noqa: BLE001 - the run still must not repeat the edit
+            logger.warning("Could not record the motor denial for %s: %s", ticket_id, type(exc).__name__)
+        try:
+            express_lane.register_express_owner_action(ticket_id)
+        except Exception as exc:  # noqa: BLE001 - the denial still stops when the backlog write fails
+            logger.warning("Could not open the express owner action for %s: %s", ticket_id, type(exc).__name__)
+        self._persist_diagnostics(ws, run_id, ticket_id)
+        logger.error("%s", express_lane.official_cause_line(ticket_id))
+        return StageResult(
+            outcome="failed",
+            cause_code=express_lane.CAUSE_SELF_MODIFICATION,
+            output_refs=[],
+            evidence_refs=[express_lane.CAUSE_SELF_MODIFICATION, "line-block"],
+        )
 
     # -- full run --------------------------------------------------------
 

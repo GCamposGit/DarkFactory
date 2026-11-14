@@ -17,6 +17,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from core.line import routing
+from core.line.review_cascade import valid_contingency
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ class RouteHit(BaseModel):
     harness: Optional[str] = None
     model: Optional[str] = None
     evidence_ref: str
+    # USR-488: cascade level 3 or 4 (same family, recorded). Only these may share the writer's family.
+    contingency_level: Optional[int] = None
 
 
 class GateWorkerObservation(BaseModel):
@@ -308,7 +311,7 @@ def decide(
         return wait_for(build, CODE_NO_BUILD_ROUTE, RESOURCE_BUILD, STAGE_BUILD)
     if not review.harness:
         return wait_for(review, CODE_NO_REVIEW_ROUTE, RESOURCE_REVIEW, STAGE_REVIEW)
-    if review.harness.casefold() == build.harness.casefold():
+    if _hit_family(review) == _hit_family(build) and review.contingency_level is None:
         return wait_for(review, CODE_REVIEW_SAME_FAMILY, RESOURCE_REVIEW, STAGE_REVIEW)
     gate_code, gate_ref = classify_gate(gate, observed)
     if gate_code is not None:
@@ -384,16 +387,70 @@ def _local_gate_busy() -> bool:
         return True
 
 
+# USR-510: admission reads this list even when dispatch mode is off.
+ENV_ADMISSION_WORKERS = "DARKFAC_ADMISSION_WORKERS"
+
+
+def _filter_disabled_worker_urls(dispatch: Any, raw: str) -> list[str]:
+    """Split a worker list and drop URLs whose host is in ``DARKFAC_FLEET_DISABLED_HOSTS``."""
+    urls = [part.strip() for part in raw.split(",") if part.strip()]
+    disabled = dispatch.disabled_hosts()
+    if not disabled:
+        return urls
+    return [url for url in urls if not dispatch.is_worker_disabled(url, disabled)]
+
+
 def _remote_worker_urls() -> list[str]:
-    """Configured remote gate workers. Mode off or an empty setting is an empty list, not capacity."""
+    """Gate workers admission may read.
+
+    ``DARKFAC_REMOTE_HARNESS=off`` does not hide them: that mode only stops
+    dispatch. CI and a nested worker job still return an empty list.
+    The source is ``DARKFAC_ADMISSION_WORKERS`` when the variable is set
+    (including an empty value), otherwise ``DARKFAC_TEST_WORKERS`` when that
+    variable is set, otherwise the default of ``worker_urls``. A URL in
+    ``DARKFAC_FLEET_DISABLED_HOSTS`` is omitted and is not probed.
+    """
     try:
         from core.harness import remote_dispatch as dispatch
     except Exception as exc:  # noqa: BLE001
         logger.warning("gate worker list unavailable: %s", type(exc).__name__)
         return []
-    if dispatch._effective_mode(remote_required=False) == "off" or dispatch._unconditional_disable_reason():
+    if dispatch._unconditional_disable_reason():
         return []
+    admission_raw = os.environ.get(ENV_ADMISSION_WORKERS)
+    if admission_raw is not None:
+        return _filter_disabled_worker_urls(dispatch, admission_raw)
+    test_raw = os.environ.get(dispatch.ENV_TEST_WORKERS)
+    if test_raw is not None:
+        return _filter_disabled_worker_urls(dispatch, test_raw)
     return list(dispatch.worker_urls())
+
+
+def _url_is_disabled(url: str) -> bool:
+    """True when this URL must not be probed. An unreadable policy does not invent a ban."""
+    try:
+        from core.harness import remote_dispatch as dispatch
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("gate worker disable check unavailable: %s", type(exc).__name__)
+        return False
+    return bool(dispatch.is_worker_disabled(url))
+
+
+def _reported_node_disabled(health: Any) -> bool:
+    """True when health names a node or host banned by ``DARKFAC_FLEET_DISABLED_HOSTS``."""
+    if not isinstance(health, dict):
+        return False
+    try:
+        from core.harness import remote_dispatch as dispatch
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("gate worker disable check unavailable: %s", type(exc).__name__)
+        return False
+    node_id = health.get("node_id")
+    hostname = health.get("hostname")
+    return bool(dispatch.is_worker_node_disabled(
+        node_id if isinstance(node_id, str) else None,
+        hostname if isinstance(hostname, str) else None,
+    ))
 
 
 def _probe_remote(url: str) -> Any:
@@ -440,7 +497,11 @@ def collect_gate_observation(
     list_remote: Callable[[], Sequence[str]] = _remote_worker_urls,
     probe: Callable[[str], Any] = _probe_remote,
 ) -> GateObservation:
-    """Read local worker capacity and remote health. Does not start a gate or write a candidate."""
+    """Read local worker capacity and remote health. Does not start a gate or write a candidate.
+
+    A URL in ``DARKFAC_FLEET_DISABLED_HOSTS`` is not probed. Health whose
+    ``node_id`` or ``hostname`` names a disabled host leaves the collection.
+    """
     now = _as_utc(clock())
     workers: list[GateWorkerObservation] = []
     try:
@@ -465,11 +526,17 @@ def collect_gate_observation(
     except Exception as exc:  # noqa: BLE001 - a failed reading is omitted, never invented
         logger.warning("local gate capacity unreadable: %s", type(exc).__name__)
     for url in list_remote():
+        if _url_is_disabled(url):
+            logger.info("gate worker %s is disabled; not probed", _worker_ref(url))
+            continue
         try:
             health = probe(url)
         except Exception as exc:  # noqa: BLE001
             logger.warning("gate health probe failed for %s: %s", _worker_ref(url), type(exc).__name__)
             health = None
+        if _reported_node_disabled(health):
+            logger.info("gate worker %s reports a disabled node; omitted", _worker_ref(url))
+            continue
         ref = _worker_ref(url)
         workers.append(worker_from_health(ref, health, evidence_ref=ref))
     return GateObservation(workers=workers, observed_at=now, evidence_ref="gate://collection")
@@ -498,6 +565,37 @@ def _select_route(
         harness=harness,
         model=None if model is None else str(model),
         evidence_ref=f"routing://{routing_stage}/{harness}",
+    )
+
+
+def _hit_family(hit: RouteHit) -> str:
+    """Model family of a route; the harness name only when the family is unknown (OpenRouter carries many)."""
+    from core.line.recovery_receipt import route_family
+
+    try:
+        return route_family((hit.harness or "").casefold(), hit.model)
+    except ValueError:
+        return (hit.harness or "").casefold()
+
+
+def _select_review(
+    pick_route: PickFn, caps: Iterable[str], writer: str, writer_model: Optional[str] = None, **common: Any,
+) -> RouteHit:
+    """Cascade of USR-488: independent route first, recorded contingency before any wait."""
+    from core.line.review_cascade import select_review_route
+
+    writer_family = _hit_family(RouteHit(stage=STAGE_BUILD, harness=writer, model=writer_model, evidence_ref=""))
+    families = {writer_family} if writer_family != writer.casefold() else set()
+    route = select_review_route(
+        lambda stage, caps_, **kw: pick_route(stage, caps_, reserve_quota=False, mode="read", **common, **kw),
+        caps, implementing_harness=writer, families=families,
+    )
+    if route is None:
+        return RouteHit(stage=STAGE_REVIEW, harness=None, model=None, evidence_ref="routing://review/none")
+    return RouteHit(
+        stage=STAGE_REVIEW, harness=route.harness, model=route.model,
+        evidence_ref=f"routing://review/{route.harness}" + (f"#level={route.level}" if route.level > 2 else ""),
+        contingency_level=route.level if route.contingency else None,
     )
 
 
@@ -571,15 +669,7 @@ def admit(
     else:
         build = build_pick
     if writer:
-        review = _select_route(
-            pick_route,
-            "review",
-            read_caps,
-            decision_stage=STAGE_REVIEW,
-            mode="read",
-            implementing_harness=writer,
-            **common,
-        )
+        review = _select_review(pick_route, read_caps, writer, build.model, **common)
     else:
         review = RouteHit(stage=STAGE_REVIEW, harness=None, model=None, evidence_ref="routing://review/none")
 
@@ -668,9 +758,10 @@ def verify_recovery_receipt(
     if review.get("approved") is not True or review.get("independent") is not True:
         return False, "receipt_review_not_approved"
     implementer_family = str(receipt.get("implementer_family") or "").strip().casefold()
+    same_family = str(review.get("reviewer_family") or "").strip().casefold() == implementer_family
     if (not review.get("reviewer_family") or not implementer_family
             or str(review.get("implementer_family") or "").strip().casefold() != implementer_family
-            or str(review.get("reviewer_family") or "").strip().casefold() == implementer_family):
+            or (same_family and not valid_contingency(review.get("contingency")))):
         return False, "receipt_review_not_independent"
     if stages["ci"].get("green") is not True:
         return False, "receipt_ci_not_green"

@@ -95,4 +95,34 @@ aprovacao nem entrega. Contrato: https://openrouter.ai/docs/guides/best-practice
 USR-477: quando o revisor pago configurado pertence a uma familia que escreveu
 o candidato, a rota tenta o alias distill.openrouter ja registrado e exige
 independencia novamente. Se nenhuma familia independente estiver disponivel,
-a revisao continua fechada, sem autorizar merge.
+a revisao segue a contingencia do USR-488 abaixo, sem autorizar merge por si so.
+
+## Contingencia de revisao USR-488
+
+A revisao nao trava a entrega por falta de outra familia. A cascata escolhe a
+primeira rota disponivel, sempre acima do piso de cota e dentro dos tetos
+`run_caps.openrouter_*`:
+
+1. outra familia por harness (`pick` de `review`);
+2. outra familia pelo OpenRouter: para implementador Claude, o papel
+   `review.openrouter` do registro (modelo OpenAI barato); nos demais, o alias
+   `sonnet`; o papel `distill.openrouter` segue como ultimo recurso;
+3. mesma familia, outro modelo (papeis `review.<harness>` ou `planning.<harness>`
+   diferentes do modelo que implementou);
+4. mesmo modelo com persona adversarial distinta e temperatura diferente. Os CLIs
+   de agente nao aceitam temperatura: fica registrada como `applied: false`, sem
+   bloquear.
+
+So sem nenhuma rota nos quatro niveis a admissao espera `no_review_route`.
+`review_same_family` so ocorre para uma rota sem nivel de contingencia registrado.
+Admissao, revisao e retomada usam o mesmo `select_review_route`
+(`core/line/review_cascade.py`). A revisao e sempre uma chamada de agente nova,
+somente leitura, sobre diff e contexto da tarefa, sem a sessao do implementador.
+
+Evidencia: cada rodada de `review_state.json` traz `route` (nivel, harness, modelo,
+persona, temperatura, motivo); `review_route.json` e `review_execution.json`
+guardam a mesma rota e, nos niveis 3 e 4, o bloco `contingency`. O recibo de
+recuperacao aceita revisor da mesma familia somente com `contingency` valido
+(nivel 3 ou 4, persona e motivo); sem nivel registrado continua recusado
+(`receipt_review_not_independent`). A aprovacao segue ligada ao digest do
+candidato e nunca e marcada `forced`.

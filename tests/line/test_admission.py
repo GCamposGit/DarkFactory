@@ -291,6 +291,157 @@ def test_remote_stale_reading_stays_stale_when_status_is_ok() -> None:
     assert classify_gate(observation, NOW) == (CODE_GATE_STALE, "gate://notebook")
 
 
+def _clear_admission_worker_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("DARKFAC_HARNESS_WORKER_JOB", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.delenv(admission.ENV_ADMISSION_WORKERS, raising=False)
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+
+
+def _fresh_remote(**extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "workers": 2,
+        "busy": False,
+        "observed_at": NOW.isoformat(),
+        "node_id": "grokbox",
+        "hostname": "grokbox",
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_remote_harness_off_still_reads_the_fleet(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.harness import remote_dispatch as dispatch
+
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv(admission.ENV_ADMISSION_WORKERS, "http://admit:9")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://test:9")
+    assert admission._remote_worker_urls() == ["http://admit:9"]
+
+    monkeypatch.setenv(admission.ENV_ADMISSION_WORKERS, "")
+    assert admission._remote_worker_urls() == []
+
+    monkeypatch.delenv(admission.ENV_ADMISSION_WORKERS)
+    assert admission._remote_worker_urls() == ["http://test:9"]
+
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS")
+    assert admission._remote_worker_urls() == list(dispatch.worker_urls())
+
+
+def test_ci_and_worker_job_keep_the_admission_list_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "auto")
+    monkeypatch.setenv(admission.ENV_ADMISSION_WORKERS, "http://admit:9")
+    monkeypatch.setenv("CI", "true")
+    assert admission._remote_worker_urls() == []
+
+    monkeypatch.delenv("CI")
+    monkeypatch.setenv("DARKFAC_HARNESS_WORKER_JOB", "1")
+    assert admission._remote_worker_urls() == []
+
+
+def test_disabled_url_is_not_probed_and_reported_node_leaves_the_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop,notebook")
+    monkeypatch.setenv(
+        admission.ENV_ADMISSION_WORKERS,
+        "http://100.78.181.90:8080,http://10.9.9.9:8080,http://grokbox:8080",
+    )
+    assert admission._remote_worker_urls() == ["http://10.9.9.9:8080", "http://grokbox:8080"]
+
+    probed: list[str] = []
+
+    def probe(url: str) -> dict[str, Any]:
+        probed.append(url)
+        if "10.9.9.9" in url:
+            return _fresh_remote(workers=4, node_id="desktop", hostname="somewhere-else")
+        return _fresh_remote(workers=3, node_id="grokbox", hostname="grokbox")
+
+    by_node = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=lambda: ["http://100.78.181.90:8080", "http://10.9.9.9:8080", "http://grokbox:8080"],
+        probe=probe,
+    )
+    assert probed == ["http://10.9.9.9:8080", "http://grokbox:8080"]
+    refs = [worker.evidence_ref for worker in by_node.workers]
+    assert refs == ["gate://local", "gate://grokbox"]
+
+    def probe_hostname(url: str) -> dict[str, Any]:
+        return _fresh_remote(workers=4, node_id="other", hostname="ai-notebook")
+
+    by_hostname = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=lambda: ["http://10.8.8.8:8080"],
+        probe=probe_hostname,
+    )
+    assert [worker.evidence_ref for worker in by_hostname.workers] == ["gate://local"]
+    assert classify_gate(by_hostname, NOW) == (CODE_GATE_ZERO, "gate://local")
+
+
+def test_local_zero_admits_on_one_free_remote_when_dispatch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://grokbox:8080")
+    probed: list[str] = []
+
+    def probe(url: str) -> dict[str, Any]:
+        probed.append(url)
+        return _fresh_remote()
+
+    observation = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=admission._remote_worker_urls,
+        probe=probe,
+    )
+    assert probed == ["http://grokbox:8080"]
+    decision = decide(
+        planning=_hit("planning", "claude"),
+        build=_hit("build", "codex"),
+        review=_hit("review", "grok"),
+        gate=observation,
+        now=NOW,
+        not_before_for=lambda _kind: NOW,
+    )
+    assert decision.outcome == "allow" and decision.not_before is None
+    assert decision.evidence_ref.endswith(";gate://grokbox")
+    assert "gate://local" not in decision.evidence_ref
+
+
+def test_status_ok_remote_does_not_cover_local_zero_on_the_fleet_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_admission_worker_env(monkeypatch)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://grokbox:8080,http://desktop:8080")
+    observation = collect_gate_observation(
+        clock=lambda: NOW,
+        measure=lambda: SimpleNamespace(workers=0),
+        local_busy=lambda: False,
+        list_remote=admission._remote_worker_urls,
+        probe=lambda _url: {"status": "ok"},
+    )
+    assert classify_gate(observation, NOW) == (CODE_GATE_ZERO, "gate://local")
+    decision = decide(
+        planning=_hit("planning", "claude"),
+        build=_hit("build", "codex"),
+        review=_hit("review", "grok"),
+        gate=observation,
+        now=NOW,
+        not_before_for=lambda _kind: NOW,
+    )
+    assert decision.outcome == "wait" and decision.code == CODE_GATE_ZERO
+    assert decision.evidence_ref == "gate://local"
+
+
 def test_pytest_does_not_probe_the_suite_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     probes: list[str] = []
     import core.harness.suite_lock as suite_lock
@@ -386,20 +537,30 @@ def test_route_wait_keeps_a_later_reset_and_floors_an_earlier_one() -> None:
     assert calls[0][0] == "planning"
 
 
+def test_contingency_hit_may_share_the_writer_family_but_a_plain_hit_may_not() -> None:
+    kwargs = dict(planning=_hit("planning", "claude"), build=_hit("build", "claude"), gate=_gate(_usable()),
+                  now=NOW, not_before_for=lambda kind: NOW)
+    plain = decide(review=_hit("review", "claude"), **kwargs)
+    assert plain.outcome == "wait" and plain.code == CODE_REVIEW_SAME_FAMILY
+    cascade = decide(review=_hit("review", "claude").model_copy(update={"contingency_level": 4}), **kwargs)
+    assert cascade.outcome == "allow"
+
+
 def test_missing_review_route_waits_without_asking_the_gate_clock() -> None:
     routes = {"planning": ("claude", "opus"), "development": ("codex", "sonnet"), "review": None}
     decision, seen, earliest_calls = _admit(routes, gate=_gate(_usable()))
     assert decision.code == CODE_NO_REVIEW_ROUTE and decision.stage == STAGE_REVIEW
-    assert [row["stage"] for row in seen] == ["planning", "development", "review"]
+    assert [row["stage"] for row in seen] == ["planning", "development", "review", "review"]
     assert earliest_calls[0][0] == "review"
     assert decision.not_before == NOW + timedelta(seconds=routing.MIN_ROUTE_WAIT_SECONDS)
 
 
-def test_same_family_pick_waits_and_a_gate_failure_does_not_call_earliest() -> None:
+def test_same_family_review_uses_contingency_and_a_gate_failure_does_not_call_earliest() -> None:
+    # Only the writer's family answers: cascade level 3 (same family, another model) admits.
     same, seen, calls = _admit(_routes(build="claude", review="claude"), gate=_gate(_usable()))
-    assert same.code == CODE_REVIEW_SAME_FAMILY
+    assert same.outcome == "allow" and "level=3" in same.evidence_ref
     assert seen[2]["implementing_harness"] == "claude"
-    assert calls[0][0] == "review"
+    assert calls == []
 
     zero = _worker("local", 0, False, NOW, "gate://local")
     waiting, _seen, gate_calls = _admit(_routes(), gate=_gate(zero))
@@ -491,3 +652,28 @@ def test_recovery_receipt_requires_fresh_candidate_bound_production_chain():
     assert admission.verify_recovery_receipt(
         bad_review, candidate_digest=candidate, run_id="fleet-run-468", now=now,
     )[1] == "receipt_review_not_independent"
+    same_family = dict(approved=True, independent=True, reviewer_family="codex", implementer_family="codex")
+    contingency = {"level": 3, "persona": "standard", "reason": "same_family_other_model"}
+    for review, expected in (
+        (stage(**same_family), "receipt_review_not_independent"),
+        (stage(**same_family, contingency={"level": 1, "persona": "standard", "reason": "x"}),
+         "receipt_review_not_independent"),
+        (stage(**same_family, contingency=contingency), "receipt_valid"),
+    ):
+        assert admission.verify_recovery_receipt(
+            {**receipt, "review": review}, candidate_digest=candidate, run_id="fleet-run-468", now=now,
+        )[1] == expected
+
+def test_openrouter_writer_and_reviewer_compare_model_family_not_harness_name() -> None:
+    def hit(stage: str, model: str) -> admission.RouteHit:
+        return admission.RouteHit(stage=stage, harness="openrouter", model=model, evidence_ref=f"routing://{stage}/openrouter")
+
+    def run(build_model: str, review_model: str) -> AdmissionDecision:
+        return decide(
+            planning=hit("planning", "gpt-sol"), build=hit("build", build_model), review=hit("review", review_model),
+            gate=_gate(_usable()), now=NOW, not_before_for=lambda kind: NOW,
+        )
+
+    assert run("gpt-sol", "sonnet").outcome == "allow"
+    blocked = run("sonnet", "sonnet")
+    assert blocked.outcome == "wait" and blocked.code == CODE_REVIEW_SAME_FAMILY

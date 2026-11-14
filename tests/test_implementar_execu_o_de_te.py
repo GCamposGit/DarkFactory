@@ -245,13 +245,13 @@ def test_harness_test_runner_specs():
     # 2. OpenAI / Codex: Default is Luna low for fast test execution
     codex_spec = get_harness_test_runner_spec(HarnessType.CODEX)
     assert codex_spec.harness == HarnessType.CODEX
-    assert codex_spec.model_id == "openai/gpt-5-6-luna-high"
+    assert codex_spec.model_id == "openai/gpt-6-luna"
     assert codex_spec.reasoning_effort == "low"
     assert codex_spec.execution_tier == ExecutionTier.LIGHT_HARNESS
 
     # 2b. OpenAI / Codex: Deep RCA escalates to Luna max
     codex_rca_spec = get_harness_test_runner_spec(HarnessType.CODEX, deep_rca=True)
-    assert codex_rca_spec.model_id == "openai/gpt-5-6-luna-high"
+    assert codex_rca_spec.model_id == "openai/gpt-6-luna"
     assert codex_rca_spec.reasoning_effort == "max"
     assert codex_rca_spec.execution_tier == ExecutionTier.DEEP_DIAGNOSTIC
 
@@ -279,7 +279,7 @@ def test_generate_subagent_prompt_multi_harness():
 
     codex_prompt = generate_subagent_prompt(instr, harness=HarnessType.CODEX, deep_rca=True)
     assert "CODEX" in codex_prompt
-    assert "openai/gpt-5-6-luna-high" in codex_prompt
+    assert "openai/gpt-6-luna" in codex_prompt
     assert "max" in codex_prompt
 
     grok_prompt = generate_subagent_prompt(instr, harness=HarnessType.GROK)

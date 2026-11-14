@@ -1,67 +1,55 @@
 # Handoff operacional
 
-Versao: 11
-Atualizado em: 2026-10-31
+Versao: 12
+Atualizado em: 2026-11-11 (Claude Code, coordenador de 09/11 a 11/11)
 
 ## Estado
 
-- Fase: V0 da Dark Factory.
-- Canais: Telegram, DarkHub e interfaces de chat; demandas seguem por `run_ticket.py` e pelo registro compartilhado no control store.
-- Operacao: Antigravity como interface interativa de operacao (`DARKFAC_OPERATING_HARNESS=antigravity`); tarefas headless/frota sao executadas pelo harness eleito pelo roteador (Grokbox e Notebook). Antigravity nunca e usado por workers, `--fleet` ou pump.
-- Fila totalmente desbloqueada: tag `planning-only` removida de todos os tickets.
-- Blocos do Plano V0 concluidos e sincronizados no PostgreSQL e git ledger: USR-343 (Atrito zero), USR-375 (Motor unico), USR-369 (Capacidade/rede), USR-376 (Pesquisa/learning pack), USR-377 (Enxugar codigo/testes), USR-378 (Roteamento enxuto) e USR-379 (Governanca e manual), alem de USR-428, USR-429, USR-433, USR-434, USR-438 e USR-439.
-- Proximo na esteira: USR-279 (Prova da V0 com o piloto M1 do gestor de SEO e redes sociais da mansaodolago.com). Dependencias 100% satisfeitas, elegivel imediatamente no despachante da frota.
+- Fase: V0 da Dark Factory (0/5 entregas qualificadas; piloto M1 bloqueado na OA-082).
+- `main` em `ac848437` (#850) em 11/11 10:35Z, CI do merge anterior verde.
+- Despachante: tarefa agendada `DarkFac-Fleet-Dispatcher` (loop) com `--recovery-tickets USR-510,USR-509,USR-508,USR-506,USR-498,USR-503,USR-499,USR-500,USR-502,USR-492,USR-483,USR-504`. Desde o USR-508 ele se reinicia sozinho quando o `main` muda.
+- Hosts: Desktop executa; Grokbox oscila (cai e volta); Notebook frequentemente com `workers=0` porque a RAM livre fica abaixo de 4 GiB com os apps do owner abertos.
+- Cotas (11/11 ~07:36 BRT): Claude semanal 5% e Grok 12,6% (ambos abaixo do piso), Codex 15% (no piso, renova 12/11 09:58 BRT; Grok renova 12/11 14:50 BRT). Toda escrita agora cai no OpenRouter. Abaixo do piso, a escrita vai para o OpenRouter (teto US$ 2 por execucao, US$ 10 por mes).
+- Revisao: cascata do USR-488 (outra familia por harness; outra familia via OpenRouter; mesma familia com outro modelo; mesmo modelo com persona adversarial). Admissao compara familia do modelo, nao nome do harness (#834).
 
-## Decisoes
+## Decisoes do owner em vigor (09-10/11)
 
-- Consultar estado operacional pelo briefing compartilhado `python -m core.ops.briefing`. Cotas exibidas sao snapshots locais. Valor ausente, invalido ou `STALE` e desconhecido; na rota interativa do operador Antigravity isso nao o exclui silenciosamente: segue elegivel com aviso e causa registrada. O piso de 15% continua valendo para cotas conhecidas. O briefing nao dispara atualizacao de nos nem probes de cotas.
-- Se PostgreSQL ou `gh` estiver indisponivel, o briefing informa o fallback da fila ou a indisponibilidade dos PRs; nao presume esses dados completos.
-- Grok entra na cascata da etapa `planning` como contingencia quando Claude e Codex estiverem esgotados ou criticos (<=15%).
-- Quando Claude, Codex e Grok estiverem sem cota ou indisponiveis, o fallback de leitura vai para OpenRouter pelo alias `distill.openrouter` do registro de modelos. O id concreto fica so no registro.
-- O snapshot diario do ledger (`scripts/snapshot_queue.py`) aborta se qualquer ID existente for perdido, mesmo se substituido por novo ID com contagem igual. `next_action_id` consulta todo o historico git para impedir reutilizacao de ID.
-- Textos operacionais citam alias (`distill.openrouter`, `core.models.registry`). Nao colar id literal de modelo neste handoff.
+- Prioridade: funcionamento estavel, autonomo e paralelo; corrigir na hora o que for pequeno, ticket para o resto, reaproveitando tickets do roadmap.
+- OpenRouter e fallback de cota baixa; revisao na mesma familia so sem alternativa.
+- Grok preferido para escrita enquanto houver saldo.
+- Politica de portao: PR com testes afetados e contratos; suite completa em Linux ou CI; CI noturno Windows permanece. Ainda depende da assinatura da OA-089 para entrar no `AGENTS.md` (PR #832).
+- Subagentes leves para tarefas simples e leitura de testes; o coordenador recebe so resumo e acoes.
 
-## O que foi entregue nesta sessao
+## O que foi entregue (09-11/11)
 
-- **USR-439**: Sentinela de linha autonomo com intervalo deterministico de 45m (2700s via timestamp delta, eliminando a assimetria do cron standard 5-campos minute % 45 == 0) e execucao multi-harness (`core/line/sentinel.py`). Integrado de forma perene no despachante de frota (`core/line/fleet_dispatcher.py` via `sentinel_hook`), no briefing operacional (`core/ops/briefing.py`), nos guardas de fim de turno (`core/ops/turn_guard.py`) e no runner agendado (`scripts/run_sentinel.ps1`). Emite alertas urgentes e amigaveis ao Owner via Telegram em caso de parada por falta de rotas de desenvolvimento (todas as contas <= 15%) ou jobs travados ha mais de 45m.
-- **USR-438**: Mensagens do Telegram e Grill simplificadas para leigos em celular: corpo de mensagem com texto integral das alternativas, botoes enxutos de 2-3 palavras e URLs publicas de producao (`https://darkhub.ggcampos.com`). PR #814 mesclado no `main` (commit `33cba722`), deploy Dokploy com health verificado ao vivo (`b18360dd`), ticket marcado `completed`.
-- **USR-431**: Paridade do harness de operacao para Codex e Antigravity: implementado `core/ops/turn_guard.py` centralizando guardas agnosticas (learning pack obrigatorio para alteracoes de codigo, rastreamento de ciclo de vida de sessao no registro unificado de execucoes e handoff); `scripts/stop_hook_artifacts.py` unificado para delegar ao turn_guard. Portao oficial aprovado [HARNESS_PASS] em `60f17473` (4.805 testes, 0 falhas). PR #811 mesclado no `main` (commit `b25b5fc5`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no DarkHub (`https://darkhub.ggcampos.com/health` retornando `b25b5fc5`), ticket marcado `completed` no demands store.
-- **USR-424**: Resolvido desacoplamento entre fila duravel (control store) e ledger local durante entrega autonoma. Portao oficial aprovado com [HARNESS_PASS] em `9c58d863` (4.796 testes, 0 falhas). PR #809 mesclado no `main` (commit `9842a697`), imagem GHCR publicada, deploy Dokploy concluido com verificacao ao vivo no DarkHub (`https://darkhub.ggcampos.com/health` retornando `9842a697`), ticket marcado `completed` no demands store.
-- **USR-420**: Convergencia pos-deploy usa candidato fixo e respeita hosts desabilitados (`DARKFAC_FLEET_DISABLED_HOSTS=desktop`), isolando o ambiente em `tests/conftest.py`. Portao oficial aprovado [HARNESS_PASS] remotamente. PR #808 mesclado no `main` (commit `d2092f0e`), deploy Dokploy com health verificado ao vivo e ticket marcado `completed`.
-- **USR-430**: Implementado filtro de hosts desabilitados (`DARKFAC_FLEET_DISABLED_HOSTS`) no despachante remoto (`core/harness/remote_dispatch.py`) e na rotacao de retentativas (`run_ticket.py`). Portao oficial rodado remotamente com 100% de sucesso (`[HARNESS_PASS]`, 4646 passed, 30 skipped, 0 failed). PR #803 mesclado no `main` (commit `ed6cf52d`), CI no `main` verde, deploy Dokploy concluido (darkfac-cloud e Darkhub blue-green no slot blue), ticket marcado `completed` no PostgreSQL e demands store com zero toque humano.
-- **USR-436**: Roteador atualizado para permitir escrita interativa do Antigravity como operating harness (`DARKFAC_OPERATING_HARNESS=antigravity`). PR #805 mesclado (`90390014`), deploy Dokploy e ticket marcado `completed`.
-- **USR-433**: Briefing de sessao agnostico de harness (`core.ops.briefing`), `docs/operacao/HANDOFF.md`, eleicao do Antigravity como operador no roteador, estabilizacao do medidor RPC de cota Antigravity. PR #798 mesclado e implantado.
-- **USR-434**: Prevencao de regressao no snapshot diario do ledger; importacao de OAs git-only para a control store antes da exportacao do snapshot; unificacao e protecao de IDs no `core/owner_actions/store.py`; restauracao da acao do Desktop como `OA-081` e correcao do item #82 de decision sem opcoes para action. PR #799 mesclado (commit `3b655f03`); deploy Dokploy com DarkHub blue-green no slot blue.
-- **USR-421**: Redirecionamento do cache do pytest por worktree, reaplicado no inicio de `pytest_sessionfinish`, para o foco do `fleet_dispatcher` terminar com codigo de saida e resumo `N passed in Xs` mesmo quando `%LOCALAPPDATA%` nao e gravavel. PR #801 mesclado no `main` (commit `58b4b2aa`), CI no `main` verde, deploy Dokploy concluido e ticket marcado `completed` no PostgreSQL e ledger.
-- **USR-435**: CI no `main` verificado e 100% verde apos o merge do USR-421 (run 41130641330), ticket marcado `completed`.
-- **Restauracao do Grokbox**: Disparo do wake email para o Grokbot via probe throttled, reativando a VM Linux no Tailscale e restabelecendo o worker oficial remoto de 95-143 segundos.
+- Correcoes feitas pela coordenacao via subagente: #831 e #834 (USR-488, cascata de revisao e familia do modelo), #833 (estado runtime no `.gitignore`), #835/#836/#837/#838 (espera 75, trava de linha, reserva de frota e PR ativo nao contam como falha), #839 (falha repetida segura so o ticket; `set_recovery` saiu de `_record_failure`), #830 (plano Frente 7).
+- Entregas da propria frota, sem toque humano: USR-501 (#841, sentinela de fila ociosa), USR-497 (#842, fechar falhas quando o `main` muda), USR-494 (#843, via expressa de autorreparo), USR-508 (#848, despachante reinicia ao mudar o `main`), USR-510 (#849, admissao considera todos os workers de portao), USR-489 (#850).
+- Varredura de 09/11: 159 worktrees removidas (84 commits soltos preservados em tags `archive/worktree-*`), 5 PRs antigos fechados, 6 tickets orfaos devolvidos a fila.
 
 ## O que esta em voo
 
-- **Fila da frota**: USR-279 (Prova da V0 / Piloto M1) elegivel imediatamente na esteira; blocos V0 anteriores concluidos.
-- **Monitoramento em background**: sentinela ativo a cada 45 min com verificacao multi-harness deterministica e alerta Telegram.
+- USR-483 (Grokbox): identidade de sessao e papel de coordenador. O processo do USR-489 no Desktop pode seguir vivo apos o merge; confirmar e encerrar se for orfao.
+- Conferir que o USR-510 (#849) acabou com as esperas `gate_capacity_zero` vindas de `gate://local` quando o Notebook esta sem RAM.
+- Em seguida na prioridade: USR-509 (entregas com PR de CI vermelho ficam `blocked deploy_evidence_missing` e nao corrigem: USR-447 #845, USR-449 #846, USR-493 #844, USR-486 #847), USR-506 (motivo de falha grava trecho de codigo).
 
 ## Pendencias
 
-- `OA-078` (opcional): Ligar aviso de PR protegido no Telegram: chat id no Hub e chave de assinatura [USR-395].
-- `OA-081`: Destravar atualizacao do Desktop uma unica vez (quando concluir a indexacao do Segundo Cerebro).
-- `OA-077`: Publicar consulta git de `core/governance/authorization.py` (USR-386).
+- OA-089 (owner): assinar a autorizacao do `AGENTS.md` (secoes 3 e 5). Passo a passo no DarkHub.
+- PRs antigos #825 (USR-468), #822 (USR-448) e #821: com conflito e CI vermelho; decidir retomar ou fechar.
+- Tickets abertos relevantes: USR-496 (ids de gateway do Grok), USR-498..USR-504, USR-506, USR-509, USR-510.
 
 ## Armadilhas novas
 
-1. **Ratchet de complexidade em funcoes orquestradoras**: `maybe_dispatch_remote` possui limite maximo de 178 linhas. Novas condicoes de validacao de host devem ser encapsuladas em funcoes auxiliares externas (ex.: `_probe_eligible_worker`) para evitar reprovacao no `complexity_ratchet.py`.
-2. **Capacidade de reserva de host na frota**: `acquire_fleet_reservation` impoe limite estrito de 1 reserva ativa por host. Retomadas de entrega (`--resume-delivery`) aguardam a liberacao da reserva do ticket anterior.
-3. **Wait de worker remoto ocupado no `runner.py`**: quando `grokbox` reporta `busy=True`, o dispatch remoto aguarda em polling de ate 300 s (5 min) antes de cair para o runner local. Para rodar testes locais imediatamente sem tentar o worker remoto nem esperar busy wait, passe `--local`.
-4. **Capacidade de workers xdist no Windows**: hosts com RAM livre proxima a 5 GiB alocam apenas 1 worker por conservadorismo de memoria (demorando ~40 min para 4.700+ testes). Definir `$env:DARKFAC_MAX_WORKERS = '3'` reduz o tempo para ~23 min com total estabilidade e ~1.6 GiB de RAM consumida.
-5. **Buffering de subprocessos Python no Windows**: streams redirecionadas para pipes seguram saida ate preencher buffer de 4/8 KB; para ver logs em tempo real em tarefas background, use `PYTHONUNBUFFERED=1` ou `python -u`.
-6. **Reservas de frota zumbis**: se um canary ou run retentar planning sem rota disponivel, ele pode reter uma reserva `fres-...` no PostgreSQL. Ao diagnosticar fila ociosa com Grokbox saudavel, verifique a tabela `fleet_reservations`.
-7. **Id literal no handoff**: o censo de modelos conta prefixos de modelos fora da allowlist. Este arquivo tem baseline 0. Use alias ou marque id de fio com `census: wire-id` na mesma linha.
-8. **Ticket so na fila**: `complete_ticket` e `--resume-delivery` resolvem o id na control store quando o `demands.json` da worktree nao tem a linha (USR-424) e gravam o mesmo `(project_id, ticket_id)`. So id ausente na worktree, na fila, no checkout compartilhado e em `origin/main` devolve `cause=ticket_absent`, sem criar ticket. Nao copie o ledger compartilhado para a worktree so para a entrega passar.
-9. **Resume do mesmo candidato (USR-424)**: no projeto `darkfac`, `validation.json` `passed` com `ValidationReport.candidate_digest` igual ao candidato atual permanece e o portao nao roda, tambem quando so a politica de revisao mudou.
-10. **Corrida de CI do merge anterior no check-main**: ao disparar `dokploy_redeploy.py` imediatamente apos o merge, `check_main` pode inspecionar o ultimo run *concluido* do commit anterior enquanto o run do novo commit ainda esta `in_progress`.
-11. **Subprocessos sem mock em loops de sync (`sync_usage_to_cloud.py`)**: chamadas como `run_daily_queue_snapshot` executam `git` no filesystem. Sob carga pesada, a execucao excede o intervalo de sync gerando `delay <= 0`. Nao encapsular `time.sleep(delay)` sob `if delay:` para garantir que `time.sleep(0.0)` sempre seja chamado (cedendo a CPU e disparando interceptadores em testes). Em testes de loop, mockar `run_daily_queue_snapshot` obrigatoriamente.
-12. **Identificadores de nos no censo de modelos**: identificadores de host como o hostname do Grokbox iniciam com prefixo rastreado pelo regex do censo. Linhas de configuracao que contenham esses identificadores literais exigem o comentario `# census: wire-id` para nao reprovar no `test_model_id_ratchet_usr185.py`.
+1. Recusa nao e falha: saidas 75, `[TRAVA DE LINHA]`, `[RESERVA DE FROTA]` e "ja possui PR ativo" sao espera e nao devem acender recuperacao. Se surgir outro tipo de recusa contando como falha, adicione o marcador em `LOCK_MARKERS` de `core/line/fleet_dispatcher.py`.
+2. Com recuperacao ativa, `run_ticket.py` usa teto de frota 1; a recuperacao global so deve ser acionada explicitamente.
+3. Cota do Grok: queda de uso no mesmo periodo e marcada como leitura suspeita e o roteador exclui o Grok. O mecanismo existente de confirmacao e `.factory/usage/history/xai.confirmation.json` (quota_id, period_start, used_percent da leitura atual). USR-504 trata de forma duravel.
+4. `admission.sqlite3`: falhas antigas de causa ja corrigida podem ser fechadas (`update failures set open=0`) e `dispatcher_recovery.active=0`, sempre com backup em `.factory/backups/`. O USR-497 automatiza o fechamento quando o `main` muda.
+5. CI de PR leva de 3 a 5 minutos para criar o run do `DarkFac CI`; antes disso so aparece `trusted-pr-policy`.
+6. `gh pr close` pode ser negado pelo classificador de permissoes; peca autorizacao explicita ao owner.
+7. Id literal de modelo neste arquivo quebra o censo de modelos (baseline 0). Use alias.
 
 ## Proximo passo
 
-- Executar USR-279: Prova da V0 com o piloto M1 do gestor de SEO e redes sociais da mansaodolago.com.
+- Acompanhar a entrega do USR-510 e, em seguida, do USR-509; com os dois, a frota deve rodar nos tres hosts e retomar as entregas presas.
+- Quando o Grok cair abaixo de 15%, conferir que a escrita passa ao OpenRouter sem travar e que o gasto respeita o teto mensal.
+- Retomar a V0 depois da Fase 1 do plano (USR-497..USR-503).

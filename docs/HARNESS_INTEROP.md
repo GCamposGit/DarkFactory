@@ -54,6 +54,7 @@ O monitoramento da integridade da esteira roda de forma agnóstica entre harness
 - É executado de forma não-bloqueante no fechamento de turnos via `python -m core.ops.turn_guard`.
 - Pode ser invocado diretamente pelo sistema operacional através do script `scripts/run_sentinel.ps1`.
 - Emite alertas urgentes formatados para leigos (padrão USR-438) no Telegram quando todas as cotas de desenvolvimento estão esgotadas (<= 15%) ou quando um job está estagnado em voo há mais de 45 minutos.
+- USR-501: com host livre, rota de desenvolvimento e ticket elegível sem execução, persiste `idle_since_epoch` e, depois de mais de 15 minutos, alerta uma vez por episódio no Hub e no Telegram. Dentro da janela de 45 minutos a amostra de 15 minutos avança esse relógio sem `pick` nem leitura de cota; a sonda completa e `--force` continuam com o relatório de rotas e cotas. A mesma amostra alerta status local ativo ou running sem processo quando o heartbeat passou de 120 segundos, uma vez por episódio, sem gravar reserva, entrega pendente, trava ou estado do despachante. Também alerta `stale_lock` quando `line.lock` ou `line.fleet-*.lock` começou antes do committer time do `merge_sha` em `merge.json` do mesmo ticket. Git sem committer time não usa mtime, e o alerta não apaga a trava. O briefing lista `idle_queue`, `active_without_process` e `stale_lock` quando presentes.
 
 ## DarkHub
 

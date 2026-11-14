@@ -376,6 +376,68 @@ def test_ratchet_failure_goes_back_to_agent_once_with_combined_output(
     assert "REVIEW" not in line.calls
 
 
+def test_python_311_recusa_antes_de_chamar_plan(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from core.orchestrator import manual_host_preflight
+
+    real_enforce = manual_host_preflight.enforce_manual_host_contract
+
+    def python_311(*args, **kwargs):
+        kwargs["version_info"] = SimpleNamespace(major=3, minor=11, micro=9)
+        return real_enforce(*args, **kwargs)
+
+    monkeypatch.setattr(manual_host_preflight, "enforce_manual_host_contract", python_311)
+
+    code = run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"])
+    err = capsys.readouterr().err
+
+    assert code == 2
+    assert line.calls == []
+    assert "host_preflight_failed:python_version" in err
+    assert "Python 3.11.9" in err
+    assert "Python 3.12+" in err
+    assert "pip install -r requirements.txt" in err
+    assert "requirements-dev.txt" not in err
+    assert "recusou a execucao antes de PLAN" in err
+
+
+def test_modulo_ausente_do_portao_nao_chama_plan(
+    line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from core.orchestrator import manual_host_preflight
+
+    real_find = manual_host_preflight.importlib.util.find_spec
+
+    def hide_importlinter(name: str, package: str | None = None):
+        if name.split(".", 1)[0] == "importlinter":
+            return None
+        return real_find(name, package)
+
+    monkeypatch.setattr(manual_host_preflight.importlib.util, "find_spec", hide_importlinter)
+
+    code = run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"])
+    err = capsys.readouterr().err
+
+    assert code == 2
+    assert line.calls == []
+    assert "host_preflight_failed:gate_dependency_missing" in err
+    assert "importlinter" in err
+    assert "pip install import-linter" in err
+    assert "recusou a execucao antes de PLAN" in err
+
+
+def test_ambiente_valido_chama_plan(
+    line: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"])
+    err = capsys.readouterr().err
+
+    assert code == 0
+    assert line.calls[0] == "PLAN"
+    assert "host_preflight_failed" not in err
+
+
 def test_admission_allow_still_runs_plan_and_fresh_development_pick(
     line: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

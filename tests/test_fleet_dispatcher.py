@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -256,6 +259,145 @@ def test_recovery_list_completes_and_expires_persistently(tmp_path: Path):
     assert [t for t, _ in again.launched] == ["USR-11"]
 
 
+def test_line_block_preempts_live_recovery_list_on_first_free_host(tmp_path: Path):
+    """Com a lista viva e recovery inativo, line-block sai antes dela no primeiro host livre."""
+    demands = [
+        _d("USR-10", "completed"),
+        _d("USR-11"),
+        _d("USR-12"),
+        _d("USR-13"),
+        _d("USR-30", tags=["line-block"], deps=["USR-10"]),
+    ]
+    e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"))
+    e.free.discard("grokbox")
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-30", "notebook"), ("USR-12", "desktop")]
+    assert cyc["queue_remaining"] == ["USR-11", "USR-13"]
+    assert "recuperacao_prioritaria" not in cyc["skipped"].values()
+    assert cyc["recovery_list"]["pending"] == ["USR-12", "USR-11"]
+
+
+def test_line_block_takes_the_only_slot_when_recovery_is_active(tmp_path: Path):
+    """Sem job em voo, line-block ocupa o slot unico; o recovery sai no ciclo seguinte."""
+    demands = [_d("USR-12"), _d("USR-13"), _d("USR-30", tags=["line-block"])]
+    e = _recovery_env(tmp_path, demands, ("USR-12", "USR-11"), active=True)
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-30", "grokbox")]
+    assert cyc["queue_remaining"] == ["USR-12", "USR-13"]
+    assert "recovery_single_delivery_reserved" in cyc["idle_reasons"].values()
+
+    e.handles["USR-30"].rc = 1
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-30", "grokbox"), ("USR-12", "grokbox")]
+    assert cyc["in_flight"].get("grokbox") == "USR-12"
+    assert "USR-30" in cyc["cooldown"]
+
+
+def test_line_block_does_not_open_a_second_delivery_while_one_is_in_flight(tmp_path: Path):
+    demands = [_d("USR-12"), _d("USR-13")]
+    e = _recovery_env(tmp_path, demands, ("USR-12",), active=True)
+    e.d.run_cycle()
+    assert e.launched == [("USR-12", "grokbox")]
+
+    demands.append(_d("USR-30", tags=["line-block"]))
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-12", "grokbox")]
+    assert cyc["in_flight"] == {"grokbox": "USR-12"}
+    assert cyc["skipped"]["USR-30"] == "recuperacao_prioritaria"
+    assert "USR-30" not in cyc["queue_remaining"]
+
+
+def test_line_block_does_not_open_second_delivery_if_recovery_latches_mid_flight(tmp_path: Path):
+    """Entrega lancada antes do latch nao segura a reserva; line-block ainda fica de fora."""
+    demands = [_d("USR-11")]
+    e = Env(tmp_path, demands, free=("grokbox",))
+    e.d.run_cycle()
+    assert e.launched == [("USR-11", "grokbox")]
+    assert not e.d.in_flight["grokbox"].recovery_token
+
+    e.d.admission_store.set_recovery(active=True, cause="gate_failed", fingerprint="fp")
+    e.free = {"grokbox", "notebook", "desktop"}
+    demands.append(_d("USR-30", tags=["line-block"]))
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-11", "grokbox")]
+    assert cyc["in_flight"] == {"grokbox": "USR-11"}
+    assert cyc["skipped"]["USR-30"] == "recuperacao_prioritaria"
+
+
+def test_line_block_stays_out_for_excluded_tag_open_dependency_and_cooldown(tmp_path: Path):
+    demands = [
+        _d("USR-20", tags=["line-block", "congelado-v0"]),
+        _d("USR-21", tags=["line-block", "waiting_human"]),
+        _d("USR-22", tags=["line-block", "planning-only"]),
+        _d("USR-23", tags=["line-block", "not-authorized-for-execution"]),
+        _d("USR-24", tags=["line-block"], deps=["USR-99"]),
+        _d("USR-25", tags=["line-block"]),
+        _d("USR-12"),
+        _d("USR-13"),
+    ]
+    e = _recovery_env(tmp_path, demands, ("USR-12",))
+    e.free = {"grokbox"}
+    e.d.cooldown["USR-25"] = e.now + 500
+    cyc = e.d.run_cycle()
+    assert e.launched == [("USR-12", "grokbox")]
+    assert cyc["queue_remaining"] == ["USR-13"]
+    for tid in ("USR-20", "USR-21", "USR-22", "USR-23"):
+        assert cyc["skipped"][tid].startswith("tag:")
+    assert cyc["skipped"]["USR-24"] == "dependencia_aberta"
+    assert cyc["skipped"]["USR-25"] == "cooldown_infra"
+
+
+def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
+    from core.demands.models import TAG_LINE_BLOCK, UserTicket
+
+    assert TAG_LINE_BLOCK == "line-block"
+    ticket = UserTicket(id="USR-30", title="Destrava a linha", tags=[TAG_LINE_BLOCK])
+    assert ticket.tags == ["user-demand", TAG_LINE_BLOCK]
+    assert fd.demand_has_line_block(ticket.model_dump(mode="json"))
+    assert not fd.demand_has_line_block({"id": "USR-31", "tags": "line-block", "line_block": True, "title": "line-block"})
+
+    impostor = _d("USR-31")
+    impostor["line_block"] = True
+    impostor["title"] = "line-block"
+    demands = [
+        _d("USR-11"),
+        _d("USR-32", tags=["line_block"]),
+        _d("USR-33", tags=["line-block-urgent"]),
+        impostor,
+        _d("USR-30", tags=["line-block"]),
+    ]
+    e = _recovery_env(tmp_path, demands, ("USR-11",))
+    e.d.run_cycle()
+    assert e.launched == [("USR-30", "grokbox"), ("USR-11", "notebook"), ("USR-31", "desktop")]
+
+
+def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
+    calls: list[list[str]] = []
+
+    class Process:
+        def poll(self):
+            return None
+
+    def popen(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return Process()
+
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
+    monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {
+        "Popen": staticmethod(popen),
+        "STDOUT": -2,
+    })())
+    host = fd.HostSpec("grokbox", 1, "http://g")
+    fd.default_launch("USR-11", host, {"id": "USR-11", "tags": []})
+    fd.default_launch("USR-30", host, {"id": "USR-30", "tags": ["user-demand", "line-block"]})
+    assert len(calls) == 2
+    for cmd, tid in zip(calls, ("USR-11", "USR-30"), strict=True):
+        assert Path(cmd[1]).name == "run_ticket.py"
+        assert cmd[2:] == [tid, "--fleet", "--host-id", host.id]
+        assert "line-block" not in cmd
+
+
 def test_identical_failure_open_does_not_idle_host_with_other_admissible_ticket(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
     e.d.admission_store.is_failure_open = lambda **kw: kw["ticket_id"] == "USR-01"
@@ -360,6 +502,254 @@ def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_p
     assert active.d.run_cycle()["dispatched"] == []
 
 
+def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str = "completed"):
+    """Pending row for a completed ticket, with the dispatcher collaborators stubbed."""
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pd
+
+    monkeypatch.setattr(pd, "_children", {})
+    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
+    context = tmp_path / "artifacts" / "USR-99" / ".darkfac" / "runs" / "USR-99"
+    context.mkdir(parents=True)
+    (context / "progress.json").write_text('{"harness":"codex"}', encoding="utf-8")
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    directory = tmp_path / "pending"
+    row = pd.schedule(
+        "USR-99", candidate, "review", resume_delivery=True, cause=cause, directory=directory,
+    )
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr(
+        "core.demands.queue_store.control_store",
+        lambda: SimpleNamespace(
+            mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": status}],
+        ),
+    )
+    monkeypatch.setattr(
+        "core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}],
+    )
+    monkeypatch.setattr(pd, "_route", lambda _row: ("grok", "grok"))
+    calls: list[list[str]] = []
+    handle = SimpleNamespace(pid=424242, poll=lambda: None)
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append(list(cmd)) or handle)
+    return pd, directory, context, candidate, row, calls
+
+
+def _coherent_release(context: Path, *, merge_sha: str, report_sha: str | None = None) -> None:
+    import json
+
+    if report_sha is not None:
+        (context / "deploy_report.json").write_text(
+            json.dumps({"sha": report_sha, "deployed": False}), encoding="utf-8",
+        )
+    (context / "merge.json").write_text(
+        json.dumps({"merge_sha": merge_sha, "candidate_digest": "candidate"}), encoding="utf-8",
+    )
+    (context / "validation.json").write_text(
+        json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8",
+    )
+    (context / "review_state.json").write_text(
+        json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}),
+        encoding="utf-8",
+    )
+    (context / "review_execution.json").write_text(
+        json.dumps({
+            "candidate_digest": "candidate",
+            "implementer_family": "openai",
+            "reviewer_family": "anthropic",
+        }),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("cause", ["ci_fix_requires_revalidation", "ci_fix_route_wait"])
+def test_ci_recovery_without_merge_resumes_completed_ticket(tmp_path: Path, monkeypatch, cause: str):
+    pd, directory, _context, candidate, row, calls = _arm_completed_wait(tmp_path, monkeypatch, cause=cause)
+    assert row.cause == cause and row.status == "waiting"
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.cause == cause
+
+
+def test_ci_recovery_resumes_when_merge_and_deploy_files_have_no_sha(tmp_path: Path, monkeypatch):
+    pd, directory, context, candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    (context / "deploy_report.json").write_text('{"deployed": false}', encoding="utf-8")
+    (context / "merge.json").write_text('{"candidate_digest": "candidate"}', encoding="utf-8")
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+
+
+def test_ci_recovery_with_merge_sha_keeps_the_deploy_evidence_trail(tmp_path: Path, monkeypatch):
+    pd, directory, context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    _coherent_release(context, merge_sha="b" * 40, report_sha="a" * 40)
+
+    assert pd.tick(tmp_path, directory=directory, now=row.next_check + 1)[0]["cause"] == "deploy_evidence_mismatch"
+    assert calls == []
+
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "waiting"
+    pd._save(directory / "USR-99.json", saved)
+    _coherent_release(context, merge_sha="a" * 40, report_sha="a" * 40)
+    assert pd.tick(tmp_path, directory=directory, now=row.next_check + 2)[0]["status"] == "merged_awaiting_deploy"
+    assert calls == []
+
+
+def test_completed_ticket_with_another_cause_stays_blocked_without_deploy_proof(tmp_path: Path, monkeypatch):
+    pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_red_twice",
+    )
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["cause"] == "deploy_evidence_missing"
+    assert result[0]["status"] == "blocked"
+    assert calls == []
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    assert saved.cause == "deploy_evidence_missing"
+
+
+@pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
+@pytest.mark.parametrize("ledger", ["planned", "hold"])
+def test_exhausted_ci_recovery_closes_wait_without_deploy_block(
+    tmp_path: Path, monkeypatch, finish_mode: str, ledger: str,
+):
+    from types import SimpleNamespace
+
+    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+        status="completed" if ledger == "hold" else "planned",
+    )
+    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda ticket_id: ledger == "hold" and ticket_id == "USR-99")
+    recovery = context / "ci_recovery.json"
+    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
+    path = directory / "USR-99.json"
+    if finish_mode == "child_exit":
+        row.pid = 424242
+        row.status = "running"
+        pd._save(path, row)
+        pd._children[424242] = SimpleNamespace(poll=lambda: 1)
+    else:
+        row.status = "blocked"
+        row.cause = "launcher_exit:1"
+        pd._save(path, row)
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result == [{"ticket": "USR-99", "status": "terminal"}]
+    assert not path.exists()
+    assert not path.with_suffix(".log").exists()
+
+
+@pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
+def test_exhausted_marker_without_durable_requeue_keeps_the_wait(
+    tmp_path: Path, monkeypatch, finish_mode: str,
+):
+    import json
+    from types import SimpleNamespace
+
+    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda _ticket_id: False)
+    recovery = context / "ci_recovery.json"
+    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
+    path = directory / "USR-99.json"
+    if finish_mode == "child_exit":
+        row.pid = 424242
+        row.status = "running"
+        pd._save(path, row)
+        pd._children[424242] = SimpleNamespace(poll=lambda: 1)
+    else:
+        row.status = "blocked"
+        row.cause = "launcher_exit:1"
+        pd._save(path, row)
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "waiting"
+    assert result[0]["cause"] == "ci_fix_requires_revalidation"
+    assert path.is_file()
+    saved = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "waiting"
+    assert saved.cause == "ci_fix_requires_revalidation"
+    assert saved.pid is None
+    assert json.loads(recovery.read_text(encoding="utf-8")) == {"attempts": 1}
+
+
+def test_requeue_ticket_failure_does_not_close_the_ci_wait(tmp_path: Path, monkeypatch):
+    """A raising requeue must not publish success or end the pending delivery."""
+    import json
+    from types import SimpleNamespace
+
+    import run_ticket
+    from core.roadmap.models import DeliveryStatus
+
+    pd, directory, context, candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
+    )
+    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda _ticket_id: False)
+    monkeypatch.setattr(pd, "queue_dir", lambda: directory)
+    recovery = context / "ci_recovery.json"
+    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
+    path = directory / "USR-99.json"
+    row.pid = 424242
+    row.status = "running"
+    pd._save(path, row)
+
+    comments: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        comments.append(list(command))
+        return SimpleNamespace(returncode=0, stdout="ticket/usr-99\n", stderr="")
+
+    monkeypatch.setattr(run_ticket.subprocess, "run", fake_run)
+
+    class BrokenStore:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def requeue_ticket(self, *_args, **_kwargs):
+            raise OSError("ledger unavailable")
+
+        def get_ticket(self, *_args, **_kwargs):
+            raise AssertionError("durable read must not run after requeue fails")
+
+    monkeypatch.setattr(run_ticket, "DemandsStore", BrokenStore)
+    ticket = run_ticket.UserTicket(
+        id="USR-99", project_id="darkfac", title="Ticket de teste",
+        problem_statement="problema de teste", status=DeliveryStatus.COMPLETED,
+    )
+
+    assert run_ticket._reopen_after_ci_budget(ticket, candidate, "ci_recovery_budget_exhausted") is False
+
+    assert comments == []
+    assert json.loads(recovery.read_text(encoding="utf-8")) == {"attempts": 1}
+    held = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert held.status == "waiting" and held.pid is None
+    assert held.cause == "ci_fix_requires_revalidation"
+    result = pd.tick(tmp_path, directory=directory, now=held.next_check - 1)
+    assert result[0]["status"] == "waiting"
+    assert path.is_file()
+    saved = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "waiting"
+    assert saved.pid is None
+    assert saved.cause == "ci_fix_requires_revalidation"
+
+
 def test_verified_resource_change_reopens_breaker(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
     resource = {"version": "worker-v1"}
@@ -407,7 +797,11 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
                          context_digest="ctx", resource_version="worker-v1")
     for _ in range(3):
         e.d._record_failure(failed, 1, "context", "context scanner failed")
-    assert e.d.admission_store.recovery_state()["active"] == 1
+    # falha repetida do mesmo ticket segura so o ticket; a frota segue livre
+    assert e.d.admission_store.recovery_state()["active"] == 0
+    assert [h["ticket_id"] for h in e.d.admission_store.ticket_holds()] == ["USR-99"]
+    assert len(e.d.run_cycle()["dispatched"]) == 2
+    e.d.admission_store.set_recovery(active=True, cause="context", fingerprint="fp")
 
     # A fresh dispatcher sees the durable latch and only dispatches one delivery globally.
     e.d = fd.FleetDispatcher(
@@ -625,6 +1019,107 @@ def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkey
     fd.default_launch("USR-413", fd.HostSpec("notebook", 1), {"id": "USR-413"})
 
     assert captured["env"]["DARKFAC_STATE_ROOT"] == str((tmp_path / "shared-state").resolve())
+
+
+def _capture_launch_env(monkeypatch, tmp_path: Path, host: fd.HostSpec) -> dict[str, str]:
+    captured: dict[str, object] = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
+    monkeypatch.setattr(
+        fd,
+        "subprocess",
+        type(
+            "Subprocess",
+            (),
+            {"Popen": staticmethod(lambda _cmd, **kwargs: captured.update(kwargs) or Process()), "STDOUT": -2},
+        )(),
+    )
+    fd.default_launch("USR-510", host, {"id": "USR-510"})
+    env = captured.get("env")
+    assert isinstance(env, dict)
+    return env
+
+
+@pytest.mark.parametrize(
+    ("previous", "pin", "expected"),
+    [
+        (
+            "http://custom:1,http://custom:2",
+            "http://pin:9",
+            "http://custom:1,http://custom:2,http://pin:9",
+        ),
+        (
+            "http://a:1, http://pin:9 ,http://b:2",
+            "http://pin:9",
+            "http://a:1,http://pin:9,http://b:2",
+        ),
+        (
+            "http://a:1,http://a:1,http://b:2",
+            "http://b:2",
+            "http://a:1,http://b:2",
+        ),
+        (
+            "http://100.77.130.5:8080,http://100.78.181.90:8080",
+            "http://100.77.130.5:8080",
+            "http://100.77.130.5:8080,http://100.78.181.90:8080",
+        ),
+    ],
+)
+def test_default_launch_pins_gate_worker_and_keeps_admission_list(
+    tmp_path: Path, monkeypatch, previous: str, pin: str, expected: str,
+):
+    """The gate pin is one URL. Admission keeps the dispatcher list plus that URL."""
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", previous)
+    monkeypatch.delenv("DARKFAC_ADMISSION_WORKERS", raising=False)
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("grokbox", 1, pin))
+    assert env["DARKFAC_TEST_WORKERS"] == pin
+    assert env["DARKFAC_REMOTE_HARNESS"] == "required"
+    assert env["DARKFAC_FLEET_GATE_REMOTE"] == "1"
+    assert env["DARKFAC_ADMISSION_WORKERS"] == expected
+
+
+@pytest.mark.parametrize("previous", [None, "", "   ", ","])
+def test_default_launch_admission_uses_fleet_default_when_worker_list_is_empty(
+    tmp_path: Path, monkeypatch, previous: str | None,
+):
+    from core.harness.remote_dispatch import DEFAULT_WORKERS
+
+    assert DEFAULT_WORKERS == "http://100.77.130.5:8080,http://100.78.181.90:8080"
+    if previous is None:
+        monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("DARKFAC_TEST_WORKERS", previous)
+    monkeypatch.delenv("DARKFAC_ADMISSION_WORKERS", raising=False)
+    pin = "http://pin:9"
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("desktop", 3, pin))
+    assert env["DARKFAC_TEST_WORKERS"] == pin
+    assert env["DARKFAC_REMOTE_HARNESS"] == "required"
+    assert env["DARKFAC_FLEET_GATE_REMOTE"] == "1"
+    assert env["DARKFAC_ADMISSION_WORKERS"] == f"{DEFAULT_WORKERS},{pin}"
+
+
+def test_default_launch_notebook_does_not_replace_test_workers(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://keep:1,http://keep:2")
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "required")
+    monkeypatch.delenv("DARKFAC_ADMISSION_WORKERS", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_GATE_REMOTE", raising=False)
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("notebook", 2, None))
+    assert env["DARKFAC_REMOTE_HARNESS"] == "off"
+    assert env["DARKFAC_TEST_WORKERS"] == "http://keep:1,http://keep:2"
+    assert "DARKFAC_ADMISSION_WORKERS" not in env
+    assert "DARKFAC_FLEET_GATE_REMOTE" not in env
+
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("notebook", 2, None))
+    assert env["DARKFAC_REMOTE_HARNESS"] == "off"
+    assert "DARKFAC_TEST_WORKERS" not in env
+    assert "DARKFAC_ADMISSION_WORKERS" not in env
 
 
 def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):
@@ -892,12 +1387,43 @@ def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
         e.d._record_failure(job, 1, "failure",
                             f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
     store = e.d.admission_store
+    assert not store.recovery_state()["active"]  # falha repetida nunca serializa a frota
+    assert [h["ticket_id"] for h in store.ticket_holds()] == ["USR-01"]
     if cause == "gate_failed":
         assert store.ticket_holds()[0]["cause"] == cause
-        assert not store.recovery_state()["active"]
-    else:
-        assert store.recovery_state()["active"]
-        assert not store.ticket_holds()
+
+
+@pytest.mark.parametrize(("rc", "held"), [(75, False), (1, True)])
+def test_identical_failures_hold_ticket_except_structured_wait(tmp_path, rc, held):
+    e = Env(tmp_path, [])
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        e.d._record_failure(job, rc, "failure", "route_wait: sem rota")
+    assert not e.d.admission_store.recovery_state()["active"]
+    assert bool(e.d.admission_store.ticket_holds()) is held
+
+
+def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
+    text = "[RESERVA DE FROTA] Fleet capacity ceiling of 1 active cycles reached"
+    assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
+    active_pr = "[RECUSA] Ticket USR-494 ja possui PR ativo #830: https://github.com/x/y/pull/830"
+    assert fd.is_lock_refusal(active_pr) and not fd.is_infra_failure(2, active_pr)
+    assert not fd.is_lock_refusal("[RECUSA] pull_request_lookup_unavailable")
+    e = Env(tmp_path, [])
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        kind = "lock" if fd.is_lock_refusal(text) else "failure"
+        e.d._record_failure(job, 2, kind, text)
+    assert not e.d.admission_store.recovery_state()["active"]
+
+
+def test_lock_refusals_do_not_activate_recovery(tmp_path):
+    e = Env(tmp_path, [])
+    for _ in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
+        e.d._record_failure(job, 2, "lock", "canonical_ownership_conflict")
+    assert not e.d.admission_store.recovery_state()["active"]
+    assert len(e.d.failures) == 3
 
 
 @pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "identical_failure_open"])
@@ -915,3 +1441,619 @@ def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypat
     cycle = e.d.run_cycle()
     assert e.launched == [("USR-02", "grokbox")]
     assert cycle["skipped"]["USR-01"] == blocked
+
+
+_SHA_A = "a" * 40
+_SHA_B = "b" * 40
+
+
+class _ShaSeq:
+    def __init__(self, values: list[object]) -> None:
+        self._values = list(values)
+        self.calls = 0
+
+    def __call__(self) -> object:
+        index = min(self.calls, len(self._values) - 1)
+        self.calls += 1
+        return self._values[index]
+
+
+class _LiveHandle:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def poll(self) -> None:
+        self.calls.append("poll")
+        return None
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+
+    def wait(self, *_args: object, **_kwargs: object) -> int:
+        self.calls.append("wait")
+        return 0
+
+
+def _no_dispatch(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("o reinicio nao despacha ticket")
+
+
+_KEEP_LAUNCH = object()
+
+
+def _sha_dispatcher(
+    tmp_path: Path,
+    reader: object,
+    *,
+    dry_run: bool = False,
+    launch_argv: list[str] | None = None,
+    exec_fn: object | None = None,
+    launch: object = _KEEP_LAUNCH,
+    digest_hook: object | None = None,
+    sentinel_hook: object | None = None,
+):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    execs: list[tuple[str, list[str]]] = []
+
+    def record(executable: str, argv: list[str]) -> None:
+        execs.append((executable, list(argv)))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(hosts=HOSTS[:1], state_path=tmp_path / "state.json", cycle_sec=0, deploy_window_sec=100),
+        demands_loader=list,
+        probe=lambda _host: fd.HostProbe(False, "ocupado"),
+        launch=_no_dispatch if launch is _KEEP_LAUNCH else launch,
+        deploy=lambda: 0,
+        clock=lambda: 0.0,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        dry_run=dry_run,
+        digest_hook=digest_hook,
+        sentinel_hook=sentinel_hook,
+        code_sha_reader=reader,
+        exec_fn=exec_fn or record,
+        launch_argv=["--loop"] if launch_argv is None else launch_argv,
+    )
+    return dispatcher, execs
+
+
+def _stop_after(limit: int):
+    state = {"n": 0}
+
+    def stop() -> bool:
+        state["n"] += 1
+        return state["n"] > limit
+
+    return stop
+
+
+def _one_cycle(dispatcher):
+    seen: list[dict] = []
+    original = dispatcher.run_cycle
+
+    def wrapped():
+        seen.append(original())
+        return seen[-1]
+
+    dispatcher.run_cycle = wrapped
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert seen, "o ciclo nao rodou"
+    return seen[0]
+
+
+def _plant_live_work(dispatcher, tmp_path: Path, monkeypatch):
+    from core.line import pending_delivery as pending
+
+    checkout = tmp_path / "operational-checkout"
+    checkout.mkdir()
+    (checkout / "keep.txt").write_text("stay", encoding="utf-8")
+    handle = _LiveHandle()
+    child = _LiveHandle()
+    dispatcher.in_flight["grokbox"] = fd.InFlight("USR-508", "grokbox", handle, operational_checkout=checkout)
+    pending._children[508508] = child
+    removed: list[bool] = []
+    monkeypatch.setattr(fd, "_remove_operational_checkout", lambda *_a, **_k: removed.append(True))
+    return handle, child, checkout, removed, pending
+
+
+def _assert_live_work_untouched(handle, child, checkout: Path, removed: list[bool]) -> None:
+    for actor in (handle, child):
+        assert "kill" not in actor.calls
+        assert "terminate" not in actor.calls
+        assert "wait" not in actor.calls
+    assert removed == []
+    assert (checkout / "keep.txt").read_text(encoding="utf-8") == "stay"
+
+
+def test_changed_checkout_sha_reexecs_before_cycle_and_leaves_live_work(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path, _ShaSeq([_SHA_A, _SHA_B]), launch_argv=["--loop", "--resume-only"],
+    )
+    handle, child, checkout, removed, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    cycles: list[str] = []
+    dispatcher.run_cycle = lambda: cycles.append("cycle")
+    try:
+        dispatcher.run_forever(stop=_stop_after(1))
+    finally:
+        pending._children.pop(508508, None)
+    assert cycles == []
+    assert execs == [(
+        sys.executable,
+        [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop", "--resume-only"],
+    )]
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+    _assert_live_work_untouched(handle, child, checkout, removed)
+    assert dispatcher.in_flight["grokbox"].operational_checkout == checkout
+
+
+def test_exec_failure_is_logged_and_the_loop_continues(tmp_path: Path, monkeypatch, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="darkfac.line.fleet_dispatcher")
+
+    def boom(_executable: str, _argv: list[str]) -> None:
+        raise OSError("exec recusado")
+
+    dispatcher, _execs = _sha_dispatcher(tmp_path, _ShaSeq([_SHA_A, _SHA_B]), exec_fn=boom)
+    handle, child, checkout, removed, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    try:
+        cycle = _one_cycle(dispatcher)
+    finally:
+        pending._children.pop(508508, None)
+    assert "exec recusado" in caplog.text
+    assert "reinicio do despachante falhou" in caplog.text
+    assert cycle["code_sha"] == _SHA_B
+    assert cycle["code_sha_changed"] is True
+    _assert_live_work_untouched(handle, child, checkout, removed)
+
+
+@pytest.mark.parametrize("startup,later", [(_SHA_A, _SHA_A), ("A" * 40, "a" * 40)])
+def test_equal_checkout_sha_does_not_replace_and_cycle_exposes_it(tmp_path: Path, startup: str, later: str) -> None:
+    dispatcher, execs = _sha_dispatcher(tmp_path, _ShaSeq([startup, later]))
+    cycle = _one_cycle(dispatcher)
+    assert execs == []
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+
+
+@pytest.mark.parametrize(
+    "startup,later,exposed",
+    [
+        (None, None, None),
+        ("abc", "def", None),
+        (_SHA_A, None, None),
+        (None, _SHA_B, _SHA_B),
+        (_SHA_A, "abc", None),
+        ("abc", _SHA_B, _SHA_B),
+        ("", _SHA_B, _SHA_B),
+    ],
+)
+def test_unreadable_checkout_sha_does_not_replace(
+    tmp_path: Path, startup: object, later: object, exposed: str | None,
+) -> None:
+    dispatcher, execs = _sha_dispatcher(tmp_path, _ShaSeq([startup, later]))
+    cycle = _one_cycle(dispatcher)
+    assert execs == []
+    assert cycle["code_sha"] == exposed
+    assert cycle["code_sha_changed"] is False
+
+
+def test_dry_run_and_once_expose_sha_change_without_replacing(tmp_path: Path) -> None:
+    dry, dry_execs = _sha_dispatcher(tmp_path / "dry", _ShaSeq([_SHA_A, _SHA_B]), dry_run=True)
+    dry_cycle = _one_cycle(dry)
+    assert dry_execs == []
+    assert dry_cycle["code_sha"] == _SHA_B
+    assert dry_cycle["code_sha_changed"] is True
+
+    once, once_execs = _sha_dispatcher(tmp_path / "once", _ShaSeq([_SHA_A, _SHA_B]))
+    once_cycle = once.run_cycle()
+    assert once_execs == []
+    assert once_cycle["code_sha"] == _SHA_B
+    assert once_cycle["code_sha_changed"] is True
+
+    resume, resume_execs = _sha_dispatcher(tmp_path / "resume", _ShaSeq([_SHA_A, _SHA_B]))
+    resume.config.resume_only = True
+    resume_cycle = resume.run_cycle()
+    assert resume_execs == []
+    assert resume_cycle["mode"] == "resume_only"
+    assert resume_cycle["code_sha"] == _SHA_B
+    assert resume_cycle["code_sha_changed"] is True
+
+
+def test_reader_error_counts_as_unreadable_sha(tmp_path: Path, caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="darkfac.line.fleet_dispatcher")
+
+    class _BoomAfterStart:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                return _SHA_A
+            raise OSError("git explodiu")
+
+    dispatcher, execs = _sha_dispatcher(tmp_path, _BoomAfterStart())
+    cycle = _one_cycle(dispatcher)
+    assert execs == []
+    assert cycle["code_sha"] is None
+    assert cycle["code_sha_changed"] is False
+    assert "git explodiu" in caplog.text
+
+
+def test_sha_comparison_uses_project_root_head_without_env_or_origin_main(tmp_path: Path, monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake(root: Path, **kwargs: object) -> str:
+        calls.append({"root": root, "use_env": kwargs.get("use_env"), "env": kwargs.get("env")})
+        return _SHA_A
+
+    commands: list[object] = []
+    real_run = fd.subprocess.run
+
+    def spy(cmd: object, *args: object, **kwargs: object):
+        commands.append(cmd)
+        return real_run(cmd, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(fd, "current_git_sha", fake)
+    monkeypatch.setattr(fd.subprocess, "run", spy)
+    monkeypatch.setenv("DARKFAC_GIT_SHA", _SHA_B)
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(hosts=HOSTS[:1], state_path=tmp_path / "state.json", cycle_sec=0),
+        demands_loader=list,
+        probe=lambda _host: fd.HostProbe(False, "ocupado"),
+        launch=_no_dispatch,
+        deploy=lambda: 0,
+        clock=lambda: 0.0,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        digest_hook=None,
+        sentinel_hook=None,
+        exec_fn=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("exec inesperado")),
+        launch_argv=["--loop"],
+    )
+    cycle = _one_cycle(dispatcher)
+    assert calls
+    assert all(row["root"] == fd.PROJECT_ROOT and row["use_env"] is False and row["env"] is None for row in calls)
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+    assert not any("origin/main" in str(cmd) for cmd in commands)
+
+
+def _plant_wait(directory: Path, *, status: str = "running", pid: int | None = 4242):
+    from core.line import pending_delivery as pending
+
+    directory.mkdir(parents=True, exist_ok=True)
+    row = pending.PendingDelivery(
+        ticket_id="USR-447",
+        worktree="C:/dev/DarkFac/wt-usr-447",
+        stage="development",
+        status=status,
+        pid=pid,
+        started_at=10.0,
+        cause="route_wait",
+        next_check=0,
+    )
+    path = directory / "USR-447.json"
+    pending._save(path, row)
+    return pending, path
+
+
+def _raise_from_tick(monkeypatch, directory: Path, exc: BaseException, *, mutate: bool):
+    pending, path = _plant_wait(directory)
+    before = path.read_bytes()
+
+    def boom(file_path: Path, _repo: object, _now: object) -> dict:
+        if mutate:
+            current = pending.PendingDelivery.model_validate_json(file_path.read_text(encoding="utf-8"))
+            current.status = "blocked"
+            current.pid = None
+            current.cause = "mutated"
+            pending._save(file_path, current)
+        raise exc
+
+    monkeypatch.setattr(pending, "_tick_row", boom)
+    return pending, path, before
+
+
+@pytest.mark.parametrize(
+    ("exc", "missing"),
+    [
+        (ImportError("cannot import name 'fresh'", name="core.line.routing"), "core.line.routing"),
+        (ModuleNotFoundError("No module named 'core.line.fresh'", name="core.line.fresh"), "core.line.fresh"),
+        (ImportError("cannot import name 'fresh'"), None),
+        (ModuleNotFoundError("No module named 'core.line.fresh'"), None),
+    ],
+)
+def test_import_error_in_tick_is_stale_cause_and_keeps_wait_json(
+    tmp_path: Path, monkeypatch, exc: ImportError, missing: str | None,
+) -> None:
+    pending, path, before = _raise_from_tick(monkeypatch, tmp_path / "pending", exc, mutate=True)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=0)[0]
+    assert result["status"] == "check_failed"
+    assert result["cause"] == pending.STALE_DISPATCHER_IMPORT
+    if missing is None:
+        assert "missing" not in result
+        assert not exc.name
+    else:
+        assert result["missing"] == exc.name == missing
+    assert path.read_bytes() == before
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.pid == 4242
+
+
+def test_real_importerror_name_is_the_missing_field(tmp_path: Path, monkeypatch) -> None:
+    try:
+        from core.line.fleet_dispatcher import _usr508_symbol_absent  # type: ignore[attr-defined]  # noqa: F401
+    except ImportError as exc:
+        caught = exc
+    else:
+        raise AssertionError("o simbolo ausente deveria falhar")
+    pending, path, before = _raise_from_tick(monkeypatch, tmp_path / "pending", caught, mutate=True)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=0)[0]
+    assert result["cause"] == "stale_dispatcher_import"
+    assert result["status"] == "check_failed"
+    assert caught.name
+    assert result["missing"] == caught.name
+    assert path.read_bytes() == before
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "running"
+    assert saved.pid == 4242
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("store down"), OSError("disk"), ValueError("bad row")])
+def test_other_tick_exceptions_keep_the_class_name(tmp_path: Path, monkeypatch, exc: Exception) -> None:
+    pending, path, before = _raise_from_tick(monkeypatch, tmp_path / "pending", exc, mutate=True)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=0)[0]
+    assert result == {"ticket": "USR-447", "status": "check_failed", "cause": type(exc).__name__}
+    assert path.read_bytes() != before
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    assert saved.pid is None
+    assert saved.cause == "mutated"
+
+
+def _track_cycle(dispatcher, events: list[str]):
+    original = dispatcher.run_cycle
+    seen: list[dict] = []
+
+    def wrapped():
+        events.append("cycle")
+        cycle = original()
+        seen.append(cycle)
+        return cycle
+
+    dispatcher.run_cycle = wrapped
+    original_exec = dispatcher._exec_fn
+
+    def tracking(executable: str, argv: list[str]):
+        events.append("exec")
+        return original_exec(executable, argv)
+
+    dispatcher._exec_fn = tracking
+    return seen
+
+
+def test_stale_import_restarts_once_after_cycle_when_head_is_unchanged(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    directory = tmp_path / "pending"
+    _pending, path, before = _raise_from_tick(
+        monkeypatch, directory,
+        ImportError("cannot import name 'fresh'", name="core.line.routing"),
+        mutate=True,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        lambda: _SHA_A,
+        launch=None,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+    handle, child, checkout, removed, planted = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    try:
+        dispatcher.run_forever(stop=_stop_after(1))
+        assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == dispatcher._startup_sha == _SHA_A
+    finally:
+        os.environ.pop(fd.IMPORT_RESTART_SHA_ENV, None)
+        planted._children.pop(508508, None)
+    assert events == ["cycle", "exec"]
+    assert execs == [(
+        sys.executable,
+        [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop"],
+    )]
+    cycle = seen[0]
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+    assert cycle["resumptions"][0]["status"] == "check_failed"
+    assert cycle["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert cycle["resumptions"][0]["missing"] == "core.line.routing"
+    assert path.read_bytes() == before
+    _assert_live_work_untouched(handle, child, checkout, removed)
+
+
+def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.setenv(fd.IMPORT_RESTART_SHA_ENV, _SHA_A)
+    directory = tmp_path / "pending"
+    _pending, path, before = _raise_from_tick(
+        monkeypatch, directory,
+        ModuleNotFoundError("No module named 'core.line.fresh'", name="core.line.fresh"),
+        mutate=True,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        lambda: _SHA_A,
+        launch=None,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert execs == []
+    assert events == ["cycle", "digest", "sentinel", "sleep:0"]
+    cycle = seen[0]
+    assert cycle["code_sha"] == _SHA_A
+    assert cycle["code_sha_changed"] is False
+    assert cycle["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert cycle["resumptions"][0]["missing"] == "core.line.fresh"
+    assert cycle["resumptions"][0]["status"] == "check_failed"
+    assert path.read_bytes() == before
+    assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
+
+
+def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(tmp_path, _ShaSeq([_SHA_A, _SHA_B]), launch=None)
+    dispatcher.run_cycle = lambda: events.append("cycle")
+    dispatcher.digest_hook = lambda: events.append("digest")
+    dispatcher.sentinel_hook = lambda: events.append("sentinel")
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert events == []
+    assert execs == [(
+        sys.executable,
+        [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop"],
+    )]
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+
+
+def test_stale_import_does_not_restart_in_dry_run_or_when_launch_is_present(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: None)
+    forged = {"resumptions": [{"ticket": "USR-447", "status": "check_failed", "cause": "stale_dispatcher_import"}]}
+
+    dry, dry_execs = _sha_dispatcher(tmp_path / "dry", lambda: _SHA_A, dry_run=True, launch=None)
+    dry.run_cycle = lambda: forged
+    dry.run_forever(stop=_stop_after(1))
+    assert dry_execs == []
+
+    launched, launched_execs = _sha_dispatcher(tmp_path / "launch", lambda: _SHA_A)
+    launched.run_cycle = lambda: forged
+    launched.run_forever(stop=_stop_after(1))
+    assert launched_execs == []
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+
+
+def test_stale_import_exec_failure_is_logged_and_does_not_exec_twice(
+    tmp_path: Path, monkeypatch, caplog,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    caplog.set_level(logging.ERROR, logger="darkfac.line.fleet_dispatcher")
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    directory = tmp_path / "pending"
+    _pending, path, before = _raise_from_tick(
+        monkeypatch, directory, ImportError("cannot import name 'fresh'", name="core.line.routing"), mutate=True,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+
+    def boom(_executable: str, _argv: list[str]) -> None:
+        raise OSError("exec recusado")
+
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        lambda: _SHA_A,
+        launch=None,
+        exec_fn=boom,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    try:
+        dispatcher.run_forever(stop=_stop_after(2))
+        assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
+    finally:
+        os.environ.pop(fd.IMPORT_RESTART_SHA_ENV, None)
+    assert execs == []
+    assert events == [
+        "cycle", "exec", "digest", "sentinel", "sleep:0",
+        "cycle", "digest", "sentinel", "sleep:0",
+    ]
+    assert seen[0]["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert seen[1]["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert seen[0]["code_sha_changed"] is False
+    assert path.read_bytes() == before
+    assert "exec recusado" in caplog.text
+    assert "reinicio do despachante falhou apos import obsoleto" in caplog.text
+
+
+def test_stale_import_without_complete_sha_does_not_replace(tmp_path: Path, monkeypatch) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.delenv(fd.IMPORT_RESTART_SHA_ENV, raising=False)
+    directory = tmp_path / "pending"
+    _raise_from_tick(
+        monkeypatch, directory, ImportError("cannot import name 'fresh'", name="core.line.routing"), mutate=False,
+    )
+    monkeypatch.setattr(pending, "queue_dir", lambda: directory)
+    events: list[str] = []
+    dispatcher, execs = _sha_dispatcher(
+        tmp_path / "state",
+        _ShaSeq([_SHA_A, _SHA_A, None]),
+        launch=None,
+        digest_hook=lambda: events.append("digest"),
+        sentinel_hook=lambda: events.append("sentinel"),
+    )
+    seen = _track_cycle(dispatcher, events)
+    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    dispatcher.run_forever(stop=_stop_after(1))
+    assert execs == []
+    assert events == ["cycle", "digest", "sentinel", "sleep:0"]
+    assert seen[0]["resumptions"][0]["cause"] == "stale_dispatcher_import"
+    assert seen[0]["code_sha"] is None
+    assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
+
+
+def test_main_forwards_original_argv_and_once_skips_the_loop(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Dispatcher:
+        def __init__(self, _config: object, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run_cycle(self) -> dict[str, bool]:
+            captured["cycle"] = True
+            return {"ok": True}
+
+        def run_forever(self) -> None:
+            captured["forever"] = True
+
+    monkeypatch.setattr(fd, "FleetDispatcher", Dispatcher)
+    monkeypatch.setattr(fd, "configure_logging", lambda *_a, **_k: None)
+
+    assert fd.main(["--loop", "--cycle-sec", "7", "--resume-only"]) == 0
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["launch_argv"] == ["--loop", "--cycle-sec", "7", "--resume-only"]
+    assert captured.get("forever") is True
+    assert "cycle" not in captured
+
+    captured.clear()
+    assert fd.main(["--once", "--dry-run", "--loop"]) == 0
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["launch_argv"] == ["--once", "--dry-run", "--loop"]
+    assert kwargs["dry_run"] is True
+    assert captured.get("cycle") is True
+    assert "forever" not in captured

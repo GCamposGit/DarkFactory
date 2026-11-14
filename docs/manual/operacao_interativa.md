@@ -1,4 +1,4 @@
-<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, run_ticket.py -->
+<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py -->
 # Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
 Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
@@ -27,6 +27,8 @@ python C:\dev\DarkFac\run_ticket.py USR-XXX
 Antigravity nunca e elegivel em modo headless ou frota: `fleet_dispatcher`, workers, `--fleet` e pump nao podem usa-lo. Esses caminhos seguem a rota de desenvolvimento do despachante. Se harnesses locais de alta capacidade estiverem esgotados para o estagio `planning` ou `development`, o roteador aciona dinamicamente a contingencia OpenRouter via Fronteira de Pareto (`resolve_pareto_openrouter_model`, USR-440/USR-444) sem modelos hard-coded, garantindo classe GPT Sol / Claude Opus para planejamento, resolucao automatica de wire IDs de API e governanca estrita de orcamento.
 
 O `run_ticket.py` revalida a cota de `development` antes de cada fatia do plano, com um `pick` fresco sobre a leitura daquele momento. Um plano de uma fatia faz esse pick uma vez. Um plano de várias fatias repete o pick antes de cada agente, e a leitura pode trocar o harness write entre fatias. O pin `--harness` e o `--force` do preflight nao iniciam, numa fatia, um harness com headroom conhecido de 15% ou menos, ou sem leitura. Com `--fleet`, esse pick usa `execution_context` headless: Antigravity nao inicia a fatia mesmo sendo o harness de operacao, com Google acima de 15% e os demais no piso. Sem rota elegivel o processo espera (codigo 75, JSON com `cause` `route_wait`, `stage` `BUILD` e o caminho da worktree), nao chama o agente da fatia, nao comeca a entrega e a worktree permanece, inclusive um arquivo gravado durante o PLAN e o trabalho das fatias anteriores. `_discard_untouched_workspace` e `_report_workspace_fate` nao removem esse diretorio.
+
+Depois da worktree e antes de PLAN, o mesmo launcher recusa o interpretador fora do contrato do portao (USR-489): Python anterior a 3.12, modulo ausente em `requirements.txt` (incluindo `importlinter`, pacote `import-linter`) ou arquivo ilegivel. A saida e 2, PLAN nao comeca, e o stderr traz `host_preflight_failed` com o comando de correcao.
 
 Antes dessa worktree e do PLAN, a admissao (`core.line.admission`) confirma rota de planning, de development e de review em outra familia, alem de um worker de gate com capacidade explicita (`workers` inteiro maior que zero, `busy` false e leitura com menos de 90 segundos). Falta de rota, capacidade zero, worker ocupado, leitura stale, colecao vazia ou health generico (`status=ok` sem esses campos) encerra com exit 75, JSON `route_wait` e o ticket em `planned`, sem criar worktree. Um `allow` nao substitui o `pick` de cada estagio. Com `--fleet`, a admissao de build tambem e headless e deixa Antigravity fora das caps de escrita.
 
@@ -85,12 +87,21 @@ O monitoramento da fabrica opera de forma agnostica e centralizada em `core/line
   - `core/ops/turn_guard.py`: executa checagem nao-bloqueante nos encerramentos de turno.
   - `scripts/run_sentinel.ps1`: script PowerShell para execucao direta ou agendamento no Task Scheduler do Windows.
 - **Alertas claros no Telegram**: em caso de parada por falta de rota (todas as contas <= 15%) ou jobs travados em voo sem escrita em log ha mais de 45m, dispara notificacao clara em linguagem para leigo conforme padrao USR-438 via `NotificationService`.
+- **Fila ociosa (USR-501)**: host livre, rota de desenvolvimento e ticket elegivel (`select_tickets` ou `queue_remaining` do ciclo da frota), com `running_fleet_runs` e `in_flight` vazios, gravam `idle_since_epoch`. O achado `idle_queue` e o alerta no Hub e no Telegram (`NotificationService`, canal ALL) saem so depois de passar de 15 minutos (900s). A mesma chave de episodio nao reenvia. Com a condicao zerada, um episodio novo pode alertar. Os status `healthy`, `idle`, `degraded`, `stalled_no_route` e `stalled_in_flight` permanecem.
+- **Amostra leve (USR-501 T2)**: dentro dos 2700s, `maybe_run_sentinel` nao chama `check_factory_status`, `pick` nem `read_quotas`. O relogio de 15 min avanca com o estado do despachante, a rota em cache e `running_fleet_runs`. O ticket elegivel dessa amostra sai de `queue_remaining`; estado ausente nao faz `git fetch` nem trata `pending_tickets` como fila. A sonda de 45 min e `--force` seguem com o relatorio de rotas e cotas.
+- **Status ativo sem processo (USR-501 T3)**: `in_flight` de host local, `pending_delivery` com status `running` e reserva local com status `active` geram o achado `status_without_process` quando o ticket e o pid nao estao em `running_fleet_runs` e o heartbeat passou de 120s. Processo vivo ou heartbeat com ate 120s nao alerta. Run cujo host esta fora de grokbox, notebook e desktop nao entra na amostra. O alerta vai ao Hub e ao Telegram (`NotificationService`, canal ALL) uma vez por episodio. O sentinela nao grava reserva, entrega pendente, trava nem estado do despachante, e nao muda o status da linha. No briefing esse achado aparece como `active_without_process`.
+- **Trava anterior ao merge (USR-501 T4)**: `line.lock` e `line.fleet-*.lock` geram o achado `stale_lock` quando `LineLockInfo.started_at` e anterior ao committer time do `merge_sha` em `merge.json` do mesmo ticket. Trava adquirida depois desse merge, trava sem merge resolvivel e merge de outro ticket ficam em silencio. Se a leitura de git falha, o mtime do arquivo nao substitui o committer time. O alerta vai ao Hub e ao Telegram (`NotificationService`, canal ALL) uma vez por episodio e nao apaga a trava.
+- **Amostra de 15 minutos sem sonda de cota (USR-501)**: dentro da janela de 45 minutos, a amostra leve avalia `idle_queue`, o status ativo sem processo e `stale_lock` sem `pick` nem `read_quotas`. O briefing lista `idle_queue`, `active_without_process` e `stale_lock` quando esses achados estao presentes.
 
 ## Capacidade de escrita interativa no roteador (USR-436)
 
 O roteador valida as capacidades com `agent_cli.supports(harness, mode)` antes de ranquear candidatos para o estagio `development`. Com `operating_harness=antigravity` em sessao interativa (fora do modo headless), o Antigravity declara capacidade de escrita para desenvolvimento no chat, viabilizando sua eleicao quando a cota estiver saudavel acima do piso de 15%. Em execucao headless, na frota ou com outro operador, Antigravity permanece estritamente somente-leitura.
 
 Na recuperacao USR-452, uma falha real de teste com contagem no HARNESS_RESULT nao e tratada como worker indisponivel por conter essa mensagem no traceback. O launcher corrige o candidato antes de repetir o portao; nao chama o owner para resolver essa classificacao tecnica.
+
+## Negação ao alterar o motor no chat (USR-494 T2)
+
+Self-Modification, ou `permission denied` ao editar `core/line`, `core/harness`, `run_ticket.py` ou `scripts/line_validate.py`, grava `self_modification` e a tag `line-block` no control store, uma vez. O run não relança essa edição. `protected_path` e `permission denied` de banco ou ACL não entram nessa causa. A linha impressa é `[ERRO NA ENTREGA] causa: self_modification`. A fábrica abre uma ação do owner com um único comando, `python -m core.line.express_lane run --ticket <ID>`. Registrar de novo devolve a mesma ação aberta. O comando lista todas as falhas do host, inclusive o piso de cota, e só então executa o ticket.
 
 ## Diagnostico de holds por ticket (USR-484)
 
@@ -107,5 +118,14 @@ CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
 retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
 nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
 fica preservada para retomada automatica. Esgotar essa tentativa registra falha
-tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+tecnica e tenta reabrir o ticket em `planned` com causa `ci_recovery_budget_exhausted`.
+O comentario no PR, com a causa e o ID, so sai depois que essa reabertura ficou
+duravel em `planned` ou `hold`. Se `requeue_ticket` falha, o marcador `exhausted`
+sai de `ci_recovery.json`, o comentario de sucesso nao e publicado e a espera
+continua reintentavel. A espera so encerra como terminal depois dessa transicao,
+sem exigir evidencia de deploy.
 `run_ticket.py --recovery --run-id <id>` ativa a reserva canonica de uma entrega global e usa a identidade recebida do dispatcher. O launcher verifica o gate antes de iniciar qualquer agente; `gate_busy` retorna como espera estruturada.
+
+## Revisao sem outra familia disponivel
+
+A sessao interativa e a frota usam a mesma cascata de revisao (USR-488): outra familia por harness, outra familia pelo OpenRouter, mesma familia com outro modelo e, por fim, o mesmo modelo com persona adversarial. O nivel usado fica registrado no veredito; so sem nenhum nivel a admissao espera. Detalhes em [roteamento](roteamento.md).

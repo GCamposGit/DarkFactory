@@ -51,7 +51,8 @@ encerra com exit 75 (`EXIT_ROUTE_WAIT`). O stdout recebe um JSON com `ok` false,
 na fila. A worktree não é criada e o dry run não imprime `[DRY RUN]`.
 
 A revisão prospectiva usa outro harness que a rota de build (o nome do harness, sem distinção de
-maiúsculas). A mesma família produz `review_same_family`. O harness que escreveria é o pin `--harness`
+maiúsculas). Uma rota de mesma família sem nível de contingência produz `review_same_family`; a cascata
+do USR-488 (`docs/manual/roteamento.md`) tenta antes outra família, OpenRouter, outro modelo e persona. O harness que escreveria é o pin `--harness`
 quando ele declara escrita; em contexto headless o pin Antigravity continua fora da escrita e a revisão
 é comparada com o harness que o `pick` de `development` elegeu. Um pin não inventa rota quando esse
 `pick` devolve `None`.
@@ -63,6 +64,17 @@ observação com menos de 90 segundos. As causas de espera são `gate_capacity_z
 `{"status": "ok"}`). `status` não entra na conta. Um worker utilizável na coleção libera o gate. Entre
 falhas, a causa segue a ordem zero, busy, stale, genérico: coleção vazia e health genérico permanecem
 espera e não cobrem um zero, um busy ou um stale.
+
+`DARKFAC_REMOTE_HARNESS=off` não tira os workers da leitura da admissão: o modo off só
+impede o despacho do portão. A fonte é `DARKFAC_ADMISSION_WORKERS` quando a variável está
+definida, mesmo vazia; senão `DARKFAC_TEST_WORKERS` quando definida; senão o default de
+`worker_urls`. URL em `DARKFAC_FLEET_DISABLED_HOSTS` não é sondada. Health cujo `node_id` ou
+`hostname` cai em host desabilitado sai da coleção e não admite. `CI` e
+`DARKFAC_HARNESS_WORKER_JOB` continuam com lista vazia. Worker local com `workers` 0 não
+bloqueia a frota quando um remoto está livre (`workers` > 0, `busy` false, observação com
+menos de 90 segundos): o `evidence_ref` do gate nesse allow é `gate://<host>` desse remoto.
+Health só `{"status": "ok"}` não cobre o zero local; sem worker utilizável a espera segue
+`gate_capacity_zero` com `gate://local`.
 
 `allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
 novo na leitura daquele momento.
@@ -232,6 +244,10 @@ uma nova revisão independente.
 O revisor com filesystem continua recebendo o diff integral no prompt e os mesmos bytes em `candidate.diff` na worktree. O OpenRouter não lê disco: `provider.generate` recebe no prompt os critérios, o trecho sanitizado e os sha256 do manifesto. A SPEC sanitizada entra uma vez; `review_context` deixa de repetir o `SPEC.md` cru nesse transporte. SPEC ou tickets ausentes, vazios ou ilegíveis devolvem `review_context_unavailable`, sem chamar o modelo e sem gravar `review_verdict.json` com approve. A revisão continua recusando a mesma família do implementador e não escreve nem apaga `validation.json`. O `ticket_id` do `generate` é o `run_id` quando ele é um ticket `USR-N`; senão vem de `DARKFAC_TICKET_ID`. Sem um desses dois, o evento de uso fica nulo. O texto do prompt e o corpo da resposta não são lidos para descobrir o ticket. A resposta normalizada guarda `finish_reason`, a contagem `completion_tokens` e `truncated`. `truncated` fica verdadeiro quando `finish_reason` é `length` ou quando `completion_tokens` chega a 4096. Esse caso devolve `review_output_truncated` e nunca aprova. Não trate uma resposta cortada como um veredito aproveitável; uma nova tentativa precisa receber saída completa.
 
 
+### Negação ao alterar o motor (USR-494 T2)
+
+Self-Modification, ou `permission denied` em `core/line`, `core/harness`, `run_ticket.py` ou `scripts/line_validate.py`, grava a causa `self_modification` e a tag `line-block` no control store. A mesma gravação não duplica tag nem causa. O launcher imprime `[ERRO NA ENTREGA] causa: self_modification` e o run não relança essa edição. `protected_path` e `permission denied` de banco ou ACL seguem nas causas deles. O classificador lê a causa na linha oficial, não na cauda do log. A parada abre uma ação do owner com um único comando, `python -m core.line.express_lane run --ticket <ID>` (`core/line/express_lane.py`). Registrar de novo devolve a ação aberta. O comando lista todas as falhas do host, inclusive o piso de cota, e não lança o ticket enquanto faltar alguma. Com o host válido, lança `run_ticket.py <ID> --fleet --host-id <host>`. Ticket já em voo ou terminal termina sem outro processo.
+
 ## Planejamento
 
 Rotas de planejamento: Claude (role `planning.claude`) ou Codex (role `planning.codex`), ambos com modelo tier `high` no registro.
@@ -245,6 +261,10 @@ explicito (padrao do CLI) nao tem nivel declarado e nao e elegivel. O fallback d
 Sem modelo alto disponivel (cota, cooldown ou capacidade do host), `pick()` devolve `None` e o estagio
 espera pela semantica de `core/line/route_wait.py` (`retry` com `not_before`, e `waiting_human` somente
 apos o orcamento de relogio). Nunca ha queda para modelo barato e nenhum agente e invocado.
+
+## Contrato Python antes de PLAN (USR-489)
+
+`_stage_plan` chama `enforce_manual_host_contract` (`core/orchestrator/manual_host_preflight.py`) antes de INTAKE, GRILL e PLAN. Python anterior a 3.12, modulo ausente ou `requirements.txt` ilegivel encerra com exit 2 e nao chama PLAN. As dependencias sao as linhas desse arquivo, o mesmo que o portao instala; `import-linter` e conferido como o modulo `importlinter`. A mensagem traz `host_preflight_failed` e o comando de correcao (`py -3.12 -m pip install -r requirements.txt` no Windows, ou `pip install` da distribuicao ausente no interpretador selecionado).
 
 ## Estrutura do run_ticket (USR-375 S3)
 
@@ -291,7 +311,12 @@ CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
 retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
 nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
 fica preservada para retomada automatica. Esgotar essa tentativa registra falha
-tecnica em `validating`; nao solicita autorizacao de negocio ao owner.
+tecnica e tenta reabrir o ticket em `planned` com causa `ci_recovery_budget_exhausted`.
+O comentario no PR, com a causa e o ID, so sai depois que essa reabertura ficou
+duravel em `planned` ou `hold`. Se `requeue_ticket` falha, o marcador `exhausted`
+sai de `ci_recovery.json`, o comentario de sucesso nao e publicado e a espera
+continua reintentavel. A espera so encerra como terminal depois dessa transicao,
+sem exigir evidencia de deploy.
 
 USR-473: espera de deploy exige SHA do recibo de merge e evidencia coincidente
 do candidato validado e aprovado. Recibo inconsistente permanece visivel como
@@ -354,3 +379,5 @@ gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
 comportamental cobre esse ciclo inteiro na mesma worktree. Revisoes recusadas
 de candidatos anteriores permanecem preservadas; o novo candidato exige suas
 proprias provas de portao, revisao e producao.
+
+Na admissao, "mesma familia" compara a familia do modelo, nao o nome do harness: escritor e revisor via OpenRouter com modelos de familias diferentes sao independentes.

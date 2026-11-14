@@ -50,7 +50,7 @@ Fonte única das regras para todo agente e harness (Claude Code, Codex, Grok Bui
 Comando oficial do portão:
 
 ```powershell
-python C:\dev\DarkFac\core\harnessunner.py --quick
+python C:\dev\DarkFac\core\harness\runner.py --quick
 ```
 
 - **PR**: roda os testes afetados (`python -m core.harness.affected --run`) mais os contratos `lint-imports`, `python scripts/complexity_ratchet.py` e `python -m core.harness.docs_sync --base origin/main --head HEAD`.

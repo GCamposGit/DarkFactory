@@ -65,3 +65,46 @@ ticket: `ticket_hold` fica visível no ciclo e no briefing, e só um digest novo
 ou contexto libera. O runner aponta caminhos sujos em `[DIRTY_PATHS]`, preservando a linha
 canônica de erro usada pelo classificador. Esta lição registra o comportamento operacional,
 sem afirmar CI, merge ou deploy.
+
+## Aprendizado da entrega USR-494 T1
+
+A tag `line-block` é a via expressa da frota. O despachante lê só essa tag no ticket `planned`:
+título, campo extra ou tag parecida não furam a fila. Quem está elegível sai no primeiro host
+livre, antes da lista `--recovery-tickets` e do restante. Tag excluída, dependência aberta e
+cooldown continuam de fora. Com `recovery.active=false`, os hosts seguintes seguem a lista e a
+fila regular. Com `recovery.active=true`, há um único slot: o `line-block` o ocupa se ninguém
+está em voo, e não abre outra entrega se já houver uma. O lançamento segue
+`run_ticket.py <id> --fleet --host-id <host>`. Portão, revisão e piso de cota não mudam. Esta
+lição não afirma CI, merge ou deploy.
+
+## Aprendizado da entrega USR-494 T2
+
+Negar a edição do motor no chat manda o ticket para a via expressa. Self-Modification, ou
+permission denied em `core/line`, `core/harness`, `run_ticket.py` ou `scripts/line_validate.py`,
+grava a causa `self_modification` e a tag `line-block` no control store. Repetir a gravação não
+duplica tag nem causa. `protected_path` e permission denied de banco ou ACL ficam nas causas
+deles. O run que recebeu a negação não relança a mesma edição. A frota lê `self_modification` na
+linha `[ERRO NA ENTREGA] causa:`, não numa menção perdida na cauda do log. Esta lição não afirma
+CI, merge ou deploy.
+
+## Aprendizado da entrega USR-494 T3
+
+A causa `self_modification` entrega um único comando ao owner:
+`python -m core.line.express_lane run --ticket <ID>`. A ação aberta guarda só esse
+comando; registrar de novo devolve a mesma ação. O comando lê o host inteiro e
+imprime cada requisito ausente, inclusive o piso de cota de 15%. Com falha, não
+lança o ticket. Com o host válido, lança uma vez
+`run_ticket.py <id> --fleet --host-id <host deste host>`. Ticket já em voo ou
+terminal termina sem criar outro processo. Portão, revisão e piso do lançamento
+não mudam. Esta lição não afirma CI, merge ou deploy.
+
+## Aprendizado da entrega USR-494 T4
+
+A segunda falha classificada `self_modification` do mesmo ticket avisa o owner
+uma vez. A primeira só grava o episódio. O aviso sai no canal ALL com a causa
+e o comando `python -m core.line.express_lane run --ticket <ID>`. Repetir o
+mesmo episódio não manda outro aviso. A chave é o ticket e a causa: a cauda do
+log não abre episódio. Entrega concluída, ou outra causa classificada, encerra
+o episódio e uma repetição nova pode avisar uma vez. O aviso não liga
+`recovery.active`. O hold do ticket segue o limiar que já estava configurado.
+Esta lição não afirma CI, merge ou deploy.

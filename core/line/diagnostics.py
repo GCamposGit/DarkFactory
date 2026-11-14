@@ -225,5 +225,5 @@ def persist(ws: workspace.RunWorkspace, message: str, job_key: str) -> bool:
         workspace.push(ws)
         return True
     except Exception as exc:  # noqa: BLE001 - diagnostics must never change a stage outcome
-        logger.warning("Could not persist diagnostics for run %s: %s", ws.run_id, type(exc).__name__)
+        logger.warning("Could not persist diagnostics for run %s: %s: %s", ws.run_id, type(exc).__name__, redacted_head(str(exc)))
         return False

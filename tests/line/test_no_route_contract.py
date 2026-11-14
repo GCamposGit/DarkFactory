@@ -39,6 +39,10 @@ AGENT_STAGE_MODULES = (
 
 # Modules that call `pick` on purpose without parking the run on a missing route.
 NOT_A_ROUTE_PARK: dict[str, str] = {
+    "review_cascade.py": (
+        "USR-488: pure selection of the review route. It returns None when no level has a route and the callers, "
+        "admission and stage_review, are the ones that wait; it never runs or parks a stage."
+    ),
     "feeder_cycle.py": (
         "USR-304: optional admission quota gate (DARKFAC_FEEDER_QUOTA_GATE) only asks whether ANY harness is above "
         "the 15% floor before admitting tickets; it never runs or parks a stage, so there is no route to wait for."

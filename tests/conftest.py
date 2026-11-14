@@ -19,6 +19,7 @@ from typing import Any, Iterator
 # inherited safely by pytest subprocesses started during collection.
 AMBIENT_REMOTE_INFRA_ENV = (
     "DARKFAC_TEST_WORKERS",
+    "DARKFAC_ADMISSION_WORKERS",
     "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
     "DARKFAC_REMOTE_HARNESS",
     "DARKFAC_WORKER_TOKEN",
