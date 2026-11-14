@@ -13,8 +13,5 @@
 - A demonstração exigirá integração real e cenários de alteração de advisory, cache, concorrência, retomada e rechecagem após correção, conforme as premissas fornecidas.
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] Para IaC, a expansão deve avaliar apenas vulnerabilidades de componentes referenciados ou também configurações inseguras da infraestrutura? (id=q1)
-- [intent] SBOM será uma entrada existente para análise ou a entrega também deverá gerar SBOM dos projetos e imagens? (id=q2)
+- [intent] Para IaC, a expansão deve avaliar apenas vulnerabilidades de componentes referenciados ou também configurações inseguras da infraestrutura? -> **Componentes e versões referenciados** (respondida pelo owner)
+- [intent] SBOM será uma entrada existente para análise ou a entrega também deverá gerar SBOM dos projetos e imagens? -> **Consumir e gerar SBOM** (respondida pelo owner)
