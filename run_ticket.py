@@ -2471,6 +2471,10 @@ def _retry_red_ci(
     record = ticket_engine.workspace.context_dir(ticket_engine.run_workspace(ticket)) / "ci_recovery.json"
     previous = json.loads(record.read_text(encoding="utf-8")) if record.exists() else {}
     if previous.get("attempts", 0) >= 1:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        temporary = record.with_suffix(".tmp")
+        temporary.write_text(json.dumps({**previous, "attempts": 1, "exhausted": True}), encoding="utf-8")
+        os.replace(temporary, record)
         return report, f"ci_recovery_budget_exhausted: {feedback}"
     progress.phase("ci", "running", "CI vermelho: devolvendo o log ao agente (1x)")
     result = _invoke_fix_agent(target_worktree, ticket, "ci-vermelho", feedback)
@@ -2486,28 +2490,141 @@ def _retry_red_ci(
     return report, "ci_fix_requires_revalidation" if _changed else f"ci_fix_no_changes: {feedback}"
 
 
+def _status_name(status: Any) -> str:
+    return str(getattr(status, "value", status) or "")
+
+
+def _clear_ci_recovery_exhausted(ticket: UserTicket) -> None:
+    """Remove the exhausted marker so a failed requeue cannot end the wait."""
+    record = ticket_engine.workspace.context_dir(ticket_engine.run_workspace(ticket)) / "ci_recovery.json"
+    try:
+        payload = json.loads(record.read_text(encoding="utf-8")) if record.is_file() else {}
+    except (OSError, ValueError, TypeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.pop("exhausted", None)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    temporary = record.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, record)
+
+
+def _keep_ci_recovery_wait(ticket: UserTicket, target_worktree: Path) -> None:
+    """Put the CI recovery wait back to waiting, without a live pid, so the dispatcher retries it."""
+    from core.line.pending_delivery import CI_RECOVERY_CAUSES, PendingDelivery, RECHECK_SECONDS, _save, queue_dir
+    path = queue_dir() / f"{ticket.id}.json"
+    cause = "ci_fix_requires_revalidation"
+    stage = "review"
+    harness = None
+    try:
+        if path.is_file():
+            current = PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+            stage = current.stage
+            harness = current.implementing_harness
+            if current.cause in CI_RECOVERY_CAUSES:
+                cause = current.cause
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read CI recovery wait for %s: %s", ticket.id, exc)
+    if harness is None:
+        progress = ticket_engine.artifacts_root() / ticket.id / ".darkfac" / "runs" / ticket.id / "progress.json"
+        try:
+            if progress.is_file():
+                harness = json.loads(progress.read_text(encoding="utf-8")).get("harness")
+        except (OSError, ValueError, TypeError):
+            harness = None
+    row = PendingDelivery(
+        ticket_id=ticket.id, worktree=str(target_worktree.resolve()), stage=stage,
+        implementing_harness=harness, resume_delivery=True, next_check=time.time() + RECHECK_SECONDS,
+        status="waiting", cause=cause,
+    )
+    try:
+        _save(path, row)
+    except OSError as exc:
+        logger.warning("Could not keep CI recovery wait for %s: %s", ticket.id, exc)
+
+
+def _release_failed_ci_requeue(ticket: UserTicket, target_worktree: Path) -> None:
+    _clear_ci_recovery_exhausted(ticket)
+    _keep_ci_recovery_wait(ticket, target_worktree)
+
+
+def _reopen_after_ci_budget(ticket: UserTicket, target_worktree: Path, reason: str) -> bool:
+    """Reopen an exhausted CI delivery. Comment only after planned or hold is durable.
+
+    A failed requeue clears ``exhausted`` and leaves the wait retryable. It does not
+    claim that the ticket returned to planned.
+    """
+    from core.line.pending_delivery import SETTLED_CI_REQUEUE_STATUSES
+    store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
+    try:
+        store.requeue_ticket(ticket.id, reason=reason, reopen=True)
+        durable = store.get_ticket(ticket.id)
+    except Exception as exc:  # noqa: BLE001 - the wait must stay retryable when the ledger write fails
+        logger.warning("Could not requeue %s after exhausted CI recovery: %s", ticket.id, exc)
+        _release_failed_ci_requeue(ticket, target_worktree)
+        return False
+    status = _status_name(getattr(durable, "status", None)) if durable is not None else ""
+    if status not in SETTLED_CI_REQUEUE_STATUSES:
+        logger.warning(
+            "Requeue of %s did not reach planned or hold (status=%s)", ticket.id, status or "unknown",
+        )
+        _release_failed_ci_requeue(ticket, target_worktree)
+        return False
+    comment = (
+        f"{reason}: CI recovery budget exhausted for ticket {ticket.id}. "
+        f"The ticket is back in {status} for another delivery attempt."
+    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "comment", "--body", comment, _git_branch(target_worktree)],
+            cwd=target_worktree, capture_output=True, text=True, timeout=30, check=False,
+        )
+        if result.returncode:
+            logger.warning("Could not comment on PR for %s: %s", ticket.id, (result.stderr or "gh failed").strip())
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Could not comment on PR for %s: %s", ticket.id, type(exc).__name__)
+    return True
+
+
 def _park_waiting_human(ticket: UserTicket, evidence: str) -> None:
-    """Legacy helper name: technical failure stays validating, never asks for business authorization."""
+    """Keep non-budget CI repair failures visible without claiming the budget was exhausted."""
     try:
         DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json").update_status(
-              ticket.id, DeliveryStatus.VALIDATING, delivery_evidence=f"technical_failed: {evidence}"
+            ticket.id, DeliveryStatus.VALIDATING, delivery_evidence=f"technical_failed: {evidence}"
         )
-    except Exception as exc:  # noqa: BLE001 - recording the park must not hide the failure itself
-        logger.warning("Could not park %s (%s): %s", ticket.id, evidence[:80], exc)
+    except Exception as exc:  # noqa: BLE001 - failure recording must not mask the CI failure
+        logger.warning("Could not record CI failure for %s (%s): %s", ticket.id, evidence[:80], exc)
+
+
+def _git_branch(worktree: Path) -> str:
+    """Resolve the branch name for gh pr comment's branch selector."""
+    result = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=worktree,
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    if result.returncode or not result.stdout.strip():
+        raise RuntimeError("cannot resolve PR branch")
+    return result.stdout.strip()
 
 
 def _ci_red_twice_result(
     ticket: UserTicket, log: str, target_worktree: Path, current_branch: str, resume_cmd: str,
     progress: ProgressPublisher, as_json: bool, return_result: bool,
 ) -> Any:
-    """Exhausted technical repair stays visible with evidence while independent work continues."""
+    """Record exhausted CI as planned; retain prior handling for other repair failures."""
+    exhausted = log.startswith("ci_recovery_budget_exhausted")
+    cause = "ci_recovery_budget_exhausted" if exhausted else "ci_red_twice"
     message = f"CI vermelho duas vezes no PR: {log}"
-    progress.phase("ci", "failed", message, cause="ci_red_twice")
-    progress.set_outcome(message, "ci_red_twice")
-    _park_waiting_human(ticket, f"ci_red_twice: {log}")
-    print(f"[ERRO] Ticket {ticket.id}: ci_red_twice. Worktree: {target_worktree}", file=sys.stderr)
+    progress.phase("ci", "failed", message, cause=cause)
+    progress.set_outcome(message, cause)
+    if exhausted:
+        _reopen_after_ci_budget(ticket, target_worktree, cause)
+    else:
+        _park_waiting_human(ticket, log)
+    print(f"[ERRO] Ticket {ticket.id}: {cause}. Worktree: {target_worktree}", file=sys.stderr)
     payload = {
-        "exit_code": 1, "ok": False, "cause": "ci_red_twice", "error": log, "ticket_id": ticket.id,
+        "exit_code": 1, "ok": False, "cause": cause, "error": log, "ticket_id": ticket.id,
         "branch": current_branch, "worktree": str(target_worktree), "resume_command": resume_cmd,
     }
     if as_json and not return_result:

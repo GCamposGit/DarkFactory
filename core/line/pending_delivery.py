@@ -18,6 +18,10 @@ from core.paths import state_root
 logger = logging.getLogger(__name__)
 RECHECK_SECONDS = 900
 STALE_DISPATCHER_IMPORT = "stale_dispatcher_import"
+# Red CI repair is still a delivery, even after the ledger was marked completed (USR-509).
+CI_RECOVERY_CAUSES = frozenset({"ci_fix_requires_revalidation", "ci_fix_route_wait"})
+# Exhausted CI recovery is terminal only after one of these durable outcomes.
+SETTLED_CI_REQUEUE_STATUSES = frozenset({"planned", "hold"})
 _children: dict[int, subprocess.Popen] = {}
 
 
@@ -94,6 +98,102 @@ def _route(row: PendingDelivery):
                 execution_context="headless")
 
 
+def _ci_recovery_without_merge(row: PendingDelivery, release: Path, merge_path: Path) -> bool:
+    """True when a red-CI wait has no SHA-bearing merge or deploy receipt."""
+    if row.cause not in CI_RECOVERY_CAUSES:
+        return False
+    for path, sha_field in ((release, "sha"), (merge_path, "merge_sha")):
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(receipt, dict) and receipt.get(sha_field):
+            return False
+    return True
+
+
+def _ci_recovery_path(row: PendingDelivery) -> Path:
+    from core.line.ticket_engine import artifacts_root
+    return artifacts_root() / row.ticket_id / ".darkfac" / "runs" / row.ticket_id / "ci_recovery.json"
+
+
+def _ci_recovery_is_exhausted(row: PendingDelivery) -> bool:
+    """Whether run_ticket recorded that this wait has no more CI repair attempts."""
+    try:
+        return json.loads(_ci_recovery_path(row).read_text(encoding="utf-8")).get("exhausted") is True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _ticket_hold_exists(ticket_id: str) -> bool:
+    """True when admission already holds this ticket. A missing store is not a hold."""
+    from core.line.admission_store import AdmissionStore, AdmissionStoreError
+    from core.paths import state_root
+    path = state_root() / "admission.sqlite3"
+    if not path.is_file():
+        return False
+    try:
+        return any(item.get("ticket_id") == ticket_id for item in AdmissionStore(path).ticket_holds())
+    except (AdmissionStoreError, OSError):
+        return False
+
+
+def _durable_requeue_status(ticket_id: str) -> str | None:
+    """``planned`` or ``hold`` only when that transition is already durable."""
+    from core.demands.queue_store import control_store
+    status = ""
+    try:
+        store = control_store()
+        if not getattr(store, "mock_mode", False):
+            ticket = next((item for item in store.list_tickets() if item.get("id") == ticket_id), None)
+            status = str((ticket or {}).get("status") or "")
+    except (OSError, RuntimeError, TypeError, ValueError, AttributeError):
+        status = ""
+    if status in SETTLED_CI_REQUEUE_STATUSES:
+        return status
+    if _ticket_hold_exists(ticket_id):
+        return "hold"
+    return None
+
+
+def _clear_exhausted_marker(row: PendingDelivery) -> None:
+    """Drop ``exhausted`` so the next due tick can resume instead of closing the wait."""
+    record = _ci_recovery_path(row)
+    try:
+        payload = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return
+    if not isinstance(payload, dict) or "exhausted" not in payload:
+        return
+    payload.pop("exhausted", None)
+    temporary = record.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, record)
+
+
+def _settle_exhausted_ci_recovery(path: Path, row: PendingDelivery, now: float) -> dict | None:
+    """Close the wait only after planned/hold. Otherwise leave it retryable."""
+    if not _ci_recovery_is_exhausted(row):
+        return None
+    if _durable_requeue_status(row.ticket_id) in SETTLED_CI_REQUEUE_STATUSES:
+        path.unlink(missing_ok=True)
+        return {"ticket": row.ticket_id, "status": "terminal"}
+    try:
+        _clear_exhausted_marker(row)
+    except OSError:
+        logger.warning("Could not clear exhausted CI marker for %s", row.ticket_id)
+    row.pid = None
+    row.status = "waiting"
+    if row.cause not in CI_RECOVERY_CAUSES:
+        row.cause = "ci_fix_requires_revalidation"
+    row.next_check = now + RECHECK_SECONDS
+    _save(path, row)
+    return {
+        "ticket": row.ticket_id, "status": "waiting",
+        "next_check": row.next_check, "cause": row.cause,
+    }
+
+
 def _pid_running(row: PendingDelivery) -> bool:
     try:
         process = psutil.Process(row.pid)
@@ -121,6 +221,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             current = PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
             if current.pid != row.pid:
                 return {"ticket": row.ticket_id, "status": current.status}
+            settled = _settle_exhausted_ci_recovery(path, row, now)
+            if settled is not None:
+                return settled
             if rc == 0:
                 row.pid, row.status, row.next_check = None, "waiting", 0
                 _save(path, row)
@@ -134,6 +237,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             return {"ticket": row.ticket_id, "status": "running", "pid": row.pid}
         else:
             row.pid, row.status = None, "waiting"
+    settled = _settle_exhausted_ci_recovery(path, row, now)
+    if settled is not None:
+        return settled
     if row.status == "blocked" or row.next_check > now or is_locked():
         return {"ticket": row.ticket_id, "status": row.status, "next_check": row.next_check}
     store = control_store()
@@ -171,13 +277,17 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
         return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     if ticket.get("status") in {"completed", "cancelled", "canceled"}:
-        if ticket.get("status") == "completed" and (
+        if ticket.get("status") == "completed" and _ci_recovery_without_merge(row, release, merge_path):
+            # The ledger was closed when the PR opened. CI is still red and nothing merged.
+            row.resume_delivery = True
+        elif ticket.get("status") == "completed" and (
                 not release.is_file() or not report.get("deployed") or not report.get("sha")):
             row.status, row.cause = "blocked", "deploy_evidence_missing"
             _save(path, row)
             return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
-        path.unlink()
-        return {"ticket": row.ticket_id, "status": "terminal"}
+        else:
+            path.unlink()
+            return {"ticket": row.ticket_id, "status": "terminal"}
     if ticket.get("status") == "waiting_human":
         return {"ticket": row.ticket_id, "status": "waiting_human"}
     allowed = {Path(w["worktree"]).resolve() for w in list_worktrees(repo_root)}

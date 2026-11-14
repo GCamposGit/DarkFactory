@@ -14520,5 +14520,36 @@
     "dependencies": [],
     "created_at": "2026-11-08T15:17:14.859816Z",
     "updated_at": "2026-11-11T10:32:31.279965Z"
+  },
+  {
+    "id": "USR-509",
+    "project_id": "darkfac",
+    "title": "Retomada de entrega fica blocked deploy_evidence_missing com PR de CI vermelho e nao corrige",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "33e0775414cf8aa827332eb533e2a51148e22b9f",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 11/11 as entregas USR-447 (#845), USR-493 (#844) e USR-449 (#846) abriram PR com CI vermelho (falhas reais e distintas). As linhas de pending_delivery passaram de waiting ci_fix_requires_revalidation para blocked deploy_evidence_missing, sem merge e sem nova tentativa de correcao; os PRs ficam parados e o ticket nao volta a fila.",
+    "core_journey": [
+      "Em 11/11 as entregas USR-447 (#845), USR-493 (#844) e USR-449 (#846) abriram PR com CI vermelho (falhas reais e distintas). As linhas de pending_delivery passaram de waiting ci_fix_requires_revalidation para blocked deploy_evidence_missing, sem merge e sem nova tentativa de correcao; os PRs ficam parados e o ticket nao volta a fila."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "PR aberto com CI vermelho leva a correcao de CI e nova validacao dentro do orcamento, nunca a blocked por falta de deploy",
+      "Esgotado o orcamento, o ticket volta a planned ou hold com causa clara e o PR e marcado",
+      "Teste de comportamento cobre CI vermelho apos PR"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-11T06:38:50.753108Z",
+    "updated_at": "2026-11-14T01:03:41.370182Z"
   }
 ]
