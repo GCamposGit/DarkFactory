@@ -1,4 +1,4 @@
-<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/demands/queue_store.py, core/demands/store.py -->
+<!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/owner_actions/*.py, hub/backend/service*.py, hub/backend/api.py, hub/backend/main.py, hub/backend/models.py, hub/frontend/interventions.js, core/orchestrator/adapters/control_postgres.py, core/ops/briefing.py, deploy/dokploy/docker-compose.hub.yml, .env.example, core/demands/queue_store.py, core/demands/store.py -->
 # Fila de tickets (USR-343)
 
 A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
@@ -72,16 +72,15 @@ attempt anterior sao apagados.
 
 ## Acoes do owner e status (S4b)
 
-- Escritores de `owner_actions` (respostas do Hub via `answer_sync`, espelhos, alertas de CI, CLI)
+- Escritores de `owner_actions` (respostas e cliques do Hub, espelhos, alertas de CI, CLI)
   gravam no control store (`OwnerActionStore` no ledger padrao). Nao existem mais PRs `chore/oa-*`
-  nem `ticket/queue-*`; a leitura mescla o control store sobre o `owner_actions.json`.
+  nem `ticket/queue-*`; o PostgreSQL e a unica fonte de leitura e escrita de OAs. `owner_actions.json` e apenas exportacao.
 - `DemandsStore.save_ticket` e `update_status` gravam a linha em `tickets` do control store no ledger do checkout compartilhado. No ledger da worktree a mesma chamada só atualiza a linha `(project_id, ticket_id)` já presente na fila. `DARKFAC_DEMANDS_PATH` deixa a gravação só no arquivo.
 - Snapshot diario: `python C:\dev\DarkFac\scripts\snapshot_queue.py` (a flag `--force` ignora o
   marcador do dia) escreve `demands.json` e `owner_actions.json` a partir do control store em UM
   commit, publicado em `main` com o token do GitHub App (`core/git/app_token.py`). E idempotente
-  (marcador no diretorio de estado; ledger igual nao gera commit) e roda uma vez por dia dentro do
-  laco de `scripts/sync_usage_to_cloud.py`. Le e escreve so numa worktree
-  descartavel de `origin/main`: o checkout de quem chama nunca fica sujo (USR-414). O control store e mesclado sobre os arquivos de `origin/main` (ids so do arquivo sao sincronizados de volta ao control store antes do export e permanecem) e, se qualquer id existente for perdido ou a contagem de ids cair, o snapshot aborta com erro sem commitar (USR-419, USR-434). O fetch sincroniza a ref `origin/main` antes do checkout da worktree e `next-id` respeita os ids gravados em todo o historico git para evitar reutilizacao de ids.
+  (marcador no diretorio de estado; ledger igual nao gera commit) e deve ser agendado separadamente, fora da publicacao de cotas. Le e escreve so numa worktree
+  descartavel de `origin/main`: o checkout de quem chama nunca fica sujo (USR-414). O export de OAs reflete somente o control store e nunca importa linhas do Git. A protecao contra perda de ids continua valendo para demandas. O fetch sincroniza a ref `origin/main` antes do checkout da worktree e `next-id` respeita os ids gravados em todo o historico git para evitar reutilizacao de ids.
 - `core/infra/node_sync.py` trata os dois ledgers como arquivos gerados: antes do pull do Desktop
   (`/system/update`) e na remediacao do Notebook, edicoes locais sao copiadas para
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
@@ -139,3 +138,31 @@ A mensagem de grill no Telegram traz, por pergunta com recomendacao, o botao
 "Aceitar recomendada": payload `cb:grill:<run_id>#<question_id>:<indice da opcao>`, o mesmo
 caminho dos botoes de opcao (`build_telegram_line_grill_handler`), que grava a resposta e
 acorda o job de grill.
+
+
+### Fonte unica de OAs no DarkHub
+
+Em producao, defina `DARKFAC_OWNER_ACTIONS_MODE=control` e
+`DARKFAC_HF02_DATABASE_URL` com a URL PostgreSQL de escrita usada pela fabrica.
+Nao use uma URL somente leitura. A conexao deve alcancar a mesma base e schema
+dos workers. `DARKHUB_CONTROL_DATABASE_URL` sozinho nao configura a fila de OAs.
+Para desenvolvimento/testes isolados, selecione `DARKFAC_OWNER_ACTIONS_MODE=file`;
+`DARKFAC_OWNER_ACTIONS_PATH` escolhe o arquivo. Falha de conexao nunca seleciona arquivo
+nem SQLite em memoria. O SQLite local continua disponivel no control store da fabrica.
+
+Na inicializacao, o Hub importa `hub/data/owner_actions/resolutions.json` e `dynamic.json`
+uma unica vez e grava `control_migration_v1.json` no mesmo volume depois de persistir tudo.
+Done no banco e terminal; a migracao pode ser retomada apos falha parcial. Resolucao sem
+definicao e arquivo corrompido impedem a migracao e deixam a fila indisponivel, com erro
+no log. Preserve o volume e os arquivos legados ate confirmar a migracao. Depois do
+marcador, eles sao ignorados. Nao existe RemoteLedger nem reconciliacao por `answer_sync`.
+
+GET de OAs/intervencoes e mutacoes devolvem HTTP 503, `available=false`, `ok=false`
+quando nao ha conexao com o control store. O painel remove a lista anterior e mostra
+"Fila indisponivel: sem conexao com o banco". `read_at` identifica a ultima leitura
+concluida e aparece no topo da fila, inclusive quando vazia.
+
+Validacao apos deploy: verificar o marcador de migracao no volume, comparar ids/status
+do Hub com o banco, fechar uma OA de teste e conferir persistencia apos reinicio. Durante
+indisponibilidade controlada do banco, GET e POST devem devolver 503 e nenhuma mutacao
+pode afirmar sucesso. Este procedimento nao foi executado em producao nesta entrega.

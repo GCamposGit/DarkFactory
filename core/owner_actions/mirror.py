@@ -104,6 +104,7 @@ def human_request_to_action(request: Any) -> OwnerAction:
         verify=redact(verify),
         created_at=request.created_at,
         created_by="production-line",
+        human_request_identity=(request.run_id, request.blocking_stage),
     )
 
 

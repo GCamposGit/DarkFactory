@@ -2,7 +2,7 @@
 
 Writers (Hub answers, mirrors, alerts, CLI) land in the control store instead of editing the
 git-tracked ledger and opening ``chore/oa-*`` PRs. ``owner_actions.json`` becomes a daily snapshot
-(``scripts/snapshot_queue.py``). Readers merge the control rows over the file (control wins).
+(``scripts/snapshot_queue.py``). In control mode the control store is the only source of truth for reads and writes.
 """
 
 from __future__ import annotations
@@ -27,46 +27,42 @@ def is_default_ledger(path: Path) -> bool:
         return False
 
 
-def list_control_rows() -> list[dict[str, Any]]:
-    """Rows held by the control store; ``[]`` when it does not exist yet or is unreachable."""
-    from core.demands.queue_store import control_store
+class ControlQueueUnavailable(RuntimeError):
+    """The control store is configured but cannot be read or written (never masked as an empty queue)."""
+
+
+def is_configured() -> bool:
+    """Whether configuration selects PostgreSQL or an existing local control database."""
     from core.paths import state_root
 
-    if not os.environ.get("DARKFAC_HF02_DATABASE_URL") and not (state_root() / "control.db").exists():
-        return []
+    return bool(os.environ.get("DARKFAC_HF02_DATABASE_URL", "").strip()) or (state_root() / "control.db").exists()
+
+
+def list_control_rows() -> list[dict[str, Any]]:
+    """Rows held by the control store; configuration and connection failures raise.
+
+    Raises ``ControlQueueUnavailable`` when the store is configured but unreachable.
+    """
+    from core.demands.queue_store import control_store
+
+    if not is_configured():
+        return []  # local store not created yet: a genuinely empty queue, not a masked failure
     try:
         return [r for r in control_store().list_owner_actions() if isinstance(r, dict)]
-    except Exception as exc:  # noqa: BLE001 - readers fall back to the file
-        logger.warning("Control store unavailable for owner actions (%s); using the file", exc)
-        return []
+    except Exception as exc:  # noqa: BLE001 - re-raised as a structured error
+        logger.warning("Control store unavailable for owner actions (%s)", type(exc).__name__)
+        raise ControlQueueUnavailable(f"control store indisponivel: {type(exc).__name__}") from exc
 
 
 def write_rows(rows: list[dict[str, Any]]) -> None:
-    """Upsert ``rows`` (``to_record`` dicts). Raises when the store is unavailable."""
+    """Upsert ``rows`` (``to_record`` dicts). Raises ``ControlQueueUnavailable`` when the store is unavailable."""
     from core.demands.queue_store import control_store
 
-    store = control_store()
-    now = datetime.now(UTC)
-    for row in rows:
-        store.upsert_owner_action(str(row["id"]), str(row.get("status") or "open"), row, now)
-
-
-def merge_rows(file_rows: list[Any], control_rows: list[dict[str, Any]]) -> list[Any]:
-    """Control rows replace file rows of the same id (a done file row is never reopened)."""
-    merged: dict[str, Any] = {}
-    order: list[str] = []
-    for raw in file_rows:
-        key = str(raw.get("id")) if isinstance(raw, dict) else None
-        if key is None:
-            continue
-        merged[key] = raw
-        order.append(key)
-    for raw in control_rows:
-        key = str(raw.get("id"))
-        current = merged.get(key)
-        if isinstance(current, dict) and current.get("status") == "done" and raw.get("status") != "done":
-            continue
-        if key not in merged:
-            order.append(key)
-        merged[key] = raw
-    return [merged[k] for k in order]
+    try:
+        store = control_store()
+        now = datetime.now(UTC)
+        for row in rows:
+            store.upsert_owner_action(str(row["id"]), str(row.get("status") or "open"), row, now)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a structured error
+        logger.warning("Control store write failed for owner actions (%s)", type(exc).__name__)
+        raise ControlQueueUnavailable(f"control store indisponivel: {type(exc).__name__}") from exc

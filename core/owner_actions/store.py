@@ -1,19 +1,4 @@
-"""Tolerant-read / atomic-write store for the owner action backlog (USR-190).
-
-Layers
-------
-* **definitions** - ``.factory/owner_actions/owner_actions.json`` (git-tracked, curated by agents
-  through ``scripts/owner_action.py`` and shipped inside the Hub image by ``COPY .factory``).
-* **resolutions** (optional overlay) - a small JSON file the *Hub* writes when the owner clicks
-  "marcar como feito" / answers a decision. In production it lives on the persistent Hub volume,
-  because the definitions inside the container image are read-only in spirit and reset on every
-  redeploy. The effective state of an item is its definition overlaid by its resolution.
-
-Reading never raises: a missing file is an empty backlog, a corrupted file is an empty backlog plus
-a warning, and an invalid row is skipped with a warning. Writing is atomic (tmp + ``os.replace``),
-serialised by a lock file and refuses to overwrite a definitions file it cannot parse.
-"""
-
+"""Owner actions backed by the configured control store, or explicit local file mode."""
 from __future__ import annotations
 
 import contextlib
@@ -50,7 +35,6 @@ SCHEMA_VERSION = 1
 ENV_PATH = "DARKFAC_OWNER_ACTIONS_PATH"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = REPO_ROOT / ".factory" / "owner_actions" / "owner_actions.json"
-DEFAULT_OVERLAY_PATH = REPO_ROOT / "hub" / "data" / "owner_actions" / "resolutions.json"
 
 _LOCK_TIMEOUT_S = 10.0
 _LOCK_STALE_S = 60.0
@@ -82,19 +66,11 @@ class _LedgerEnvelope(BaseModel):
     actions: list[Any]
 
 
-class _ResolutionEnvelope(BaseModel):
-    """Validated resolution overlay envelope."""
-
-    model_config = ConfigDict(extra="allow")
-
-    schema_version: Literal[SCHEMA_VERSION]
-    resolutions: dict[str, Any]
-
-
 @dataclass
 class LoadResult:
     actions: list[OwnerAction] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    read_at: str = field(default_factory=lambda: iso_z(utc_now()))
 
 
 def default_path() -> Path:
@@ -222,17 +198,6 @@ def _validate_candidate_document(document: dict[str, Any]) -> None:
         seen.add(action.id)
 
 
-def _validate_resolution_document(document: dict[str, Any]) -> None:
-    """Validate the complete overlay before replacing it."""
-
-    try:
-        envelope = _ResolutionEnvelope.model_validate(document)
-        for raw in envelope.resolutions.values():
-            Resolution.model_validate(raw)
-    except ValidationError as exc:
-        raise OwnerActionInvalid(f"envelope de resolucoes invalido: {_summarise(exc)}") from exc
-
-
 def apply_resolution(action: OwnerAction, resolution: Resolution | None) -> OwnerAction:
     """Overlay a resolution on a definition (a definition already ``done`` always wins)."""
 
@@ -253,43 +218,39 @@ def apply_resolution(action: OwnerAction, resolution: Resolution | None) -> Owne
 
 
 class OwnerActionStore:
-    """File-backed backlog. ``overlay_path`` is optional (the Hub sets it, agents usually do not)."""
+    """One configured source for reads and writes; database errors propagate."""
 
     def __init__(
         self,
         path: Path | str | None = None,
         *,
-        overlay_path: Path | str | None = None,
         remote_ref: str | None = "origin/main",
-        dynamic_path: Path | str | None = None,
-        remote_ledger: Any = None,
         control: bool | None = None,
     ) -> None:
         self.path = Path(path) if path is not None else default_path()
-        # USR-343 S4b: the default project ledger is backed by the control store (None = auto-detect).
         from core.owner_actions import control_queue
 
-        self.control = control_queue.is_default_ledger(self.path) if control is None else control
-        self.dynamic_path = Path(dynamic_path) if dynamic_path is not None else None
-        self.overlay_path = Path(overlay_path) if overlay_path is not None else None
-        # Best-effort id reservation against a branch's unsynced base (USR-255); None disables it.
+        mode = os.environ.get("DARKFAC_OWNER_ACTIONS_MODE", "").strip().lower()
+        if mode not in ("", "file", "control"):
+            raise OwnerActionInvalid("DARKFAC_OWNER_ACTIONS_MODE must be file or control")
+        self.control = control if control is not None else (
+            mode == "control" or (mode != "file" and control_queue.is_default_ledger(self.path) and control_queue.is_configured())
+        )
         self.remote_ref = remote_ref
-        # Read-only source of the definitions on origin/main (USR-348); falls back to ``path``.
-        self.remote_ledger = remote_ledger
+        self.migration_error: str | None = None
 
     # ------------------------------------------------------------------ read
 
     def _load_definitions(self) -> LoadResult:
-        payload, warning = _read_json(self.path)
         if self.control:
             from core.owner_actions import control_queue
 
-            rows = control_queue.merge_rows(_raw_actions(payload), control_queue.list_control_rows())
-            payload, warning = {"schema_version": SCHEMA_VERSION, "actions": rows}, None
-        if self.remote_ledger is not None:
-            remote = self.remote_ledger.get()
-            if remote is not None:
-                payload, warning = remote, None
+            if self.migration_error:
+                raise control_queue.ControlQueueUnavailable(self.migration_error)
+            payload = {"actions": control_queue.list_control_rows()}
+            warning = None
+        else:
+            payload, warning = _read_json(self.path)
         result = LoadResult()
         if warning:
             result.warnings.append(warning)
@@ -313,78 +274,95 @@ class OwnerActionStore:
             result.actions.append(action)
         return result
 
-    def _load_resolutions(self) -> tuple[dict[str, Resolution], list[str]]:
-        if self.overlay_path is None:
-            return {}, []
-        payload, warning = _read_json(self.overlay_path)
-        warnings = [warning] if warning else []
-        resolutions: dict[str, Resolution] = {}
-        raw_map = payload.get("resolutions") if isinstance(payload, dict) else None
-        if isinstance(raw_map, dict):
-            for action_id, raw in raw_map.items():
-                try:
-                    resolutions[str(action_id)] = Resolution.model_validate(raw)
-                except ValidationError:
-                    warnings.append(f"resolucao de {action_id} ignorada: registro invalido")
-        return resolutions, warnings
-
     def load(self) -> LoadResult:
-        """Effective backlog (definitions overlaid by resolutions). Never raises."""
+        """Read the selected source; never substitute a snapshot for a failed database."""
+        return self._load_definitions()
 
-        try:
-            result = self._load_definitions()
-            if self.dynamic_path is not None:
-                dynamic = OwnerActionStore(self.dynamic_path, remote_ref=None)._load_definitions()
-                curated_ids = {action.id for action in result.actions}
-                result.actions.extend(action for action in dynamic.actions if action.id not in curated_ids)
-                result.warnings.extend(dynamic.warnings)
-            resolutions, warnings = self._load_resolutions()
-            result.warnings.extend(warnings)
-            result.actions = [apply_resolution(a, resolutions.get(a.id)) for a in result.actions]
-            return result
-        except Exception as exc:  # pragma: no cover - last-resort guard: the queue must keep working
-            logger.warning("owner_actions: leitura falhou (%s)", exc)
-            return LoadResult(warnings=[f"leitura do backlog falhou: {exc.__class__.__name__}"])
+    def migrate_legacy_overlays(self, directory: Path) -> None:
+        """Import legacy volume data once; mark only after every row persisted.
+
+        Existing completed control rows are terminal. A partial import is safe to retry.
+        The export is consulted only to recover definitions of old resolution-only clicks.
+        """
+        if not self.control:
+            return
+        marker = directory / "control_migration_v1.json"
+        if marker.exists():
+            return
+        dynamic, dynamic_warning = _read_json(directory / "dynamic.json")
+        resolutions, resolution_warning = _read_json(directory / "resolutions.json")
+        if dynamic_warning or resolution_warning:
+            raise OwnerActionStoreCorrupt(dynamic_warning or resolution_warning)
+        if dynamic is None and resolutions is None:
+            return
+        if dynamic is not None and (not isinstance(dynamic, dict) or not isinstance(dynamic.get("actions"), list)):
+            raise OwnerActionInvalid("invalid legacy dynamic actions")
+        if resolutions is not None and not isinstance(resolutions, dict):
+            raise OwnerActionInvalid("invalid legacy resolutions")
+        resolution_map = resolutions.get("resolutions", {}) if isinstance(resolutions, dict) else {}
+        if not isinstance(resolution_map, dict):
+            raise OwnerActionInvalid("invalid legacy resolutions")
+        export, warning = _read_json(self.path)
+        if warning:
+            raise OwnerActionStoreCorrupt(warning)
+        exported = {a.id: a for a in (OwnerAction.model_validate(r) for r in _raw_actions(export))}
+        dynamic_actions = [OwnerAction.model_validate(r) for r in _raw_actions(dynamic)]
+
+        def apply(document: dict[str, Any], rows: list[Any]) -> None:
+            by_id = {r["id"]: OwnerAction.model_validate(r) for r in rows}
+            for action in dynamic_actions:
+                identity = dynamic.get("human_request_identities", {}).get(action.id) if isinstance(dynamic, dict) else None
+                if identity:
+                    action = action.model_copy(update={"human_request_identity": tuple(identity)})
+                existing = by_id.get(action.id)
+                if existing is None or (existing.status is not ActionStatus.DONE and action.status is ActionStatus.DONE):
+                    by_id[action.id] = action
+            for action_id, raw in resolution_map.items():
+                action = by_id.get(action_id) or exported.get(action_id)
+                if action is None:
+                    raise OwnerActionInvalid(f"legacy resolution without definition: {action_id}")
+                resolved = apply_resolution(action, Resolution.model_validate(raw))
+                if resolved.status is not ActionStatus.DONE:
+                    raise OwnerActionInvalid(f"invalid legacy resolution for {action_id}")
+                by_id[action_id] = resolved
+            rows[:] = [a.to_record() for a in by_id.values()]
+
+        self._mutate_control(apply)
+        _atomic_write_json(marker, {"migrated_at": iso_z(utc_now())})
 
     def sync_human_request(self, request: Any, *, closed: bool) -> OwnerAction:
-        """Apply a machine event only to dynamic HumanRequests; done is terminal."""
+        """Persist machine HumanRequests through the same mutation path; done is terminal."""
         from core.owner_actions.mirror import human_request_to_action
 
-        if self.dynamic_path is None:
-            raise OwnerActionInvalid("dynamic owner action storage is not configured")
         action = human_request_to_action(request)
-        if any(item.id == action.id for item in self._load_definitions().actions):
-            raise OwnerActionInvalid("machine event conflicts with curated owner action")
-        dynamic = OwnerActionStore(self.dynamic_path, remote_ref=None)
 
         def apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
-            identity = [request.run_id, request.blocking_stage]
-            identities = document.setdefault("human_request_identities", {})
-            if not isinstance(identities, dict):
-                raise OwnerActionInvalid("invalid dynamic identity metadata")
             for index, raw in enumerate(rows):
-                if isinstance(raw, dict) and raw.get("id") == action.id:
-                    if identities.get(action.id) != identity:
-                        raise OwnerActionInvalid("dynamic owner action identity conflict or missing identity")
+                if raw.get("id") == action.id:
                     existing = OwnerAction.model_validate(raw)
+                    if (existing.human_request_identity is None
+                            and existing.created_by == action.created_by and existing.title == action.title):
+                        existing = existing.model_copy(update={"human_request_identity": action.human_request_identity})
+                        rows[index] = existing.to_record()
+                    if existing.human_request_identity != action.human_request_identity:
+                        raise OwnerActionInvalid("human request identity conflict")
                     if existing.status is ActionStatus.DONE or not closed:
                         return existing
                     done = OwnerAction.model_validate({**existing.to_record(), "status": "done"})
                     rows[index] = done.to_record()
                     return done
             saved = OwnerAction.model_validate({**action.to_record(), "status": "done"}) if closed else action
-            identities[action.id] = identity
             rows.append(saved.to_record())
             return saved
 
-        return dynamic._mutate_definitions(apply)
+        return self._mutate_definitions(apply)
 
     def list_actions(self, *, include_done: bool = True) -> list[OwnerAction]:
         actions = self.load().actions
         return actions if include_done else [a for a in actions if a.status is not ActionStatus.DONE]
 
     def answered_decisions(self) -> list[OwnerAction]:
-        """Decisions already answered in the effective backlog (feeds the repo sync, USR-195)."""
+        """Decisions already answered in the configured store."""
         return [
             a for a in self.load().actions
             if a.kind is ActionKind.DECISION and a.status is ActionStatus.DONE and a.answer is not None
@@ -400,22 +378,14 @@ class OwnerActionStore:
     next_id = next_action_id
 
     def _used_numbers(self, rows: list[Any] | None = None, remote_reserved: set[int] | None = None) -> set[int]:
-        """Numeric ids in definitions, skipped rows, control rows, dynamic file, overlay and base branch.
+        """Numeric ids reserved in the selected store and git history.
 
         Non-numeric ids (``OA-HR-...``, ``OA-QR-...``) never match ``SEQUENTIAL_ID_PATTERN``.
         """
-        ids: list[str] = [a.id for a in self._load_definitions().actions]
-        payload, _ = _read_json(self.path)
+        ids = [a.id for a in self._load_definitions().actions]
+        payload, _ = _read_json(self.path) if not self.control else (None, None)
         raw_rows = list(_raw_actions(payload)) + list(rows or [])
-        if self.control:
-            from core.owner_actions import control_queue
-
-            raw_rows += control_queue.list_control_rows()
-        if self.dynamic_path is not None:
-            dynamic_payload, _ = _read_json(self.dynamic_path)
-            raw_rows += _raw_actions(dynamic_payload)
         ids += [str(r.get("id", "")) for r in raw_rows if isinstance(r, dict)]
-        ids += [str(key) for key in self._load_resolutions()[0]]
         used = {int(m.group(1)) for m in map(SEQUENTIAL_ID_PATTERN.match, ids) if m}
         used |= self._git_history_used_numbers()
         return used | (self._remote_reserved_numbers() if remote_reserved is None else remote_reserved)
@@ -432,13 +402,6 @@ class OwnerActionStore:
             int(m.group(1))
             for m in re.finditer(r'["\']OA-(\d+)["\']', result.stdout)
         }
-
-    def _id_in_other_sources(self, action_id: str) -> bool:
-        if self.dynamic_path is not None:
-            payload, _ = _read_json(self.dynamic_path)
-            if any(isinstance(r, dict) and r.get("id") == action_id for r in _raw_actions(payload)):
-                return True
-        return action_id in self._load_resolutions()[0]
 
     def _remote_reserved_numbers(self) -> set[int]:
         """``OA-NNN`` numbers already used by ``self.remote_ref``'s copy of the file (USR-255).
@@ -488,24 +451,17 @@ class OwnerActionStore:
             return result
 
     def _mutate_control(self, fn: Callable[[dict[str, Any], list[Any]], Any]) -> Any:
-        """Run ``fn`` over file+control rows and persist only the changed rows to the control store."""
+        """Run ``fn`` over control rows and persist only the changed rows."""
         import copy
 
         from core.owner_actions import control_queue
 
-        with _file_lock(self.path):
-            payload, warning = _read_json(self.path)
-            if warning and self.path.exists():
-                raise OwnerActionStoreCorrupt(
-                    f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
-                )
-            file_document = _writable_ledger_document(payload)
-            _validate_candidate_document(file_document)
+        if self.migration_error:
+            raise control_queue.ControlQueueUnavailable(self.migration_error)
+        with _THREAD_LOCK:
             control_rows = control_queue.list_control_rows()
             _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_rows})
-            rows = copy.deepcopy(
-                control_queue.merge_rows(file_document["actions"], control_rows)
-            )
+            rows = copy.deepcopy(control_rows)
             before = {str(r.get("id")): json.dumps(r, sort_keys=True) for r in rows if isinstance(r, dict)}
             document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": rows}
             _validate_candidate_document(document)
@@ -528,7 +484,7 @@ class OwnerActionStore:
         def _append(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
             existing_ids = {str(r.get("id")) for r in rows if isinstance(r, dict)}
             action_id = draft.id or self._next_id_from_rows(rows, remote_reserved)
-            if action_id in existing_ids or self._id_in_other_sources(action_id):
+            if action_id in existing_ids:
                 raise OwnerActionInvalid(f"{action_id} ja existe")
             try:
                 action = draft.build(action_id)
@@ -564,7 +520,6 @@ class OwnerActionStore:
         option_id: str | None = None,
         note: str = "",
         answered_by: str = "owner",
-        to_overlay: bool = False,
     ) -> OwnerAction:
         """Mark done (``action``) or record the answer (``decision``). Idempotent for a repeat."""
 
@@ -587,26 +542,20 @@ class OwnerActionStore:
             if answer is not None and current.answer and current.answer.option_id != answer.option_id:
                 raise OwnerActionInvalid(f"{action_id} ja foi respondida com a opcao {current.answer.option_id}")
             return current
-        if to_overlay:
-            if self.overlay_path is None:
-                raise OwnerActionInvalid("overlay de resolucoes nao configurado")
-            return self._write_overlay(current, answer, note)
         return self._resolve_in_definitions(action_id, answer, note)
 
     def _validate_write_sources(self) -> None:
         """Fail closed before a mutation if any persisted definition row is invalid."""
 
-        payload, warning = _read_json(self.path)
-        if warning and self.path.exists():
-            raise OwnerActionStoreCorrupt(
-                f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({warning})"
-            )
-        document = _writable_ledger_document(payload)
-        _validate_candidate_document(document)
         if self.control:
             from core.owner_actions import control_queue
 
             _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_queue.list_control_rows()})
+            return
+        payload, warning = _read_json(self.path)
+        if warning:
+            raise OwnerActionStoreCorrupt(warning)
+        _validate_candidate_document(_writable_ledger_document(payload))
 
     def reconcile_update(
         self,
@@ -661,42 +610,6 @@ class OwnerActionStore:
 
         return self._mutate_definitions(_apply)
 
-    def _write_overlay(self, current: OwnerAction, answer: DecisionAnswer | None, note: str) -> OwnerAction:
-        assert self.overlay_path is not None
-        resolution = Resolution(status=ActionStatus.DONE, resolved_at=utc_now(), answer=answer, note=note.strip())
-        with _file_lock(self.overlay_path):
-            # Overlay writes must not hide a malformed source ledger that tolerant reads skipped.
-            payload, ledger_warning = _read_json(self.path)
-            if ledger_warning and self.path.exists():
-                raise OwnerActionStoreCorrupt(f"{self.path.name} esta corrompido; corrija o JSON antes de gravar ({ledger_warning})")
-            if isinstance(payload, list):
-                source_document: dict[str, Any] = {"schema_version": SCHEMA_VERSION, "actions": payload}
-            elif isinstance(payload, dict):
-                source_document = payload
-            else:
-                source_document = {"schema_version": SCHEMA_VERSION, "actions": []}
-            _validate_candidate_document(source_document)
-            if self.control:
-                from core.owner_actions import control_queue
-
-                _validate_candidate_document({"schema_version": SCHEMA_VERSION, "actions": control_queue.list_control_rows()})
-
-            payload, warning = _read_json(self.overlay_path)
-            if warning and self.overlay_path.exists():
-                backup = self.overlay_path.with_name(f"{self.overlay_path.name}.corrupt-{int(time.time())}")
-                with contextlib.suppress(OSError):
-                    os.replace(self.overlay_path, backup)
-                payload = None
-            document = payload if isinstance(payload, dict) else {"schema_version": SCHEMA_VERSION, "resolutions": {}}
-            _validate_resolution_document(document)
-            envelope = _ResolutionEnvelope.model_validate(document)
-            resolutions = dict(envelope.resolutions)
-            resolutions[current.id] = json.loads(resolution.model_dump_json(exclude_none=True))
-            document = {**document, "schema_version": SCHEMA_VERSION, "resolutions": resolutions}
-            _validate_resolution_document(document)
-            _atomic_write_json(self.overlay_path, document)
-        return apply_resolution(current, resolution)
-
 
 def _summarise(exc: ValidationError) -> str:
     parts = []
@@ -726,7 +639,6 @@ def unblocks(action: OwnerAction, actions: list[OwnerAction]) -> list[str]:
 
 
 __all__ = [
-    "DEFAULT_OVERLAY_PATH",
     "DEFAULT_PATH",
     "ENV_PATH",
     "LoadResult",

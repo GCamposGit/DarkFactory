@@ -59,6 +59,8 @@ def test_render_ledgers_leaves_the_calling_checkout_untouched(
 ) -> None:
     seed, _ = clone
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    from core.demands.queue_store import control_store
+    control_store()  # Explicit local control database for the export.
     (seed / DEMANDS_RELATIVE).unlink()
     _git(seed, "commit", "-qam", "drop ledger")
     wt = tmp_path / "wt"
@@ -94,7 +96,7 @@ def test_node_sync_converges_with_a_dirty_owner_actions_ledger(
     assert reset_generated_ledgers(node, backup_dir=tmp_path / "bk") == []
 
 
-def test_render_ledgers_keeps_ids_that_exist_only_in_the_files(
+def test_render_ledgers_keeps_file_tickets_but_uses_control_only_for_actions(
     clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """USR-419: the control store wins per id, but never removes an id that only the file has."""
@@ -114,9 +116,11 @@ def test_render_ledgers_keeps_ids_that_exist_only_in_the_files(
         json.dumps({"schema_version": 1, "actions": [{"id": "OA-9999", "title": "so no arquivo"}]}), encoding="utf-8"
     )
 
+    from core.demands.queue_store import control_store
+    control_store()  # Explicit local database, initially empty.
     out = render_ledgers(wt)
     assert "USR-9999" in [t["id"] for t in json.loads(out[DEMANDS_RELATIVE])]
-    assert "OA-9999" in [a["id"] for a in json.loads(out[OWNER_ACTIONS_RELATIVE])["actions"]]
+    assert json.loads(out[OWNER_ACTIONS_RELATIVE])["actions"] == []
 
 
 def test_snapshot_aborts_when_a_ledger_would_lose_ids(
@@ -157,10 +161,10 @@ def test_snapshot_aborts_when_an_existing_id_is_missing_even_if_count_did_not_dr
     assert _git(bare, "rev-parse", "main") == before
 
 
-def test_render_ledgers_imports_git_only_owner_actions_to_control_store(
+def test_render_ledgers_exports_control_without_importing_git(
     clone: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """USR-434: OAs present only in the git worktree are synced into the control store before export."""
+    """USR-434: Git-only OAs never enter the control store through an export."""
     import json
     from core.owner_actions.store import OwnerActionStore
 
@@ -194,10 +198,12 @@ def test_render_ledgers_imports_git_only_owner_actions_to_control_store(
         encoding="utf-8",
     )
 
+    from core.demands.queue_store import control_store
+    control_store()  # Explicit local database, initially empty.
     out = render_ledgers(wt)
     rendered_actions = json.loads(out[OWNER_ACTIONS_RELATIVE])["actions"]
-    assert any(a["id"] == "OA-081" for a in rendered_actions)
+    assert rendered_actions == []
 
     # Verify that the action was synced into the control store
     control_actions = OwnerActionStore(control=True).list_actions()
-    assert any(a.id == "OA-081" for a in control_actions)
+    assert control_actions == []

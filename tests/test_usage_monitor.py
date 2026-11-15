@@ -438,6 +438,8 @@ def test_claude_adapter_prefers_fresh_statusline_snapshot_without_cli_quota(
         "five_hour": {"used_percentage": 24, "resets_at": "2026-10-26T15:00:00Z"},
         "seven_day": {"used_percentage": 70, "resets_at": "2026-10-30T08:00:00Z"},
     }})
+    from datetime import datetime, timedelta, timezone
+    snapshot["checked_at"] = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     (tmp_path / "anthropic.json").write_text(json.dumps(snapshot), encoding="utf-8")
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
 
@@ -445,11 +447,33 @@ def test_claude_adapter_prefers_fresh_statusline_snapshot_without_cli_quota(
         returncode = 0
         stdout = json.dumps(cli_status)
 
-    monkeypatch.setattr("core.usage.adapters.subprocess.run", lambda *args, **kwargs: Result())
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fresh statusLine must not invoke any CLI")
+    monkeypatch.setattr("core.usage.adapters.subprocess.run", forbidden)
     result = adapter.inspect(force=True)
     assert result.adapter == "json_snapshot"
     assert result.quota_supported is True
     assert [window.used_percent for window in result.windows] == [24.0, 70.0]
+
+
+@pytest.mark.parametrize("used,paid_calls", [(84, 1), (85, 0), (100, 0)])
+def test_claude_paid_probe_only_when_stale_and_above_floor(tmp_path, monkeypatch, used, paid_calls):
+    from datetime import datetime, timedelta, timezone
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+    from scripts.claude_statusline import snapshot_from_payload
+
+    snapshot = snapshot_from_payload({"rate_limits": {"five_hour": {"used_percentage": used}}})
+    snapshot["checked_at"] = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
+    (tmp_path / "anthropic.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    spec = ProviderSpec("anthropic", "Claude", ProviderFamily.FRONTIER, "https://example.test")
+    adapter = ClaudeCodeAccountAdapter(spec, tmp_path)
+    monkeypatch.setattr(adapter, "_find_claude", lambda: "claude")
+    monkeypatch.setattr(adapter, "_probe_claude_cli", lambda _: None)
+    calls = []
+    monkeypatch.setattr(adapter, "_probe_claude_headless", lambda _: calls.append(True))
+    account = adapter.inspect(force=True)
+    assert len(calls) == paid_calls
+    assert account.windows[0].used_percent == used
 
 
 def test_find_claude_prefers_npm_install_over_path_cache(tmp_path: Path, monkeypatch) -> None:

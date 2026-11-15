@@ -98,9 +98,9 @@ def test_401_alerts_without_leaking_key(client: TestClient, service: HubService,
     assert SECRET not in blob and "errada-xyz" not in blob
 
 
-def test_stale_after_five_minutes(client: TestClient, service: HubService, clock: Clock, sent: List[str]) -> None:
+def test_stale_after_twenty_minutes(client: TestClient, service: HubService, clock: Clock, sent: List[str]) -> None:
     assert _sync(client, SECRET).status_code == 200
-    clock.advance(minutes=5)
+    clock.advance(minutes=20)
     assert _usage_items(service) == []
     clock.advance(seconds=1)
     items = _usage_items(service)
@@ -126,7 +126,7 @@ def test_auto_close_and_rearm(client: TestClient, service: HubService, clock: Cl
     assert _sync(client, SECRET).status_code == 200
     assert _usage_items(service) == []
     # a new failure after recovery notifies again
-    clock.advance(minutes=10)
+    clock.advance(minutes=21)
     assert len(_usage_items(service)) == 1
     assert len(sent) == 2
 

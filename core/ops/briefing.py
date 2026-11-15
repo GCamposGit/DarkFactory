@@ -49,13 +49,7 @@ def _owner_actions() -> list[str]:
 
     root = project_root()
     base = root / ".factory" / "owner_actions" / "owner_actions.json"
-    dynamic = root / ".factory" / "owner_actions" / "dynamic.json"
-    overlay = root / "hub" / "data" / "owner_actions" / "resolutions.json"
-    result = OwnerActionStore(
-        path=base,
-        dynamic_path=dynamic if dynamic.is_file() else None,
-        overlay_path=overlay if overlay.is_file() else None,
-    ).load()
+    result = OwnerActionStore(path=base).load()
     open_actions = [a for a in result.actions if getattr(a.status, "value", a.status) != "done"]
     lines = [f"{a.id} | {getattr(a.status, 'value', a.status)} | {a.title}" for a in open_actions]
     lines.extend(f"Aviso: {warning}" for warning in result.warnings)

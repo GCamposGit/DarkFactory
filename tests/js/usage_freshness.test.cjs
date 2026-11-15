@@ -37,16 +37,38 @@ test("stale snapshot shows highlighted badge and keeps the percentage", () => {
   const { __card: card } = load();
   const html = card({ ...base, age_seconds: 601, stale: true, source_node: "n1", checked_at: "2030-01-01T11:49:00Z" });
   assert.match(html, /data-stale-badge/);
-  assert.match(html, /desatualizado/);
+  assert.match(html, /DESATUALIZADO/);
+  assert.match(html, /opacity-40/);
+  assert.match(html, /text-red-300/);
   assert.match(html, /40/);
   assert.doesNotMatch(html, /desconectado/i);
+  const replay = card({ ...base, age_seconds: 10, measurement_age_seconds: 1800, stale: true });
+  assert.match(replay, /DESATUALIZADO há 30 min/);
 });
 
 test("no synced data is neither stale nor shown as zero", () => {
   const { __card: card, __fresh: fresh } = load();
   const account = { ...base, status: "unknown", windows: [], message: "Sem dado sincronizado", age_seconds: null, stale: false };
-  assert.deepEqual({ ...fresh(account) }, { stale: false, text: "sem dado sincronizado" });
+  assert.deepEqual({ ...fresh(account) }, { stale: true, text: "DESATUALIZADO: chegada desconhecida" });
   const html = card(account);
-  assert.doesNotMatch(html, /data-stale-badge/);
-  assert.match(html, /sem dado sincronizado/);
+  assert.match(html, /data-stale-badge/);
+  assert.match(html, /chegada desconhecida/);
+});
+
+test("OA outage clears previous cards and shows unavailable instead of empty", async () => {
+  const elements = new Map();
+  const element = () => ({ innerHTML: "OLD CARD", textContent: "", classList: { add() {}, remove() {}, toggle() {} }, setAttribute() {} });
+  const ctx = {
+    document: { addEventListener() {}, getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }, querySelectorAll() { return []; } },
+    window: {}, console: { warn() {} }, setInterval() {}, setTimeout() {},
+    hubFetch: async () => ({ ok: false, status: 503 }),
+  };
+  vm.createContext(ctx);
+  const interventions = fs.readFileSync(path.join(__dirname, "..", "..", "hub", "frontend", "interventions.js"), "utf8");
+  vm.runInContext(interventions + "\n;this.__load = loadPriorityInterventions;", ctx);
+  await ctx.__load();
+  for (const id of ["interventions-hero-strip", "owner-actions-section"]) {
+    assert.match(elements.get(id).innerHTML, /Fila indisponivel: sem conexao com o banco/);
+    assert.doesNotMatch(elements.get(id).innerHTML, /OLD CARD|Zero Pendências/);
+  }
 });

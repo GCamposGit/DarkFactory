@@ -84,6 +84,11 @@ async function loadPriorityInterventions(force = false) {
     renderOwnerActionsSection();
     updateOwnerActionsSidebarBadge();
   } catch (err) {
+    interventionsState.report = { available: false, items: [], total_count: 0 };
+    interventionsState.ownerActionSignature = "";
+    renderInterventionsHeroStrip();
+    renderOwnerActionsSection();
+    updateOwnerActionsSidebarBadge();
     console.warn("Could not load priority interventions:", err);
   } finally {
     interventionsState.loading = false;
@@ -95,6 +100,10 @@ function renderInterventionsHeroStrip() {
   if (!container) return;
 
   const report = interventionsState.report || { total_count: 0, items: [] };
+  if (report.available === false) {
+    container.innerHTML = '<div role="alert" class="rounded-xl border border-red-500 bg-red-950 p-3 text-red-300">Fila indisponivel: sem conexao com o banco</div>';
+    return;
+  }
   const total = report.total_count || 0;
 
   if (total === 0) {
@@ -691,20 +700,29 @@ function renderOwnerActionCard(item) {
 function renderOwnerActionsSection() {
   const container = document.getElementById("owner-actions-section");
   if (!container) return;
+  const report = interventionsState.report || {};
+  if (report.available === false) {
+    container.classList.remove("hidden");
+    container.innerHTML = '<div role="alert" class="rounded-xl border border-red-500 bg-red-950 p-3 text-red-300">Fila indisponivel: sem conexao com o banco</div>';
+    return;
+  }
+  const readAt = report.read_at ? new Date(report.read_at).getTime() : NaN;
+  const age = Number.isFinite(readAt) ? Math.max(0, Math.floor((Date.now() - readAt) / 60000)) : null;
+  const freshness = age === null ? "Ultima leitura sem horario" : `Banco lido ha ${age} min`;
   const all = getOwnerActionItems();
   const warnings = (interventionsState.report && interventionsState.report.owner_action_warnings) || [];
   const filter = interventionsState.ownerActionFilter || "all";
   const items = filter === "all" ? all : all.filter((item) => item.urgency === filter);
 
   // Skip identical renders (the 30s poll): keeps open cards, typed notes and focus intact.
-  const signature = JSON.stringify([filter, all, warnings]);
+  const signature = JSON.stringify([filter, all, warnings, freshness]);
   if (signature === interventionsState.ownerActionSignature) return;
   captureOwnerActionDrafts();
   interventionsState.ownerActionSignature = signature;
 
   if (!all.length && !warnings.length) {
-    container.classList.add("hidden");
-    container.innerHTML = "";
+    container.classList.remove("hidden");
+    container.innerHTML = `<p class="text-xs text-slate-400">${freshness} · Nenhuma acao pendente</p>`;
     return;
   }
   container.classList.remove("hidden");
@@ -730,7 +748,7 @@ function renderOwnerActionsSection() {
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div>
           <h2 class="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
-            <span>Ações do Owner</span>
+            <span>Ações do Owner</span><span class="text-xs text-slate-400">${freshness}</span>
             <span class="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-mono font-bold">${all.length}</span>
           </h2>
           <p class="text-[11px] text-slate-400">Tudo que só você pode fazer ou decidir, com o passo a passo completo. O backlog é atualizado a cada merge e deploy.</p>

@@ -75,7 +75,10 @@ class UsageMixin:
 
     def get_account_usage(self, force: bool = False) -> Any:
         """Return a partial-success report for every known AI platform."""
-        return self.account_usage_monitor.inspect(force=force)
+        report = self.account_usage_monitor.inspect(force=force)
+        for account in report.accounts:
+            account.with_freshness()
+        return report
 
     def request_account_refresh(self, target_node: Optional[str] = None) -> Any:
         """Record a refresh request for the metering host; never probe CLIs on a synced-only Hub."""
@@ -157,11 +160,11 @@ class UsageMixin:
                 continue
             try:
                 # Record which node sent the snapshot so the Hub can show its origin (USR-233).
-                account = {**account, "source_node": payload.client_node_id}
+                account = {**account, "source_node": payload.client_node_id, "received_at": datetime.now(timezone.utc).isoformat()}
                 self.account_usage_monitor.save_snapshot(str(provider_id), account)
                 accounts_updated += 1
             except Exception as exc:
-                logger.warning("Failed to save account snapshot for %s: %s", provider_id, exc)
+                raise OSError("account_snapshot_persistence_failed") from exc
 
         # 2. Ingest API credit balance snapshots
         for credit in payload.credits:
@@ -174,8 +177,9 @@ class UsageMixin:
                 self.api_credits_monitor.save_snapshot(str(provider_id), credit)
                 credits_updated += 1
             except Exception as exc:
-                logger.warning("Failed to save credit snapshot for %s: %s", provider_id, exc)
+                raise OSError("credit_snapshot_persistence_failed") from exc
 
+        self.refresh_request_store.complete_from_snapshots(payload.client_node_id, payload.accounts)
         self.usage_sync_watch.record_success()
         now_str = datetime.now(timezone.utc).isoformat()
         return UsageSyncResponse(

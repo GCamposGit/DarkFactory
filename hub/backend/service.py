@@ -27,7 +27,6 @@ from core.infra.inventory import InventoryManager
 from core.infra.metrics import InfraMetricsReport
 from core.workflow.line_live import LineLiveSnapshot, read_line_live
 from hub.backend.usage_sync_watch import UsageSyncWatch
-from core.owner_actions.remote_ledger import from_env as owner_actions_remote_from_env
 from core.owner_actions.store import ENV_PATH as OWNER_ACTIONS_ENV_PATH, OwnerActionStore
 
 from hub.backend.service_net import (  # noqa: F401  (re-exported public API)
@@ -173,22 +172,7 @@ class HubService(
                     except Exception as exc:
                         logger.warning(f"Failed to copy seed item {seed_item.name}: {exc}")
 
-        # Owner action backlog (USR-190). Definitions: tracked in the repository and shipped in the
-        # image (or isolated under data_dir for tests/embedded use). Resolutions made in the Hub go
-        # to an overlay on the persistent data volume so a redeploy never resurrects an item the
-        # owner already closed.
-        if data_dir is not None:
-            owner_actions_path: Path = self.data_dir / "owner_actions" / "owner_actions.json"
-        elif os.environ.get(OWNER_ACTIONS_ENV_PATH, "").strip():
-            owner_actions_path = Path(os.environ[OWNER_ACTIONS_ENV_PATH].strip())
-        else:
-            owner_actions_path = repository_root / ".factory" / "owner_actions" / "owner_actions.json"
-        self.owner_action_store = OwnerActionStore(
-            owner_actions_path,
-            overlay_path=self.data_dir / "owner_actions" / "resolutions.json",
-            dynamic_path=self.data_dir / "owner_actions" / "dynamic.json",
-            remote_ledger=owner_actions_remote_from_env() if data_dir is None else None,
-        )
+        self._configure_owner_actions(data_dir)
 
         self.usage_sync_watch = UsageSyncWatch(self.data_dir / "usage_sync" / "state.json")
 
@@ -232,6 +216,25 @@ class HubService(
 
         self._ensure_storage()
         self._cached_infra_metrics: Optional[Tuple[float, InfraMetricsReport]] = None
+
+    def _configure_owner_actions(self, data_dir: Path | None) -> None:
+        if data_dir is not None:
+            owner_actions_path: Path = self.data_dir / "owner_actions" / "owner_actions.json"
+        elif os.environ.get(OWNER_ACTIONS_ENV_PATH, "").strip():
+            owner_actions_path = Path(os.environ[OWNER_ACTIONS_ENV_PATH].strip())
+        else:
+            owner_actions_path = self.project_root / ".factory" / "owner_actions" / "owner_actions.json"
+        self.owner_action_store = OwnerActionStore(
+            owner_actions_path,
+            control=(os.environ.get("DARKFAC_OWNER_ACTIONS_MODE", "control" if data_dir is None or os.environ.get("DARKFAC_HF02_DATABASE_URL") else "file") != "file"),
+        )
+
+        try:
+            self.owner_action_store.migrate_legacy_overlays(self.data_dir / "owner_actions")
+        except Exception as exc:
+            logger.error("Owner action migration unavailable: %s", type(exc).__name__)
+            self.owner_action_store.migration_error = "legacy owner action migration unavailable"
+
 
     @property
     def control_store(self) -> Any:

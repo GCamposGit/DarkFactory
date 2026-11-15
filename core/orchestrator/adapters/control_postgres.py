@@ -2,7 +2,7 @@
 
 Governed by ADR-HF-001, CONTRACTS.md, and control.json.
 Provides production PostgreSQL execution with transactional outbox,
-SELECT FOR UPDATE SKIP LOCKED, monotonic fencing, and an offline mock fallback.
+SELECT FOR UPDATE SKIP LOCKED, monotonic fencing, and explicitly configured test mocks.
 """
 
 from __future__ import annotations
@@ -235,7 +235,7 @@ CREATE INDEX IF NOT EXISTS idx_fleet_reservations_expiry
 
 
 class PostgresControlStore:
-    """PostgreSQL implementation of ControlStore with fallback/mock capability."""
+    """PostgreSQL implementation of ControlStore; connection failures never enable mocks."""
 
     def __init__(
         self,
@@ -257,22 +257,15 @@ class PostgresControlStore:
                 lease_duration_sec=self.lease_duration_sec,
             )
         else:
+            # Fail closed: a configured PostgreSQL that cannot be reached is an error, never a
+            # silent swap to an ephemeral in-memory engine (mutations would "succeed" and vanish).
             try:
                 import psycopg  # type: ignore[import-not-found]
-                self._psycopg = psycopg
-                self.mock_mode = False
-                self._init_db()
-            except (ImportError, Exception) as exc:
-                logger.warning(
-                    "PostgreSQL unavailable (%s); falling back to in-memory mock engine.",
-                    exc,
-                )
-                self.mock_mode = True
-                self._backend = SQLiteControlStore(
-                    db_path=":memory:",
-                    runtime_owner=self.runtime_owner,
-                    lease_duration_sec=self.lease_duration_sec,
-                )
+            except ImportError as exc:
+                raise StoreUnavailableError(f"psycopg is not installed: {exc}") from exc
+            self._psycopg = psycopg
+            self.mock_mode = False
+            self._init_db()
 
     def _init_db(self) -> None:
         """Initialize PostgreSQL tables if running against a live database."""
@@ -284,7 +277,7 @@ class PostgresControlStore:
                     cur.execute(POSTGRES_DDL)
                 conn.commit()
         except Exception as exc:
-            raise StoreUnavailableError(f"Failed to initialize PostgreSQL schema: {exc}") from exc
+            raise StoreUnavailableError("PostgreSQL schema unavailable") from exc
 
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         if self.mock_mode:

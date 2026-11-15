@@ -73,7 +73,15 @@ def parse_task_xml(xml_text: str) -> SyncTaskState | None:
     else:
         script = args.split(" ")[0] if args else ""
     workdir = exec_el.findtext("t:WorkingDirectory", default="", namespaces=_NS) or ""
-    return SyncTaskState(script_path=script, working_directory=workdir.strip())
+    schedule_current = (
+        root.findtext(".//t:TimeTrigger/t:Repetition/t:Interval", namespaces=_NS) == "PT5M"
+        and root.findtext(".//t:Principal/t:LogonType", namespaces=_NS) == "S4U"
+        and root.findtext(".//t:Settings/t:Enabled", default="true", namespaces=_NS) != "false"
+        and root.find(".//t:LogonTrigger", _NS) is not None
+        and root.find(".//t:RestartOnFailure", _NS) is not None
+        and "--once" in args
+    )
+    return SyncTaskState(script_path=script, working_directory=workdir.strip(), schedule_current=schedule_current)
 
 
 def query_task() -> SyncTaskState | None:
@@ -98,24 +106,25 @@ def _pythonw() -> str:
 
 
 def build_task_xml(root: Path, target_url: str, user: str, pythonw: str) -> str:
-    """XML equivalente ao de install_sync_task.ps1 (logon, oculta, loop de 60 s)."""
+    """XML equivalente ao de install_sync_task.ps1 (logon e a cada 5 min, sem sessao interativa)."""
     script = expected_script_path(str(root))
-    args = f'"{script}" --target-url "{target_url}" --loop --interval 60'
+    args = f'"{script}" --target-url "{target_url}" --once'
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
+    <TimeTrigger><Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2026-01-01T00:00:00</StartBoundary><Enabled>true</Enabled></TimeTrigger>
     <LogonTrigger><Enabled>true</Enabled><UserId>{escape(user)}</UserId></LogonTrigger>
   </Triggers>
   <Principals>
-    <Principal id="Author"><UserId>{escape(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal>
+    <Principal id="Author"><UserId>{escape(user)}</UserId><LogonType>S4U</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal>
   </Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <StartWhenAvailable>true</StartWhenAvailable>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Hidden>true</Hidden>
+    <ExecutionTimeLimit>PT1M</ExecutionTimeLimit>
+    <Hidden>true</Hidden><Enabled>true</Enabled>
     <RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author">

@@ -1,6 +1,10 @@
 <!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py -->
 # Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
+O briefing le OAs apenas da fonte configurada pelo `OwnerActionStore`: control store
+em producao, arquivo com modo local explicito. Nao consulta `dynamic.json` nem
+`resolutions.json`. Banco indisponivel aparece como erro na secao de OAs do briefing.
+
 Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
 confirmados, preservando revisão por outra família. `route_wait` fica persistido
 para o dispatcher retomar automaticamente; o operador não precisa voltar ao chat.

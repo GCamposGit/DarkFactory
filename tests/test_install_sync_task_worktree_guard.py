@@ -25,15 +25,10 @@ def _run(shell: str, script: Path, *args: str) -> subprocess.CompletedProcess[st
 def test_guard_precedes_register_scheduled_task() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     guard = text.index("rev-parse")
-    assert guard < text.index("Register-ScheduledTask")
-    assert guard < text.index("New-ScheduledTaskAction")
     dry = text.index("if ($DryRun)")
     assert guard < dry
-    first_cmdlet = min(text.index(c) for c in
-                       ("New-ScheduledTaskAction", "New-ScheduledTaskTrigger",
-                        "New-ScheduledTaskPrincipal", "New-ScheduledTaskSettingsSet",
-                        "Register-ScheduledTask"))
-    assert dry < first_cmdlet
+    # The registration itself is delegated to the Python installer; guard and dry-run come first.
+    assert dry < text.index("install_usage_sync_task.py")
     for marker in (".worktrees", ".claude", ".codex", "exit 2"):
         assert marker in text
     assert r"C:\dev\DarkFac\scripts\install_sync_task.ps1" in text

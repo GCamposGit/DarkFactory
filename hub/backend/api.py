@@ -1006,7 +1006,10 @@ def sync_usage_endpoint(
     ):
         service.usage_sync_watch.record_refusal("unauthorized_401")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
-    return service.sync_usage_data(payload)
+    try:
+        return service.sync_usage_data(payload)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Usage snapshot persistence unavailable") from exc
 
 
 @router.post("/node-sync/convergence")
@@ -1394,7 +1397,7 @@ def get_owner_action_answers_endpoint(
     x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
     service: HubService = Depends(get_hub_service),
 ) -> dict[str, Any]:
-    """Answered decisions (overlay included) so the Notebook can persist them in the repo (USR-195)."""
+    """Answered decisions from the configured source of truth."""
     configured_key = (os.environ.get("DARKFAC_TELEMETRY_KEY") or "").strip()
     if not configured_key:
         raise HTTPException(status_code=503, detail="Owner action synchronization is disabled.")

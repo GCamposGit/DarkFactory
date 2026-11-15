@@ -157,6 +157,7 @@ class OwnerAction(BaseModel):
     answer: DecisionAnswer | None = None
     # USR-307: append-only trail of reconciliation outcomes ({"at","outcome","note"}); never rewritten.
     history: list[dict[str, str]] = Field(default_factory=list)
+    human_request_identity: tuple[str, str] | None = None
 
     @field_validator("id")
     @classmethod
@@ -217,6 +218,8 @@ class OwnerAction(BaseModel):
         """JSON-ready dict in the file's canonical key order (answer/options only when set)."""
 
         record = self.model_dump(mode="json")
+        if self.human_request_identity is None:
+            record.pop("human_request_identity", None)
         if not self.options:
             record.pop("options", None)
         if self.answer is None:

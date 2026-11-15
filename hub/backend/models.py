@@ -648,6 +648,7 @@ class PriorityInterventionItem(BaseModel):
 class PriorityInterventionsReport(BaseModel):
     """Consolidated human-in-the-loop priority intervention queue."""
 
+    read_at: Optional[str] = None
     total_count: int = Field(ge=0, description="Total pending actions requiring human decision")
     grill_count: int = Field(ge=0, description="Pending clarifying grill sessions")
     deploy_count: int = Field(ge=0, description="Pending G8 deployment gates requiring owner approval")
@@ -682,6 +683,7 @@ class OwnerActionView(BaseModel):
 class OwnerActionsReport(BaseModel):
     """The whole owner action backlog (open and optionally done)."""
 
+    read_at: Optional[str] = None
     open_count: int = Field(ge=0)
     done_count: int = Field(ge=0)
     items: List[OwnerActionView] = Field(default_factory=list)
