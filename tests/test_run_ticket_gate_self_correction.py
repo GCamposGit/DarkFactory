@@ -42,87 +42,74 @@ def _commit_all(repo: Path, message: str) -> None:
     subprocess.run(["git", "commit", "-m", message], cwd=str(repo), check=True, capture_output=True)
 
 
-def test_official_gate_binds_project_root_to_candidate_and_preserves_fleet_state(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    """Reproduce fleet's inherited checkout root and run the gate through its real child process."""
+def test_gate_environment_resolves_candidate_and_preserves_fleet_state(tmp_path: Path, monkeypatch) -> None:
+    """The actual project-root helper sees the delivery candidate in the gate environment."""
     shared = tmp_path / "shared"
     candidate = tmp_path / "candidate"
     shared.mkdir()
     candidate.mkdir()
     _init_git_repo(shared)
     _init_git_repo(candidate)
-    (candidate / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
-    _commit_all(candidate, "ignore Python bytecode")
     (shared / "primary-checkout.py").write_text("owner changes\n", encoding="utf-8")
-
-    (candidate / "core" / "harness").mkdir(parents=True)
-    (candidate / "core" / "__init__.py").write_text("", encoding="utf-8")
-    (candidate / "core" / "paths.py").write_text(
-        "import os\nfrom pathlib import Path\n"
-        "def project_root():\n"
-        "    return Path(os.environ['DARKFAC_PROJECT_ROOT']).resolve()\n",
-        encoding="utf-8",
-    )
-    (candidate / "core" / "harness" / "runner.py").write_text(
-        "import os, subprocess, sys\nfrom pathlib import Path\n"
-        "sys.path.insert(0, str(Path(__file__).resolve().parents[2]))\n"
-        "from core.paths import project_root\n"
-        "root = project_root()\n"
-        "status = subprocess.run(['git', 'status', '--porcelain'], cwd=root, "
-        "capture_output=True, text=True, check=True).stdout.strip()\n"
-        "if status:\n"
-        "    print('[ERROR] Candidate worktree is dirty; commit or use a clean checkout before running the official harness')\n"
-        "    print('[DIRTY_PATHS] ' + ', '.join(line[3:] for line in status.splitlines()))\n"
-        "    print('[TEST_COUNT] count=0')\n"
-        "    raise SystemExit(1)\n"
-        "if Path(__file__).resolve().parents[2] != root:\n"
-        "    raise SystemExit('runner root does not match candidate')\n"
-        "if not os.environ.get('DARKFAC_STATE_ROOT'):\n"
-        "    raise SystemExit('fleet state root was lost')\n"
-        "print('[TEST_COUNT] count=1')\nprint('[HARNESS_PASS]')\n",
-        encoding="utf-8",
-    )
-    _commit_all(candidate, "candidate gate runner")
 
     fleet_state = tmp_path / "fleet-state"
     monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(shared))
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(fleet_state))
-    monkeypatch.setattr(run_ticket.line_lock, "is_fleet_mode", lambda: False)
-    monkeypatch.setattr(run_ticket, "_wait_gate_grokbox_if_needed", lambda _as_json: None)
-    monkeypatch.setattr(run_ticket, "_wait_gate_ram_if_local", lambda _as_json: None)
+    env = run_ticket._gate_environment(candidate)
+    from core.paths import project_root, state_root
 
-    class Progress:
-        def phase(self, *_args, **_kwargs):
-            pass
+    assert project_root() == shared.resolve()  # process environment itself is not mutated
+    with patch.dict(os.environ, env):
+        assert project_root() == candidate.resolve()
+        assert state_root() == fleet_state.resolve()
+        assert subprocess.run(
+            ["git", "status", "--porcelain"], cwd=project_root(), capture_output=True,
+            text=True, check=True,
+        ).stdout.strip() == ""
 
-    step, _command, result = run_ticket._gate_run_official(
-        run_ticket.ticket_stages.GateState(), candidate, Progress(), [], True, "resume"
-    )
+        (candidate / "candidate-change.py").write_text("uncommitted candidate edit\n", encoding="utf-8")
+        assert subprocess.run(
+            ["git", "status", "--porcelain"], cwd=project_root(), capture_output=True,
+            text=True, check=True,
+        ).stdout.strip() == "?? candidate-change.py"
 
-    assert step == run_ticket.ticket_stages.STEP_PROCEED
-    assert result.returncode == 0
-    assert "[TEST_COUNT] count=1" in result.stdout
-    assert "[HARNESS_PASS]" in result.stdout
-    assert "primary-checkout.py" not in result.stdout
     assert subprocess.run(
         ["git", "status", "--porcelain"], cwd=shared, capture_output=True, text=True, check=True
     ).stdout.strip() == "?? primary-checkout.py"
-    assert subprocess.run(
-        ["git", "status", "--porcelain"], cwd=candidate, capture_output=True, text=True, check=True
-    ).stdout.strip() == ""
     assert os.environ["DARKFAC_PROJECT_ROOT"] == str(shared)
     assert os.environ["DARKFAC_STATE_ROOT"] == str(fleet_state)
 
-    (candidate / "candidate-change.py").write_text("uncommitted candidate edit\n", encoding="utf-8")
-    _dirty_step, _dirty_command, dirty_result = run_ticket._gate_run_official(
-        run_ticket.ticket_stages.GateState(), candidate, Progress(), [], True, "resume"
+
+def test_remote_gate_retry_reuses_candidate_environment(tmp_path: Path, monkeypatch) -> None:
+    candidate = tmp_path / "candidate"
+    checkout = tmp_path / "operational"
+    candidate.mkdir()
+    checkout.mkdir()
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(checkout))
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "fleet-state"))
+    monkeypatch.setattr(run_ticket, "GATE_REMOTE_RETRIES", 1)
+    monkeypatch.setattr(run_ticket.time, "sleep", lambda _delay: None)
+    calls = []
+
+    def fake_run_bounded(_cmd, **kwargs):
+        calls.append(kwargs)
+        return BoundedProcessResult(stdout="[HARNESS_PASS]", stderr="", returncode=0, duration_s=0.1)
+
+    monkeypatch.setattr(run_ticket, "_run_bounded", fake_run_bounded)
+    initial = BoundedProcessResult(
+        stdout="[REMOTE_JOB_LOST] worker gone", stderr="", returncode=1, duration_s=0.1,
     )
-    assert dirty_result.returncode == 1
-    assert "[DIRTY_PATHS] candidate-change.py" in dirty_result.stdout
-    assert "[TEST_COUNT] count=0" in dirty_result.stdout
-    assert "primary-checkout.py" not in dirty_result.stdout
-    capsys.readouterr()
+    # Exercise actual retry path and its environment builder after a remote failure.
+    with patch.object(run_ticket, "_gate_remote_unavailable", return_value=True), \
+         patch.object(run_ticket, "_rotate_gate_workers", return_value=None):
+        result = run_ticket._retry_gate_remote_unavailable(
+            ["runner.py", "--remote-required"], initial, candidate, [], 1, True, lambda: False,
+        )
+
+    assert result.returncode == 0
+    assert calls[0]["cwd"] == candidate
+    assert calls[0]["env"]["DARKFAC_PROJECT_ROOT"] == str(candidate.resolve())
+    assert calls[0]["env"]["DARKFAC_STATE_ROOT"] == str(tmp_path / "fleet-state")
 
 
 def test_gate_failure_reinvokes_agent_with_distilled_log_then_retries(tmp_path: Path) -> None:

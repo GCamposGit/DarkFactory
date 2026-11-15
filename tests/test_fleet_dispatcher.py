@@ -883,6 +883,49 @@ def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkey
     assert captured["env"]["DARKFAC_STATE_ROOT"] == str((tmp_path / "shared-state").resolve())
 
 
+def test_dispatch_removes_checkout_project_root_but_keeps_derived_state_root(tmp_path: Path, monkeypatch):
+    captured = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    checkout = tmp_path / "operational-checkout"
+    checkout.mkdir()
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(checkout))
+    monkeypatch.delenv("DARKFAC_STATE_ROOT", raising=False)
+    monkeypatch.setattr(fd, "PROJECT_ROOT", checkout)
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "child-checkout")
+    monkeypatch.setattr(
+        fd, "subprocess",
+        type("Subprocess", (), {
+            "Popen": staticmethod(lambda _cmd, **kwargs: captured.update(kwargs) or Process()),
+            "STDOUT": -2,
+        })(),
+    )
+
+    fd.default_launch("USR-516", fd.HostSpec("notebook", 1), {"id": "USR-516"})
+
+    assert "DARKFAC_PROJECT_ROOT" not in captured["env"]
+    assert captured["env"]["DARKFAC_STATE_ROOT"] == str((checkout / ".factory").resolve())
+
+
+def test_dispatch_keeps_remote_gate_pin_without_inheriting_project_root(tmp_path: Path, monkeypatch):
+    checkout = tmp_path / "dirty-checkout"
+    checkout.mkdir()
+    (checkout / "dirty.py").write_text("shared change", encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(checkout))
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "fleet-state"))
+
+    env = _capture_launch_env(monkeypatch, tmp_path, fd.HostSpec("grokbox", 1, "http://worker:8080"))
+
+    assert "DARKFAC_PROJECT_ROOT" not in env
+    assert env["DARKFAC_STATE_ROOT"] == str((tmp_path / "fleet-state").resolve())
+    assert env["DARKFAC_FLEET_GATE_REMOTE"] == "1"
+    assert env["DARKFAC_TEST_WORKERS"] == "http://worker:8080"
+
+
 def _capture_launch_env(monkeypatch, tmp_path: Path, host: fd.HostSpec) -> dict[str, str]:
     captured: dict[str, object] = {}
 

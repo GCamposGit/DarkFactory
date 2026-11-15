@@ -17,7 +17,7 @@ Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A
 
 Como manter: este arquivo não é protegido. O owner edita quando quiser, e a fábrica o atualiza na mesma entrega que muda um destes fatos (com a data no histórico ao final). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
 
-Última revisão: 14/11/2026 (USR-516: o portão de entrega fixa `DARKFAC_PROJECT_ROOT` na worktree do candidato em toda tentativa, sem sobrescrever o estado compartilhado da frota).
+Última revisão: 15/11/2026 (USR-516: o dispatcher resolve e preserva `DARKFAC_STATE_ROOT` no filho, sem propagar o `DARKFAC_PROJECT_ROOT` do checkout operacional; cada tentativa do portão aponta para a worktree candidata).
 
 ## Canais de entrada
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
@@ -140,3 +140,5 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 - 06/11/2026: USR-452 entregue em producao no SHA11366cac48e4cbb5f991ce112c71dc9bcd42f89d, PR826, CI42252777189. Backup snp3t_darkfac_20261106_163829_2ee471 restaurado com sucesso. USR-479 fecha cooldown e prova de retomada do corretivo integrado.
 
 - 08/11/2026: USR-484, corre??o dos quatro bloqueios da revis?o: causa oficial precede cauda; recovery tenta pr?ximos tickets; hold observa HEADs reais; retomada exige v?nculo HEAD/artefatos e status leg?vel. Altera??es locais, sem commit, push ou merge.
+
+- 15/11/2026: USR-516 fecha a propagação de raiz que deixava o portão inspecionar o checkout operacional. O filho do dispatcher mantém a raiz de estado compartilhada já resolvida e deixa `run_ticket` vincular cada gate à worktree candidata, inclusive no retry remoto.
