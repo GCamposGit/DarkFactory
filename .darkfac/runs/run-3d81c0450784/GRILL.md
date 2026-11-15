@@ -15,9 +15,6 @@
 - (technical) Como definir os prazos das provas periódicas de reteste? -> **Exigir prazo por perfil; evidência vencida perde validade e aparece como pendência** (A consolidação diária já prevista não define a validade da prova nem a periodicidade de reteste de cada projeto.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [business] Qual política de retenção deve valer para evidências e histórico operacional dos projetos habilitados? (id=q1)
-- [business] Como autorizar os limites de custo e consumo desta operação? (id=q2)
-- [business] Onde e quando os alertas operacionais devem chegar ao owner? (id=q3)
+- [business] Qual política de retenção deve valer para evidências e histórico operacional dos projetos habilitados? -> **Retenção permanente (sem expiração automática) para as evidências e o histórico operacional dos projetos habilitados. Usar o destino durável autorizado no perfil de cada projeto; se faltar um destino autorizado, aguardar a sua definição antes de armazenar dados desse projeto.** (respondida pelo owner)
+- [business] Como autorizar os limites de custo e consumo desta operação? -> **Exigir limites por projeto e respeitar também os tetos globais existentes** (respondida pelo owner)
+- [business] Onde e quando os alertas operacionais devem chegar ao owner? -> **DarkHub e Telegram: novidade acionável, falha ou prazo vencido, sem repetição inalterada** (respondida pelo owner)
