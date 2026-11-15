@@ -99,6 +99,24 @@ def test_remove_sandbox_dir_refuses_a_path_outside_the_system_tempdir(
     assert outside.is_dir()  # left untouched
 
 
+def test_remove_sandbox_dir_refuses_the_system_temp_root_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix="usr457-root-"))
+    marker = root / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(tempdirs.tempfile, "gettempdir", lambda: str(root))
+
+    result = tempdirs.remove_sandbox_dir(root)
+
+    assert result.ok is False
+    assert result.error_kind == "outside_tempdir"
+    assert marker.read_text(encoding="utf-8") == "keep"
+    # Restore the real temp root for the test's own cleanup.
+    monkeypatch.undo()
+    tempdirs.robust_rmtree(root)
+
+
 def test_remove_sandbox_dir_on_an_already_gone_directory_is_ok() -> None:
     directory = Path(tempfile.mkdtemp(prefix="usr457-gone-"))
     directory.rmdir()

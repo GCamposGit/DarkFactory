@@ -60,13 +60,13 @@ class SandboxCleanup:
 
 
 def _within_system_tempdir(path: Path) -> bool:
-    """True when ``path.resolve()`` is ``tempfile.gettempdir()`` or lives below it."""
+    """True when ``path.resolve()`` is a strict descendant of the system tempdir."""
     try:
         resolved = path.resolve()
         temp_root = Path(tempfile.gettempdir()).resolve()
     except OSError:
         return False
-    return resolved == temp_root or temp_root in resolved.parents
+    return temp_root in resolved.parents
 
 
 def remove_sandbox_dir(path: Path) -> SandboxCleanup:
