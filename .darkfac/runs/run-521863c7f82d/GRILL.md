@@ -12,8 +12,5 @@
 - Exceções, aceitação de risco e mudanças em governança protegida seguem os mecanismos existentes, sem autorização implícita nesta demanda.
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] Nesta entrega, as propostas de correção devem apenas ser apresentadas ou também executadas? (id=q1)
-- [business] A prioridade sugerida pelo modelo pode mudar a ordem de execução dos tickets? (id=q2)
+- [intent] Nesta entrega, as propostas de correção devem apenas ser apresentadas ou também executadas? -> **Gerar propostas; execução em ticket separado** (respondida pelo owner)
+- [business] A prioridade sugerida pelo modelo pode mudar a ordem de execução dos tickets? -> **Somente recomendação explicada** (respondida pelo owner)
