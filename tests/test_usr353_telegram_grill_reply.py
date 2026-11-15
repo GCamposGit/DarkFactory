@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
-from core.owner_actions.answer_sync import DEMANDS_RELATIVE, apply_answers, pending_answers
 from core.owner_actions.models import OwnerAction
 from hub.backend.api import get_hub_service, router
 from hub.backend.service import HubService
@@ -89,19 +88,3 @@ def test_owner_bot_unrelated_chatter_stays_ignored_and_records_nothing(client) -
     body = test_client.post("/api/webhooks/telegram/owner", json=_update(101, "oi")).json()
     assert body["action"] == "unknown" and not body.get("response_text")
     assert _answers(test_client) == []
-
-
-def test_answer_sync_imports_grill_reply_into_repo_ledger(client, tmp_path: Path) -> None:
-    test_client, _service = client
-    test_client.post("/api/webhooks/telegram/ops", json=_update(102, "Aprovado, teto 40", GRILL_PROMPT))
-    answers = [OwnerAction.model_validate(r) for r in _answers(test_client)]
-
-    root = tmp_path / "repo"
-    (root / ".factory" / "owner_actions").mkdir(parents=True)
-    (root / ".factory" / "owner_actions" / "owner_actions.json").write_text('{"actions": []}', encoding="utf-8")
-    DemandsStore(root / DEMANDS_RELATIVE).save_ticket(UserTicket(id="USR-341", title="Teto", problem_statement="x"))
-
-    assert [a.id for a in pending_answers(root, answers)] == [answers[0].id]
-    result = apply_answers(root, answers)
-    assert result.annotated == {answers[0].id: ["USR-341"]}
-    assert pending_answers(root, answers) == []

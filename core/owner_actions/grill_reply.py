@@ -4,16 +4,14 @@ A Grill question reaches the owner on both Telegram bots, and the owner often an
 (a reply to the message, or a voice note) instead of pressing a button. Those answers used to vanish: the
 owner bot is alerts-only and ignored them, and the ops bot only recorded buttons and ``/grill``.
 
-``record_grill_reply`` turns the reply into a DONE decision in the Hub's dynamic owner-action store, with
-the free text as the answer note. That makes it visible in ``GET /api/owner-actions/answers`` (so the
-Notebook sync persists it in the repository) and lets ``annotate_blocked_tickets`` attach it to the ticket.
+``record_grill_reply`` turns the reply into a DONE decision in the configured owner-action store, with
+the free text as the answer note. That makes it visible in ``GET /api/owner-actions/answers`` (for readers of the shared control store) and lets ``annotate_blocked_tickets`` attach it to the ticket.
 Idempotent per ``(target, update_id)``.
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 from core.owner_actions.models import (
@@ -67,8 +65,6 @@ def record_grill_reply(
 ) -> tuple[OwnerAction, list[str]]:
     """Persist the reply as a DONE decision; returns it with the ticket ids it was annotated on."""
 
-    if store.dynamic_path is None:
-        raise ValueError("dynamic owner action storage is not configured")
     clean = redact((text or "").strip())
     if not clean:
         raise ValueError("empty grill reply")
@@ -87,6 +83,6 @@ def record_grill_reply(
         answer=DecisionAnswer(option_id=GRILL_REPLY_OPTION, note=clean, answered_by=f"{channel}:{user_id}"),
         created_by=f"{channel}-grill-reply",
     )
-    saved, _created = OwnerActionStore(Path(store.dynamic_path), remote_ref=None).upsert(action)
+    saved, _created = store.upsert(action)
     annotated = annotate_blocked_tickets(saved, demands_store) if demands_store is not None else []
     return saved, annotated

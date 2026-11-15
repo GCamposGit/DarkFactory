@@ -227,7 +227,7 @@ class InterventionsMixin:
             deploy_count=deploy_count,
             waiting_human_count=waiting_human_count,
             owner_action_count=len(owner_action_items),
-            owner_action_warnings=owner_action_warnings,
+            owner_action_warnings=owner_action_warnings, read_at=self._owner_actions_read_at,
             items=items,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -258,12 +258,9 @@ class InterventionsMixin:
             return set()
 
     def _collect_owner_action_items(self, terminal_runs: frozenset[str] | set[str] = frozenset()) -> Tuple[List[PriorityInterventionItem], List[str]]:
-        """Open owner actions as priority-queue items. Never raises: the queue must keep working."""
-        try:
-            loaded = self.owner_action_store.load()
-        except Exception as exc:  # pragma: no cover - the store already swallows read errors
-            logger.warning("Error collecting owner actions: %s", exc)
-            return [], ["backlog de acoes humanas indisponivel"]
+        """Read live owner actions; propagate unavailability instead of showing an empty queue."""
+        loaded = self.owner_action_store.load()
+        self._owner_actions_read_at = loaded.read_at
         by_id = {a.id: a for a in loaded.actions}
         items: List[PriorityInterventionItem] = []
         for action in loaded.actions:
@@ -366,6 +363,7 @@ class InterventionsMixin:
         )
         done = sum(1 for a in loaded.actions if a.status == ActionStatus.DONE)
         return OwnerActionsReport(
+            read_at=loaded.read_at,
             open_count=len(loaded.actions) - done,
             done_count=done,
             items=views,
@@ -381,13 +379,13 @@ class InterventionsMixin:
         )
 
     def mark_owner_action_done(self, action_id: str, note: str = "") -> OwnerActionResolveResult:
-        """Owner closed an `action` item in the DarkHub. Persists to the resolutions overlay."""
-        action = self.owner_action_store.resolve(action_id, note=note, to_overlay=True)
+        """Owner closed an `action` item in the DarkHub. Persists to the configured store."""
+        action = self.owner_action_store.resolve(action_id, note=note)
         return self._owner_action_result(action, [])
 
     def answer_owner_decision(self, action_id: str, option_id: str, note: str = "") -> OwnerActionResolveResult:
         """Owner answered a `decision`: persist it and attach it to the tickets it blocks."""
-        action = self.owner_action_store.resolve(action_id, option_id=option_id, note=note, to_overlay=True)
+        action = self.owner_action_store.resolve(action_id, option_id=option_id, note=note)
         annotated = annotate_blocked_tickets(action, self.demands_service.store)
         return self._owner_action_result(action, annotated)
 

@@ -29,6 +29,7 @@ class AccountUsageMonitor:
         cache_ttl_sec: float = 30.0,
         synced_only: bool = False,
     ) -> None:
+        self.synced_only = synced_only
         self.snapshot_dir = Path(snapshot_dir)
         self.adapters = list(adapters) if adapters is not None else list(
             (build_synced_adapters if synced_only else build_default_adapters)(self.snapshot_dir)
@@ -39,18 +40,12 @@ class AccountUsageMonitor:
         self._lock = threading.RLock()
 
     def save_snapshot(self, provider_id: str, payload: Dict[str, Any]) -> None:
-        """Persist or update an account quota snapshot JSON file and invalidate cache."""
+        """Replace a complete snapshot and invalidate cache; never retain old quota windows."""
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         file_target = self.snapshot_dir / f"{provider_id}.json"
-        existing: Dict[str, Any] = {}
-        if file_target.is_file():
-            try:
-                existing = json.loads(file_target.read_text(encoding="utf-8"))
-            except Exception as exc:
-                logger.warning("Failed to read existing snapshot %s: %s", file_target, exc)
-        existing.update(payload)
-        existing.setdefault("checked_at", datetime.now(timezone.utc).isoformat())
-        file_target.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+        snapshot = dict(payload)
+        snapshot.setdefault("checked_at", "1970-01-01T00:00:00Z" if snapshot.get("source_node") else datetime.now(timezone.utc).isoformat())
+        file_target.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
         with self._lock:
             self._cache = None
             self._cached_at = 0.0
@@ -68,7 +63,7 @@ class AccountUsageMonitor:
     def inspect(self, force: bool = False) -> AccountUsageReport:
         with self._lock:
             if not force and self._cache is not None and time.monotonic() - self._cached_at < self.cache_ttl_sec:
-                return self._cache
+                return self._with_arrival_freshness(self._cache)
 
         accounts: List[ProviderAccountUsage] = []
         workers = min(6, max(1, len(self.adapters)))
@@ -93,4 +88,16 @@ class AccountUsageMonitor:
         with self._lock:
             self._cache = report
             self._cached_at = time.monotonic()
+        return self._with_arrival_freshness(report)
+
+    def _with_arrival_freshness(self, report: AccountUsageReport) -> AccountUsageReport:
+        for account in report.accounts:
+            if not account.source_node:
+                continue
+            try:
+                payload = json.loads((self.snapshot_dir / f"{account.provider_id}.json").read_text(encoding="utf-8"))
+                account.received_at = payload.get("received_at")
+            except (OSError, ValueError):
+                account.received_at = None
+            account.with_freshness()
         return report

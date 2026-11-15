@@ -1,6 +1,11 @@
 <!-- covers: core/line/v0_proof.py, core/line/owner_intake.py, core/line/acceptance.py, core/line/pilot_secrets.py, hub/backend/api.py, hub/backend/service_line.py, hub/frontend/live.html, hub/frontend/live.js, hub/frontend/live.css -->
 # Prova da V0 (USR-279)
 
+Na verificacao dos canais pelo Hub, OAs usam o mesmo PostgreSQL da fabrica.
+Banco indisponivel responde 503 em OAs/intervencoes; uma lista vazia ou snapshot
+na imagem nao serve como evidencia de ausencia de bloqueios. Consulte a hora
+`read_at` da leitura concluida e a configuracao em [fila.md](fila.md).
+
 Critério aprovado pelo owner em 24/10 (`docs/plans/PLANO_V0_2026-10-24.md`, seção 1): **5 demandas
 reais seguidas** entram por Telegram, Hub ou chat e chegam em produção **sem o owner tocar**, cada
 uma com learning pack; **pelo menos 1** é de um produto real (`project_id` diferente de `darkfac`);

@@ -1479,9 +1479,11 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
 
 class ClaudeCodeAccountAdapter(AccountUsageAdapter):
+    SNAPSHOT_FRESHNESS_TTL_SECONDS = 900.0
+
     def inspect(self, force: bool = False) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
-        if snapshot and not force and self._is_snapshot_fresh(snapshot):
+        if snapshot and self._is_snapshot_fresh(snapshot):
             return self._from_snapshot(snapshot)
 
         # The CLI is the supported source for subscription rate limits. Do not impersonate the
@@ -1491,7 +1493,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             cli_usage = self._probe_claude_cli(executable)
             if cli_usage and cli_usage.quota_supported:
                 return cli_usage
-            headless_usage = self._probe_claude_headless(executable)
+            headless_usage = self._probe_claude_headless(executable) if self._paid_probe_allowed(snapshot) else None
             if headless_usage is not None:
                 return headless_usage
 
@@ -1516,6 +1518,15 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             "Claude Code não instalado ou fora do PATH. Instale com 'npm install -g @anthropic-ai/claude-code' ou configure ANTHROPIC_API_KEY.",
             "claude_code",
         )
+
+    def _paid_probe_allowed(self, snapshot: Optional[Dict[str, Any]] = None) -> bool:
+        snapshot = snapshot or self._snapshot_payload()
+        if not snapshot:
+            return True
+        if self._is_snapshot_fresh(snapshot):
+            return False
+        usage = self._from_snapshot(snapshot)
+        return all(w.remaining_percent is None or w.remaining_percent > 15.0 for w in usage.windows)
 
     @staticmethod
     def _extract_claude_oauth_info() -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -1561,7 +1572,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
     def _refresh_claude_token_via_cli(self) -> bool:
         """Invokes Claude Code CLI headlessly to refresh expired OAuth credentials in ~/.claude/.credentials.json."""
         executable = self._find_claude()
-        if not executable:
+        if not executable or not self._paid_probe_allowed():
             return False
         try:
             res = subprocess.run(
@@ -1666,6 +1677,8 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         unified 5h/7d utilization (0..1) and reset epoch. Runs in an empty temp dir (no CLAUDE.md
         context) with the cheapest model. Returns None when no event carries a utilization.
         """
+        if not self._paid_probe_allowed():
+            return None
         try:
             with tempfile.TemporaryDirectory(prefix="darkfac-quota-probe-") as neutral:
                 result = subprocess.run(

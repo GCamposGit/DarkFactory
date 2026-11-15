@@ -1,8 +1,4 @@
-"""Decisao pura de criar/manter/atualizar a tarefa agendada DarkFac-Usage-Cloud-Sync (USR-236).
-
-Sem I/O e sem dependencia de Windows: o instalador em
-``scripts/install_usage_sync_task.py`` coleta o estado e aplica a decisao.
-"""
+"""Snapshot-only publication and portable scheduling policy for usage telemetry."""
 
 from __future__ import annotations
 
@@ -27,6 +23,7 @@ class SyncTaskState:
 
     script_path: str
     working_directory: str = ""
+    schedule_current: bool = True
 
 
 @dataclass(frozen=True)
@@ -74,6 +71,8 @@ def decide_sync_task(
             SyncTaskAction.UPDATE,
             f"tarefa aponta para worktree ('{current.script_path}')",
         )
+    if not current.schedule_current:
+        return SyncTaskDecision(SyncTaskAction.UPDATE, "schedule disabled, interactive or missing five-minute trigger")
     wanted = expected_script_path(desired_root)
     if normalize_path(current.script_path) != normalize_path(wanted):
         return SyncTaskDecision(
@@ -88,3 +87,138 @@ def decide_sync_task(
             f"diretorio de trabalho '{current.working_directory}' difere de '{desired_root}'",
         )
     return SyncTaskDecision(SyncTaskAction.KEEP, "tarefa ja aponta para o checkout principal")
+
+import json
+import logging
+import os
+from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional
+
+from pydantic import BaseModel
+from core.usage.models import snapshot_age_seconds
+
+logger = logging.getLogger("darkfac.sync_usage")
+
+def _unquote_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
+        return value[1:-1].strip()
+    return value
+
+
+def load_telemetry_key(
+    repo_root: Path,
+    *,
+    environ: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Read the telemetry key at runtime, preferring the process environment to local .env."""
+    environment = os.environ if environ is None else environ
+    from_environment = _unquote_env_value(environment.get("DARKFAC_TELEMETRY_KEY", ""))
+    if from_environment:
+        return from_environment
+
+    env_file = Path(repo_root) / ".env"
+    try:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            candidate = line.strip()
+            if not candidate or candidate.startswith("#"):
+                continue
+            if candidate.lower().startswith("export "):
+                candidate = candidate[7:].lstrip()
+            name, separator, value = candidate.partition("=")
+            if separator and name.strip() == "DARKFAC_TELEMETRY_KEY":
+                return _unquote_env_value(value)
+    except OSError:
+        return ""
+    return ""
+
+
+def configure_sync_logging(repo_root: Path) -> None:
+    """Persist task diagnostics locally because pythonw has no visible console."""
+    logger.setLevel(logging.INFO)
+    if any(getattr(handler, "_darkfac_sync_file", False) for handler in logger.handlers):
+        return
+    try:
+        log_dir = Path(repo_root) / ".factory" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            log_dir / "usage_sync.log",
+            maxBytes=1_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        handler._darkfac_sync_file = True  # type: ignore[attr-defined]
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    except OSError as exc:
+        logger.warning("Could not open local sync log: %s", type(exc).__name__)
+
+
+def collect_local_usage_payload(
+    repo_root: Path,
+    node_id: str = "workstation",
+    force_probe: bool = False,
+) -> Dict[str, Any]:
+    """Collects local provider accounts and API credits into a unified sync payload."""
+    # Publication reads files only: even inspect(force=False) may probe stale accounts.
+    def read_snapshots(kind: str) -> list[dict[str, Any]]:
+        rows = []
+        for path in sorted((repo_root / ".factory" / "usage" / kind).glob("*.json")):
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(payload, dict):
+                raise ValueError(f"invalid {kind} snapshot")
+            rows.append(payload)
+        return rows
+
+    return {
+        "client_node_id": node_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "accounts": read_snapshots("providers"),
+        "credits": read_snapshots("credits"),
+    }
+
+
+class PublishResult(BaseModel):
+    """A publication receipt; errors contain no response body, token or database URL."""
+
+    ok: bool = False
+    http_status: int | None = None
+    oldest_snapshot_age_seconds: int | None = None
+    error: str | None = None
+
+
+def publish_once(
+    repo_root: Path | None = None,
+    *,
+    target_url: str | None = None,
+    node_id: str | None = None,
+) -> PublishResult:
+    """Publish existing snapshots without probing; HTTP timeout is six seconds; never raises."""
+    age = None
+    try:
+        import httpx
+        from core.paths import project_root
+
+        root = repo_root if repo_root is not None else project_root()
+        key = load_telemetry_key(root)
+        if not key:
+            return PublishResult(error="telemetry_key_missing")
+        payload = collect_local_usage_payload(root, node_id or os.environ.get("DARKFAC_NODE_ID", "workstation"), force_probe=False)
+        snapshots = payload["accounts"] + payload["credits"]
+        ages = [snapshot_age_seconds(row.get("checked_at")) for row in snapshots]
+        age = max(ages) if ages and all(a is not None for a in ages) else None
+        if not payload["accounts"]:
+            return PublishResult(error="account_snapshots_missing", oldest_snapshot_age_seconds=age)
+        response = httpx.post(
+            f"{(target_url or os.environ.get('DARKHUB_CLOUD_URL', 'https://darkhub.ggcampos.com')).rstrip('/')}/api/usage/sync",
+            json=payload,
+            headers={"X-DarkFac-Telemetry-Key": key},
+            timeout=6.0,
+        )
+        ok = 200 <= response.status_code < 300
+        return PublishResult(ok=ok, http_status=response.status_code,
+                             oldest_snapshot_age_seconds=age, error=None if ok else "http_error")
+    except Exception as exc:
+        return PublishResult(oldest_snapshot_age_seconds=age, error=type(exc).__name__)

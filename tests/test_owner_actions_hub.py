@@ -135,7 +135,7 @@ def test_priority_endpoint_exposes_owner_action_count(client: TestClient, seeded
     assert any(i["kind"] == "owner_action" for i in data["items"])
 
 
-def test_done_endpoint_sets_resolved_at_and_persists_to_overlay(
+def test_done_endpoint_persists_and_survives_restart(
     client: TestClient, service: HubService, seeded: dict[str, str]
 ) -> None:
     response = client.post(f"/api/owner-actions/{seeded['critical']}/done", json={"note": "feito"})
@@ -145,11 +145,8 @@ def test_done_endpoint_sets_resolved_at_and_persists_to_overlay(
     # The dependent is no longer blocked.
     after = {i["action"]["id"]: i for i in client.get("/api/owner-actions").json()["items"]}
     assert after[seeded["dependent"]]["blocked_by"] == []
-    overlay = json.loads((service.data_dir / "owner_actions" / "resolutions.json").read_text(encoding="utf-8"))
-    assert seeded["critical"] in overlay["resolutions"]
-    # definitions (shipped with the image) are untouched
     raw = json.loads(service.owner_action_store.path.read_text(encoding="utf-8"))["actions"]
-    assert {r["id"]: r["status"] for r in raw}[seeded["critical"]] == "open"
+    assert {r["id"]: r["status"] for r in raw}[seeded["critical"]] == "done"
     # redeploy: a brand new service on the same volume still sees it closed
     fresh = HubService(data_dir=service.data_dir)
     assert fresh.owner_action_store.get(seeded["critical"]).status.value == "done"
@@ -195,9 +192,112 @@ def test_hub_in_production_layout_reads_the_baked_in_backlog(tmp_path: Path, mon
     definitions = tmp_path / "owner_actions.json"
     OwnerActionStore(definitions).add(_draft(title="Item embutido na imagem"))
     monkeypatch.setenv("DARKFAC_OWNER_ACTIONS_PATH", str(definitions))
+    monkeypatch.setenv("DARKFAC_OWNER_ACTIONS_MODE", "file")
     svc = HubService()
     assert svc.owner_action_store.path == definitions
     assert [i.action_target_id for i in svc.get_priority_interventions().items if i.kind == PriorityInterventionKind.OWNER_ACTION] == ["OA-001"]
+
+
+@pytest.fixture
+def control_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from core.workflow.control_store import SQLiteControlStore
+    from core.owner_actions import control_queue
+    from core.demands import queue_store
+
+    database = SQLiteControlStore(db_path=tmp_path / "control.db")
+    monkeypatch.setenv("DARKFAC_OWNER_ACTIONS_MODE", "control")
+    monkeypatch.setattr(control_queue, "is_configured", lambda: True)
+    monkeypatch.setattr(queue_store, "control_store", lambda: database)
+    return database
+
+
+def test_control_is_only_source_and_hub_click_survives_restart(tmp_path: Path, control_db) -> None:
+    from core.owner_actions.models import ActionStatus
+
+    data = tmp_path / "hub"
+    export = data / "owner_actions" / "owner_actions.json"
+    file_store = OwnerActionStore(export, control=False, remote_ref=None)
+    old = file_store.add(_draft(id="OA-001"))
+    file_store.add(_draft(id="OA-099", title="Export only, never live"))
+    live = OwnerActionStore(export, control=True, remote_ref=None)
+    live.upsert(old)
+    live.resolve(old.id)
+    live.add(_draft(id="OA-002", title="Only in control"))
+    service = HubService(data_dir=data)
+    assert {a.id: a.status for a in service.owner_action_store.load().actions} == {
+        "OA-001": ActionStatus.DONE, "OA-002": ActionStatus.OPEN,
+    }
+    app.dependency_overrides[get_hub_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"X-Hub-Session": service.session_token})
+            result = client.post("/api/owner-actions/OA-002/done", json={})
+            assert result.status_code == 200
+            assert client.get("/api/owner-actions").json()["read_at"]
+    finally:
+        app.dependency_overrides.clear()
+    assert HubService(data_dir=data).owner_action_store.get("OA-002").status is ActionStatus.DONE
+    assert file_store.get("OA-001").status is ActionStatus.OPEN
+    assert not (export.parent / "resolutions.json").exists()
+
+
+def test_database_outage_is_503_for_reads_and_mutations(tmp_path: Path, control_db, monkeypatch) -> None:
+    from core.demands import queue_store
+
+    service = HubService(data_dir=tmp_path / "hub")
+    service.owner_action_store.add(_draft(id="OA-001"))
+    def unavailable():
+        raise ConnectionError("offline")
+    monkeypatch.setattr(queue_store, "control_store", unavailable)
+    app.dependency_overrides[get_hub_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"X-Hub-Session": service.session_token})
+            responses = [client.get("/api/owner-actions"), client.get("/api/interventions/priority"),
+                         client.post("/api/owner-actions/OA-001/done", json={})]
+            for response in responses:
+                assert response.status_code == 503
+                assert response.json()["available"] is False
+                assert response.json()["ok"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_overlay_migration_is_idempotent_and_never_replayed(tmp_path: Path, control_db) -> None:
+    from core.owner_actions.models import Resolution, ActionStatus, utc_now
+
+    data = tmp_path / "hub"
+    directory = data / "owner_actions"
+    export = OwnerActionStore(directory / "owner_actions.json", control=False, remote_ref=None)
+    action = export.add(_draft(id="OA-001"))
+    resolution = Resolution(status=ActionStatus.DONE, resolved_at=utc_now())
+    (directory / "resolutions.json").write_text(json.dumps({"resolutions": {action.id: resolution.model_dump(mode="json")}}), encoding="utf-8")
+    (directory / "dynamic.json").write_text(json.dumps({"actions": [_draft(id="OA-HR-new").build("OA-HR-new").to_record()]}), encoding="utf-8")
+    first = HubService(data_dir=data)
+    assert first.owner_action_store.get(action.id).status is ActionStatus.DONE
+    assert first.owner_action_store.get("OA-HR-new")
+    before = control_db.list_owner_actions()
+    (directory / "resolutions.json").write_text("invalid, ignored after migration", encoding="utf-8")
+    second = HubService(data_dir=data)
+    assert second.owner_action_store.get(action.id).status is ActionStatus.DONE
+    assert control_db.list_owner_actions() == before
+
+
+def test_hub_reports_write_failure_without_returning_ok(tmp_path: Path, control_db, monkeypatch) -> None:
+    service = HubService(data_dir=tmp_path / "hub")
+    service.owner_action_store.add(_draft(id="OA-001"))
+    def unavailable(*args, **kwargs):
+        raise ConnectionError("write failed")
+    monkeypatch.setattr(control_db, "upsert_owner_action", unavailable)
+    app.dependency_overrides[get_hub_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            client.headers.update({"X-Hub-Session": service.session_token})
+            result = client.post("/api/owner-actions/OA-001/done", json={})
+            assert result.status_code == 503 and result.json()["ok"] is False
+            assert service.owner_action_store.get("OA-001").status.value == "open"
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ------------------------------------------------------------------- the UI

@@ -81,6 +81,8 @@ def _shrunk_ledgers(wt: Path, content: dict[str, str]) -> list[str]:
     """Ledgers whose id count would drop or lose existing IDs versus origin/main (USR-419, USR-434)."""
     violations: list[str] = []
     for rel, text in content.items():
+        if rel == OWNER_ACTIONS_RELATIVE:
+            continue  # OA exports reflect the database, including removed rows.
         before_rows = _ledger_rows(_read_text(wt / rel))
         after_rows = _ledger_rows(text)
         before_ids = {str(r.get("id")) for r in before_rows if isinstance(r, dict) and "id" in r}
@@ -101,7 +103,6 @@ def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
     """
     from core.demands import queue_store
     from core.demands.store import DemandsStore
-    from core.owner_actions import control_queue
     from core.owner_actions.store import SCHEMA_VERSION, OwnerActionStore
 
     if worktree is None:
@@ -112,21 +113,10 @@ def render_ledgers(worktree: Path | None = None) -> dict[str, str]:
         )
     tickets = [json.loads(t.model_dump_json()) for t in sorted(stored, key=lambda t: t.id)]
 
-    file_rows: list[dict[str, Any]] = []
-    if worktree is not None:
-        file_rows = [r for r in _ledger_rows(_read_text(worktree / OWNER_ACTIONS_RELATIVE)) if isinstance(r, dict) and "id" in r]
-        try:
-            control_actions = OwnerActionStore(control=True).list_actions()
-            control_ids = {a.id for a in control_actions}
-            missing_in_control = [r for r in file_rows if str(r["id"]) not in control_ids]
-            if missing_in_control:
-                control_queue.write_rows(missing_in_control)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not sync git-only owner actions to control store: %s", exc)
-
-    control_records = [a.to_record() for a in OwnerActionStore(control=True).list_actions()]
-    merged_actions = control_queue.merge_rows(file_rows, control_records)
-    actions = sorted(merged_actions, key=lambda a: str(a.get("id", "")))
+    actions = sorted(
+        (a.to_record() for a in OwnerActionStore(control=True).list_actions()),
+        key=lambda action: str(action["id"]),
+    )
     return {
         DEMANDS_RELATIVE: json.dumps(tickets, indent=2, ensure_ascii=False) + "\n",
         OWNER_ACTIONS_RELATIVE: json.dumps(

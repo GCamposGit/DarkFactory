@@ -71,7 +71,7 @@ def _decision_draft(**overrides: Any) -> OwnerActionDraft:
 
 @pytest.fixture
 def store(tmp_path: Path) -> OwnerActionStore:
-    return OwnerActionStore(tmp_path / "oa" / "owner_actions.json", overlay_path=tmp_path / "oa" / "resolutions.json")
+    return OwnerActionStore(tmp_path / "oa" / "owner_actions.json")
 
 
 # ------------------------------------------------------------------ schema
@@ -247,25 +247,6 @@ def test_next_id_and_add_consider_the_base_branch(tmp_path: Path) -> None:
     assert OwnerActionStore(isolated, remote_ref="main").next_id() == "OA-001"
 
 
-def test_next_id_considers_overlay_and_dynamic_sources(tmp_path: Path) -> None:
-    """USR-411: an id taken only in the overlay or dynamic file is never handed out again."""
-    base = tmp_path / "oa"
-    base.mkdir()
-    ledger = base / "owner_actions.json"
-    ledger.write_text(json.dumps({"schema_version": 1, "actions": [_draft().build("OA-001").to_record()]}), encoding="utf-8")
-    overlay = base / "resolutions.json"
-    overlay.write_text(json.dumps({"resolutions": {"OA-077": {}}}), encoding="utf-8")
-    dynamic = base / "dynamic.json"
-    dynamic.write_text(json.dumps({"schema_version": 1, "actions": [
-        _draft().build("OA-078").to_record(), _draft().build("OA-HR-x").to_record()]}), encoding="utf-8")
-    store = OwnerActionStore(ledger, overlay_path=overlay, dynamic_path=dynamic, remote_ref=None, control=False)
-    assert store.next_action_id() == "OA-079"
-    assert store.add(_draft()).id == "OA-079"
-    with pytest.raises(OwnerActionInvalid):
-        store.add(_draft().model_copy(update={"id": "OA-077"}))
-    assert cli.run(["next-id"], store=store, out=io.StringIO()) == 0
-
-
 def test_next_id_considers_git_history(tmp_path: Path) -> None:
     """USR-434: an id recorded anywhere in git history is never handed out again."""
     repo = tmp_path / "repo"
@@ -422,23 +403,6 @@ def test_every_mutation_rejects_invalid_ledger_without_changing_file(
     assert path.read_bytes() == original
 
 
-def test_overlay_write_rejects_invalid_existing_resolution_without_changing_overlay(
-    tmp_path: Path,
-) -> None:
-    definitions = tmp_path / "owner_actions.json"
-    overlay = tmp_path / "resolutions.json"
-    store = OwnerActionStore(definitions, overlay_path=overlay, remote_ref=None)
-    action = store.add(_draft())
-    original = json.dumps(
-        {"schema_version": 1, "resolutions": {action.id: {"status": "approval"}}}, indent=2
-    ).encode("utf-8")
-    overlay.write_bytes(original)
-
-    with pytest.raises(OwnerActionInvalid):
-        store.resolve(action.id, to_overlay=True)
-    assert overlay.read_bytes() == original
-
-
 def test_control_write_validates_all_rows_before_any_upsert(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from core.owner_actions import control_queue
 
@@ -488,38 +452,6 @@ def test_resolve_decision_requires_valid_option_and_keeps_first_answer(store: Ow
         store.resolve(created.id, option_id="A")
 
 
-def test_overlay_resolution_wins_over_open_definition_and_survives_reload(tmp_path: Path) -> None:
-    definitions = tmp_path / "defs" / "owner_actions.json"
-    overlay = tmp_path / "volume" / "resolutions.json"
-    agent_store = OwnerActionStore(definitions)
-    action = agent_store.add(_draft())
-    decision = agent_store.add(_decision_draft(title="Decidir algo importante"))
-
-    hub_store = OwnerActionStore(definitions, overlay_path=overlay)
-    hub_store.resolve(action.id, to_overlay=True)
-    hub_store.resolve(decision.id, option_id="A", note="n", to_overlay=True)
-
-    # A fresh process (redeploy) sees the closed items even though the definitions still say open.
-    reloaded = OwnerActionStore(definitions, overlay_path=overlay)
-    by_id = {a.id: a for a in reloaded.load().actions}
-    assert by_id[action.id].status is ActionStatus.DONE
-    assert by_id[decision.id].answer.option_id == "A"
-    assert json.loads(definitions.read_text(encoding="utf-8"))["actions"][0]["status"] == "open"
-
-
-def test_corrupted_overlay_is_ignored_on_read_and_replaced_on_write(tmp_path: Path) -> None:
-    definitions = tmp_path / "owner_actions.json"
-    overlay = tmp_path / "resolutions.json"
-    store = OwnerActionStore(definitions, overlay_path=overlay)
-    created = store.add(_draft())
-    overlay.write_text("{oops", encoding="utf-8")
-    loaded = store.load()
-    assert loaded.actions[0].status is ActionStatus.OPEN and loaded.warnings
-    store.resolve(created.id, to_overlay=True)
-    assert store.get(created.id).status is ActionStatus.DONE
-    assert list(tmp_path.glob("resolutions.json.corrupt-*"))
-
-
 def test_dependency_helpers(store: OwnerActionStore) -> None:
     first = store.add(_draft())
     second = store.add(_draft(title="Depende da primeira", depends_on=[first.id]))
@@ -534,6 +466,19 @@ def test_dependency_helpers(store: OwnerActionStore) -> None:
     by_id = {a.id: a for a in actions}
     assert blocked_by(by_id[second.id], by_id) == []
     assert unblocks(by_id[first.id], actions) == []
+
+
+def test_postgres_connection_failure_never_creates_memory_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from types import SimpleNamespace
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+    from core.workflow.control_contracts import StoreUnavailableError
+
+    def unavailable(*args, **kwargs):
+        raise ConnectionError("database offline")
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=unavailable))
+    with pytest.raises(StoreUnavailableError):
+        PostgresControlStore(database_url="postgresql://test.invalid/local")
 
 
 # --------------------------------------------------------- decision -> tickets

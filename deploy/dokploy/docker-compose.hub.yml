@@ -39,6 +39,9 @@ services:
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
       - DOKPLOY_DEPLOY_URL=${DOKPLOY_DEPLOY_URL:-}
       - DARKFAC_TELEMETRY_KEY=${DARKFAC_TELEMETRY_KEY:-}
+      # Shared live owner-action queue: the same writable PostgreSQL used by the factory.
+      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL:-}
+      - DARKFAC_OWNER_ACTIONS_MODE=control
       # USR-42: read-only view of the coordinator's control store for the task board
       - DARKHUB_CONTROL_DATABASE_URL=${DARKHUB_CONTROL_DATABASE_URL:-}
       # Owner demands -> production line (core.line.owner_intake): Telegram /demand, /linha <ticket>

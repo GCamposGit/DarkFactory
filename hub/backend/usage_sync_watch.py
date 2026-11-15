@@ -19,9 +19,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from core.usage.models import RECEIVED_STALE_AFTER_SECONDS
+
 logger = logging.getLogger(__name__)
 
-STALE_AFTER = timedelta(minutes=5)
+STALE_AFTER = timedelta(seconds=RECEIVED_STALE_AFTER_SECONDS)
 
 CAUSE_KEY_MISSING = "key_missing"
 CAUSE_UNAUTHORIZED = "unauthorized_401"
@@ -37,8 +39,8 @@ _CAUSE_TEXT: Dict[str, tuple[str, str]] = {
         "POST /api/usage/sync foi recusado com 401: a chave do host difere da DARKFAC_TELEMETRY_KEY do Hub.",
     ),
     CAUSE_STALE: (
-        "Sincronizacao de cotas parada ha mais de 5 minutos",
-        "Nenhuma sincronizacao bem-sucedida em POST /api/usage/sync ha mais de 5 minutos (host parado ou tarefa DarkFac-Usage-Cloud-Sync falhando).",
+        "Sincronizacao de cotas parada ha mais de 20 minutos",
+        "Nenhuma sincronizacao bem-sucedida em POST /api/usage/sync ha mais de 20 minutos (host parado ou tarefa DarkFac-Usage-Cloud-Sync falhando).",
     ),
 }
 

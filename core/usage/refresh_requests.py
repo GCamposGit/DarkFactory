@@ -1,9 +1,4 @@
-"""USR-234: persistent "refresh quotas" requests handed from the Hub to the metering host.
-
-The Hub (VPS) never probes provider CLIs; a button press only records a request in a JSON file on
-the Hub volume. The host that owns the CLIs polls the pending requests, measures, syncs and closes
-each request with the new ``checked_at`` (or a failure reason).
-"""
+"""Persistent refresh requests settled by the next snapshot publication, without host polling."""
 
 from __future__ import annotations
 
@@ -14,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 from pydantic import BaseModel, Field
 from core.common.time import utc_now as _utc_now
@@ -113,3 +108,24 @@ class RefreshRequestStore:
                 self._save(requests)
                 return request
         return None
+
+    def complete_from_snapshots(self, node_id: str, accounts: list[dict[str, Any]]) -> None:
+        """Settle pending refreshes on publication, without a separate host polling loop.
+
+        A publication of old files must never be reported as a new measurement.
+        """
+        try:
+            stamps = [datetime.fromisoformat(str(a.get("checked_at", "")).replace("Z", "+00:00")) for a in accounts]
+            oldest = min(stamp.replace(tzinfo=stamp.tzinfo or timezone.utc) for stamp in stamps)
+        except (ValueError, TypeError):
+            oldest = None
+        for request in self.pending(node_id):
+            requested = datetime.fromisoformat(request.requested_at.replace("Z", "+00:00"))
+            requested = requested.replace(tzinfo=requested.tzinfo or timezone.utc)
+            fresh = oldest is not None and oldest >= requested
+            change = RefreshRequestUpdate(
+                status=RefreshStatus.DONE if fresh else RefreshStatus.FAILED,
+                checked_at=oldest.isoformat() if fresh else None,
+                failure_reason=None if fresh else "Publicacao recebida sem medicao nova; o publicador nao executa sondas.",
+            )
+            self.update(request.id, change)

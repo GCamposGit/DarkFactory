@@ -12,6 +12,7 @@ from core.common.time import utc_now_iso
 
 
 STALE_AFTER_SECONDS = 600
+RECEIVED_STALE_AFTER_SECONDS = 20 * 60
 
 
 def snapshot_age_seconds(checked_at: Optional[str], now: Optional[datetime] = None) -> Optional[int]:
@@ -104,16 +105,23 @@ class ProviderAccountUsage(BaseModel):
     period_start: Optional[str] = None
     plausibility_flags: List[str] = Field(default_factory=list)
     # Freshness of a synced snapshot (USR-233): node that sent it, age and the stale flag.
+    received_at: Optional[str] = None
     source_node: Optional[str] = None
     age_seconds: Optional[int] = None
+    measurement_age_seconds: Optional[int] = None
     stale: bool = False
     probe_failure: Optional[ProbeFailure] = None
 
     def with_freshness(self, now: Optional[datetime] = None) -> "ProviderAccountUsage":
-        """Fill ``age_seconds``/``stale`` from ``checked_at`` (status and windows stay untouched)."""
-        age = snapshot_age_seconds(self.checked_at, now)
+        """Use server arrival for synced accounts and measurement time for local accounts."""
+        age = snapshot_age_seconds(self.received_at if self.source_node else self.checked_at, now)
         self.age_seconds = age
-        self.stale = is_stale(age)
+        measured_age = snapshot_age_seconds(self.checked_at, now)
+        self.measurement_age_seconds = measured_age
+        self.stale = (
+            age is None or age > RECEIVED_STALE_AFTER_SECONDS
+            or measured_age is None or measured_age > RECEIVED_STALE_AFTER_SECONDS
+        ) if self.source_node else is_stale(age)
         return self
 
 

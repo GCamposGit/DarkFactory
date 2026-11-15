@@ -32,7 +32,6 @@ from core.owner_actions.models import (
 from core.owner_actions.notify import notify_owner_action, should_notify
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import (
-    DEFAULT_OVERLAY_PATH,
     OwnerActionError,
     OwnerActionStore,
     blocked_by,
@@ -160,7 +159,7 @@ def run(
     parser = _build_parser()
     args = parser.parse_args(argv)
     stream = out or sys.stdout
-    active = store or OwnerActionStore(overlay_path=DEFAULT_OVERLAY_PATH)
+    active = store or OwnerActionStore()
 
     def emit(text: str) -> None:
         stream.write(redact(text) + "\n")

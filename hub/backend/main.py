@@ -14,6 +14,7 @@ import urllib.parse
 from starlette.types import ASGIApp, Scope, Receive, Send
 from starlette.responses import Response, JSONResponse
 
+from core.owner_actions.control_queue import ControlQueueUnavailable
 from core.demands.models import DemandInput
 from hub.backend.api import get_hub_service, roadmap_router, router as api_router
 from hub.backend.auth import SAFE_METHODS, is_local_request, is_mutation_exempt, telemetry_key_valid
@@ -184,6 +185,11 @@ app = FastAPI(
 
 
 # Restrict CORS to trusted loopback origins
+@app.exception_handler(ControlQueueUnavailable)
+async def owner_queue_unavailable(_request: Any, _exc: ControlQueueUnavailable) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"available": False, "ok": False, "detail": "Fila indisponivel: sem conexao com o banco"})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\]|testserver)(:\d+)?$",

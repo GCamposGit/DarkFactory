@@ -1,4 +1,4 @@
-<!-- covers: core/usage/ticket_cost.py, core/usage/adapters.py, scripts/claude_statusline.py -->
+<!-- covers: core/usage/ticket_cost.py, core/usage/adapters.py, scripts/claude_statusline.py, core/usage/sync_task.py, core/usage/models.py, core/usage/monitor.py, core/usage/refresh_requests.py, scripts/install_usage_sync_task.py, scripts/install_sync_task.ps1, hub/frontend/usage.js -->
 # Custo por ticket (USR-378)
 
 Cada tentativa de ticket (inclusive as que falham) grava uma linha em
@@ -20,7 +20,7 @@ confirma que `refreshInterval` repete o comando a cada N segundos, além das atu
 eventos ([Claude Code — Customize your status line](https://code.claude.com/docs/en/statusline#manually-configure-a-status-line)).
 O script extrai somente `rate_limits.five_hour` e `rate_limits.seven_day` e grava `anthropic.json`
 atomicamente em `.factory/usage/providers/` (ou no `DARKFAC_STATE_ROOT` configurado).
-O adaptador considera snapshots de ate 120 segundos; assim, a leitura do statusline pode alimentar
+O adaptador considera snapshots de ate 15 minutos; assim, a leitura do statusline pode alimentar
 o roteador mesmo quando a CLI local nao esta autenticada ou nao fornece `rate_limits`.
 
 O arquivo persistido contem apenas percentuais usados/restantes, horario de reset, horario da
@@ -37,3 +37,42 @@ snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
 
 `GeminiAccountAdapter` coleta quotas locais via Language Server local (`antigravity_rpc`). Quando a coleta remota ou as credenciais falham, o adaptador persiste um `ProbeFailure` estruturado com categoria (`unavailable`, `invalid_response`, `protocol`, etc.) e código do erro, mantendo o estado rastreável no relatório sem expor segredos.
 
+
+
+## Publicacao de cotas e frescor
+
+`core.usage.sync_task.publish_once()` le somente os JSONs locais de providers e credits:
+nao chama `inspect`, nao forca sonda e nao invoca inferencia. Retorna `PublishResult`
+com `ok`, `http_status`, `oldest_snapshot_age_seconds` (nulo se desconhecido) e `error`
+sanitizado; nao propaga excecoes. O POST tem timeout HTTP de 6 segundos. Falha ao persistir no Hub devolve 503.
+`scripts/sync_usage_to_cloud.py --once` e o invólucro CLI; `--loop --interval 300`
+permanece disponivel. A exportacao diaria de OAs usa `scripts/snapshot_queue.py`
+separadamente. O despachante ainda precisa chamar `publish_once()` pelo coordenador.
+
+No publicador, configure `DARKFAC_TELEMETRY_KEY`, `DARKHUB_CLOUD_URL` e
+`DARKFAC_NODE_ID`. A chave pode vir do `.env` do checkout principal. No Hub,
+`DARKFAC_TELEMETRY_KEY` deve ser igual e `DARKHUB_USAGE_SNAPSHOT_DIR` deve apontar
+para o volume persistente (ex.: `/app/hub/data/usage-snapshots`), para usar leitores sem sondas.
+O servidor sobrepoe `received_at` com a hora UTC de chegada. A API calcula `age_seconds`
+por esse campo, inclusive ao servir cache, e `stale=true` acima de 1200 segundos.
+O alerta de publicacao parada usa o mesmo limiar de 20 minutos, evitando oscilar
+na cadencia de cinco minutos da tarefa. Snapshots legados sem chegada conhecida ficam desatualizados. `checked_at` continua
+indicando a medicao na origem: republicar um snapshot antigo renova a chegada, nao a medicao.
+`measurement_age_seconds` informa essa segunda idade; medicao velha ou desconhecida
+tambem marca `stale`, mesmo com chegada recente. O destaque usa a maior idade conhecida.
+Publicacoes substituem o snapshot inteiro, sem reter percentuais anteriores ausentes no novo payload.
+Pedidos manuais de refresh sao encerrados na chegada da publicacao: leitura anterior ao pedido
+devolve falha explicita, nunca sucesso de medicao nova; nao ha polling separado no host.
+O painel mostra idade por cartao, destaca DESATUALIZADO em vermelho e esmaece percentuais.
+
+O instalador Python agora registra `--once` no logon e a cada cinco minutos,
+com S4U (sem sessao interativa), tarefa habilitada e tres reinicios em falha.
+O invólucro PowerShell usa o mesmo instalador. Tarefas antigas/interativas/desabilitadas
+sao reconhecidas como atualizacao necessaria. O instalador nao foi executado nesta entrega.
+S4U precisa ter acesso local aos snapshots e ao `.env`; validar HTTPS no contexto da tarefa.
+
+A sonda Claude aproveita o snapshot de statusLine por 15 minutos, inclusive com force.
+A chamada paga so e permitida depois dessa idade e com todas as janelas conhecidas
+acima de 15%; no piso, retorna a ultima leitura, sem inferencia. A publicacao nunca
+aciona essa sonda. Apos deploy, conferir `received_at`, aguardar/simular mais de 20 minutos
+sem publicacao e verificar `stale` e destaque visual; observar recibos do publicador.
