@@ -55,6 +55,10 @@ python C:\dev\DarkFac\run_ticket.py USR-XXX --allow-grokbox-wake-email
 
 Esse argumento autoriza somente o email de wake do grokbox. Envios autorizados continuam limitados a uma tentativa por janela compartilhada de 30 minutos entre worktrees; falha no estado do throttle ou no envio suprime o email sem interromper o launcher.
 
+## Raiz do portao na worktree candidata (USR-516)
+
+Na entrega em frota, `run_ticket.py` executa o portao oficial com a raiz do projeto apontada explicitamente para a worktree candidata (`DARKFAC_PROJECT_ROOT`). Isso impede que um valor herdado do checkout compartilhado direcione o runner para outra arvore. As configuracoes de estado da frota, como `DARKFAC_STATE_ROOT`, continuam no ambiente do processo filho. O portao valida a candidata e falha fechado se ela estiver suja.
+
 ## Entrega de ticket so na fila (USR-424)
 
 `--resume-delivery` resolve o id antes de exigir o `demands.json` da worktree, nesta ordem: ledger da worktree, fila duravel do control store, arquivo do checkout compartilhado e `origin/main`. A fila materializa o mesmo id no ledger da worktree, sem `next_ticket_id`, sem o agente de correcao e sem copiar o ledger compartilhado. O arquivo do checkout compartilhado segue para a entrega sem gravar a worktree e sem criar linha na fila. Id so em `origin/main` continua encontrado; o rebase posterior traz a linha. Id ausente nos quatro locais encerra com exit 1, `ok=false`, `cause=ticket_absent` e `error` no formato `Ticket <ID> not found in demands store`. O stderr cita o ledger da worktree, a control store, o checkout compartilhado e `origin/main`. O ledger e o `control.db` permanecem como estavam. `run_ticket.py USR-XXX` carrega o id no ledger do checkout (a fila entra nessa leitura) e, se faltar, em `origin/main`.
