@@ -139,7 +139,7 @@ def select_review_route(
             writer_model = resolve(f"development.{implementing_harness}")
         except KeyError:
             writer_model = None
-    tried = [*excluded, "openrouter"]
+    tried = list(excluded)
     fallback: Optional[tuple[str, Optional[str]]] = None
     for _ in range(4):
         found = pick("review", all_caps, implementing_harness=None, exclude=tried, **pick_kwargs)
@@ -147,7 +147,13 @@ def select_review_route(
             break
         harness, model = found[0], (found[1] if len(found) > 1 else None)
         tried.append(harness)
-        alternative = _other_model(harness, writer_model) if harness == implementing_harness else model
+        if harness == "openrouter":
+            # Level 3 may use the paid route too: an independent family when known, else any other model.
+            alternative = _paid_independent(model, families, openrouter_fallbacks) or (
+                model if model and model != writer_model else None
+            )
+        else:
+            alternative = _other_model(harness, writer_model) if harness == implementing_harness else model
         if alternative is None:
             fallback = fallback or (harness, model if model else writer_model)
             continue

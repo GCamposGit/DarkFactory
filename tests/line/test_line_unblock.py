@@ -96,7 +96,7 @@ def test_validate_flags_openrouter_ok_on_a_write_stage(monkeypatch: pytest.Monke
     assert any("openrouter_ok" in v for v in validate_routing_config(cfg))
 
 
-def test_development_with_claude_cooling_and_codex_unknown_gets_no_route_not_openrouter(
+def test_development_with_claude_cooling_and_codex_unknown_degrades_to_codex_not_a_read_only_openrouter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setitem(HARNESS_CAPABILITIES, "openrouter", frozenset({"read"}))
@@ -112,7 +112,7 @@ def test_development_with_claude_cooling_and_codex_unknown_gets_no_route_not_ope
         cooldown_path=cooldowns, openrouter_balance_lookup=lambda: 5.0,
         unknown_quota_last_resort_ok=False,
     )
-    assert route is None
+    assert route == ("codex", None)  # unknown quota degrades to the subscription, never to a read-only harness
 
 
 # --------------------------------------------------------------------------
@@ -136,34 +136,16 @@ def _openrouter_development() -> tuple[str, str | None]:
     return ("openrouter", load_routing_config().stages["development"].openrouter_model)
 
 
-def test_unknown_quota_is_fail_closed_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("complexity", [None, "low", "medium", "high"])
+def test_development_unknown_quota_degrades_to_the_subscription_before_openrouter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complexity: str | None
+) -> None:
     monkeypatch.delenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", raising=False)
-    table = {"anthropic": 5.0, "openai": None}
-    assert _pick("development", table, tmp_path) == _openrouter_development()
-    assert _pick("development", table, tmp_path, openrouter_balance=0.0) is None
-
-
-def test_last_resort_elects_unknown_codex_when_nothing_is_known_healthy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
-    assert _pick("development", {"anthropic": 5.0, "openai": None}, tmp_path, complexity="low") == ("codex", None)
-
-
-@pytest.mark.parametrize("complexity", ["medium", "high"])
-def test_development_unknown_quota_blocks_medium_and_high(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, complexity: str
-) -> None:
-    monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
+    assert _pick("development", {"anthropic": 5.0, "openai": None, "xai": 5.0}, tmp_path,
+                 complexity=complexity) == ("codex", None)
     table = {"anthropic": None, "openai": None, "xai": None}
-    assert _pick("development", table, tmp_path, complexity=complexity) == _openrouter_development()
-    assert _pick("development", table, tmp_path, complexity=complexity, openrouter_balance=0.0) is None
-
-
-def test_development_low_allows_unknown_quota_without_bootstrap_setting(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.delenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", raising=False)
-    assert _pick("development", {"anthropic": None, "openai": None}, tmp_path,
-                 complexity="low") == ("claude", "sonnet")
+    assert _pick("development", table, tmp_path, complexity=complexity) == ("claude", "sonnet")
+    assert _pick("development", table, tmp_path, complexity=complexity, openrouter_balance=0.0) == ("claude", "sonnet")
 
 
 def test_last_resort_prefers_known_healthy_over_unknown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,7 +155,7 @@ def test_last_resort_prefers_known_healthy_over_unknown(tmp_path: Path, monkeypa
 
 def test_last_resort_never_elects_known_critical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DARKFAC_ROUTING_UNKNOWN_QUOTA", "last_resort")
-    table = {"anthropic": 5.0, "openai": 10.0}
+    table = {"anthropic": 5.0, "openai": 10.0, "xai": 1.0}
     assert _pick("development", table, tmp_path) == _openrouter_development()
     assert _pick("development", table, tmp_path, openrouter_balance=0.0) is None
 

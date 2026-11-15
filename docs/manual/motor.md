@@ -43,38 +43,17 @@ tamanho e antes de `_stage_route`, do dry run, da worktree e do PLAN. A consulta
 A decisão traz `outcome` (`allow` ou `wait`), `code`, `stage`, `resource`, `observed_at`,
 `evidence_ref` e `not_before` (`null` quando o outcome é `allow`).
 
-Sem rota de `planning`, de `development` ou de `review`, ou sem worker de gate utilizável, o launcher
-encerra com exit 75 (`EXIT_ROUTE_WAIT`). O stdout recebe um JSON com `ok` false, `cause` `route_wait`,
+A admissão exige apenas uma rota de `development` (assinatura com cota conhecida, cota desconhecida em
+contingência ou OpenRouter) e, enquanto a run ainda não tem plano (`SPEC.md`/`tickets.json` na run ou na
+worktree preservada, argumento `plan_exists`), uma rota de `planning`. Revisão e portão não entram na
+admissão: a cascata de revisão (`docs/manual/roteamento.md`) e o portão tratam a própria ausência quando
+chegam a vez. Sem a rota exigida, o launcher
+encerra com exit 75 (`EXIT_ROUTE_WAIT`) com `no_planning_route` ou `no_build_route`. O `not_before` é o
+reset de cota mais próximo conhecido, no máximo 30 minutos à frente e nunca antes de 60 segundos. O stdout recebe um JSON com `ok` false, `cause` `route_wait`,
 `error` igual ao `code`, `ticket_id`, `exit_code` 75 e os campos da decisão. O stderr recebe
 `[AGUARDANDO]` e `harness_infra_error: route_wait`. O ticket volta a `planned` quando estava
 `discovered`, `accepted`, `implementing` ou `validating`. Um ticket que já estava `planned` permanece
 na fila. A worktree não é criada e o dry run não imprime `[DRY RUN]`.
-
-A revisão prospectiva usa outro harness que a rota de build (o nome do harness, sem distinção de
-maiúsculas). Uma rota de mesma família sem nível de contingência produz `review_same_family`; a cascata
-do USR-488 (`docs/manual/roteamento.md`) tenta antes outra família, OpenRouter, outro modelo e persona. O harness que escreveria é o pin `--harness`
-quando ele declara escrita; em contexto headless o pin Antigravity continua fora da escrita e a revisão
-é comparada com o harness que o `pick` de `development` elegeu. Um pin não inventa rota quando esse
-`pick` devolve `None`.
-
-O gate conta como capacidade com `workers` inteiro maior que zero, `busy` false e instante de
-observação com menos de 90 segundos. As causas de espera são `gate_capacity_zero` (`workers` <= 0),
-`gate_worker_busy` (`busy` true), `gate_worker_stale` (90 segundos ou mais), `gate_capacity_absent`
-(coleção vazia) e `gate_health_generic` (faltam `workers`, `busy` ou o instante, inclusive um body
-`{"status": "ok"}`). `status` não entra na conta. Um worker utilizável na coleção libera o gate. Entre
-falhas, a causa segue a ordem zero, busy, stale, genérico: coleção vazia e health genérico permanecem
-espera e não cobrem um zero, um busy ou um stale.
-
-`DARKFAC_REMOTE_HARNESS=off` não tira os workers da leitura da admissão: o modo off só
-impede o despacho do portão. A fonte é `DARKFAC_ADMISSION_WORKERS` quando a variável está
-definida, mesmo vazia; senão `DARKFAC_TEST_WORKERS` quando definida; senão o default de
-`worker_urls`. URL em `DARKFAC_FLEET_DISABLED_HOSTS` não é sondada. Health cujo `node_id` ou
-`hostname` cai em host desabilitado sai da coleção e não admite. `CI` e
-`DARKFAC_HARNESS_WORKER_JOB` continuam com lista vazia. Worker local com `workers` 0 não
-bloqueia a frota quando um remoto está livre (`workers` > 0, `busy` false, observação com
-menos de 90 segundos): o `evidence_ref` do gate nesse allow é `gate://<host>` desse remoto.
-Health só `{"status": "ok"}` não cobre o zero local; sem worker utilizável a espera segue
-`gate_capacity_zero` com `gate://local`.
 
 `allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
 novo na leitura daquele momento.

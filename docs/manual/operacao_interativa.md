@@ -132,4 +132,4 @@ sem exigir evidencia de deploy.
 
 ## Revisao sem outra familia disponivel
 
-A sessao interativa e a frota usam a mesma cascata de revisao (USR-488): outra familia por harness, outra familia pelo OpenRouter, mesma familia com outro modelo e, por fim, o mesmo modelo com persona adversarial. O nivel usado fica registrado no veredito; so sem nenhum nivel a admissao espera. Detalhes em [roteamento](roteamento.md).
+A sessao interativa e a frota usam a mesma cascata de revisao (USR-488): outra familia por harness, outra familia pelo OpenRouter, mesma familia com outro modelo e, por fim, o mesmo modelo com persona adversarial. O nivel usado fica registrado no veredito; a admissao nao exige mais rota de revisao nem de portao (so `development` e, sem plano, `planning`). Cota desconhecida degrada para tentar a assinatura antes do OpenRouter (USR-504). Detalhes em [roteamento](roteamento.md).

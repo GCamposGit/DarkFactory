@@ -62,7 +62,8 @@ def test_line_routing_json_resolves_to_same_values_as_defaults() -> None:
     assert dev.harness_pins["codex"].model == "gpt-6-luna"
     assert dev.harness_pins["grok"].model == "grok-4.7"
     assert cfg.stages["planning"].openrouter_model == "gpt-sol"
-    assert cfg.stages["development"].openrouter_model == "gpt-sol"
+    assert cfg.stages["development"].openrouter_model == "gpt-6-luna"  # cheap role, not the high-tier one
+    assert cfg.run_caps.openrouter_monthly_cap_usd == 28.13
     for stage_name in ("grill", "distill"):
         assert cfg.stages[stage_name].openrouter_model == "deepseek/deepseek-v4.1-flash"
     assert registry.resolve(cfg.stages["review"].openrouter_model) == registry.resolve("sonnet")

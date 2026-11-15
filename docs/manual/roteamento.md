@@ -67,9 +67,9 @@ O Antigravity é elegível para o estágio `development` **exclusivamente** quan
 O OpenRouter atua na fabrica com duplo papel: **otimizacao continua de custo-beneficio (Fronteira de Pareto)** e **garantia de operacao continua (fallback zero-touch)** quando as cotas de assinatura estiverem no piso critico (<= 15%) ou zeradas:
 
 1. **Planejamento com Alta Inteligencia**: O estagio `planning` usa o papel `planning.openrouter` apontando para modelos de fronteira de alta capacidade (`tier: high`), garantindo que o fatiamento e especificacao mantenham qualidade Staff+ mesmo sem Claude Opus ou Codex Sol.
-2. **Desenvolvimento com Escrita Autonoma**: OpenRouter declara suporte a `write` (`agent_cli.supports("openrouter", "write") is True`) atraves do motor de aplicacao cirurgica de patches e criacao de arquivos (`_apply_openrouter_write_blocks`). No estagio `development`, quando todas as assinaturas locais estao esgotadas ou em cooldown, o OpenRouter e eleito com o papel `development.openrouter`, permitindo que a esteira continue implementando e validando sem depender de recargas manuais.
+2. **Desenvolvimento com Escrita Autonoma**: OpenRouter declara suporte a `write` (`agent_cli.supports("openrouter", "write") is True`) atraves do motor de aplicacao cirurgica de patches e criacao de arquivos (`_apply_openrouter_write_blocks`). No estagio `development`, quando todas as assinaturas locais estao esgotadas ou em cooldown, o OpenRouter e eleito com o papel barato `review.openrouter`, permitindo que a esteira continue implementando e validando sem depender de recargas manuais.
 3. **Avaliacao por Fronteira de Pareto**: Modelos de micro-custo (papel `distill.openrouter` a $0.002/tarefa) sao avaliados para estagios de menor complexidade (`distill`, `review`, fatias mecanicas), poupando as janelas de assinatura para tarefas arquiteturais densas.
-4. **Enforcement de Orcamento e Alertas no Telegram**: O roteador e a telemetria de creditos (`ApiCreditsMonitor`) respeitam o teto por execucao (`run_caps.openrouter_usd`, default US$ 2.00) e o teto mensal (`run_caps.openrouter_monthly_cap_usd`, default US$ 10.00). Ao atingir o limiar de alerta (`openrouter_alert_threshold`, default 80% ou US$ 8.00), uma notificacao critica com categoria `AlertCategory.EXECUTION_BUDGET` e enviada via Telegram ao Owner.
+4. **Enforcement de Orcamento e Alertas no Telegram**: O roteador e a telemetria de creditos (`ApiCreditsMonitor`) respeitam o teto por execucao (`run_caps.openrouter_usd`, default US$ 2.00) e o teto mensal (`run_caps.openrouter_monthly_cap_usd`, US$ 28.13 neste mes e US$ 10.00 a partir de 01/12/2026). Ao atingir o limiar de alerta (`openrouter_alert_threshold`, default 80% do teto), uma notificacao critica com categoria `AlertCategory.EXECUTION_BUDGET` e enviada via Telegram ao Owner.
 5. **Consulta Dinamica a Fronteira de Pareto sem Modelos Hard-coded (USR-444)**: Nenhum modelo de inferencia fica hard-coded em codigo ou instrucoes estaticas. O roteador invoca `resolve_pareto_openrouter_model`, consultando diariamente o ledger de benchmarks (`core.benchmarks.fetcher.ensure_daily_benchmark()`) gerado a partir de Artificial Analysis e OpenRouter. Para planejamento e arquitetura, a esteira exige alta inteligencia (score >= 85.0, classe Claude Opus `anthropic/claude-opus-5` e GPT Sol `openai/gpt-5-6-sol` / `gpt-sol`). Modelos proibidos para autonomia (`fable`, `astra`) sao excluidos por contrato. <!-- census: wire-id -->
 6. **Resolucao Automatica de Wire IDs e Dynamic Headroom (USR-440)**: Todo alias interno (`gpt-sol`, `opus`, `sonnet`) e traduzido transparentemente para o wire ID oficial do provedor (`gateway_id`, ex.: `openai/gpt-5.6-sol`), prevenindo erros HTTP 400 de API e garantindo despacho imediato sem atrito. <!-- census: wire-id -->
 
@@ -113,9 +113,8 @@ primeira rota disponivel, sempre acima do piso de cota e dentro dos tetos
    de agente nao aceitam temperatura: fica registrada como `applied: false`, sem
    bloquear.
 
-So sem nenhuma rota nos quatro niveis a admissao espera `no_review_route`.
-`review_same_family` so ocorre para uma rota sem nivel de contingencia registrado.
-Admissao, revisao e retomada usam o mesmo `select_review_route`
+O OpenRouter tambem vale no nivel 3 (mesma familia, outro modelo): havendo saldo, a revisao nunca termina sem rota.
+A admissao nao exige mais rota de revisao nem de portao. Revisao e retomada usam o mesmo `select_review_route`
 (`core/line/review_cascade.py`). A revisao e sempre uma chamada de agente nova,
 somente leitura, sobre diff e contexto da tarefa, sem a sessao do implementador.
 
@@ -126,3 +125,29 @@ recuperacao aceita revisor da mesma familia somente com `contingency` valido
 (nivel 3 ou 4, persona e motivo); sem nivel registrado continua recusado
 (`receipt_review_not_independent`). A aprovacao segue ligada ao digest do
 candidato e nunca e marcada `forced`.
+
+## Degradar, nao recusar (USR-504)
+
+Ordem de rota para escrever codigo: (1) assinatura com cota conhecida acima do piso de 15%;
+(2) assinatura com cota desconhecida, tentada em contingencia (log `route_degraded=unknown_quota`,
+qualquer complexidade); se o CLI devolver rate limit, o cooldown existente cuida; (3) OpenRouter barato
+dentro dos tetos; (4) so entao esperar. Cota conhecida abaixo do piso continua excluida.
+
+- **Hold de leitura velha**: leitura velha, ausente ou com timeout de qualquer provedor (Anthropic,
+  OpenAI, xAI) usa a ultima leitura valida com margem pessimista de 10 pontos, valida ate o reset da janela
+  mais proxima ou no maximo 6 h (`_stale_until_reset_headroom`). O cache negativo de 10 min aplica o hold
+  antes de devolver desconhecido. `pending_delivery._cached_quota` reutiliza o mesmo hold.
+- **Status degradado**: leitura `degraded` com janelas preenchidas e menos de 6 h entra com margem de 10
+  pontos (`token_budget._quota_headroom`), nao e ignorada.
+- **Leitura suspeita** (`core/usage/history.py`): ao se repetir igual em duas leituras seguidas ela e aceita
+  (autoconfirmacao); enquanto nao confirmada vale o maior `used` entre a anterior e a nova, nunca
+  desconhecido. O arquivo de confirmacao manual continua valendo.
+- **Planejamento**: sem modelo de alto nivel elegivel, uma assinatura de nivel medio (ex.: Grok) planeja antes
+  do OpenRouter (log `planning_degraded=true`); `planning.openrouter` segue de alto nivel.
+- **OpenRouter**: `development` usa o papel barato `review.openrouter` do registro. O teto mensal
+  (`run_caps.openrouter_monthly_cap_usd`) bloqueia de verdade quando o gasto do mes (`ApiCreditsMonitor`,
+  cache de 2 min) o alcanca; gasto desconhecido nao bloqueia com saldo conhecido e positivo. O teto por
+  execucao le o gasto do ticket no ledger de uso (`ModelUsageLedger.spent_usd`). Duas execucoes de escrita
+  seguidas com 0 arquivos aplicados colocam o `openrouter` em cooldown (`record_openrouter_edits`).
+- **Verba temporaria**: o teto mensal esta em US$ 28,13 por decisao do owner (OA-090, verba adicional deste
+  mes) e volta a US$ 10,00 em 01/12/2026.

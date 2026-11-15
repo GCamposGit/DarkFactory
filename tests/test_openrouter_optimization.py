@@ -74,16 +74,15 @@ def test_apply_openrouter_write_blocks_applies_surgical_patches(tmp_path: Path) 
 
 def test_openrouter_roles_resolve_to_high_tier_models() -> None:
     planning_model = resolve("planning.openrouter")
-    dev_model = resolve("development.openrouter")
+    dev_model = resolve("review.openrouter")
     distill_model = resolve("distill.openrouter")
 
     assert planning_model == "gpt-sol"
     assert is_high_tier_model("planning.openrouter") is True
     assert is_high_tier_model(planning_model) is True
 
-    assert dev_model == "gpt-sol"
-    assert is_high_tier_model("development.openrouter") is True
-    assert is_high_tier_model(dev_model) is True
+    assert dev_model == "gpt-6-luna"  # development on OpenRouter uses the cheap role
+    assert is_high_tier_model("review.openrouter") is False
 
     assert distill_model == "deepseek/deepseek-v4.1-flash"
 
@@ -127,7 +126,7 @@ def test_openrouter_write_mode_executes_and_modifies_files(tmp_path: Path, monke
         cwd=tmp_path,
         mode="write",
         harness="openrouter",
-        model="development.openrouter",
+        model="review.openrouter",
     )
     result = run_agent(req)
 
@@ -176,9 +175,9 @@ def test_check_openrouter_monthly_budget_triggers_alert_when_exceeding_threshold
         provider_name="OpenRouter",
         status=CreditAccountStatus.ACTIVE,
         is_connected=True,
-        current_month_spend_usd=8.50,  # 85% do teto de 10.0
-        cumulative_spend_usd=8.50,
-        available_credit_usd=1.50,
+        current_month_spend_usd=23.0,  # 82% do teto de 28.13
+        cumulative_spend_usd=23.0,
+        available_credit_usd=5.0,
         currency="USD",
     )
 
@@ -187,7 +186,7 @@ def test_check_openrouter_monthly_budget_triggers_alert_when_exceeding_threshold
             return fake_card
 
     monkeypatch.setattr("core.usage.api_credits.ApiCreditsMonitor", _FakeMonitor)
-
+    
     dispatched_events = []
 
     class _FakeNotificationService:
@@ -205,8 +204,8 @@ def test_check_openrouter_monthly_budget_triggers_alert_when_exceeding_threshold
     assert len(dispatched_events) == 1
     event = dispatched_events[0]
     assert "Alerta de Orcamento OpenRouter" in event["title"]
-    assert "8.50" in event["message"]
-    assert "10.00" in event["message"]
+    assert "23.00" in event["message"]
+    assert "28.13" in event["message"]
 
 
 def test_openrouter_model_wire_resolution() -> None:
@@ -218,3 +217,50 @@ def test_openrouter_model_wire_resolution() -> None:
     assert _resolve_openrouter_wire_model("gpt-sol") == "openai/gpt-5.6-sol"
     assert _resolve_openrouter_wire_model("openai/gpt-5.6-sol") == "openai/gpt-5.6-sol"
 
+
+def _card(spend, credit):
+    from core.usage.api_credits import CreditAccountStatus, ProviderCreditCard
+
+    return ProviderCreditCard(
+        provider_id="openrouter", provider_name="OpenRouter", status=CreditAccountStatus.ACTIVE, is_connected=True,
+        current_month_spend_usd=spend, available_credit_usd=credit, currency="USD",
+    )
+
+
+def test_monthly_cap_blocks_openrouter_but_unknown_spend_does_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.line import routing as r
+
+    cards = {"card": _card(28.13, 50.0)}
+    monkeypatch.setattr(r, "_openrouter_card", lambda: cards["card"])
+    assert r._openrouter_has_credits(None, 28.13) is False  # month spend reached the cap
+    cards["card"] = _card(None, 5.0)
+    assert r._openrouter_has_credits(None, 28.13) is True  # unknown spend, known positive balance
+    cards["card"] = _card(3.0, 0.0)
+    assert r._openrouter_has_credits(None, 28.13) is False  # no balance
+
+
+def test_run_spend_comes_from_the_ledger_and_two_empty_edit_runs_cool_openrouter_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.line import routing as r
+    from core.usage.ledger import ModelUsageLedger
+    from core.usage.models import ModelCallEvent
+
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    for ticket, cost in (("USR-1", 1.5), ("USR-1", 0.75), ("USR-2", 9.0)):
+        ledger.record(ModelCallEvent(ticket_id=ticket, provider="openrouter", model="m", cost_usd=cost))
+    monkeypatch.setattr("core.usage.ledger.ModelUsageLedger", lambda: ledger)
+    assert r._openrouter_run_spend("USR-1") == 2.25
+    cfg = load_routing_config(default_config_path())
+    cooldowns = tmp_path / "cooldowns.json"
+    caps = ["harness:claude"]
+    pick_kwargs = dict(config=cfg, quota_lookup=lambda _p: 5.0, cooldown_path=cooldowns, ticket_id="USR-1",
+                       openrouter_balance_lookup=lambda: 10.0)
+    assert pick("development", caps, **pick_kwargs) is None  # run spend 2.25 is over the 2.00 run cap
+    assert pick("development", caps, **{**pick_kwargs, "ticket_id": "USR-2"}) is None
+    assert pick("development", caps, **{**pick_kwargs, "ticket_id": "USR-3"})[0] == "openrouter"
+
+    r.record_openrouter_edits(0, config=cfg, cooldown_path=cooldowns)
+    assert pick("development", caps, **{**pick_kwargs, "ticket_id": "USR-3"})[0] == "openrouter"
+    r.record_openrouter_edits(0, config=cfg, cooldown_path=cooldowns)
+    assert pick("development", caps, **{**pick_kwargs, "ticket_id": "USR-3"}) is None

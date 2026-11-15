@@ -20,6 +20,7 @@ from core.usage.models import (
     AccountConnectionStatus,
     ProviderAccountUsage,
     ProviderFamily,
+    snapshot_age_seconds,
 )
 
 
@@ -131,20 +132,29 @@ def estimate_task_tokens(
     )
 
 
+_DEGRADED_MAX_AGE_SECONDS = 6 * 3600
+_DEGRADED_MARGIN_POINTS = 10.0
+
+
 def _quota_headroom(account: ProviderAccountUsage) -> Optional[float]:
     """Return the most restrictive known quota window.
 
     A healthy short window cannot compensate for an exhausted weekly/monthly
     window (or vice versa), so routing must respect both horizons.
     """
-    if account.status.value not in {"connected", "limited"} or account.plausibility_flags:
+    status = account.status.value
+    known = [float(w.remaining_percent) for w in account.windows if w.remaining_percent is not None]
+    if status == "degraded":
+        # A degraded probe with filled windows (younger than 6 h) is read pessimistically, not ignored.
+        age = snapshot_age_seconds(account.checked_at)
+        if not known or age is None or age >= _DEGRADED_MAX_AGE_SECONDS:
+            return None
+        return max(0.0, min(known) - _DEGRADED_MARGIN_POINTS)
+    if status not in {"connected", "limited"} or account.plausibility_flags:
         return None
-    if account.status.value == "limited":
+    if status == "limited":
         return 0.0
-    known = [window for window in account.windows if window.remaining_percent is not None]
-    if not known:
-        return None
-    return min(float(window.remaining_percent) for window in known if window.remaining_percent is not None)
+    return min(known) if known else None
 
 
 def _pressure_for(remaining_percent: Optional[float]) -> TokenPressure:

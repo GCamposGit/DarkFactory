@@ -82,7 +82,7 @@
         }
       },
       "openrouter_ok": true,
-      "openrouter_model": "development.openrouter"
+      "openrouter_model": "review.openrouter"
     },
     "review": {
       "cascade": "other_family_than_development",
@@ -102,7 +102,7 @@
     "review_rounds": 2,
     "wall_clock_hours": 6,
     "openrouter_usd": 2.0,
-    "openrouter_monthly_cap_usd": 10.0,
+    "openrouter_monthly_cap_usd": 28.13,
     "openrouter_alert_threshold": 0.8
   }
 }

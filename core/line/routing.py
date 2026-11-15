@@ -4,7 +4,7 @@ Implements the unified "subscription first, OpenRouter only with verified balanc
 and fail-closed under critical pressure" policy.
 `pick()` walks a stage cascade, filtering out ineligible accounts (not in host_caps,
 in cooldown, forbidden models, unknown/stale quota, or remaining <= critical threshold 15%,
-except that low-complexity development can use unknown quota in degraded mode),
+except that development degrades to unknown quota before OpenRouter),
 and prioritizes eligible harnesses via Dynamic Headroom (highest remaining quota first)
 or specialized intelligence tiers.
 
@@ -193,7 +193,7 @@ def _default_routing_config() -> RoutingConfig:
             "development": StageRoute(
                 cascade=[("claude", "sonnet"), ("codex", None), ("grok", resolve_model("development.grok"))],
                 openrouter_ok=True,
-                openrouter_model=resolve_model("development.openrouter"),
+                openrouter_model=resolve_model("review.openrouter"),
                 harness_pins={
                     "claude": HarnessPin(model="sonnet"),
                     "codex": HarnessPin(model=resolve_model("development.codex"), effort="high"),
@@ -454,18 +454,26 @@ def _probe_negative_clear(provider_dir: Path, provider_id: str) -> None:
 _STALE_RESET_MARGIN_POINTS = 10.0
 
 
-def _stale_until_reset_headroom(snapshot_file: Path, now: datetime) -> Optional[float]:
-    """Anthropic only (USR-416): the statusline writes the Claude quota only while a session is open.
+_STALE_HOLD_MAX_SECONDS = 6 * 3600.0
 
-    Between sessions the last valid snapshot stays usable until its 5h window resets, with a
-    conservative margin added to the used percentage. After the reset it is unknown again.
+
+def _stale_until_reset_headroom(snapshot_file: Path, now: datetime) -> Optional[float]:
+    """Hold the last valid reading while the probe is stale, absent or timing out (all providers).
+
+    Between sessions the last valid snapshot stays usable until its nearest window reset (at most 6 h
+    after it was taken), with a pessimistic margin added to the used percentage. After that it is
+    unknown again.
     """
     try:
         data = json.loads(snapshot_file.read_text(encoding="utf-8"))
+        if data.get("plausibility_flags"):
+            return None
+        checked = _parse_iso_utc(data.get("checked_at")) if data.get("checked_at") else None
+        if checked is not None and (now - checked).total_seconds() > _STALE_HOLD_MAX_SECONDS:
+            return None
         windows = [w for w in data.get("windows", []) if isinstance(w, dict)]
-        five_hour = next((w for w in windows if w.get("quota_id") == "claude:5h"), None)
-        reset = _parse_iso_utc(five_hour.get("resets_at")) if five_hour else None
-        if reset is None or reset <= now or data.get("plausibility_flags"):
+        resets = [r for r in (_parse_iso_utc(w.get("resets_at")) for w in windows if w.get("resets_at")) if r is not None]
+        if not resets or min(resets) <= now:
             return None
         values = []
         for window in windows:
@@ -532,30 +540,27 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
 
             if (snapshot_stale or not snapshot_file.is_file()) and _probe_negative_read(provider_dir, provider_id):
                 logger.info("Quota probe for %s skipped (negative cache); failing closed", provider_id)
-                if provider_id == "anthropic":
-                    held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
-                    if held is not None:
-                        return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
+                held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
+                if held is not None:
+                    return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
                 return None, "probe_timeout"
             try:
                 usage = run_with_deadline(provider_id, lambda a=adapter: a.inspect(force=snapshot_stale))
             except ProbeTimeout as timeout_exc:
                 logger.warning("Quota probe timed out %s; failing closed", timeout_exc.as_dict())
                 _probe_negative_write(provider_dir, provider_id)
-                if provider_id == "anthropic":
-                    held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
-                    if held is not None:
-                        return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
+                held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
+                if held is not None:
+                    return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
                 return None, "probe_timeout"
             checked = _parse_iso_utc(usage.checked_at)
             if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
                 reason: QuotaDiagnosisReason = "probe_unavailable" if snapshot_stale else "stale_snapshot"
-                if provider_id == "anthropic":
-                    held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
-                    if held is not None:
-                        logger.info("Anthropic snapshot stale; holding last reading until 5h reset (+margin)")
-                        reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
-                        return max(0.0, held - reserved), "healthy"
+                held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
+                if held is not None:
+                    logger.info("%s snapshot stale; holding last reading until reset (+margin)", provider_id)
+                    reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
+                    return max(0.0, held - reserved), "healthy"
                 logger.warning(
                     "Quota data for %s is older than %ss (%s); failing closed", provider_id, max_age, reason
                 )
@@ -906,12 +911,31 @@ def resolve_pareto_openrouter_model(
     return fallback_model or resolve_model("planning.openrouter")
 
 
-def _check_openrouter_monthly_budget(cfg: RoutingConfig) -> None:
-    """Verifica teto mensal e dispara alerta critico se spend atingir threshold."""
+_OPENROUTER_CARD_TTL_S = 120.0
+_openrouter_card_cache: tuple[float, Any, Any] = (0.0, None, None)
+
+
+def _openrouter_card() -> Any:
+    """Credit card of the OpenRouter account (balance and month spend), cached briefly; None on failure."""
+    global _openrouter_card_cache
     try:
         from core.usage.api_credits import ApiCreditsMonitor
 
+        stamp, card, source = _openrouter_card_cache
+        if card is not None and source is ApiCreditsMonitor and time.monotonic() - stamp < _OPENROUTER_CARD_TTL_S:
+            return card
         card = ApiCreditsMonitor().inspect_openrouter()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to verify OpenRouter credits: %s", exc)
+        return None
+    _openrouter_card_cache = (time.monotonic(), card, ApiCreditsMonitor)
+    return card
+
+
+def _check_openrouter_monthly_budget(cfg: RoutingConfig) -> None:
+    """Dispara alerta critico quando o gasto mensal do OpenRouter atinge o limiar do teto."""
+    try:
+        card = _openrouter_card()
         if card and card.current_month_spend_usd is not None:
             monthly_cap = getattr(cfg.run_caps, "openrouter_monthly_cap_usd", 10.0)
             threshold = getattr(cfg.run_caps, "openrouter_alert_threshold", 0.80)
@@ -940,12 +964,12 @@ def _elect_openrouter(
     cfg: RoutingConfig,
     balance_lookup: Optional[Callable[[], Optional[float]]],
 ) -> Optional[tuple[str, str]]:
-    if _openrouter_has_credits(balance_lookup):
+    if _openrouter_has_credits(balance_lookup, cfg.run_caps.openrouter_monthly_cap_usd):
         _check_openrouter_monthly_budget(cfg)
         if stage != "review" and (stage_cfg.openrouter_model in (None, "pareto", "dynamic") or os.environ.get("DARKFAC_OPENROUTER_DYNAMIC_PARETO") == "1"):
             return "openrouter", resolve_pareto_openrouter_model(stage, fallback_model=stage_cfg.openrouter_model)
         return "openrouter", stage_cfg.openrouter_model
-    logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
+    logger.warning("OpenRouter fallback skipped: account disconnected, balance non-positive or monthly cap reached.")
     return None
 
 
@@ -969,19 +993,69 @@ def _independent_openrouter(route: Optional[tuple[str, str]], implementing_harne
     return route
 
 
-def _openrouter_has_credits(balance_lookup: Optional[Callable[[], Optional[float]]]) -> bool:
-    """OpenRouter fallback requires a verified positive credit balance."""
+def _openrouter_has_credits(
+    balance_lookup: Optional[Callable[[], Optional[float]]], monthly_cap_usd: Optional[float] = None
+) -> bool:
+    """OpenRouter needs a verified positive balance and a month spend under the monthly cap.
+
+    Unknown month spend does not block while the balance is known and positive.
+    """
     if balance_lookup is not None:
         bal = balance_lookup()
         return bal is not None and bal > 0.0
-    try:
-        from core.usage.api_credits import ApiCreditsMonitor
-
-        card = ApiCreditsMonitor().inspect_openrouter()
-        return bool(card.is_connected and card.available_credit_usd is not None and card.available_credit_usd > 0.0)
-    except Exception as exc:
-        logger.warning("Failed to verify OpenRouter credits: %s", exc)
+    card = _openrouter_card()
+    if card is None or not (card.is_connected and card.available_credit_usd is not None and card.available_credit_usd > 0.0):
         return False
+    spent = card.current_month_spend_usd
+    if monthly_cap_usd is not None and spent is not None and spent >= monthly_cap_usd:
+        logger.warning("OpenRouter monthly cap reached (spent=%.2f cap=%.2f)", spent, monthly_cap_usd)
+        return False
+    return True
+
+
+def _openrouter_run_spend(ticket_id: Optional[str]) -> float:
+    """Dollars the ticket's run already spent on OpenRouter, read from the usage ledger."""
+    if not ticket_id:
+        return 0.0
+    try:
+        from core.usage.ledger import ModelUsageLedger
+
+        return ModelUsageLedger().spent_usd(ticket_id, "openrouter")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OpenRouter run spend unavailable for %s: %s", ticket_id, exc)
+        return 0.0
+
+
+_OPENROUTER_EMPTY_EDITS_LIMIT = 2
+
+
+def record_openrouter_edits(
+    applied_files: int, *, config: Optional[RoutingConfig] = None, cooldown_path: Optional[Path] = None
+) -> None:
+    """Cool OpenRouter down after consecutive write runs that applied edits to 0 files."""
+    path = cooldown_path or default_cooldown_path()
+    counter = path.with_name("openrouter_empty_edits.json")
+    try:
+        count = int(json.loads(counter.read_text(encoding="utf-8")).get("count", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        count = 0
+    count = 0 if applied_files > 0 else count + 1
+    if count >= _OPENROUTER_EMPTY_EDITS_LIMIT:
+        cfg = config or load_routing_config()
+        until = datetime.now(timezone.utc) + timedelta(minutes=max(cfg.cooldown_default_minutes, 0))
+        data = _load_cooldowns(path)
+        data["openrouter"] = {
+            "until": until.isoformat(), "reason": "no_edits_applied", "model": None,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_cooldowns(path, data)
+        logger.warning("OpenRouter in cooldown until %s: %d runs applied edits to 0 files", until.isoformat(), count)
+        count = 0
+    try:
+        counter.parent.mkdir(parents=True, exist_ok=True)
+        counter.write_text(json.dumps({"count": count}), encoding="utf-8")
+    except OSError as exc:
+        logger.debug("openrouter empty-edits counter not written: %s", exc)
 
 
 def _pick_winner(
@@ -1020,13 +1094,14 @@ def _pick_winner(
         return _rank_eligible(stage, complexity, eligible, _slack_by_candidate(stage, eligible, slack_fn))
 
     if stage == "development":
-        allow_unknown = (complexity or "").lower().strip() == "low"
+        allow_unknown = True  # degrade, do not refuse: try the subscription before OpenRouter
     else:
         allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
     if allow_unknown and unknown_quota:
         winner = unknown_quota[0]
         logger.warning(
-            "No harness with known healthy quota for stage %s; electing %s with UNKNOWN quota as last resort",
+            "route_degraded=unknown_quota stage=%s harness=%s: no known healthy quota; trying the subscription "
+            "before OpenRouter (rate limits fall to the cooldown)",
             stage, winner[0],
         )
         return winner
@@ -1079,14 +1154,15 @@ def pick(
        - Medium complexity / default: development sorts by weekly slack (remaining % of the weekly window
          divided by hours until its reset, higher first; headroom when any candidate lacks a reset);
          other stages sort strictly by remaining headroom descending.
-    2b. Low-complexity development can use unknown quota in degraded mode. Other stages retain the
+    2b. Development always accepts unknown quota in degraded mode (`route_degraded=unknown_quota`). Other stages retain the
        optional bootstrap (`DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`, or
        `unknown_quota_last_resort_ok=True`):
        when no candidate has known healthy quota, a subscription harness whose quota is UNKNOWN (never
        one known critical, nor one in cooldown) is elected, in cascade order, before OpenRouter.
        Default off: unknown quota stays fail-closed for the subscription itself.
     3. OpenRouter contingency when it declares the required mode, a model is configured, confirmed
-       credit is positive and spent_usd is under the run cap, and either the stage sets
+       credit is positive, the month spend is under `openrouter_monthly_cap_usd`, the run spend (the larger of
+       `spent_usd` and the ticket's ledger total) is under the run cap, OpenRouter is not cooling down, and either the stage sets
        `openrouter_ok` or every evaluated subscription is known-exhausted. Unknown or critical
        subscription quota never elects that subscription; with credit, OpenRouter is the route.
     """
@@ -1133,12 +1209,9 @@ def pick(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
         operating, execution_context,
     ):
-        is_grok_planning_contingency = (
-            stage == "planning"
-            and harness == "grok"
-            and not claude_or_codex_healthy
-        )
-        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model) and not is_grok_planning_contingency:
+        # Degrade, do not refuse: with no healthy high-tier subscription, a mid-tier one plans before OpenRouter.
+        is_planning_contingency = stage == "planning" and not claude_or_codex_healthy and model is not None
+        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model) and not is_planning_contingency:
             logger.info("pick: %s/%s skipped for stage %s (not a high-tier model)", harness, model, stage)
             continue
         cooling = _in_cooldown(harness, cooldowns)
@@ -1172,8 +1245,6 @@ def pick(
 
         evaluated.append((harness, model, cooling, is_critical, remaining))
 
-        if stage == "planning" and harness == "grok" and claude_or_codex_healthy:
-            continue
 
         if not cooling and not is_critical and remaining is not None:
             eligible.append((harness, model, remaining))
@@ -1188,6 +1259,8 @@ def pick(
     )
 
     if winner is not None:
+        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(winner[1]):
+            logger.warning("planning_degraded=true harness=%s: no high-tier subscription available", winner[0])
         if reserve_quota:
             try:
                 from core.usage.reservation import QuotaReservationManager
@@ -1211,7 +1284,8 @@ def pick(
         and stage_cfg.openrouter_model
         and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
         and allow_openrouter
-        and spent_usd < cfg.run_caps.openrouter_usd
+        and not _in_cooldown("openrouter", cooldowns)
+        and max(spent_usd, _openrouter_run_spend(ticket_id)) < cfg.run_caps.openrouter_usd
     ):
         route = _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
         return _independent_openrouter(route, implementing_harness) if stage == "review" else route

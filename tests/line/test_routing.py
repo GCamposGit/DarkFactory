@@ -75,7 +75,7 @@ def test_pick_skips_critical_quota_account():
     assert choice == ("codex", None)
 
 
-def test_pick_unknown_quota_counts_as_ineligible_fail_closed():
+def test_pick_unknown_quota_degrades_to_the_subscription_before_openrouter():
     cfg = load_routing_config(default_config_path())
     choice = pick(
         "development",
@@ -84,7 +84,7 @@ def test_pick_unknown_quota_counts_as_ineligible_fail_closed():
         quota_lookup=lambda _pid: None,
         cooldown_path=Path("does-not-exist.json"),
     )
-    assert choice is None
+    assert choice == ("claude", "sonnet")  # unknown quota is tried; a rate limit falls to the cooldown
 
 
 def _write_codex_snapshot(providers_dir: Path, *, checked_at: str, remaining_percent, **extra) -> None:
@@ -125,7 +125,11 @@ def test_pick_development_fails_closed_on_stale_codex_snapshot_then_recovers_aft
     stale_choice = pick(
         "development", ["harness:codex"], config=cfg, quota_lookup=None, cooldown_path=Path("does-not-exist.json"),
     )
-    assert stale_choice is None  # the 40-day-old reading is never trusted, even though it says 56% remaining
+    # The 40-day-old reading is never trusted as known quota (no hold after 6 h); the subscription is only tried.
+    from core.line.routing import _quota_headroom_diagnosis
+
+    assert _quota_headroom_diagnosis("openai")[0] is None
+    assert stale_choice == ("codex", None)
 
     fresh_checked_at = datetime.now(timezone.utc).isoformat()
     _write_codex_snapshot(providers_dir, checked_at=fresh_checked_at, remaining_percent=56.0)
@@ -158,7 +162,10 @@ def test_pick_development_fails_closed_on_suspicious_codex_reading_even_when_fre
     choice = pick(
         "development", ["harness:codex"], config=cfg, quota_lookup=None, cooldown_path=Path("does-not-exist.json"),
     )
-    assert choice is None
+    from core.line.routing import _quota_headroom_diagnosis
+
+    assert _quota_headroom_diagnosis("openai")[0] is None  # flagged without windows: never known quota
+    assert choice == ("codex", None)
 
 
 def test_quota_headroom_diagnosis_distinguishes_stale_probe_unavailable_suspicious_and_healthy(
@@ -766,3 +773,23 @@ def test_pick_development_elects_antigravity_when_operating_interactively_withou
         cooldown_path=tmp_path / "cd3.json",
     )
     assert cascade_winner != ("antigravity", None)
+
+
+def test_stale_reading_is_held_with_a_margin_for_every_provider_until_reset_or_six_hours(tmp_path: Path) -> None:
+    from core.line.routing import _stale_until_reset_headroom
+
+    now = datetime.now(timezone.utc)
+
+    def snapshot(provider: str, checked_ago_h: float, reset_in_h: float) -> Path:
+        path = tmp_path / f"{provider}.json"
+        path.write_text(json.dumps({
+            "checked_at": (now - timedelta(hours=checked_ago_h)).isoformat(),
+            "windows": [{"quota_id": f"{provider}:w", "used_percent": 40.0,
+                         "resets_at": (now + timedelta(hours=reset_in_h)).isoformat()}],
+        }), encoding="utf-8")
+        return path
+
+    for provider in ("anthropic", "openai", "xai"):
+        assert _stale_until_reset_headroom(snapshot(provider, 2, 3), now) == 50.0  # 100 - (40 + 10)
+    assert _stale_until_reset_headroom(snapshot("openai", 7, 3), now) is None  # older than 6 h
+    assert _stale_until_reset_headroom(snapshot("openai", 1, -1), now) is None  # window already reset

@@ -211,11 +211,13 @@ def test_grok_limited_signal_overrides_weekly_headroom(tmp_path, monkeypatch):
     assert _quota_headroom(usage) == 0.0
 
 
-@pytest.mark.parametrize("previous,current,start_offset,flag", [
-    (30, 20, 2, "decreased"), (10, 70, 2, "jumped"),
-    (None, 90, 0, "reset"),
+@pytest.mark.parametrize("previous,current,start_offset,flag,pessimistic", [
+    (30, 20, 2, "decreased", 60.0), (10, 70, 2, "jumped", 20.0),
+    (None, 90, 0, "reset", 0.0),
 ])
-def test_plausibility_fails_closed(tmp_path, previous, current, start_offset, flag):
+def test_plausibility_degrades_pessimistically_then_self_confirms(
+    tmp_path, previous, current, start_offset, flag, pessimistic,
+):
     now = datetime.now(timezone.utc)
     start = now.replace(microsecond=0).isoformat()
     path = history_path(tmp_path / "providers", "xai")
@@ -234,8 +236,13 @@ def test_plausibility_fails_closed(tmp_path, previous, current, start_offset, fl
                              remaining_percent=100-current, window_duration_minutes=10080)])
     result = record_probe(usage, tmp_path / "providers")
     assert result.status == AccountConnectionStatus.DEGRADED
-    assert _quota_headroom(result) is None
+    # Never unknown: the larger `used` of the previous and the new reading, minus the 10-point margin.
+    assert _quota_headroom(result) == pessimistic
     assert flag in result.message
+    # The same reading twice in a row is accepted (auto-confirmation).
+    again = record_probe(usage, tmp_path / "providers")
+    assert again.status == AccountConnectionStatus.CONNECTED and not again.plausibility_flags
+    assert _quota_headroom(again) == 100 - current
 
 
 def test_audit_expect_detects_mismatch(tmp_path, monkeypatch, capsys):
@@ -409,7 +416,7 @@ def test_corrupt_history_blocks_new_reading(tmp_path):
                              remaining_percent=99, window_duration_minutes=10080)])
     checked = record_probe(usage, directory)
     assert checked.status == AccountConnectionStatus.DEGRADED
-    assert _quota_headroom(checked) is None
+    assert _quota_headroom(checked) == 89.0  # the reading itself (99% left) minus the margin, not unknown
     assert "history unreadable" in checked.message
 
 
@@ -427,8 +434,11 @@ def test_owner_confirmation_is_bound_to_period_and_value(tmp_path, monkeypatch):
         "quota_id": "grok:weekly_pool", "used_percent": 1.4,
         "period_start": payload["currentPeriodStart"], "flags": []}) + "\n", encoding="utf-8")
     assert command.audit("xai", {"xai": 10}, directory) == 1
-    assert command.audit("xai", {"xai": 10}, directory, confirm=True) == 0
-    assert confirmation_path(directory, "xai").is_file()
+    # Manual confirmation keeps working next to the automatic one (bound to period and value).
+    confirmation_path(directory, "xai").write_text(json.dumps({
+        "period_start": payload["currentPeriodStart"], "quota_id": "grok:weekly_pool", "used_percent": 90.0}),
+        encoding="utf-8")
+    assert command.audit("xai", {"xai": 10}, directory) == 0
     changed = payload | {"usagePercent": 80.0}
     monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", lambda *a, **k: Response(changed))
     assert command.audit("xai", {"xai": 20}, directory) == 1
@@ -579,3 +589,16 @@ def test_antigravity_rpc_failure_classification_is_sanitized(error, category, co
     assert failure.category == category
     assert failure.code == code
     assert str(error) not in failure.model_dump_json()
+
+
+def test_degraded_reading_with_filled_windows_is_read_with_a_margin_until_six_hours():
+    from datetime import timedelta
+
+    def reading(age_hours):
+        return ProviderAccountUsage(provider_id="xai", provider_name="Grok", family=ProviderFamily.FRONTIER,
+            status=AccountConnectionStatus.DEGRADED, adapter="grok_bot_api", message="probe down",
+            checked_at=(datetime.now(timezone.utc) - timedelta(hours=age_hours)).isoformat(),
+            windows=[QuotaWindow(quota_id="grok:weekly_pool", label="week", used_percent=40, remaining_percent=60)])
+
+    assert _quota_headroom(reading(1)) == 50.0
+    assert _quota_headroom(reading(7)) is None
