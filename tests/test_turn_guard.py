@@ -67,9 +67,66 @@ def test_check_learning_pack_passes_when_pack_present(tmp_path: Path, monkeypatc
     monkeypatch.setattr("core.ops.turn_guard._git", mock_git)
     pack_dir = tmp_path / ".factory" / "learning_packs"
     pack_dir.mkdir(parents=True, exist_ok=True)
-    (pack_dir / "USR-431.json").write_text("{}", encoding="utf-8")
+    (pack_dir / "USR-431.json").write_text(json.dumps({"files": ["core/ops/turn_guard.py"]}), encoding="utf-8")
 
     assert check_learning_pack(tmp_path, ticket_id="USR-431") is None
+
+
+@pytest.mark.parametrize("change_source", ["diff", "status"])
+def test_check_learning_pack_rejects_empty_pack_when_repository_changed(
+    tmp_path: Path, monkeypatch, change_source: str
+):
+    def mock_git(cwd, *args):
+        if change_source == "diff" and "diff" in args:
+            return "core/ops/turn_guard.py\n"
+        if change_source == "status" and "status" in args:
+            return " M core/ops/turn_guard.py\n"
+        return ""
+
+    monkeypatch.setattr("core.ops.turn_guard._git", mock_git)
+    pack_dir = tmp_path / ".factory" / "learning_packs"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "USR-431.json").write_text(json.dumps({"files": []}), encoding="utf-8")
+
+    reason = check_learning_pack(tmp_path, ticket_id="USR-431")
+
+    assert reason is not None
+    assert "Learning pack vazio" in reason
+    assert "python -m core.learning_pack.delivery" in reason
+
+
+def test_check_learning_pack_allows_empty_pack_when_repository_clean(tmp_path: Path, monkeypatch):
+    pack_dir = tmp_path / ".factory" / "learning_packs"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "USR-431.json").write_text(json.dumps({"files": []}), encoding="utf-8")
+
+    def mock_git(cwd, *args):
+        if "status" in args:
+            return "?? .factory/learning_packs/USR-431.json\n"
+        return ""
+
+    monkeypatch.setattr("core.ops.turn_guard._git", mock_git)
+
+    assert check_learning_pack(tmp_path, ticket_id="USR-431") is None
+
+
+@pytest.mark.parametrize("contents", ["{broken", "{}", json.dumps({"files": "not-a-list"})])
+def test_check_learning_pack_reports_malformed_json_without_raising(tmp_path: Path, monkeypatch, contents: str):
+    def mock_git(cwd, *args):
+        if "diff" in args:
+            return "core/ops/turn_guard.py\n"
+        return ""
+
+    monkeypatch.setattr("core.ops.turn_guard._git", mock_git)
+    pack_dir = tmp_path / ".factory" / "learning_packs"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / "USR-431.json").write_text(contents, encoding="utf-8")
+
+    reason = check_learning_pack(tmp_path, ticket_id="USR-431")
+
+    assert reason is not None
+    assert "Learning pack JSON invalido" in reason
+    assert "python -m core.learning_pack.delivery" in reason
 
 
 def test_verify_turn_full_report(tmp_path: Path, monkeypatch):

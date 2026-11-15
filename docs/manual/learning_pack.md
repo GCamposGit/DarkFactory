@@ -34,6 +34,10 @@ marcar a rota como falha de infraestrutura. O estágio ainda grava o estado atua
 da revisão antes de retornar, mantendo o contrato de retomada e deixando explícito
 que nenhuma rota foi excluída e que a sequência de falhas continua zerada.
 
+O `core.ops.turn_guard.check_learning_pack` tambem valida o conteudo do JSON. Se `files` estiver vazio e houver mudancas detectaveis no diff contra a base ou na worktree, a checagem falha e informa o comando para regerar. JSON malformado ou sem `files` gera uma falha estruturada quando ha mudancas no repositorio. Um pack vazio continua aceito quando nao ha mudancas detectaveis; packs com arquivos seguem aceitos.
+
+Quando `--head` resolve para o HEAD atual, o gerador compara `--base` com a arvore de trabalho e inclui arquivos novos nao rastreados (fora do `.gitignore`), de modo que entregas ainda sem commit produzem um pack com os arquivos e testes reais.
+
 ## Aprendizado da entrega USR-456 T2
 
 O preflight continua consultando a saúde do grokbox, mas o wake por email só ocorre com autorização
