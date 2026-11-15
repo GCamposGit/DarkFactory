@@ -1,0 +1,132 @@
+[
+  {
+    "id": "T1",
+    "title": "Persistir o ciclo de vida rastreável do achado",
+    "goal": "Consolidar no fluxo e no control store a identidade canônica, o histórico e os vínculos de evidência necessários à assistência, validação e reteste.",
+    "files_hint": [
+      "core/line/",
+      "core/control/",
+      "core/projects/",
+      "tests/"
+    ],
+    "acceptance": [
+      "Achados são deduplicados por projeto e vulnerabilidade canônica sem combinar ambientes ou advisories incompatíveis.",
+      "O registro preserva separadamente veredito determinístico, assistência, candidato, ambiente, validações e retestes.",
+      "Mudanças de candidato, advisory ou ambiente invalidam somente as evidências pertinentes e preservam o histórico.",
+      "Nenhum novo ciclo paralelo é criado enquanto CloudCoordinator, FeederCycle e BacklogFeeder puderem representar o fluxo.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Teste de deduplicação por projeto e vulnerabilidade canônica com ambientes distintos.",
+      "Teste de persistência e recuperação do histórico de transições.",
+      "Teste de invalidação seletiva de evidências após mudança de candidato, advisory e ambiente."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Adicionar explicação e prioridade assistidas pós-veredito",
+    "goal": "Executar assistência estruturada somente depois do veredito determinístico, sem permitir que ela modifique fatos ou ordenação operacional.",
+    "files_hint": [
+      "core/line/",
+      "core/models/",
+      "core/control/",
+      "tests/"
+    ],
+    "acceptance": [
+      "O modelo recebe evidências somente após a persistência do veredito determinístico.",
+      "A resposta estruturada contém explicação, prioridade sugerida, justificativa, proveniência e vínculo ao achado.",
+      "Aplicabilidade e severidade da fonte permanecem idênticas ao resultado determinístico.",
+      "A prioridade sugerida é exibida como recomendação e não altera a ordem efetiva de execução dos tickets.",
+      "Falha, indisponibilidade, limite de cota ou saída inválida registra assistência indisponível e preserva o resultado determinístico.",
+      "As chamadas usam o roteador e os tetos existentes.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Teste de ordem garantindo que a assistência ocorre depois do veredito.",
+      "Teste de imutabilidade dos campos determinísticos diante de resposta conflitante do modelo.",
+      "Teste de que a prioridade sugerida não reordena o backlog.",
+      "Teste dos fallbacks para indisponibilidade, cota excedida e resposta estruturalmente inválida."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Gerar propostas de correção rastreáveis",
+    "goal": "Produzir propostas apresentáveis e auditáveis sem executar mudanças no repositório ou no ambiente.",
+    "files_hint": [
+      "core/line/",
+      "core/control/",
+      "core/projects/",
+      "tests/"
+    ],
+    "acceptance": [
+      "Cada proposta referencia projeto, vulnerabilidade canônica, advisory, ambiente, evidências de origem e versão da assistência.",
+      "A proposta distingue ações sugeridas, premissas, riscos e validações necessárias.",
+      "A geração não modifica dependências, código, branch, ticket de execução ou ambiente afetado.",
+      "Propostas obsoletas são marcadas para reavaliação quando advisory ou evidências vinculadas mudam.",
+      "A ausência de proposta não altera nem encerra o achado determinístico.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Teste de proveniência completa da proposta.",
+      "Teste garantindo ausência de efeitos de escrita sobre código, dependências e execução.",
+      "Teste de obsolescência da proposta após mudança de advisory ou evidência.",
+      "Teste de preservação do achado quando a geração da proposta falha."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Vincular validação independente ao candidato",
+    "goal": "Registrar e avaliar, para candidatos produzidos por tickets separados, o portão vigente e a revisão por família diferente.",
+    "files_hint": [
+      "core/orchestrator/",
+      "core/line/",
+      "core/control/",
+      "core/harness/",
+      "tests/"
+    ],
+    "acceptance": [
+      "A validação fica vinculada à identidade imutável do candidato e ao ambiente relevante.",
+      "O portão vigente é requisito verificável e não pode ser substituído por aprovação textual do modelo.",
+      "A revisão independente rejeita revisor da mesma família do implementador.",
+      "Alteração do candidato invalida validações anteriores.",
+      "Resultado de merge ou teste unitário isolado não marca o achado como corrigido.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Teste de vínculo entre validação e identidade do candidato.",
+      "Teste de rejeição de revisão pela mesma família do implementador.",
+      "Teste de invalidação da validação quando o candidato muda.",
+      "Teste garantindo que aprovação textual, merge e teste unitário isolado não comprovam correção."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Fechar achados somente por reteste determinístico",
+    "goal": "Concluir o ciclo apenas quando um reteste atual comprovar a resolução no ambiente afetado.",
+    "files_hint": [
+      "core/line/",
+      "core/control/",
+      "core/projects/",
+      "tests/"
+    ],
+    "acceptance": [
+      "O achado somente fecha após reteste determinístico bem-sucedido no ambiente afetado e com dependências resolvidas.",
+      "O reteste registra ambiente, advisory, estado das dependências, instante e evidências atuais.",
+      "Falha ou resultado inconclusivo mantém o achado aberto com histórico preservado.",
+      "Mudança posterior de candidato, advisory ou ambiente invalida o fechamento pertinente e provoca reavaliação.",
+      "Exceções e aceitação de risco continuam seguindo os mecanismos existentes e não são inferidas do reteste.",
+      "python scripts/line_validate.py termina com sucesso."
+    ],
+    "tests_to_add": [
+      "Teste de fechamento após reteste determinístico bem-sucedido no ambiente correto.",
+      "Teste de permanência aberta para reteste falho, inconclusivo ou executado em ambiente divergente.",
+      "Teste de reabertura por invalidação de evidência após mudança relevante.",
+      "Teste de que exceção ou aceitação de risco não é criada implicitamente."
+    ],
+    "smoke": []
+  }
+]
