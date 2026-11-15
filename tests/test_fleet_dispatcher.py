@@ -35,11 +35,14 @@ class Env:
         self.handles: dict[str, Handle] = {}
         self.deploys = 0
         self.free = set(free)
+        self.main_sha = "a" * 40
         cfg = fd.DispatcherConfig(hosts=HOSTS, state_path=tmp / "state.json", deploy_window_sec=100, requeue_cooldown_sec=50)
         self.d = fd.FleetDispatcher(cfg, demands_loader=lambda: demands,
                                     probe=lambda h: fd.HostProbe(h.id in self.free, "x"),
                                     launch=self._launch, deploy=self._deploy, clock=lambda: self.now,
-                                    admission_store=AdmissionStore(tmp / "admission.sqlite3"))
+                                    admission_store=AdmissionStore(tmp / "admission.sqlite3"),
+                                    main_sha_reader=lambda: self.main_sha)
+        self.d._sync_main_sha()
 
     def _launch(self, tid, host, *, run_id=None, recovery=False, candidate_digest="unknown"):
         self.launched.append((tid, host.id))
@@ -1707,6 +1710,7 @@ def test_sha_comparison_uses_project_root_head_without_env_or_origin_main(tmp_pa
         deploy=lambda: 0,
         clock=lambda: 0.0,
         admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        main_sha_reader=lambda: None,
         digest_hook=None,
         sentinel_hook=None,
         exec_fn=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("exec inesperado")),
@@ -2057,3 +2061,37 @@ def test_main_forwards_original_argv_and_once_skips_the_loop(monkeypatch) -> Non
     assert kwargs["dry_run"] is True
     assert captured.get("cycle") is True
     assert "forever" not in captured
+
+
+def test_new_main_sha_unblocks_failure_and_hold_same_sha_keeps_them(tmp_path: Path):
+    from core.line.admission_store import make_fingerprint
+
+    demands = [{"id": "USR-01", "status": "planned", "project": "darkfac"}]
+    e = Env(tmp_path, demands, free=("grokbox",))
+    store = e.d.admission_store
+    e.d.run_cycle()  # lanca USR-01
+    e.handles["USR-01"].rc = 1
+    e.d.run_cycle()  # reap: falha gravada com o SHA vigente
+    assert [r["main_sha"] for r in store.snapshot()] == [e.main_sha]
+    e.now += 10**6
+    cyc = e.d.run_cycle()
+    assert cyc["skipped"]["USR-01"] == "identical_failure_open"  # mesmo SHA: segue bloqueado
+    assert len(e.launched) == 1
+    store.record_failure(make_fingerprint(
+        project_id="legacy", ticket_id="USR-77", error="x", resource_version="r"))  # main_sha vazio
+    e.main_sha = "b" * 40
+    e.d.run_cycle()  # novo main: falhas da geracao antiga (e a legada) fecham
+    assert not any(r["open"] for r in store.snapshot())
+    assert len(e.launched) == 2
+
+
+def test_unresolved_main_sha_closes_nothing(tmp_path: Path, caplog):
+    e = Env(tmp_path, [], free=())
+    store = e.d.admission_store
+    job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="p", context_digest="c")
+    e.d._record_failure(job, 1, "failure", "boom")
+    e.d._main_sha_reader = lambda: None
+    with caplog.at_level("WARNING"):
+        e.d.run_cycle()
+    assert any(r["open"] for r in store.snapshot())
+    assert "main_sha_unresolved" in caplog.text

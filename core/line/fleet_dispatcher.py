@@ -72,6 +72,16 @@ def _default_checkout_sha() -> str | None:
     return current_git_sha(PROJECT_ROOT, use_env=False)
 
 
+def _default_main_sha() -> str | None:
+    """SHA completo de ``origin/main`` neste checkout, ou None se o git falhar."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "origin/main"], cwd=PROJECT_ROOT, capture_output=True,
+                             text=True, encoding="utf-8", errors="replace", timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return normalize_sha(out.stdout) if out.returncode == 0 else None
+
+
 def _checkout_sha_changed(startup: str | None, current: str | None) -> bool:
     """True somente quando os dois SHAs ja normalizados sao completos e diferentes."""
     return bool(startup and current and startup != current)
@@ -599,8 +609,11 @@ class FleetDispatcher:
         code_sha_reader: Optional[Callable[[], object]] = None,
         exec_fn: Optional[Callable[[str, Sequence[str]], Any]] = None,
         launch_argv: Optional[Sequence[str]] = None,
+        main_sha_reader: Optional[Callable[[], object]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
+        self._main_sha_reader = main_sha_reader or _default_main_sha
+        self._main_sha: str | None = None  # ultimo SHA concreto de origin/main observado
         self.demands_loader = demands_loader
         self.probe = probe or (lambda h: default_probe(h, self.config.stable_probes))
         self.launch = launch
@@ -649,6 +662,31 @@ class FleetDispatcher:
             logger.exception("falha ao ler o SHA do checkout em execucao")
             return None
         return normalize_sha(raw)
+
+    def _sync_main_sha(self) -> None:
+        """Resolve o SHA de origin/main e fecha so falhas de outra geracao (inclui legadas sem SHA).
+
+        Sem SHA concreto (git falhou) nada e fechado: loga e o ciclo segue com o ultimo SHA conhecido.
+        """
+        try:
+            sha = normalize_sha(self._main_sha_reader())
+        except Exception:  # noqa: BLE001 - SHA ilegivel nao fecha nada
+            logger.exception("falha ao resolver o SHA de origin/main")
+            sha = None
+        if sha is None:
+            logger.warning("main_sha_unresolved: falhas de admissao preservadas neste ciclo (ultimo=%s)",
+                           self._main_sha or "")
+            return
+        self._main_sha = sha
+        if self.admission_store is None or self.dry_run:
+            return
+        try:
+            closed = self.admission_store.close_failures_for_other_sha(sha)
+        except Exception:  # noqa: BLE001 - falha de persistencia: nada fecha, admissao segue fail-closed
+            logger.exception("falha ao fechar falhas de outra geracao do main")
+            return
+        if closed:
+            logger.info("falhas de admissao fechadas por novo main: closed=%s main_sha=%s", closed, sha)
 
     def _exec_if_checkout_sha_changed(self) -> bool:
         """Substitui este processo quando o HEAD do checkout mudou desde a largada.
@@ -741,6 +779,7 @@ class FleetDispatcher:
                        kind if kind != "failure" else (cause or kind)),
                 # causa de ticket nao depende do host: soma entre hosts
                 resource_version="ticket_cause" if ticket_cause else job.resource_version,
+                main_sha=self._main_sha,
             )
             occurrences = self.admission_store.record_failure(
                 fingerprint, initial_backoff_sec=int(self.config.requeue_cooldown_sec))
@@ -954,13 +993,14 @@ class FleetDispatcher:
             context_key = safe_digest(context)
             resource_key = safe_digest(resource_version)
             hold = self.admission_store.ticket_hold(
-                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key, context_digest=context_key)
+                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key, context_digest=context_key,
+                main_sha=self._main_sha)
             if hold:
                 idle[host.id] = skipped[tid] = f"ticket_hold:{hold['cause']}"
                 return  # so o ticket fica retido; o host tenta o proximo
             if self.admission_store.is_failure_open(
                 project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                context_digest=context_key, resource_version=resource_key,
+                context_digest=context_key, resource_version=resource_key, main_sha=self._main_sha,
                 error_class=normalize_error(demand["error_class"]) if demand.get("error_class") else None,
             ):
                 idle[host.id] = "identical_failure_open"
@@ -1176,6 +1216,7 @@ class FleetDispatcher:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
                                        "resumptions": resumptions, "dispatched": [],
                                        "deployed": deployed_resume})
+        self._sync_main_sha()
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
         if self.recovery.get("active"):

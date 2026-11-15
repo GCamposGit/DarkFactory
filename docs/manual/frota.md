@@ -448,3 +448,5 @@ falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.
 Saida com codigo 75 (route_wait, gate_capacity_zero) e espera estruturada: fica no circuito por ticket, mas nunca ativa a recuperacao global da frota. O mesmo vale para recusa por trava de linha ou reserva de outro ticket vivo (kind lock): fica registrada por ticket, sem recuperacao global.
 
 A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: nao alimenta o circuito nem acende a recuperacao global. O mesmo vale para a recusa `ja possui PR ativo` (ticket com PR aberto, codigo 2).
+
+USR-511: no inicio de cada ciclo o despachante resolve o SHA de `origin/main`, grava e consulta falhas e holds de admissao com ele e fecha as falhas de outra geracao do main (inclusive legadas sem SHA). Se o git falhar, nada fecha, o log registra `main_sha_unresolved` e o ciclo segue.
