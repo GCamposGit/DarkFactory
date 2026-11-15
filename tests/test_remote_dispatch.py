@@ -90,6 +90,7 @@ def _commit_all(repo: Path, message: str) -> None:
 _HARNESS_PACKAGE_FILES = (
     "core/paths.py",
     "core/harness/runner.py",
+    "core/harness/pytest_runtime.py",
     "core/harness/cache.py",
     "core/harness/suite_lock.py",
     "core/harness/markers.py",
@@ -405,6 +406,7 @@ def test_offline_worker_falls_back_to_local(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_offline_worker_with_remote_required_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "full")
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1")
     monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
     monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **k: None)
@@ -925,3 +927,60 @@ def test_bundle_ignores_worker_commits_unknown_locally(tmp_path, copy_git_repo):
         assert head in _git(repo, "bundle", "list-heads", str(bundle))
     finally:
         bundle.unlink()
+
+def test_pr_required_with_unreachable_workers_falls_back_locally(monkeypatch):
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "required")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1,http://127.0.0.1:2")
+    monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
+    seen = []
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda url, **kw: seen.append(url) or None)
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=True,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+    assert result is None and len(seen) == 2
+
+
+def test_health_and_submit_bound_unreachable_connection(monkeypatch, tmp_path):
+    monkeypatch.setenv(remote_dispatch.ENV_WORKER_HEALTH_TIMEOUT_SEC, "60")
+    seen = []
+    def unreachable(req, **kw):
+        seen.append(kw["timeout"])
+        raise TimeoutError("offline")
+    monkeypatch.setattr(remote_dispatch.urllib.request, "urlopen", unreachable)
+    assert remote_dispatch.probe_health("http://offline", timeout=60) is None
+    bundle = tmp_path / "candidate.bundle"
+    bundle.write_bytes(b"bundle")
+    with pytest.raises(TimeoutError):
+        remote_dispatch._submit_job("http://offline", bundle, {})
+    assert all(t <= 5 for t in seen) and len(seen) == 2
+
+def test_submit_timeout_skips_worker_and_falls_back_in_pr(monkeypatch, tmp_path):
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1,http://127.0.0.1:2")
+    monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **kw: {"busy": False})
+    monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda url, health: health)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda root: "a" * 40)
+    monkeypatch.setattr(harness_cache, "tree_sha", lambda root: "b" * 40)
+    def bundle(*a, **kw):
+        path = tmp_path / "candidate.bundle"
+        path.write_bytes(b"bundle")
+        return path
+    monkeypatch.setattr(remote_dispatch, "_create_bundle", bundle)
+    seen = []
+    def timeout(url, *a):
+        seen.append(url)
+        raise TimeoutError("unreachable")
+    monkeypatch.setattr(remote_dispatch, "_submit_job", timeout)
+    assert remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=True,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    ) is None
+    assert len(seen) == 2
+    assert [a["error_code"] for a in remote_dispatch.dispatch_attempts()] == ["worker_connection_failed"] * 2

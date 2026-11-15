@@ -520,3 +520,57 @@ def test_run_with_cache_starts_and_stops_a_heartbeat_thread_around_execute(
     assert not any(
         t.name == "darkfac-harness-inflight-heartbeat" and t.is_alive() for t in threading.enumerate()
     )
+
+@pytest.mark.parametrize("workers", [0, 1, 2])
+def test_runner_uses_in_process_pytest_for_one_worker(monkeypatch, workers):
+    import subprocess
+    from core.line import gate_ram
+    from core.harness.models import HarnessStepConfig
+
+    calls = []
+    monkeypatch.setattr(runner, "_xdist_available", lambda: True)
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(8.0, workers))
+    monkeypatch.setattr(runner.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, stdout="2 passed in 0.1s"))
+    step = HarnessStepConfig(name="unit_and_integration_tests_parallel", cmd="python -m pytest tests -n auto --dist worksteal", kind="test")
+    result = runner.run_step(step)
+    if workers == 0:
+        assert result.returncode == 75 and not calls
+    else:
+        assert result.passed
+        assert calls[0][calls[0].index("-n") + 1] == ("0" if workers == 1 else "2")
+
+
+@pytest.mark.parametrize("failure, serial_code, expected_calls", [(3, 0, 2), (3, 1, 2), (3, 3, 2), (1, 0, 1)])
+def test_parallel_crash_gets_one_serial_retry(monkeypatch, tmp_path, failure, serial_code, expected_calls):
+    import subprocess
+    from core.harness import pytest_runtime
+
+    calls = []
+    def run(cmd, **kw):
+        calls.append(cmd)
+        code = failure if len(calls) == 1 else serial_code
+        return subprocess.CompletedProcess(cmd, code, stdout="EOFError" if code == 3 else "1 passed" if code == 0 else "1 failed")
+    monkeypatch.setattr(pytest_runtime.subprocess, "run", run)
+    monkeypatch.setattr(pytest_runtime, "_last_failed_cache_exists", lambda root: True)
+    result = pytest_runtime.run_with_serial_retry(["python", "-m", "pytest", "tests/test_x.py", "-n", "2"], cwd=tmp_path, timeout=120, stdout=subprocess.PIPE)
+    assert len(calls) == expected_calls
+    assert result.returncode == (serial_code if failure == 3 else failure)
+    if expected_calls == 2:
+        assert calls[1][-3:] == ["-n", "0", "--lf"]
+
+
+def test_pr_below_memory_floor_exits_75(monkeypatch, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "wait_for_gate_ram", lambda **kw: gate_ram.RamWaitResult(False, gate_ram.RamReading(1.4, 0), 300))
+    assert runner.main(["--profile", "pr"]) == 75
+    assert "gate_insufficient_ram" in capsys.readouterr().out
+
+def test_crash_retry_runs_a_real_serial_subprocess_without_cache(tmp_path):
+    import subprocess
+    import sys
+    from core.harness import pytest_runtime
+
+    script = "import sys; print('EOFError' if sys.argv[-1] == '2' else '1 passed'); sys.exit(3 if sys.argv[-1] == '2' else 0)"
+    result = pytest_runtime.run_with_serial_retry([sys.executable, "-c", script, "-n", "2"], cwd=tmp_path, timeout=30, stdout=subprocess.PIPE, text=True)
+    assert result.returncode == 0 and result.stdout.strip() == "1 passed"

@@ -217,7 +217,7 @@ def test_health_timeout_env_is_honoured_by_probe_health(monkeypatch: pytest.Monk
     monkeypatch.setenv("DARKFAC_WORKER_HEALTH_TIMEOUT_SEC", "7.5")
     assert remote_dispatch.probe_health("http://worker") is None
     assert remote_dispatch.probe_health("http://worker", timeout=1.25) is None
-    assert seen == [remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC, 7.5, 1.25]
+    assert seen == [remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC, 5.0, 1.25]
 
 
 @pytest.mark.parametrize("raw", ["", "abc", "-1", "0", "nan"])

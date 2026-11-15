@@ -5,6 +5,15 @@ O briefing le OAs apenas da fonte configurada pelo `OwnerActionStore`: control s
 em producao, arquivo com modo local explicito. Nao consulta `dynamic.json` nem
 `resolutions.json`. Banco indisponivel aparece como erro na secao de OAs do briefing.
 
+Tickets validam pelo perfil `pr` local: afetados contra o merge-base de
+`origin/main`, contratos e fumaça fixa, sem pré-teste focal duplicado. Seleção
+incerta registra `scope=affected_fallback` e roda fumaça, deixando a suíte
+completa para Linux/CI. Com 1,5 GiB livres, o portão degrada para `-n 0`; abaixo
+disso espera até 300s e retorna 75 (`gate_insufficient_ram`), sem chamar o agente
+de correção. `DARKFAC_GATE_SCOPE=full` restaura o caminho anterior com `--quick`
+e despacho remoto estrito. A admissão prévia permanece regida pelo seu contrato.
+Detalhes de seleção, prazo e recuperação de crash em [portao.md](portao.md).
+
 Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
 confirmados, preservando revisão por outra família. `route_wait` fica persistido
 para o dispatcher retomar automaticamente; o operador não precisa voltar ao chat.

@@ -13,12 +13,29 @@ python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python core/harness/runner.py --quick
+python core/harness/runner.py --profile pr
 ```
 
-`runner.py --quick` já roda a suíte inteira (paralela, cacheada, enfileirada
-por máquina — veja "Aceleração da suíte de testes" abaixo). Não é preciso
-rodar `pytest` de novo como segundo comando.
+Tickets e frota usam `runner.py --profile pr --local`: afetados contra o merge-base
+com `origin/main`, compileall, tipos, `lint-imports`, complexity ratchet e fumaça
+fixa. O perfil força execução local sem cache. Sem seleção confiável (base ausente,
+configuração global, falha no grafo ou cobertura não identificada), registra
+`scope=affected_fallback` e roda `tests/test_harness_contract.py`. Suite completa
+fica para Linux/CI de main. `docs_sync` roda no CI com base/head.
+
+O perfil PR aceita 1,5 GiB livres; até um worker executa `-n 0`, sem gateway xdist.
+A espera padrão por RAM é 300s; abaixo do mínimo retorna 75 com
+`gate_insufficient_ram`. O prazo dos afetados usa casos coletados, inclusive
+parametrizados: `min(1800, 120 + 20 * N)` segundos, limitado também pelo passo de
+1800s que inclui seleção/coleta/retry. Crash paralelo recebe uma única repetição
+serial, com `--lf` quando há lastfailed não vazio, no mesmo orçamento. Evidência
+continua vinculada ao candidato limpo/imutável e exige `[HARNESS_PASS]`.
+
+`DARKFAC_GATE_SCOPE=full` restaura `--quick` e o despacho remoto anterior no
+launcher. Full conserva a conta de workers (2 GiB de reserva + 2 GiB por worker).
+Health e envio têm timeout de socket de no máximo 5s; worker inacessível cede ao
+próximo e, no PR, a local mesmo sob `required`. Só full mantém `required` estrito.
+Não há pré-teste focal duplicado antes do perfil PR.
 
 O stack de GPU/transcrição é opcional:
 
@@ -125,7 +142,7 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
    rastro de uma falha é a linha `inflight` sendo apagada) ou crashou; de
    qualquer forma, esperar mais não tem sentido.
 4. **Paralelismo (`pytest-xdist`) + timeout por teste (`pytest-timeout`)** —
-   o step de teste roda com `-n auto --dist worksteal -m "not serial"`
+   o step paralelo usa a capacidade medida e `-m "not serial"`; até um worker usa `-n 0`
    (medido no Notebook Windows, i7-14700HX 28 threads: `worksteal` ~120s de média contra
    ~191s de `loadfile` em duas execuções de cada, suíte estável nas duas —
    `worksteal` redistribui itens individuais entre workers ociosos em vez

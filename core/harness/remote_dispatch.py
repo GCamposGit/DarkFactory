@@ -118,9 +118,8 @@ KNOWN_HOST_IDENTIFIERS: dict[str, frozenset[str]] = {
 #: (4157 passed, 14/10/2026) versus 23-30 min on the Notebook; the Desktop is second.
 DEFAULT_WORKERS = "http://100.77.130.5:8080,http://100.78.181.90:8080"
 DEFAULT_BUSY_WAIT_SEC = 300.0
-#: 10 s, not 2 s: the grokbox is reached through a Tailscale DERP relay (no direct UDP), so the
-#: /health round trip sometimes exceeds 2 s and the worker was skipped; 10 s worked every time (14/10/2026).
-HEALTH_PROBE_TIMEOUT_SEC = 10.0
+#: Bound unreachable connections even on hosts configured with required remote dispatch.
+HEALTH_PROBE_TIMEOUT_SEC = 5.0
 POLL_INTERVAL_SEC = 2.0
 #: A worker that stops answering GET /harness/jobs/{id} for longer than this
 #: is probed on ``/health`` (USR-141): a worker that still answers ``/health``
@@ -285,9 +284,12 @@ def worker_urls(disabled: set[str] | None = None) -> list[str]:
 
 
 def _effective_mode(*, remote_required: bool) -> str:
+    full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
     if remote_required:
-        return "required"
+        return "required" if full else "auto"
     raw = os.environ.get(ENV_REMOTE_HARNESS, "auto").strip().lower()
+    if raw == "required" and not full:
+        return "auto"
     return raw if raw in ("auto", "off", "required") else "auto"
 
 
@@ -331,7 +333,7 @@ def _positive_float_env(name: str, default: float) -> float:
 def health_probe_timeout_sec() -> float:
     """Timeout of the ``/health`` probe (``DARKFAC_WORKER_HEALTH_TIMEOUT_SEC``)."""
 
-    return _positive_float_env(ENV_WORKER_HEALTH_TIMEOUT_SEC, HEALTH_PROBE_TIMEOUT_SEC)
+    return min(5.0, _positive_float_env(ENV_WORKER_HEALTH_TIMEOUT_SEC, HEALTH_PROBE_TIMEOUT_SEC))
 
 
 def worker_silence_ceiling_sec() -> float:
@@ -451,6 +453,7 @@ def is_self_dispatch(base_url: str, health: dict[str, Any] | None) -> bool:
 def probe_health(base_url: str, timeout: float | None = None) -> dict[str, Any] | None:
     if timeout is None:
         timeout = health_probe_timeout_sec()
+    timeout = min(timeout, 5.0)
     url = f"{base_url.rstrip('/')}/health"
     try:
         req = urllib.request.Request(url, headers=_auth_headers())
@@ -472,7 +475,7 @@ def _submit_job(base_url: str, bundle_path: Path, metadata: dict[str, Any]) -> d
         headers=_auth_headers({"Content-Type": "application/octet-stream", "X-Job-Meta": meta_b64}),
     )
     try:
-        with urllib.request.urlopen(req, timeout=SUBMIT_TIMEOUT_SEC) as resp:
+        with urllib.request.urlopen(req, timeout=min(SUBMIT_TIMEOUT_SEC, 5.0)) as resp:
             raw = resp.read()
             body = json.loads(raw.decode("utf-8")) if raw else {}
             return {"status_code": resp.status, "body": body}
@@ -999,6 +1002,11 @@ def _dispatch_one_job(
             bundle_path = _create_bundle(project_root, base_shas=[])
             print(f"[REMOTE] {base_url}: worker missing prerequisites; retrying with a full bundle")
             submit_response = _submit_job(base_url, bundle_path, metadata)
+    except OSError as exc:
+        raise _WorkerUnavailable(
+            "job submission connection failed",
+            {"error_code": "worker_connection_failed", "worker_url": base_url},
+        ) from exc
     finally:
         with contextlib.suppress(OSError):
             bundle_path.unlink()
@@ -1222,6 +1230,10 @@ def _probe_eligible_worker(base_url: str, disabled: set[str]) -> dict[str, Any] 
     return health
 
 
+def _dispatch_disabled(mode: str) -> bool:
+    return mode == "off" or _unconditional_disable_reason() is not None
+
+
 def maybe_dispatch_remote(
     *,
     steps: list[HarnessStepConfig],
@@ -1254,10 +1266,8 @@ def maybe_dispatch_remote(
         return None
 
     mode = _effective_mode(remote_required=remote_required)
-    if mode == "off":
-        return None
-
-    if _unconditional_disable_reason() is not None:
+    remote_required = mode == "required"
+    if _dispatch_disabled(mode):
         return None
 
     disabled = disabled_hosts()

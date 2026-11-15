@@ -21,6 +21,24 @@
       ]
     },
     {
+      "name": "complexity_ratchet",
+      "cmd": "python scripts/complexity_ratchet.py",
+      "quick": true,
+      "kind": "check",
+      "profiles": [
+        "pr"
+      ]
+    },
+    {
+      "name": "layer_contracts",
+      "cmd": "lint-imports",
+      "quick": true,
+      "kind": "check",
+      "profiles": [
+        "pr"
+      ]
+    },
+    {
       "name": "affected_tests",
       "cmd": "python -m core.harness.affected --base origin/main --run",
       "quick": true,
@@ -32,7 +50,7 @@
     },
     {
       "name": "smoke_tests",
-      "cmd": "python -m pytest tests -q -m smoke",
+      "cmd": "python -m pytest tests/test_harness_contract.py -q -n 0",
       "quick": true,
       "kind": "test",
       "timeout_sec": 300,
