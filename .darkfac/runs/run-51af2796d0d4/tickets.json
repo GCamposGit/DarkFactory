@@ -1,0 +1,132 @@
+[
+  {
+    "id": "T1",
+    "title": "Modelos, perfil de cobertura e classificador com precedência fixa",
+    "goal": "Criar core/security com contratos Pydantic (CoverageProfile, CoverageItem, Provenance, ProjectCoverage), carregador de perfis em .factory/security/profiles/<project>.json validado contra o ProjectRegistry, e a função pura classify() com precedência stale > omitted > unknown > evaluated e contadores das quatro categorias.",
+    "files_hint": [
+      "core/security/__init__.py",
+      "core/security/models.py",
+      "core/security/profiles.py",
+      "core/security/classify.py",
+      ".factory/security/profiles/darkfac.json",
+      "tests/test_security_coverage_classify.py"
+    ],
+    "acceptance": [
+      "Projeto sem perfil, com enabled=false ou com access_granted=false retorna blocked com blocked_reason legível e contadores zerados, nunca evaluated.",
+      "Cada item cai em exatamente uma categoria, e a soma dos quatro contadores é igual ao universo do perfil.",
+      "Evidência com idade maior que evidence_ttl_hours vira stale e não preserva o resultado anterior (sem 'clean' herdado).",
+      "Item omitido sem motivo registrado é rejeitado na validação do perfil.",
+      "Controle declarado sem registro de evidência vira unknown com reason no_evidence.",
+      "Perfil darkfac.json versionado, sem segredos, com TTL e ambiente system declarados.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Teste de tabela cobrindo todas as combinações de flags (stale/omitted/unknown/evaluated) e verificando a precedência.",
+      "Testes de perfil ausente, desabilitado e sem acesso retornando blocked.",
+      "Teste de invariante: soma dos contadores igual ao universo."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Resolução de versões do ambiente identificado",
+    "goal": "Implementar core/security/environment_resolution.py, que produz a lista de dependências resolvidas (nome, versão, ecossistema) mais a proveniência do ambiente (id, método, hash), a partir de pip inspect do interpretador do ambiente (venv ou system) ou de lockfile com pins exatos. Requisito declarado sem pin vira dependência unknown.",
+    "files_hint": [
+      "core/security/environment_resolution.py",
+      "core/projects/environment.py",
+      "tests/test_security_environment_resolution.py"
+    ],
+    "acceptance": [
+      "Ambiente venv usa o interpretador em venv_bin_dir e o caminho fica contido no checkout (reusa venv_dir).",
+      "Ambiente system usa sys.executable e registra resolution_method=pip_inspect_system.",
+      "requirements.txt com linha sem '==' gera item unknown com reason declared_not_resolved, nunca evaluated.",
+      "environment_hash é sha256 determinístico do conjunto canônico nome==versão (ou do lockfile) e muda quando uma versão muda.",
+      "Falha de subprocess ou de parse vira erro estruturado com motivo, sem except: pass e sem vazar variáveis de ambiente.",
+      "Subprocesso com timeout e saída UTF-8 explícita.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Teste com saída de pip inspect em fixture, verificando versões e hash estável.",
+      "Teste de requirements misto (pinado e não pinado) separando resolvidos de unknown.",
+      "Teste de path de venv fora do checkout sendo rejeitado.",
+      "Teste de falha do inspect retornando erro estruturado."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Adaptador de advisories OSV com falha explícita",
+    "goal": "Implementar core/security/sca_adapter.py, que consulta OSV.dev /v1/querybatch com as versões resolvidas e devolve, por dependência, vulnerabilidades encontradas, consulta limpa ou falha, com proveniência da fonte (nome osv.dev, data do snapshot ou header de data, queried_at). Ausência de advisory só conta como evaluated quando a consulta teve sucesso para um ecossistema suportado.",
+    "files_hint": [
+      "core/security/sca_adapter.py",
+      "tests/test_security_sca_adapter.py",
+      "requirements.txt (somente se faltar cliente HTTP já usado no repo)"
+    ],
+    "acceptance": [
+      "Timeout, erro HTTP, resposta malformada ou rate limit viram unknown com reason source_failure e entram em source_failures, nunca evaluated.",
+      "Ecossistema fora de PyPI vira unknown com reason ecosystem_unsupported.",
+      "Consulta bem-sucedida sem vulns vira evaluated com evidence_ref apontando para a consulta e queried_at.",
+      "Vulnerabilidades encontradas carregam ids (OSV/GHSA/CVE) e versão afetada.",
+      "O transporte HTTP é injetável para teste, sem chave e sem dado do usuário nos headers.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Testes com transporte falso: sucesso limpo, sucesso com vuln, timeout, 500, JSON inválido e ecossistema não suportado.",
+      "Teste garantindo que nenhum caminho de falha produz status evaluated."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Orquestração, armazenamento durável e CLI headless com e2e real em darkfac",
+    "goal": "Implementar core/security/evidence_store.py (append-only por projeto no destino do perfil, retenção permanente, storage_pending sem destino), core/security/coverage.py (compute_coverage e load_latest, ligando perfil, resolução, OSV, evidência de controles e classificação, com commit_sha) e a CLI `python -m core.security.coverage [--project X] [--no-persist]` com JSON UTF-8 e códigos de saída 0, 1, 2 e 3. Executar de verdade em darkfac e registrar a evidência.",
+    "files_hint": [
+      "core/security/evidence_store.py",
+      "core/security/coverage.py",
+      "core/security/__main__.py",
+      "tests/test_security_coverage_cli.py",
+      ".importlinter"
+    ],
+    "acceptance": [
+      "`python -m core.security.coverage --project darkfac` roda contra OSV.dev real e imprime JSON com os quatro contadores, os itens e a proveniência completa (fonte, ambiente, commit). A saída real fica anexada como evidência do ticket.",
+      "Sem --project, a CLI cobre todos os projetos do registro: habilitados são calculados e os demais aparecem como blocked com motivo.",
+      "Código de saída 2 quando houver falha de fonte, 3 quando o projeto pedido estiver bloqueado ou sem perfil, 0 em caso de sucesso.",
+      "A gravação fica contida no destino do perfil, um diretório por project_id, append-only (registros anteriores nunca sobrescritos). Sem destino, o resultado vem com storage=storage_pending e nada é gravado.",
+      "Na execução seguinte, evidência anterior com idade maior que o TTL aparece como stale até ser reavaliada.",
+      "Contrato do import-linter impede core.security de importar camadas HTTP/UI.",
+      "python scripts/line_validate.py e o portão --quick passam."
+    ],
+    "tests_to_add": [
+      "Teste da CLI em processo com transporte OSV falso e ambiente em fixture, cobrindo os códigos de saída 0, 2 e 3 e o schema do JSON.",
+      "Teste do evidence_store: isolamento entre projetos, append-only, path fora do destino rejeitado e storage_pending."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Alertas sem repetição e documentação da entrega",
+    "goal": "Implementar core/security/alerts.py, que calcula o fingerprint do estado acionável (vulnerabilidades novas, falhas de fonte novas, itens que passaram a stale) e notifica via NotificationService (DarkHub e Telegram) só quando o fingerprint muda, com estado persistido por projeto. Atualizar manual, FASE_ATUAL e learning pack, e reconciliar com USR-449.",
+    "files_hint": [
+      "core/security/alerts.py",
+      "core/security/coverage.py",
+      "core/notifications/service.py",
+      "docs/manual/cobertura-seguranca.md",
+      "docs/FASE_ATUAL.md",
+      ".factory/demands/demands.json (nota de reconciliação em USR-449 via core.demands)"
+    ],
+    "acceptance": [
+      "Duas execuções seguidas com o mesmo estado acionável emitem um único alerta.",
+      "Um estado sem novidade acionável (só contadores de evaluated variando) não alerta.",
+      "Falha de fonte nova e evidência que passou a vencida geram alerta com projeto, motivo e proveniência, sem segredo.",
+      "A CLI ganha --alert (desligado por padrão em teste), e o envio real para DarkHub e Telegram em darkfac fica validado e registrado como evidência.",
+      "O manual descreve as categorias, a precedência, a CLI, os códigos de saída e o formato do perfil. FASE_ATUAL cita a nova superfície.",
+      "USR-449 recebe nota (via core.demands) apontando core.security.coverage como a implementação de 'cobertura explícita', para evitar duplicação.",
+      "python scripts/line_validate.py e docs_sync passam."
+    ],
+    "tests_to_add": [
+      "Teste de deduplicação: mesmo fingerprint não renotifica, fingerprint alterado notifica (NotificationService injetado).",
+      "Teste de que mudança só em evaluated não gera alerta."
+    ],
+    "smoke": []
+  }
+]
