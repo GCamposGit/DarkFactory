@@ -80,6 +80,62 @@ def test_sentinel_healthy_when_route_available(tmp_path: Path):
         assert "USR-100" in report.pending_tickets
 
 
+def test_all_pending_held_or_backed_off_stalls_after_two_cycles_once_per_episode(tmp_path, monkeypatch):
+    from core.line import fleet_dispatcher as fd, run_outcome
+    from core.line.admission_store import AdmissionStore
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(run_outcome, "main_sha", lambda _repo: "a" * 40)
+    store = AdmissionStore(tmp_path / "admission.sqlite3", clock=lambda: datetime.fromtimestamp(10000, timezone.utc))
+    for index in range(3):
+        store.record_attempt("darkfac", "USR-101", "gate_failed", run_id=str(index), main_sha="a" * 40,
+                             notify=lambda *args: None)
+    store.record_attempt("darkfac", "USR-102", "gate_timeout", run_id="infra", main_sha="a" * 40)
+    demands = [{"id": "USR-101", "status": "planned"}, {"id": "USR-102", "status": "planned"}]
+    dispatcher = fd.FleetDispatcher(fd.DispatcherConfig(hosts=[fd.HostSpec("notebook", 1)],
+                                                       state_path=tmp_path / "fleet.json"),
+                                    demands_loader=lambda: demands, probe=lambda _host: fd.HostProbe(True),
+                                    launch=lambda *args, **kwargs: pytest.fail("blocked ticket was launched"),
+                                    admission_store=store, clock=lambda: 10000)
+    cycle = dispatcher.run_cycle()
+    assert cycle["blocked_cycles"] == 1
+    dispatcher.run_cycle()
+    cycle = dispatcher.run_cycle()
+    assert cycle["blocked_cycles"] == 3
+    assert cycle["blocked_causes"] == {"hold": 1, "backoff_infra": 1}
+    monkeypatch.setattr(fd, "running_fleet_runs", lambda: {})
+    monkeypatch.setattr(sentinel_mod, "read_quotas", lambda: {"codex": 80})
+    monkeypatch.setattr(sentinel_mod, "_probe_sentinel_routes", lambda: ("codex", "codex", "claude"))
+    alerts = []
+    service = lambda: SimpleNamespace(notify=lambda **kwargs: alerts.append(kwargs) or object())
+    path = tmp_path / "sentinel.json"
+    for _ in range(2):
+        report = check_factory_status(demands_loader=lambda: demands, state_path=path,
+                                      fleet_state_loader=lambda: cycle, notification_service_factory=service,
+                                      clock=lambda: 10000)
+        assert report.status == SentinelStatus.STALLED_BLOCKED and report.is_stalled
+        assert "hold=1" in report.reason and "backoff_infra=1" in report.reason
+    assert len(alerts) == 1
+    monkeypatch.setattr(sentinel_mod, "read_quotas", lambda: pytest.fail("light sample probed quotas"))
+    maybe_run_sentinel(path=path, clock=lambda: 10001, fleet_state_loader=lambda: cycle,
+                       notification_service_factory=service)
+    assert load_last_report(path).status == SentinelStatus.STALLED_BLOCKED
+    assert len(alerts) == 1
+    old = dict(cycle)
+    cycle = {"blocked_cycles": 0}
+    maybe_run_sentinel(path=path, clock=lambda: 10002, fleet_state_loader=lambda: cycle,
+                       notification_service_factory=service)
+    assert not load_last_report(path).is_stalled
+    cycle = old
+    maybe_run_sentinel(path=path, clock=lambda: 10003, fleet_state_loader=lambda: cycle,
+                       notification_service_factory=service)
+    assert len(alerts) == 2
+    maybe_run_sentinel(path=path, clock=lambda: 10004, fleet_state_loader=lambda: cycle,
+                       running_loader=lambda: {"USR-103": "notebook"}, notification_service_factory=service)
+    assert not load_last_report(path).is_stalled
+    assert len(alerts) == 2
+
+
 def test_sentinel_stalled_no_route_triggers_notification(tmp_path: Path):
     """Demanda pendente sem rota viavel (todas as cotas <= 15%) marca STALLED_NO_ROUTE e notifica."""
     state_file = tmp_path / "sentinel_state.json"

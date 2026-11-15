@@ -36,7 +36,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
-from core.line import agent_retry, cancellation, line_lock, local_cancel
+from core.line import agent_retry, cancellation, line_lock, local_cancel, run_outcome
+from core.line.failure_taxonomy import classify, canonical_cause
 from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
@@ -100,7 +101,6 @@ EXIT_ROUTE_WAIT = 75
 ROUTE_WAIT_MARKER = "harness_infra_error: route_wait"
 # USR-375 S4: in-process attempts of PLAN and REVIEW for a transient `retry` outcome (agent hiccup).
 PLAN_ATTEMPTS = 2
-REVIEW_ATTEMPTS = 4
 
 
 def _routing_complexity(ticket: UserTicket) -> Optional[str]:
@@ -1397,7 +1397,7 @@ def _gate_exhausted_result(
         worker=st.last_gate_worker,
     )
     gate_payload = {
-        "exit_code": st.last_exit_code,
+        "exit_code": 75 if classify(st.last_cause) == "infra" else st.last_exit_code,
         "ok": False,
         "cause": st.last_cause,
         "ticket_id": ticket.id,
@@ -1409,6 +1409,7 @@ def _gate_exhausted_result(
         "failed_tests": st.failed_tests,
         "gate_log_tail": st.gate_log_tail,
     }
+    progress.set_outcome(run_outcome.error_detail(st.last_output, st.last_cause), st.last_cause)
     if as_json and not return_result:
         print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
     return gate_payload if return_result else gate_payload["exit_code"]
@@ -1620,6 +1621,7 @@ def _finish_self_modification(
     return 1
 
 
+@run_outcome.tracked
 def resume_delivery(
     ticket_id: str,
     worktree_path: Optional[Path | str] = None,
@@ -1852,6 +1854,8 @@ def _resume_delivery_scoped(
             ticket_id, target_worktree, as_json=as_json, return_result=return_result
         )
 
+    run_outcome.bind_attempt(ticket.id, ticket.project_id)
+
     session_probe_path = os.environ.get("DARKFAC_CODEX_SESSION_PATH", "").strip()
     if session_probe_path:  # USR-79: aviso somente leitura de chamada de ferramenta orfa
         from core.line.codex_session_probe import warn_if_unanswered
@@ -1867,6 +1871,7 @@ def _resume_delivery_scoped(
         progress = open_progress(ticket.id, ticket.project_id, ticket.title)
         holder.append(progress)
         execution_registry.attach_progress(progress, ticket.id, title=ticket.title)  # USR-208
+    run_outcome.bind_attempt(ticket.id, ticket.project_id, progress=progress)
     # USR-166: honour the ticket's cancel request (control file or signal). Reuses the launcher's scope
     # when the delivery runs in-process; a delivery subprocess joins the parent's run and never erases
     # the request it did not create.
@@ -2175,6 +2180,7 @@ def _deliver_worktree(
         try:
             ticket_engine.write_merge(rws, pr_url, merge_sha)
             require_artifact(Stage.MERGE, rws)
+            run_outcome.merged(ticket.id, ticket.project_id)
             _stage_deploy_smoke(rws, ticket, project, merge_sha, external_project, progress)
             awaiting_deploy = bool(getattr(require_artifact(Stage.DEPLOY_SMOKE, rws), "pending", False))
             ticket_extras.publish_learning(rws, learning)
@@ -2250,7 +2256,7 @@ def _retry_red_ci(
 ) -> tuple[Any, Optional[str]]:
     """Repair CI once, persist the budget, and resume the entire validation path before publishing."""
     feedback = _ci_failure_feedback(report.delivery.message)
-    record = ticket_engine.workspace.context_dir(ticket_engine.run_workspace(ticket)) / "ci_recovery.json"
+    record = run_outcome.ci_recovery_path(ticket.id)
     previous = json.loads(record.read_text(encoding="utf-8")) if record.exists() else {}
     if previous.get("attempts", 0) >= 1:
         record.parent.mkdir(parents=True, exist_ok=True)
@@ -2259,6 +2265,8 @@ def _retry_red_ci(
         os.replace(temporary, record)
         return report, f"ci_recovery_budget_exhausted: {feedback}"
     progress.phase("ci", "running", "CI vermelho: devolvendo o log ao agente (1x)")
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"attempts": 1}), encoding="utf-8")
     result = _invoke_fix_agent(target_worktree, ticket, "ci-vermelho", feedback)
     _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "ci-vermelho")
     if commit_error:
@@ -2272,101 +2280,24 @@ def _retry_red_ci(
     return report, "ci_fix_requires_revalidation" if _changed else f"ci_fix_no_changes: {feedback}"
 
 
-def _status_name(status: Any) -> str:
-    return str(getattr(status, "value", status) or "")
-
-
-def _clear_ci_recovery_exhausted(ticket: UserTicket) -> None:
-    """Remove the exhausted marker so a failed requeue cannot end the wait."""
-    record = ticket_engine.workspace.context_dir(ticket_engine.run_workspace(ticket)) / "ci_recovery.json"
-    try:
-        payload = json.loads(record.read_text(encoding="utf-8")) if record.is_file() else {}
-    except (OSError, ValueError, TypeError):
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    payload.pop("exhausted", None)
-    record.parent.mkdir(parents=True, exist_ok=True)
-    temporary = record.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload), encoding="utf-8")
-    os.replace(temporary, record)
-
-
-def _keep_ci_recovery_wait(ticket: UserTicket, target_worktree: Path) -> None:
-    """Put the CI recovery wait back to waiting, without a live pid, so the dispatcher retries it."""
-    from core.line.pending_delivery import CI_RECOVERY_CAUSES, PendingDelivery, RECHECK_SECONDS, _save, queue_dir
-    path = queue_dir() / f"{ticket.id}.json"
-    cause = "ci_fix_requires_revalidation"
-    stage = "review"
-    harness = None
-    try:
-        if path.is_file():
-            current = PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
-            stage = current.stage
-            harness = current.implementing_harness
-            if current.cause in CI_RECOVERY_CAUSES:
-                cause = current.cause
-    except (OSError, ValueError) as exc:
-        logger.warning("Could not read CI recovery wait for %s: %s", ticket.id, exc)
-    if harness is None:
-        progress = ticket_engine.artifacts_root() / ticket.id / ".darkfac" / "runs" / ticket.id / "progress.json"
-        try:
-            if progress.is_file():
-                harness = json.loads(progress.read_text(encoding="utf-8")).get("harness")
-        except (OSError, ValueError, TypeError):
-            harness = None
-    row = PendingDelivery(
-        ticket_id=ticket.id, worktree=str(target_worktree.resolve()), stage=stage,
-        implementing_harness=harness, resume_delivery=True, next_check=time.time() + RECHECK_SECONDS,
-        status="waiting", cause=cause,
-    )
-    try:
-        _save(path, row)
-    except OSError as exc:
-        logger.warning("Could not keep CI recovery wait for %s: %s", ticket.id, exc)
-
-
-def _release_failed_ci_requeue(ticket: UserTicket, target_worktree: Path) -> None:
-    _clear_ci_recovery_exhausted(ticket)
-    _keep_ci_recovery_wait(ticket, target_worktree)
-
-
 def _reopen_after_ci_budget(ticket: UserTicket, target_worktree: Path, reason: str) -> bool:
-    """Reopen an exhausted CI delivery. Comment only after planned or hold is durable.
+    """Charge exhausted CI to the durable ticket budget before any ledger requeue."""
+    from core.line.admission_store import AdmissionStore
+    from core.paths import state_root
 
-    A failed requeue clears ``exhausted`` and leaves the wait retryable. It does not
-    claim that the ticket returned to planned.
-    """
-    from core.line.pending_delivery import SETTLED_CI_REQUEUE_STATUSES
-    store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
+    run_outcome.record_failure(ticket.id, ticket.project_id, "ci_red", reason, repo=target_worktree)
+    admission_store = AdmissionStore(state_root() / "admission.sqlite3")
+    if admission_store.ticket_hold(project_id=ticket.project_id, ticket_id=ticket.id):
+        return True
     try:
+        store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
         store.requeue_ticket(ticket.id, reason=reason, reopen=True)
         durable = store.get_ticket(ticket.id)
-    except Exception as exc:  # noqa: BLE001 - the wait must stay retryable when the ledger write fails
-        logger.warning("Could not requeue %s after exhausted CI recovery: %s", ticket.id, exc)
-        _release_failed_ci_requeue(ticket, target_worktree)
+        status = getattr(durable, "status", None)
+        return str(getattr(status, "value", status)) == "planned"
+    except Exception as exc:
+        logger.warning("Could not requeue %s after CI failure: %s", ticket.id, exc)
         return False
-    status = _status_name(getattr(durable, "status", None)) if durable is not None else ""
-    if status not in SETTLED_CI_REQUEUE_STATUSES:
-        logger.warning(
-            "Requeue of %s did not reach planned or hold (status=%s)", ticket.id, status or "unknown",
-        )
-        _release_failed_ci_requeue(ticket, target_worktree)
-        return False
-    comment = (
-        f"{reason}: CI recovery budget exhausted for ticket {ticket.id}. "
-        f"The ticket is back in {status} for another delivery attempt."
-    )
-    try:
-        result = subprocess.run(
-            ["gh", "pr", "comment", "--body", comment, _git_branch(target_worktree)],
-            cwd=target_worktree, capture_output=True, text=True, timeout=30, check=False,
-        )
-        if result.returncode:
-            logger.warning("Could not comment on PR for %s: %s", ticket.id, (result.stderr or "gh failed").strip())
-    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-        logger.warning("Could not comment on PR for %s: %s", ticket.id, type(exc).__name__)
-    return True
 
 
 def _park_waiting_human(ticket: UserTicket, evidence: str) -> None:
@@ -2379,31 +2310,23 @@ def _park_waiting_human(ticket: UserTicket, evidence: str) -> None:
         logger.warning("Could not record CI failure for %s (%s): %s", ticket.id, evidence[:80], exc)
 
 
-def _git_branch(worktree: Path) -> str:
-    """Resolve the branch name for gh pr comment's branch selector."""
-    result = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=worktree,
-        capture_output=True, text=True, timeout=10, check=False,
-    )
-    if result.returncode or not result.stdout.strip():
-        raise RuntimeError("cannot resolve PR branch")
-    return result.stdout.strip()
-
-
 def _ci_red_twice_result(
     ticket: UserTicket, log: str, target_worktree: Path, current_branch: str, resume_cmd: str,
     progress: ProgressPublisher, as_json: bool, return_result: bool,
 ) -> Any:
-    """Record exhausted CI as planned; retain prior handling for other repair failures."""
+    """Account all failed CI repairs without resetting the durable ticket budget."""
+    if "fix_commit_failed:" in log and classify(log.split("fix_commit_failed:", 1)[1]) == "infra":
+        cause = canonical_cause(log.split("fix_commit_failed:", 1)[1])
+        result = _delivery_route_wait(ticket, cause, target_worktree, current_branch,
+                                      resume_cmd, progress, as_json, return_result)
+        progress.set_outcome(log, cause)
+        return result
     exhausted = log.startswith("ci_recovery_budget_exhausted")
     cause = "ci_recovery_budget_exhausted" if exhausted else "ci_red_twice"
     message = f"CI vermelho duas vezes no PR: {log}"
     progress.phase("ci", "failed", message, cause=cause)
     progress.set_outcome(message, cause)
-    if exhausted:
-        _reopen_after_ci_budget(ticket, target_worktree, cause)
-    else:
-        _park_waiting_human(ticket, log)
+    _reopen_after_ci_budget(ticket, target_worktree, cause)
     print(f"[ERRO] Ticket {ticket.id}: {cause}. Worktree: {target_worktree}", file=sys.stderr)
     payload = {
         "exit_code": 1, "ok": False, "cause": cause, "error": log, "ticket_id": ticket.id,
@@ -2444,7 +2367,8 @@ def _delivery_stage_refused(
     return_result: bool,
 ) -> Any:
     """A delivery stage without its artifact: nothing further runs and the ticket is not delivered."""
-    cause = f"stage_artifact_missing:{stage.value}"
+    cause = (canonical_cause(reason) if classify(reason) == "infra" else
+             "review_changes_required" if stage == Stage.REVIEW else f"stage_artifact_missing:{stage.value}")
     message = f"estagio {stage.value} sem artefato valido: {reason}"
     progress.phase("merge" if stage.value in ("MERGE", "DEPLOY_SMOKE") else "gate", "failed", message, cause=cause)
     progress.set_outcome(message, cause)
@@ -2527,7 +2451,7 @@ def _stage_review(
             print("--> Estagio REVIEW: aprovacao vigente para este candidato; revisor nao reexecutado.")
         return None
     cause = "review_not_attempted"
-    for _attempt in range(REVIEW_ATTEMPTS):
+    for _attempt in range(load_routing_config().run_caps.review_rounds):
         if _cancelled():
             return cancelled_payload()
         logger.info("estagio REVIEW: revisao por outra familia de modelo")
@@ -2565,6 +2489,7 @@ def _stage_review(
             if not skip_validation:
                 ticket_engine.write_validation(rws, True, "core/harness/runner.py --quick",
                     candidate_digest=_candidate_binding(rws, target_worktree, _review_base_branch(ticket))[0] or "")
+    progress.set_outcome(cause, "review_changes_required")
     return _delivery_stage_refused(
         ticket, Stage.REVIEW, cause, target_worktree, current_branch, resume_cmd, progress, as_json, return_result
     )
@@ -2641,6 +2566,7 @@ def _smoke_external_project(project: Any) -> Optional[str]:
     return "\n".join(failures) if failures else None
 
 
+@run_outcome.tracked
 def main(argv: Optional[list[str]] = None) -> int:
     """Run the launcher and report its phases to the live line board (USR-140, best-effort)."""
     box: list[ProgressPublisher] = []
@@ -3924,6 +3850,10 @@ def _stage_build(
 def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: contextlib.ExitStack) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    run_outcome.bind_attempt(
+        str(_resume_delivery_target(args) or args.ticket_id or ""), args.project or "darkfac",
+        run_id=args.run_id, enabled=not (args.dry_run or args.cancel),
+    )
 
     # 00. Cancel mode (USR-166): only writes the control file the running launcher watches
     if args.cancel:
@@ -3963,6 +3893,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     ticket, intake_exit = _stage_intake(args)
     if ticket is None:
         return intake_exit
+    run_outcome.bind_attempt(ticket.id, ticket.project_id, enabled=not (args.dry_run or args.queue_only))
 
     # An open PR outlives the process lease. Refuse before creating a second worktree or routing an
     # agent, and identify the existing execution for both humans and machine callers.
@@ -3992,6 +3923,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     progress = open_progress(ticket.id, ticket.project_id, ticket.title)
     progress.hold()
     box.append(progress)
+    run_outcome.bind_attempt(ticket.id, ticket.project_id, progress=progress)
     progress.phase("preflight", "running", "cota, tamanho do ticket e roteamento")
 
     route = _stage_preflight(args, ticket, quotas, override_granted, progress)

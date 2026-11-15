@@ -81,6 +81,7 @@ class SentinelStatus(str, Enum):
     IDLE = "idle"
     STALLED_NO_ROUTE = "stalled_no_route"
     STALLED_IN_FLIGHT = "stalled_in_flight"
+    STALLED_BLOCKED = "stalled_blocked"
     DEGRADED = "degraded"
 
 
@@ -225,7 +226,8 @@ def _eligible_ticket_ids(demands: Any, fleet_state: Mapping[str, Any]) -> List[s
         from core.line.fleet_dispatcher import select_tickets
 
         picked, _skipped = select_tickets(rows, busy_ids=set())
-        selected = [str(ticket_id) for ticket_id in picked if str(ticket_id).strip()]
+        skipped = fleet_state.get("skipped") or {}
+        selected = [str(ticket_id) for ticket_id in picked if str(ticket_id).strip() and ticket_id not in skipped]
     except Exception as exc:  # noqa: BLE001
         logger.warning("Falha ao avaliar tickets elegiveis da fila: %s", exc)
     ordered: List[str] = []
@@ -1223,6 +1225,7 @@ def _record_probe(
         findings=_compose_findings([], idle=idle.finding, ghost=ghost.finding, stale=stale.finding),
         details=details,
     )
+    report = _mark_blocked_queue(report, previous, fleet_state, notify, notification_service_factory)
     _persist_report(report, state_path)
     return report
 
@@ -1530,7 +1533,48 @@ def _light_idle_sample(
         ),
         "details": details,
     })
+    updated = _mark_blocked_queue(updated, previous, fleet_state, notify, notification_service_factory, running=running)
     _persist_report(updated, state_path)
+
+
+def _mark_blocked_queue(report: SentinelReport, previous: Optional[SentinelReport],
+                        fleet_state: Mapping[str, Any], notify: bool,
+                        service_factory: Optional[Callable[[], Any]], *,
+                        running: Optional[Mapping[str, str]] = None) -> SentinelReport:
+    """A free host plus an entirely held/delayed queue is a stalled episode."""
+    causes = fleet_state.get("blocked_causes") or {}
+    active = (int(fleet_state.get("blocked_cycles", 0)) > 2 and bool(causes)
+              and bool(fleet_state.get("free_hosts")) and not _has_dispatcher_in_flight(fleet_state)
+              and not report.in_flight_tickets and not running)
+    details = dict(report.details)
+    old = previous.details.get("queue_blocked", {}) if previous else {}
+    if not active:
+        details.pop("queue_blocked", None)
+        changes: Dict[str, Any] = {"details": details}
+        if report.status == SentinelStatus.STALLED_BLOCKED:
+            changes.update(status=SentinelStatus(old.get("baseline_status", SentinelStatus.HEALTHY)),
+                           is_stalled=old.get("baseline_stalled", False),
+                           reason=old.get("baseline_reason", "Linha operando normalmente."))
+        return report.model_copy(update=changes)
+    reason = "Fila parada: " + ", ".join(f"{key}={count}" for key, count in sorted(causes.items()))
+    episode = dict(old) if old else {"baseline_status": report.status, "baseline_stalled": report.is_stalled,
+                                   "baseline_reason": report.reason, "alerted": False}
+    sent = False
+    if notify and not episode.get("alerted"):
+        from core.notifications.models import AlertCategory, AlertSeverity, NotificationChannel
+        from core.notifications.service import NotificationService
+        try:
+            service = service_factory() if service_factory else NotificationService()
+            sent = service.notify(category=AlertCategory.SYSTEM_HEALTH, severity=AlertSeverity.CRITICAL,
+                                  title="Linha da Fabrica Parada: Fila Bloqueada", message=reason,
+                                  channel=NotificationChannel.ALL, details={"causes": causes}) is not None
+            episode["alerted"] = sent
+        except Exception:
+            logger.exception("Falha ao notificar fila bloqueada")
+    details["queue_blocked"] = {**episode, "causes": causes}
+    return report.model_copy(update={"status": SentinelStatus.STALLED_BLOCKED, "is_stalled": True,
+                                     "reason": reason, "details": details,
+                                     "alert_sent": report.alert_sent or sent})
 
 
 def load_last_report(path: Optional[Path] = None) -> Optional[SentinelReport]:

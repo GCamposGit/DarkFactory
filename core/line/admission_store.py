@@ -12,11 +12,13 @@ import re
 import sqlite3
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from core.line.failure_taxonomy import canonical_cause, classify
 
 
 def _canonical_hash(value: Any) -> str:
@@ -29,14 +31,6 @@ def safe_digest(value: Any) -> str:
     return _canonical_hash(value)
 
 
-TICKET_CAUSES = frozenset({
-    "gate_failed",
-    "gate_dirty_worktree",
-    "fix_agent_no_changes",
-    "self_modification",
-})
-
-
 def normalize_error(error: BaseException | str) -> str:
     """Stable, non-sensitive error category; exception text is never retained."""
     if isinstance(error, BaseException):
@@ -46,17 +40,9 @@ def normalize_error(error: BaseException | str) -> str:
         message = str(error).casefold()
         receipt_error = re.fullmatch(r"recovery_receipt:(receipt_[a-z0-9_]+)", message)
         name = receipt_error.group(1) if receipt_error else "error"
-    if message in TICKET_CAUSES:
-        return message  # causa especifica de ticket: a classe e a propria causa
-    categories = (
-        ("quota", ("quota", "rate limit", "rate_limit", "429", "no_route_available")),
-        ("context", ("context", "scanner", "scan failed", "input too long")),
-        ("resource", ("worker", "host", "health", "capacity", "remote_job_lost")),
-        ("checkout", ("worktree", "checkout", "git")),
-    )
-    for category, needles in categories:
-        if any(needle in message for needle in needles):
-            return category
+    normalized = canonical_cause(f"{name}: {message}" if isinstance(error, BaseException) else message)
+    if normalized != "unknown":
+        return normalized
     return re.sub(r"[^a-z0-9_]+", "_", name).strip("_")[:64] or "unknown_error"
 
 
@@ -157,8 +143,23 @@ class AdmissionStore:
                     hold_columns = {row[1] for row in db.execute("PRAGMA table_info(ticket_holds)")}
                     if "main_sha" not in hold_columns:
                         db.execute("ALTER TABLE ticket_holds ADD COLUMN main_sha TEXT NOT NULL DEFAULT ''")
+                    for hold in db.execute("SELECT project_id, ticket_id, cause FROM ticket_holds").fetchall():
+                        if classify(hold["cause"]) == "infra":
+                            db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?",
+                                       (hold["project_id"], hold["ticket_id"]))
                     db.execute("""CREATE TABLE IF NOT EXISTS reservations (
                         scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL
+                    )""")
+                    db.execute("""CREATE TABLE IF NOT EXISTS ticket_budget (
+                        project TEXT NOT NULL, ticket TEXT NOT NULL,
+                        candidate_failures INTEGER NOT NULL DEFAULT 0, infra_streak INTEGER NOT NULL DEFAULT 0,
+                        next_attempt_at REAL NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '',
+                        main_sha TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+                        PRIMARY KEY(project, ticket)
+                    )""")
+                    db.execute("""CREATE TABLE IF NOT EXISTS ticket_attempts (
+                        project TEXT NOT NULL, ticket TEXT NOT NULL, run_id TEXT NOT NULL,
+                        PRIMARY KEY(project, ticket, run_id)
                     )""")
                     db.execute("""CREATE TABLE IF NOT EXISTS dispatcher_recovery (
                         singleton INTEGER PRIMARY KEY CHECK(singleton=1), active INTEGER NOT NULL,
@@ -177,33 +178,6 @@ class AdmissionStore:
     @staticmethod
     def _scope(project_id: str, ticket_id: str, candidate_digest: str, context_digest: str, resource_version: str) -> str:
         return _canonical_hash([project_id, ticket_id, candidate_digest, context_digest, resource_version])
-
-    def is_failure_open(
-        self, *, project_id: str, ticket_id: str, candidate_digest: str,
-        context_digest: str, resource_version: str, error_class: Optional[str] = None,
-        main_sha: Optional[str] = None,
-    ) -> bool:
-        """Return true for an identical failure scope recorded on the same main sha.
-
-        Elapsed backoff alone never opens it; a different main sha always does
-        (the fix may already be on main, so the old failure can no longer speak for it).
-        """
-        try:
-            with self._connection() as db:
-                query = """SELECT 1 FROM failures WHERE project_id=? AND ticket_id=?
-                    AND candidate_digest=? AND context_digest=? AND resource_version=?
-                    AND main_sha=? AND open=1"""
-                params: tuple[Any, ...] = (
-                    project_id, ticket_id, candidate_digest, context_digest, resource_version,
-                    normalize_main_sha(main_sha),
-                )
-                if error_class is not None:
-                    query += " AND error_class=?"
-                    params += (error_class,)
-                row = db.execute(query + " LIMIT 1", params).fetchone()
-                return row is not None
-        except sqlite3.Error as exc:
-            raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def record_failure(self, fingerprint: AdmissionFingerprint, *, initial_backoff_sec: int = 600) -> int:
         """Persist a failure atomically, increasing its probe delay on repeated observations."""
@@ -233,34 +207,31 @@ class AdmissionStore:
         except (sqlite3.Error, OSError) as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
-    def set_ticket_hold(self, fingerprint: AdmissionFingerprint, occurrences: int) -> None:
-        """Hold duravel de um unico ticket; so digest novo de candidato/contexto ou novo sha do main o libera."""
+    def set_ticket_hold(self, fingerprint: AdmissionFingerprint, occurrences: int, *,
+                        connection: sqlite3.Connection | None = None) -> bool:
+        """Create a terminal hold once. Only an explicit reset or merge releases it."""
         now = self.clock().astimezone(timezone.utc).isoformat()
         try:
-            with self._connection() as db:
-                db.execute("""INSERT OR REPLACE INTO ticket_holds
+            with nullcontext(connection) if connection is not None else self._connection() as db:
+                cursor = db.execute("""INSERT OR IGNORE INTO ticket_holds
                     (project_id, ticket_id, cause, candidate_digest, context_digest, occurrences,
                      fingerprint, held_at, main_sha)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                            (fingerprint.project_id, fingerprint.ticket_id, fingerprint.error_class,
                             fingerprint.candidate_digest, fingerprint.context_digest, int(occurrences),
                             fingerprint.sha256, now, fingerprint.main_sha))
+                return cursor.rowcount == 1
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
-    def ticket_hold(self, *, project_id: str, ticket_id: str, candidate_digest: str,
-                    context_digest: str, main_sha: Optional[str] = None) -> Optional[dict[str, Any]]:
-        """Hold vigente do ticket; digests diferentes ou sha do main diferente removem o hold (None)."""
+    def ticket_hold(self, *, project_id: str, ticket_id: str, candidate_digest: str = "",
+                    context_digest: str = "", main_sha: Optional[str] = None) -> Optional[dict[str, Any]]:
+        """Return the terminal hold, independent of candidate, host and main SHA."""
         try:
             with self._connection() as db:
                 row = db.execute("SELECT * FROM ticket_holds WHERE project_id=? AND ticket_id=?",
                                  (project_id, ticket_id)).fetchone()
                 if row is None:
-                    return None
-                if (row["candidate_digest"] != candidate_digest or row["context_digest"] != context_digest
-                        or row["main_sha"] != normalize_main_sha(main_sha)):
-                    db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?",
-                               (project_id, ticket_id))
                     return None
                 return dict(row)
         except sqlite3.Error as exc:
@@ -276,45 +247,90 @@ class AdmissionStore:
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
-    def close_failures_for_other_sha(self, main_sha: Optional[str]) -> int:
-        """Close every open failure recorded under a different main sha; return how many closed.
-
-        Legacy rows written before this sha dimension existed carry main_sha=''; they
-        count as "another sha" too; once the line observes any concrete main sha, a
-        failure that cannot prove it still applies to that sha stops blocking.
-        """
-        current = normalize_main_sha(main_sha)
-        try:
-            with self._connection() as db:
-                db.execute("BEGIN IMMEDIATE")
-                cursor = db.execute(
-                    "UPDATE failures SET open=0 WHERE open=1 AND main_sha<>?", (current,)
-                )
-                db.commit()
-                return cursor.rowcount
-        except sqlite3.Error as exc:
-            raise AdmissionStoreError("admission_store_unavailable") from exc
-
-    def prune_closed_failures(self, older_than_days: float) -> int:
-        """Delete closed failures recorded before the cutoff; return how many removed."""
-        cutoff = self.clock().astimezone(timezone.utc) - timedelta(days=max(0.0, float(older_than_days)))
-        try:
-            with self._connection() as db:
-                db.execute("BEGIN IMMEDIATE")
-                cursor = db.execute(
-                    "DELETE FROM failures WHERE open=0 AND recorded_at<?", (cutoff.isoformat(),)
-                )
-                db.commit()
-                return cursor.rowcount
-        except sqlite3.Error as exc:
-            raise AdmissionStoreError("admission_store_unavailable") from exc
-
     def recovery_state(self) -> dict[str, Any]:
         """Return the persistent recovery latch, defaulting to inactive."""
         try:
             with self._connection() as db:
                 row = db.execute("SELECT * FROM dispatcher_recovery WHERE singleton=1").fetchone()
                 return dict(row) if row else {"active": 0, "cause": "", "fingerprint": "", "successes": 0}
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def budget(self, project: str, ticket: str, *, main_sha: str = "") -> dict[str, Any]:
+        """Read durable counters; a known new main clears infrastructure delay only."""
+        main_sha = normalize_main_sha(main_sha)
+        try:
+            with self._connection() as db:
+                if main_sha:
+                    db.execute("""UPDATE ticket_budget SET infra_streak=0, next_attempt_at=0, main_sha=?, updated_at=?
+                        WHERE project=? AND ticket=? AND main_sha<>?""",
+                               (main_sha, self.clock().astimezone(timezone.utc).isoformat(), project, ticket, main_sha))
+                row = db.execute("SELECT * FROM ticket_budget WHERE project=? AND ticket=?",
+                                 (project, ticket)).fetchone()
+                return dict(row) if row else {"candidate_failures": 0, "infra_streak": 0,
+                                              "next_attempt_at": 0, "last_cause": ""}
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def retry_reason(self, project: str, ticket: str, *, main_sha: str = "", now: float | None = None) -> str:
+        """Admission based on ticket counters, never on an unstable fingerprint."""
+        budget = self.budget(project, ticket, main_sha=main_sha)
+        hold = self.ticket_hold(project_id=project, ticket_id=ticket)
+        if hold:
+            return f"ticket_hold:{hold['cause']}"
+        epoch = self.clock().timestamp() if now is None else now
+        return "backoff_infra" if float(budget["next_attempt_at"]) > epoch else ""
+
+    def record_attempt(self, project: str, ticket: str, cause: str, *, run_id: str,
+                       main_sha: str = "", detail: str = "", log_path: str = "",
+                       notify: Any = None) -> dict[str, Any]:
+        """Charge a failed run exactly once across launcher, dispatcher and resumes."""
+        cause = canonical_cause(cause)
+        category = classify(cause)
+        main_sha = normalize_main_sha(main_sha)
+        now = self.clock().astimezone(timezone.utc)
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                fresh = db.execute("INSERT OR IGNORE INTO ticket_attempts VALUES (?, ?, ?)",
+                                   (project, ticket, run_id)).rowcount
+                row = db.execute("SELECT * FROM ticket_budget WHERE project=? AND ticket=?",
+                                 (project, ticket)).fetchone()
+                candidate = int(row["candidate_failures"]) if row else 0
+                streak = int(row["infra_streak"]) if row else 0
+                if row and main_sha and row["main_sha"] != main_sha:
+                    streak = 0
+                if fresh:
+                    candidate += int(category in {"candidate", "unknown"})
+                    streak = streak + 1 if category == "infra" else 0
+                    delay = min(600 * 2 ** min(max(streak - 1, 0), 4), 7200) if streak else 0
+                    db.execute("""INSERT INTO ticket_budget VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(project, ticket) DO UPDATE SET candidate_failures=excluded.candidate_failures,
+                        infra_streak=excluded.infra_streak, next_attempt_at=excluded.next_attempt_at,
+                        last_cause=excluded.last_cause, main_sha=excluded.main_sha, updated_at=excluded.updated_at""",
+                               (project, ticket, candidate, streak, now.timestamp() + delay if delay else 0,
+                                cause, main_sha or (row["main_sha"] if row else ""), now.isoformat()))
+                new_hold = False
+                if fresh and (category == "owner" or (category in {"candidate", "unknown"} and candidate >= 3)):
+                    fp = make_fingerprint(project_id=project, ticket_id=ticket, error=cause,
+                                          resource_version="ticket_budget", main_sha=main_sha)
+                    new_hold = self.set_ticket_hold(fp, candidate if category != "owner" else 1, connection=db)
+                db.commit()
+            if new_hold:
+                from core.line.failure_alerts import notify_ticket_hold
+                (notify or notify_ticket_hold)(ticket, cause, detail, log_path)
+            return self.budget(project, ticket)
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def reset_budget(self, project: str, ticket: str) -> None:
+        """A proven merge releases the hold and clears counters, retaining run deduplication."""
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("DELETE FROM ticket_budget WHERE project=? AND ticket=?", (project, ticket))
+                db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?", (project, ticket))
+                db.commit()
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 

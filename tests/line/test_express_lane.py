@@ -24,7 +24,7 @@ import run_ticket
 from core.demands.models import TAG_LINE_BLOCK, UserTicket
 from core.demands.queue_store import get_ticket, register_ticket
 from core.line import agent_cli, agent_retry
-from core.line.admission_store import TICKET_CAUSES, AdmissionStore, normalize_error
+from core.line.admission_store import AdmissionStore, normalize_error
 from core.line.agent_cli import AgentRequest, AgentResult, _classify_error, run_agent
 from core.line.agent_retry import RetryReport, run_with_retry
 from core.line.express_lane import (
@@ -371,7 +371,6 @@ def test_old_ticket_json_loads_without_express_causes() -> None:
 
 
 def test_self_modification_is_a_ticket_cause_only_on_the_official_line() -> None:
-    assert CAUSE_SELF_MODIFICATION in TICKET_CAUSES
     assert normalize_error("self_modification") == "self_modification"
     tail = (
         "Self-Modification no fim do log\n"
@@ -392,7 +391,6 @@ def test_tail_only_failures_do_not_hold_as_self_modification(tmp_path: Path) -> 
         DispatcherConfig(
             hosts=[],
             state_path=tmp_path / "fleet.json",
-            recovery_failure_threshold=3,
         ),
         admission_store=store,
         demands_loader=lambda: [],
@@ -973,7 +971,6 @@ def _lane_dispatcher(
         DispatcherConfig(
             hosts=[],
             state_path=tmp_path / "fleet.json",
-            recovery_failure_threshold=threshold,
         ),
         admission_store=store,
         demands_loader=lambda: [],
@@ -1111,7 +1108,7 @@ def test_the_log_tail_does_not_open_or_count_an_episode(tmp_path: Path) -> None:
     assert "cauda" not in (tmp_path / _EPISODE).read_text(encoding="utf-8")
 
 
-def test_the_alert_leaves_global_recovery_off_and_keeps_the_hold_threshold(
+def test_owner_failure_holds_immediately_without_consuming_candidate_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     alerts: list[ExpressRepeatAlert] = []
@@ -1125,10 +1122,9 @@ def test_the_alert_leaves_global_recovery_off_and_keeps_the_hold_threshold(
     _record_cause(dispatcher, _TICKET, 2)
 
     assert len(alerts) == 1
-    assert store.ticket_holds() == []
+    assert len(store.ticket_holds()) == 1
     assert not store.recovery_state()["active"]
     assert not dispatcher.recovery.get("active")
-    assert dispatcher.config.recovery_failure_threshold == 3
 
     _record_cause(dispatcher, _TICKET, 3)
     held = store.ticket_holds()
@@ -1136,7 +1132,7 @@ def test_the_alert_leaves_global_recovery_off_and_keeps_the_hold_threshold(
     assert len(held) == 1
     assert held[0]["ticket_id"] == _TICKET
     assert held[0]["cause"] == CAUSE_SELF_MODIFICATION
-    assert held[0]["occurrences"] == 3
+    assert held[0]["occurrences"] == 1
     assert not store.recovery_state()["active"]
     assert not dispatcher.recovery.get("active")
 
@@ -1177,3 +1173,8 @@ def test_dispatcher_sends_the_default_alert_on_the_second_occurrence(
     assert seen[0].command == f"python -m core.line.express_lane run --ticket {_TICKET}"
     _record_cause(dispatcher, _TICKET, 3)
     assert len(seen) == 1
+
+
+@pytest.fixture(autouse=True)
+def _isolate_budget_notifications(monkeypatch):
+    monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: None)

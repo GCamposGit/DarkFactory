@@ -237,7 +237,7 @@ def test_the_recommendation_for_a_blocked_critical_harness_is_also_write_capable
     pick = MagicMock(return_value=("claude", "sonnet"))
     monkeypatch.setattr(run_ticket, "pick", pick)
 
-    assert main(["USR-99", "--harness", "codex", "--dry-run"]) == 2
+    assert main(["USR-99", "--harness", "codex", "--dry-run"]) == 75
 
     assert pick.call_args.kwargs["mode"] == "write"
     assert "Recomendação do Roteador: CLAUDE" in capsys.readouterr().err
@@ -308,7 +308,7 @@ def test_run_ticket_executes_the_agent_through_the_shared_run_with_retry(
     shared = MagicMock(return_value=failing)
     monkeypatch.setattr(agent_retry, "run_with_retry", shared)
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 75
 
     shared.assert_called_once()
     kwargs = shared.call_args.kwargs
@@ -349,7 +349,7 @@ def test_a_blank_codex_failure_is_no_longer_blank(env: dict[str, Any], capsys: p
     """Codex returns empty text on failure; the report must still say what happened."""
     env["agent"].side_effect = lambda req: _fail("crash", req.harness, exit_code=1, stderr_tail="", text="")
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 75  # agent_timeout e infra
 
     err = capsys.readouterr().err
     assert "error_kind: crash" in err and "exit_code: 1" in err and "(vazio)" in err and "(vazia)" in err
@@ -439,6 +439,8 @@ def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_
     from core.git.autonomy import GitAutonomyManager
 
     monkeypatch.setattr(GitAutonomyManager, "_current_branch", lambda self, cwd: "ticket/usr-99")
+    # This stress test exercises routing; candidate binding has real-Git coverage in delivery tests.
+    monkeypatch.setattr(run_ticket, "_stage_deliver", lambda *_args: (0, {"ok": True, "status": "delivered"}))
     monkeypatch.setattr(GitAutonomyManager, "get_current_sha", lambda self, cwd: "0" * 40)
     assert real_time.sleep.__module__ in {"time", "builtins"}  # the shared module is NOT patched
 
@@ -498,7 +500,7 @@ def test_a_rate_limited_harness_gets_a_cooldown_recorded_by_the_launcher(
     monkeypatch.setattr(run_ticket, "pick", MagicMock(return_value=("claude", "sonnet")))
     env["agent"].side_effect = lambda req: _fail("rate_limited", req.harness, model=req.model, text="usage limit")
 
-    assert main(["USR-99", "--harness", "claude", "--skip-validation", "--no-commit"]) == 1
+    assert main(["USR-99", "--harness", "claude", "--skip-validation", "--no-commit"]) == 75
 
     entry = json.loads(env["cooldowns"].read_text(encoding="utf-8"))["claude"]
     assert entry["reason"] == "rate_limited"  # the next run (or stage) will skip it until the limit lifts
@@ -534,7 +536,7 @@ def test_a_dirty_shared_checkout_stops_the_run_before_any_agent_is_consumed(
 
     monkeypatch.setattr(run_ticket, "_prepare_workspace", refuse)
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation"]) == 3
+    assert main(["USR-99", "--harness", "codex", "--skip-validation"]) == 75  # infra: espera, nao gasta orcamento
 
     err = capsys.readouterr().err
     assert "core/other_ticket.py" in err and "checkout compartilhado" in err and "--allow-dirty-shared-checkout" in err
@@ -785,7 +787,7 @@ def test_timeout_without_changes_fails_with_cause_and_resume_command(
     monkeypatch.setattr(run_ticket, "resume_delivery", delivery)
     env["agent"].side_effect = lambda req: _fail("timeout", req.harness, exit_code=None, duration_s=5.0)
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 75  # agent_timeout e infra
 
     err = capsys.readouterr().err
     assert "[FALHA NA EXECUÇÃO DO AGENTE]" in err

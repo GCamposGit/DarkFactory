@@ -455,7 +455,7 @@ def test_a_refused_critical_quota_is_published_as_a_failed_preflight(
     launcher(sink)
     monkeypatch.setattr(run_ticket, "inspect_quotas", lambda: _quotas(codex=5.0))
 
-    assert main(["USR-99", "--harness", "codex", "--json"]) == 2
+    assert main(["USR-99", "--harness", "codex", "--json"]) == 75
 
     assert sink.steps == [("preflight", "running"), ("preflight", "failed"), ("run", "failed")]
     assert sink.events[1].cause_code == "quota_critical"
@@ -548,8 +548,8 @@ def test_red_ci_goes_back_to_the_agent_once_then_revalidates(
     assert main(["--resume-delivery", "USR-99", "--worktree", str(env.workspace.path), "--json"]) == 0
     assert phases == ["gate", "review", "merge"]
     assert env.agent.call_count == before  # no second BUILD or repair
-    record = run_ticket.ticket_engine.workspace.context_dir(run_ticket.ticket_engine.run_workspace(_TICKET)) / "ci_recovery.json"
-    assert json.loads(record.read_text(encoding="utf-8"))["attempts"] == 1
+    record = run_ticket.run_outcome.ci_recovery_path(_TICKET.id)
+    assert not record.exists()  # merge clears the durable repair allowance
     capsys.readouterr()
 
 
@@ -597,6 +597,7 @@ def test_ci_failed_pr_births_recovery_wait_and_the_next_tick_resumes(
         lambda _root: [{"worktree": row.worktree}],
     )
     monkeypatch.setattr(pd, "_route", lambda _row: ("grok", "grok"))
+    monkeypatch.setattr(pd.run_outcome, "main_sha", lambda _repo: "")
     calls: list[list[str]] = []
     handle = SimpleNamespace(pid=424242, poll=lambda: None)
     monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **_kw: calls.append(list(cmd)) or handle)
@@ -635,7 +636,7 @@ def test_red_ci_twice_requeues_with_cause_and_log(
         return SimpleNamespace(returncode=1, stdout="", stderr="gh unavailable")
 
     assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 75
-    record = run_ticket.ticket_engine.workspace.context_dir(run_ticket.ticket_engine.run_workspace(_TICKET)) / "ci_recovery.json"
+    record = run_ticket.run_outcome.ci_recovery_path(_TICKET.id)
     assert json.loads(record.read_text(encoding="utf-8")) == {"attempts": 1}
     _, exhausted = run_ticket._retry_red_ci(
         GitAutonomyManager(env.workspace.main_root), _TICKET, env.workspace.path,
@@ -648,9 +649,9 @@ def test_red_ci_twice_requeues_with_cause_and_log(
                                    "resume", _publisher(sink), True, True)
     assert _Store.requeued[-1] == ("USR-99", "ci_recovery_budget_exhausted", True)
     assert _Store.requeued_status == run_ticket.DeliveryStatus.PLANNED
-    assert comments and comments[0][-1] == "ticket/usr-99"
-    assert "ci_recovery_budget_exhausted" in " ".join(comments[0])
-    assert "USR-99" in " ".join(comments[0])
+    from core.line.admission_store import AdmissionStore
+    from core.paths import state_root
+    assert AdmissionStore(state_root() / "admission.sqlite3").budget("darkfac", "USR-99")["candidate_failures"] == 1
     assert len(fixes) == 1
     assert sink.events[-1].cause_code == "ci_recovery_budget_exhausted"
     assert "FAILED again" in sink.events[-1].message
@@ -894,3 +895,8 @@ def test_json_run_with_a_failing_store_warns_on_stderr_once_and_does_not_change_
     assert captured.err.count("[AVISO] Esteira ao vivo") == 1
     assert "sem permissao de escrita" in captured.err
     assert "hunter2" not in captured.err + captured.out
+
+
+@pytest.fixture(autouse=True)
+def _isolate_budget_notifications(monkeypatch):
+    monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: None)

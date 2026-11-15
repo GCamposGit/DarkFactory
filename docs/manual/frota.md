@@ -1,4 +1,4 @@
-<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/line/admission_store.py, core/line/failure_taxonomy.py, core/line/run_outcome.py, core/line/failure_alerts.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 # Operação da frota
 
@@ -67,9 +67,9 @@ python -m core.line.express_lane run --ticket USR-494
 
 Troque `USR-494` pelo id do ticket. O comando percorre todos os requisitos do host e imprime cada falha, inclusive o piso de cota de 15%. Com qualquer requisito ausente, não lança o ticket. Com o host válido, lança exatamente `run_ticket.py <ID> --fleet --host-id <host deste host>`, uma vez. Ticket já em voo (`implementing`, `validating` ou processo vivo) ou terminal (`completed`, `cancelled`) termina com sucesso e não cria outro processo. Portão, revisão e o piso de cota do `run_ticket.py` continuam valendo.
 
-A segunda ocorrência da mesma causa `self_modification` alerta o owner uma vez (USR-494 T4). A primeira só grava o episódio em `express_episodes.json`, ao lado do estado do despachante, e fica em silêncio. O alerta sai pelo `NotificationService` no canal ALL, com a causa `self_modification` e o comando único `python -m core.line.express_lane run --ticket <ID>` como próximo passo. Outra ocorrência desse episódio não gera outro alerta. A chave é o ticket e a causa classificada: o texto da cauda do log não abre episódio nem muda a chave. Entrega com `[DELIVERY_MERGED]` ou `merged_awaiting_deploy`, ou uma causa classificada diferente no mesmo ticket, apaga o episódio; duas falhas novas da mesma causa podem alertar outra vez. O alerta não liga `recovery.active`. O hold do ticket continua no `recovery_failure_threshold` já configurado.
+A segunda ocorrência da mesma causa `self_modification` alerta o owner uma vez (USR-494 T4). A primeira só grava o episódio em `express_episodes.json`, ao lado do estado do despachante, e fica em silêncio. O alerta sai pelo `NotificationService` no canal ALL, com a causa `self_modification` e o comando único `python -m core.line.express_lane run --ticket <ID>` como próximo passo. Outra ocorrência desse episódio não gera outro alerta. A chave é o ticket e a causa classificada: o texto da cauda do log não abre episódio nem muda a chave. Entrega com `[DELIVERY_MERGED]` ou `merged_awaiting_deploy`, ou uma causa classificada diferente no mesmo ticket, apaga o episódio; duas falhas novas da mesma causa podem alertar outra vez. O alerta não liga `recovery.active`. Causas de classe `owner` entram em hold imediato, sem consumir o orçamento do candidato; a ação existente do owner continua sendo a via de resolução.
 
-Falha repetida do mesmo ticket (qualquer causa) cria hold so desse ticket; o modo global de recuperação não é mais ativado por falhas, e os demais tickets seguem despachados.
+Três falhas de candidato ou de causa desconhecida criam hold só desse ticket; falhas de infraestrutura apenas aplicam backoff durável; o modo global de recuperação não é mais ativado por falhas, e os demais tickets seguem despachados.
 
 O estado `recovery_list` em `last_cycle` informa `pending` e `cause`. A lista encerra com
 `recovery_list_completed` quando os itens ficam terminais ou `recovery_list_expired` ao
@@ -101,12 +101,11 @@ fica `merged_awaiting_deploy`.
 Ticket `completed` com outra causa e sem prova de deploy fica `blocked` com causa
 `deploy_evidence_missing`.
 
-`ci_recovery.json` com `exhausted: true` so encerra a espera quando o control
-store ja esta em `planned` ou `hold`, ou quando a admissao tem um hold desse
-ticket. Sem essa transicao duravel, o tick devolve a linha para `waiting` com a
-causa de recuperacao de CI, apaga o marcador `exhausted` e nao grava
-`launcher_exit` nem `deploy_evidence_missing`. Falha de `requeue_ticket` no
-launcher faz o mesmo: nao comenta sucesso no PR e regrava a espera sem pid.
+O limite de uma correção de CI fica em `DARKFAC_STATE_ROOT/runs/ci_recovery/<TICKET>.json`,
+fora do contexto apagável. Esgotá-lo conta uma falha `ci_red` no orçamento durável do ticket.
+Reabrir o ledger em `planned` preserva esse contador e a mesma worktree. A espera só bloqueia
+automaticamente ao chegar a três falhas de candidato; abaixo disso, retoma depois do prazo.
+Uma falha ao reabrir o ledger não apaga o contador nem permite repetir a correção com orçamento novo.
 
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 para grokbox, Notebook e Desktop. O serviço não depende de sessão interativa. Uma reserva
@@ -359,17 +358,42 @@ Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) recon
 
 ## Falhas registradas
 
-Quando um `run_ticket` da frota termina com código diferente de zero, ou o checkout operacional não pode ser preparado, o despachante grava no log (`fleet-dispatcher.log`) e em `recent_failures` do estado (`.factory/runs`) o ticket, o host, o `exit_code`, a classe (`failure`, `infra`, `lock` ou `launch`) e o motivo (últimas linhas do log do ticket ou erro de lançamento, sem segredos; nunca vazio). O histórico guarda as 20 últimas. Erros de lançamento mantêm o ticket em cooldown e não aparecem como despacho concluído.
+Cada tentativa do launcher grava `DARKFAC_STATE_ROOT/runs/outcomes/<TICKET>.json` atomicamente,
+fora do contexto temporário. O resultado contém ticket, `run_id`, código de saída, causa,
+`cause_class`, estágio, diagnóstico em uma linha e instante UTC. O dispatcher prioriza esse
+resultado quando o `run_id` coincide; sem arquivo válido desse run, usa o log legado.
+O diagnóstico é sanitizado e exclui banners de cotas. O alerta informa o caminho do log real;
+execuções manuais também mantêm um log sanitizado ao lado do outcome. `recent_failures` conserva
+as 20 últimas falhas, com causa e classe além do host e do código.
 
-## Circuit breaker e recuperação (USR-468)
+## Orçamento por ticket e recuperação
 
-USR-484: o fingerprint de falha usa a causa classificada do log (`[ERRO NA ENTREGA] causa`
-ou `cause` JSON, a última vale), nunca o texto variável. No limiar, `gate_failed`,
-`gate_dirty_worktree` e `fix_agent_no_changes` seguram só o ticket (hold durável no
-admission store; `ticket_hold:<causa>` em `last_cycle`, com resumo em
-`python -m core.ops.briefing`), sem ativar recovery global. O diagnóstico lista o hold, a
-causa e as ocorrências. Um digest novo de candidato ou contexto libera o hold; esperar não.
-`infra`, `no_delivery_evidence` e `recovery_receipt` seguem no disjuntor global.
+`core.line.failure_taxonomy` é a fonte única das classes `infra`, `candidate`, `owner` e `unknown`.
+Infraestrutura inclui gate sem RAM, indisponível, timeout, sem testes, base suspeita, worktree suja,
+espera de rota/cota/trava, contexto, recurso, timeout do agente, permissões do host e rede/gh.
+Essas falhas saem com 75 e nunca consomem `candidate_failures` nem criam hold por repetição.
+
+O SQLite `admission.sqlite3` mantém `ticket_budget` por projeto e ticket. Infra incrementa
+`infra_streak` e persiste `next_attempt_at`: 10, 20, 40, 80 e no máximo 120 minutos.
+Reiniciar o dispatcher ou trocar host, fingerprint ou candidato não reduz essa espera.
+Um novo SHA conhecido de `origin/main` limpa somente a sequência e a espera de infraestrutura.
+Holds legados cuja causa é infraestrutura são removidos ao abrir o store.
+
+Falhas `candidate` e `unknown` incrementam `candidate_failures`. A terceira cria um hold terminal
+e um único alerta Hub/Telegram por hold com causa, diagnóstico e caminho do log, sem criar ticket.
+O `run_id` impede cobrança duplicada entre launcher, filho de entrega e dispatcher.
+Mudar o main, o candidato ou o contexto não libera esse hold nem zera o contador.
+Merge comprovado zera o orçamento e o limite de correção de CI. Fingerprints permanecem como
+diagnóstico e identidade de reservas; não bloqueiam tentativas depois do backoff.
+
+`pending_delivery.tick` usa o mesmo orçamento: falha infra reagenda, candidato conta até o limite.
+Retorno zero sem conclusão espera `RECHECK_SECONDS` (900s), evitando relançamento imediato.
+CI/revisão esgotados contam uma falha de candidato por tentativa, preservada entre relançamentos.
+
+Sem execução em voo, com host comprovadamente livre e todos os pendentes retidos por hold,
+backoff ou falha por mais de dois ciclos, o sentinela publica `stalled_blocked`, com causas
+agregadas (`hold=3, backoff_infra=10`, por exemplo). A amostra leve também atualiza esse estado
+sem sondar cotas. Há um alerta por episódio; uma retomada permite um novo episódio posterior.
 
 O recibo é produzido pelo dispatcher depois do deploy canônico e da prova HTTP
 do SHA exato. Um marcador escrito pelo processo filho não libera a recuperação.
@@ -378,7 +402,9 @@ dispatcher, e é retomada após reinício antes de admitir novos tickets. Valida
 revisão independente, merge e índice de learning packs vêm dos artefatos reais;
 CI e saúde são consultados novamente. Falha no deploy ou na prova mantém a espera.
 
-Cada tentativa é identificada por fingerprint de projeto, ticket, candidato, contexto, classe de erro e versão do recurso. O SQLite durável guarda o backoff, a causa, as reservas e a trava global de recuperação. O mesmo fingerprint permanece aberto mesmo depois do backoff; só uma mudança observável no candidato, contexto, recurso ou janela de cota permite nova tentativa. Causas operacionais aparecem em `idle_reasons`, `skipped` e `recovery.receipt_cause`; ausência de rota, worker zero/ocupado/stale, reserva ativa e receipt incompleto são espera, nunca sucesso.
+O SQLite também guarda reservas e a trava global de recuperação. Causas operacionais aparecem
+em `idle_reasons`, `skipped` e `recovery.receipt_cause`; ausência de rota, worker indisponível,
+reserva ativa e receipt incompleto são espera, nunca sucesso.
 
 Na recuperação, há no máximo uma entrega em voo para toda a frota. A concorrência normal só volta após uma linha `[RECOVERY_RECEIPT] {JSON}` no log da entrega. O receipt deve ser real (`simulated: false`), recente (até sete dias), vinculado ao digest do candidato em cada estágio e incluir `[HARNESS_PASS]`, revisão independente aprovada, CI verde, SHA de merge alcançável, deploy desse SHA, smoke HTTP 2xx e learning pack indexado. Evidência ausente, stale, simulada ou de outro candidato deixa a trava ativa e registra a primeira causa recusada. O hash do receipt e o candidato recuperado ficam persistidos, tornando o retorno ao teto normal idempotente após reinício.
 
@@ -425,8 +451,8 @@ a ausencia desse digest bloqueia release ate a recuperacao da evidencia.
 
 ## Encerramento sem entrega e recuperacao de CI (USR-479)
 
-Retorno zero sem prova de merge gera causa persistida e cooldown nos modos
-normal e recovery. O ticket nao ganha uma nova execucao imediatamente.
+Retorno zero sem prova de merge conta uma falha desconhecida no orçamento do ticket.
+A entrega pendente aguarda 900s antes de reavaliar conclusão; o limite de três falhas continua valendo.
 A correcao de CI e unica por tentativa: o contador permanece consumido ao
 retomar, inclusive depois de gate e revisao verdes. Retomar a entrega segue
 gate, revisao independente, novo CI e merge; BUILD nao e repetido. O teste
@@ -438,13 +464,13 @@ proprias provas de portao, revisao e producao.
 ### Retomada e prioridade ap?s os bloqueios USR-484
 
 Com recovery global ativo, a lista ordena tentativas e mant?m no m?ximo uma entrega em voo.
-Um ticket em hold ou com falha id?ntica aberta cede a vez ao pr?ximo da lista e depois ? fila regular.
+Um ticket em hold ou em backoff cede a vez ao pr?ximo da lista e depois ? fila regular.
 
 A retomada direta de um BUILD exige status Git leg?vel e limpo (exceto o ledger), commit al?m da base e
 `build_binding.json`: HEAD exato e hashes de SPEC, tickets, pesquisa e progress. A entrega grava esse
 v?nculo ap?s sincronizar o candidato. Artefatos antigos sem v?nculo, novo HEAD, artefato alterado ou
 falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.
 
-Saida com codigo 75 (route_wait, no_build_route) e espera estruturada: fica no circuito por ticket, mas nunca ativa a recuperacao global da frota. O mesmo vale para recusa por trava de linha ou reserva de outro ticket vivo (kind lock): fica registrada por ticket, sem recuperacao global.
+Saida com codigo 75 (route_wait, no_build_route) e espera estruturada: aplica backoff persistido por ticket, mas nunca ativa a recuperacao global da frota. O mesmo vale para recusa por trava de linha ou reserva de outro ticket vivo (kind lock): fica registrada por ticket, sem recuperacao global.
 
-A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: nao alimenta o circuito nem acende a recuperacao global. O mesmo vale para a recusa `ja possui PR ativo` (ticket com PR aberto, codigo 2).
+A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: aplica backoff infra sem consumir candidato nem acender a recuperacao global. O mesmo vale para a recusa `ja possui PR ativo` (ticket com PR aberto, codigo 2).

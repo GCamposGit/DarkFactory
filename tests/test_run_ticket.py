@@ -51,8 +51,9 @@ def test_format_quota_report() -> None:
     assert "CRÍTICO" in report
 
 
-def test_run_ticket_no_args_displays_quotas(capsys: pytest.CaptureFixture[str]) -> None:
+def test_run_ticket_no_args_displays_quotas(capsys: pytest.CaptureFixture[str], monkeypatch) -> None:
     """Calling run_ticket with no arguments prints the quota summary and exits cleanly (0)."""
+    monkeypatch.setattr(run_ticket, "inspect_quotas", lambda: {})
     exit_code = main([])
     assert exit_code == 0
     captured = capsys.readouterr()
@@ -84,7 +85,7 @@ def test_run_ticket_blocks_critical_harness_without_override(capsys: pytest.Capt
     with patch("run_ticket.inspect_quotas", return_value=fake_quotas), \
          patch("run_ticket.pick", return_value=("antigravity", None)):
         exit_code = main(["USR-01", "--harness", "codex", "--dry-run"])
-        assert exit_code == 2
+        assert exit_code == 75
         captured = capsys.readouterr()
         assert "BLOQUEIO DE SEGURANÇA - FAIL-CLOSED" in captured.err
         assert "codex" in captured.err
@@ -159,3 +160,125 @@ def test_build_ticket_uses_next_sequential_id(tmp_path: Path) -> None:
     ticket = run_ticket._build_ticket(args, store)
     assert ticket.id == "USR-08"
     assert ticket.acceptance_criteria == ["c1"]
+@pytest.mark.parametrize(("cause", "stage", "expected"), [
+    ("route_wait", "preflight", 75), ("context", "plan", 75),
+    ("agent_timeout", "agent", 75), ("gate_timeout", "gate", 75),
+    ("gate_remote_unavailable", "gate", 75), ("gate_dirty_worktree", "gate", 75),
+    ("gate_infra_no_tests", "gate", 75), ("base_red_suspected", "gate", 75),
+    ("gate_insufficient_ram", "gate", 75), ("network", "merge", 75),
+    ("gate_failed", "gate", 1), ("review_changes_required", "review", 1),
+    ("ci_red", "ci", 1), ("agent_no_changes", "agent", 1),
+])
+def test_all_launcher_stage_failures_write_outcome_and_charge_once(tmp_path, monkeypatch, cause, stage, expected):
+    import run_ticket
+    from core.line import run_outcome
+    from core.line.admission_store import AdmissionStore
+    from core.line.local_progress import ProgressPublisher
+    from core.paths import state_root
+
+    def failed(_argv, box):
+        progress = ProgressPublisher(ticket_id="USR-99", project_id="darkfac", title="Failure", sink=None)
+        box.append(progress)
+        run_outcome.bind_attempt("USR-99", progress=progress)
+        progress.phase(stage, "failed", "AssertionError: actual diagnostic", cause=cause)
+        print("Quota summary: headroom 80%")
+        return 1
+
+    monkeypatch.setattr(run_ticket, "_main", failed)
+    assert run_ticket.main(["USR-99"]) == expected
+    path = run_outcome.outcome_path("USR-99")
+    outcome = run_outcome.RunOutcome.model_validate_json(path.read_text(encoding="utf-8"))
+    assert outcome.cause == cause and outcome.stage == stage
+    assert outcome.detail == "AssertionError: actual diagnostic"
+    assert outcome.exit_code == expected
+    store = AdmissionStore(state_root() / "admission.sqlite3")
+    store.record_attempt("darkfac", "USR-99", cause, run_id=outcome.run_id)
+    budget = store.budget("darkfac", "USR-99")
+    assert budget["candidate_failures"] == int(expected != 75)
+
+
+def test_early_host_permission_error_has_outcome_and_infra_exit(tmp_path, monkeypatch):
+    import run_ticket
+    from core.line import run_outcome
+
+    def denied(_argv, _box):
+        run_outcome.bind_attempt("USR-99")
+        raise PermissionError("host ACL denied")
+
+    monkeypatch.setattr(run_ticket, "_main", denied)
+    assert run_ticket.main(["USR-99"]) == 75
+    outcome = run_outcome.RunOutcome.model_validate_json(run_outcome.outcome_path("USR-99").read_text(encoding="utf-8"))
+    assert outcome.cause == "host_permission"
+    assert outcome.detail == "host ACL denied"
+
+
+def test_ci_exhaustion_in_two_runs_survives_context_deletion_and_counts_twice(tmp_path, monkeypatch):
+    import run_ticket
+    from core.line import run_outcome
+    from core.line.admission_store import AdmissionStore
+    from core.paths import state_root
+    from types import SimpleNamespace
+
+    ticket = SimpleNamespace(id="USR-99", project_id="darkfac")
+    fixes = []
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *args: fixes.append(args))
+    monkeypatch.setattr(run_ticket, "_commit_fix_agent_changes_safely", lambda *args: (True, None))
+    progress = SimpleNamespace(phase=lambda *args: None)
+    report = SimpleNamespace(delivery=SimpleNamespace(message="FAILED tests/test_real.py::test_behavior"))
+    _, first = run_ticket._retry_red_ci(None, ticket, tmp_path, report, False, progress)
+    assert first == "ci_fix_requires_revalidation"
+    context = tmp_path / "context"
+    context.mkdir()
+    (context / "ci_recovery.json").write_text("{}", encoding="utf-8")
+    (context / "ci_recovery.json").unlink()
+    context.rmdir()
+
+    class Store:
+        def __init__(self, *args):
+            self.status = None
+        def requeue_ticket(self, *args, **kwargs):
+            self.status = "planned"
+        def get_ticket(self, *args):
+            return SimpleNamespace(status=self.status)
+    monkeypatch.setattr(run_ticket, "DemandsStore", Store)
+
+    @run_outcome.tracked
+    def exhausted_run():
+        run_outcome.bind_attempt(ticket.id, ticket.project_id)
+        _, reason = run_ticket._retry_red_ci(None, ticket, tmp_path, report, False, progress)
+        assert reason.startswith("ci_recovery_budget_exhausted")
+        assert run_ticket._reopen_after_ci_budget(ticket, tmp_path, reason)
+        return {"exit_code": 1, "cause": "ci_red", "error": reason}
+
+    for index in range(2):
+        assert exhausted_run()["exit_code"] == 1
+        assert AdmissionStore(state_root() / "admission.sqlite3").budget("darkfac", ticket.id)["candidate_failures"] == index + 1
+    assert len(fixes) == 1
+
+
+def test_ci_fix_without_changes_counts_candidate_instead_of_waiting_for_owner(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from core.line import run_outcome
+    from core.line.admission_store import AdmissionStore
+    from core.paths import state_root
+
+    ticket = SimpleNamespace(id="USR-99", project_id="darkfac")
+    requeues = []
+    class Store:
+        def __init__(self, *args):
+            self.status = "planned"
+        def requeue_ticket(self, *args, **kwargs):
+            requeues.append(args)
+        def get_ticket(self, *args):
+            return SimpleNamespace(status=self.status)
+    monkeypatch.setattr(run_ticket, "DemandsStore", Store)
+    monkeypatch.setattr(run_ticket, "_park_waiting_human", lambda *args: pytest.fail("owner before third candidate failure"))
+    progress = SimpleNamespace(phase=lambda *args, **kwargs: None, set_outcome=lambda *args: None)
+    @run_outcome.tracked
+    def failed_ci():
+        run_outcome.bind_attempt(ticket.id)
+        return run_ticket._ci_red_twice_result(ticket, "ci_fix_no_changes: FAILED behavior", tmp_path,
+                                              "branch", "resume", progress, False, True)
+    assert failed_ci()["exit_code"] == 1
+    assert requeues == [("USR-99",)]
+    assert AdmissionStore(state_root() / "admission.sqlite3").budget("darkfac", ticket.id)["candidate_failures"] == 1

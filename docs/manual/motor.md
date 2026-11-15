@@ -294,17 +294,25 @@ Durante a validacao pelo portao oficial, `run_ticket.py` rotaciona os workers re
 
 ## Recuperacao de CI sem repetir BUILD (USR-473)
 
-CI vermelho permite uma correcao tecnica na mesma worktree. O orcamento fica em
-`ci_recovery.json` e sobrevive a retomadas. Uma alteracao retorna codigo 75 e
-retoma a entrega pelo portao completo e pela revisao independente do novo candidato;
-nenhum push ou merge da correcao acontece antes dessas provas. Sem rota, a worktree
-fica preservada para retomada automatica. Esgotar essa tentativa registra falha
-tecnica e tenta reabrir o ticket em `planned` com causa `ci_recovery_budget_exhausted`.
-O comentario no PR, com a causa e o ID, so sai depois que essa reabertura ficou
-duravel em `planned` ou `hold`. Se `requeue_ticket` falha, o marcador `exhausted`
-sai de `ci_recovery.json`, o comentario de sucesso nao e publicado e a espera
-continua reintentavel. A espera so encerra como terminal depois dessa transicao,
-sem exigir evidencia de deploy.
+CI vermelho permite uma correção técnica na mesma worktree. O limite fica em
+`DARKFAC_STATE_ROOT/runs/ci_recovery/<TICKET>.json`, fora do contexto que o PLAN pode apagar.
+Uma alteração retorna código 75 e retoma gate e revisão independente do novo candidato antes
+de publicar. Esgotar o conserto conta uma falha `ci_red` por tentativa no mesmo orçamento
+durável usado pela revisão. Reabrir `planned` conserva esse contador. Não há novo ticket nem
+comentário automático no PR; o terceiro fracasso de candidato coloca o ticket em hold terminal.
+
+O launcher lê `run_caps.review_rounds` da configuração (atualmente 2), sem limite paralelo de
+quatro rodadas. Esgotar a revisão conta `review_changes_required` uma vez por `run_id`.
+Falhas de infraestrutura da revisão continuam classificadas como infraestrutura.
+
+Toda tentativa real, inclusive uma recusa antes de PLAN ou falha do agente, deixa
+`runs/outcomes/<TICKET>.json` na raiz de estado compartilhada: ticket, `run_id`, `exit_code`,
+`cause`, `cause_class`, `stage`, `detail` sanitizado em uma linha e `ts` UTC. O resultado
+estruturado precede o log no dispatcher. As classes vêm de `core.line.failure_taxonomy`;
+infraestrutura sai com 75, aplica backoff de 10 minutos dobrando até 2 horas e não gasta
+tentativas de candidato. Candidato e causa desconhecida têm limite durável de três por ticket,
+independentemente de host e fingerprint. Merge comprovado limpa os contadores.
+Veja [frota.md](frota.md) para hold, alerta único e a sentinela de fila bloqueada.
 
 USR-473: espera de deploy exige SHA do recibo de merge e evidencia coincidente
 do candidato validado e aprovado. Recibo inconsistente permanece visivel como
