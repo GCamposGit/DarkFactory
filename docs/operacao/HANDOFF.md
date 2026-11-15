@@ -1,55 +1,44 @@
 # Handoff operacional
 
-Versao: 12
-Atualizado em: 2026-11-11 (Claude Code, coordenador de 09/11 a 11/11)
+Versao: 13
+Atualizado em: 2026-11-15 (Claude Code, coordenador em 15/11; outra sessao assume)
 
 ## Estado
 
 - Fase: V0 da Dark Factory (0/5 entregas qualificadas; piloto M1 bloqueado na OA-082).
-- `main` em `ac848437` (#850) em 11/11 10:35Z, CI do merge anterior verde.
-- Despachante: tarefa agendada `DarkFac-Fleet-Dispatcher` (loop) com `--recovery-tickets USR-510,USR-509,USR-508,USR-506,USR-498,USR-503,USR-499,USR-500,USR-502,USR-492,USR-483,USR-504`. Desde o USR-508 ele se reinicia sozinho quando o `main` muda.
-- Hosts: Desktop executa; Grokbox oscila (cai e volta); Notebook frequentemente com `workers=0` porque a RAM livre fica abaixo de 4 GiB com os apps do owner abertos.
-- Cotas (11/11 ~07:36 BRT): Claude semanal 5% e Grok 12,6% (ambos abaixo do piso), Codex 15% (no piso, renova 12/11 09:58 BRT; Grok renova 12/11 14:50 BRT). Toda escrita agora cai no OpenRouter. Abaixo do piso, a escrita vai para o OpenRouter (teto US$ 2 por execucao, US$ 10 por mes).
-- Revisao: cascata do USR-488 (outra familia por harness; outra familia via OpenRouter; mesma familia com outro modelo; mesmo modelo com persona adversarial). Admissao compara familia do modelo, nao nome do harness (#834).
+- `main` em `060e4f41` (#854), CI verde.
+- Cotas (15/11 ~16:20 BRT): Claude 83%, Codex 33%, Grok 27,6%. Roteador elege Claude/sonnet para `development`.
+- Frota em DRENAGEM a pedido do owner: a tarefa agendada `DarkFac-Fleet-Dispatcher` foi DESATIVADA (Enabled=False) para nao relancar. O processo do despachante pode seguir vivo ate ser encerrado (o classificador negou encerrar o processo pelo agente); confira com o comando abaixo. Encerrar o despachante NAO derruba os runs em voo: o job do launcher nao tem KILL_ON_JOB_CLOSE.
+- Em voo no momento da troca: USR-516 no Notebook (`run_ticket.py USR-516`, retomada de entrega da worktree `.worktrees/usr-516-20261114T232201Z`, log `.factory/logs/coord/USR-516.log`), USR-455 no Desktop, USR-457 no Grokbox.
 
-## Decisoes do owner em vigor (09-10/11)
+## Incidente de 14-15/11: frota parada sem alerta
 
-- Prioridade: funcionamento estavel, autonomo e paralelo; corrigir na hora o que for pequeno, ticket para o resto, reaproveitando tickets do roadmap.
-- OpenRouter e fallback de cota baixa; revisao na mesma familia so sem alternativa.
-- Grok preferido para escrita enquanto houver saldo.
-- Politica de portao: PR com testes afetados e contratos; suite completa em Linux ou CI; CI noturno Windows permanece. Ainda depende da assinatura da OA-089 para entrar no `AGENTS.md` (PR #832).
-- Subagentes leves para tarefas simples e leitura de testes; o coordenador recebe so resumo e acoes.
+1. Edicoes nao commitadas da sessao Antigravity (14/11) no checkout compartilhado faziam o portao de TODA worktree falhar com `gate_dirty_worktree`. Causa raiz confirmada: o launcher do despachante injeta `DARKFAC_PROJECT_ROOT=C:\dev\DarkFac` no ambiente, e `core/harness/runner.py` usa `project_root()` para checar a arvore limpa, olhando o checkout compartilhado em vez da worktree candidata. Correcao: USR-516 (em curso). Confirme que o fix cobre o `DARKFAC_PROJECT_ROOT` herdado (o `gate_isolation` ja limpa essa variavel; o caminho da frota nao).
+2. 154 falhas `error` com `main_sha` vazio em 51 tickets nunca fechavam (USR-497 nao alcanca). Correcao: USR-511, PR #857.
+3. Sentinela marcava `healthy` com tudo parado: USR-523 (planned).
 
-## O que foi entregue (09-11/11)
+Acoes da coordenacao: edicoes preservadas e publicadas (OA-094, opcao A: PRs #855 e #856); backup do admission em `.factory/backups/coord-20261115T191712Z`; 179 falhas velhas fechadas e 10 holds `gate_dirty_worktree` removidos. A frota voltou a despachar nos tres hosts.
 
-- Correcoes feitas pela coordenacao via subagente: #831 e #834 (USR-488, cascata de revisao e familia do modelo), #833 (estado runtime no `.gitignore`), #835/#836/#837/#838 (espera 75, trava de linha, reserva de frota e PR ativo nao contam como falha), #839 (falha repetida segura so o ticket; `set_recovery` saiu de `_record_failure`), #830 (plano Frente 7).
-- Entregas da propria frota, sem toque humano: USR-501 (#841, sentinela de fila ociosa), USR-497 (#842, fechar falhas quando o `main` muda), USR-494 (#843, via expressa de autorreparo), USR-508 (#848, despachante reinicia ao mudar o `main`), USR-510 (#849, admissao considera todos os workers de portao), USR-489 (#850).
-- Varredura de 09/11: 159 worktrees removidas (84 commits soltos preservados em tags `archive/worktree-*`), 5 PRs antigos fechados, 6 tickets orfaos devolvidos a fila.
+## Pendencias para a proxima sessao
 
-## O que esta em voo
+- PR #855 (skills/docs/cofre SOPS cifrado, sem protegidos): conferir CI e mergear.
+- PR #856 (`AGENTS.md`): espera a assinatura do owner (OA-095). Depois de assinado, publicar o registro `.worktrees/oa094-auth/.factory/governance/authorizations/AUTH-OA094-AGENTS.json` em PR proprio (como o #853) e mergear o #856. Nao fazer `update-branch` no #856.
+- PR #857 (USR-511): entregar pelo caminho oficial com `python C:\dev\DarkFac\run_ticket.py --resume-delivery USR-511 --worktree C:\dev\DarkFac\.worktrees\usr-511-coord` quando a trava de linha do Notebook liberar.
+- USR-516: acompanhar o fim da entrega; se falhar, retomar com o comando impresso no log.
+- Depois do merge do USR-511 e USR-516: deploy (`python C:\dev\DarkFac\scripts\dokploy_redeploy.py`) e religar a frota (`Enable-ScheduledTask -TaskName DarkFac-Fleet-Dispatcher`, depois `Start-ScheduledTask`).
+- Proxima prioridade: USR-523, USR-503/USR-521 (xdist sob carga), USR-498, USR-506; retomar PRs de CI vermelho #840, #844-#847.
+- O `git stash` "antigravity-gemini-models+sops-vault 2026-11-14" pode ser descartado depois do merge de #855 e #856.
 
-- USR-483 (Grokbox): identidade de sessao e papel de coordenador. O processo do USR-489 no Desktop pode seguir vivo apos o merge; confirmar e encerrar se for orfao.
-- Conferir que o USR-510 (#849) acabou com as esperas `gate_capacity_zero` vindas de `gate://local` quando o Notebook esta sem RAM.
-- Em seguida na prioridade: USR-509 (entregas com PR de CI vermelho ficam `blocked deploy_evidence_missing` e nao corrigem: USR-447 #845, USR-449 #846, USR-493 #844, USR-486 #847), USR-506 (motivo de falha grava trecho de codigo).
+## Comandos uteis
 
-## Pendencias
-
-- OA-089 (owner): assinar a autorizacao do `AGENTS.md` (secoes 3 e 5). Passo a passo no DarkHub.
-- PRs antigos #825 (USR-468), #822 (USR-448) e #821: com conflito e CI vermelho; decidir retomar ou fechar.
-- Tickets abertos relevantes: USR-496 (ids de gateway do Grok), USR-498..USR-504, USR-506, USR-509, USR-510.
+- Processos da frota: `Get-CimInstance Win32_Process -Filter "Name like 'python%'" | Where-Object { $_.CommandLine -match 'fleet_dispatcher|run_ticket' } | Select-Object ProcessId,CommandLine`
+- Estado: `.factory/runs/fleet_dispatcher_state.json` (`in_flight`, `skipped`, `idle_reasons`) e `.factory/admission.sqlite3` (`failures`, `ticket_holds`).
 
 ## Armadilhas novas
 
-1. Recusa nao e falha: saidas 75, `[TRAVA DE LINHA]`, `[RESERVA DE FROTA]` e "ja possui PR ativo" sao espera e nao devem acender recuperacao. Se surgir outro tipo de recusa contando como falha, adicione o marcador em `LOCK_MARKERS` de `core/line/fleet_dispatcher.py`.
-2. Com recuperacao ativa, `run_ticket.py` usa teto de frota 1; a recuperacao global so deve ser acionada explicitamente.
-3. Cota do Grok: queda de uso no mesmo periodo e marcada como leitura suspeita e o roteador exclui o Grok. O mecanismo existente de confirmacao e `.factory/usage/history/xai.confirmation.json` (quota_id, period_start, used_percent da leitura atual). USR-504 trata de forma duravel.
-4. `admission.sqlite3`: falhas antigas de causa ja corrigida podem ser fechadas (`update failures set open=0`) e `dispatcher_recovery.active=0`, sempre com backup em `.factory/backups/`. O USR-497 automatiza o fechamento quando o `main` muda.
-5. CI de PR leva de 3 a 5 minutos para criar o run do `DarkFac CI`; antes disso so aparece `trusted-pr-policy`.
-6. `gh pr close` pode ser negado pelo classificador de permissoes; peca autorizacao explicita ao owner.
-7. Id literal de modelo neste arquivo quebra o censo de modelos (baseline 0). Use alias.
+1. Checkout compartilhado sujo derruba a frota inteira ate o USR-516 entrar. Ao assumir: `git -C C:\dev\DarkFac status --short` deve sair vazio.
+2. Trava de linha: um `run_ticket` por maquina; o segundo sai com codigo 2 sem consumir cota.
+3. Ticket novo com `--create --queue-only` entra na fila e o despachante vivo pega na hora.
+4. Encerrar processo do despachante pelo agente foi negado pelo classificador; peca ao owner ou use a tarefa agendada.
 
-## Proximo passo
-
-- Acompanhar a entrega do USR-510 e, em seguida, do USR-509; com os dois, a frota deve rodar nos tres hosts e retomar as entregas presas.
-- Quando o Grok cair abaixo de 15%, conferir que a escrita passa ao OpenRouter sem travar e que o gasto respeita o teto mensal.
-- Retomar a V0 depois da Fase 1 do plano (USR-497..USR-503).
+As armadilhas da versao 12 seguem validas (recusa nao e falha, teto de frota 1 em recuperacao, cota do Grok suspeita, CI de PR leva 3-5 min, `gh pr close` pode ser negado, id literal de modelo quebra o censo).
