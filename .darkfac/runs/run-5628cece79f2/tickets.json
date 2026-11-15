@@ -1,0 +1,24 @@
+[
+  {
+    "id": "T1",
+    "title": "Reconciliar baseline e registro de USR-449",
+    "goal": "Produzir a evidência versionada, corrigir o registro canônico de USR-449 e cadastrar como planned as lacunas reais, sem implementar novos componentes.",
+    "files_hint": [
+      ".factory/demands/demands.json",
+      "docs/reports/USR-449-baseline-reconciliation.md",
+      "docs/FASE_ATUAL.md"
+    ],
+    "acceptance": [
+      "O relatório registra SHA e horário UTC da baseline, caminhos inspecionados e evidência sanitizada da leitura de USR-449 no control store, incluindo estado e updated_at observados.",
+      "A matriz distingue capacidades entregues — CloudCoordinator, FeederCycle, BacklogFeeder, ProjectRegistry e roteador — de QualityCycle e core/security ausentes, incluindo a remoção histórica de core/security quando aplicável.",
+      "GitHub, PR #846 e HANDOFF aparecem apenas como evidências auxiliares da divergência e não substituem o estado lido do store.",
+      "O registro de USR-449 é corrigido pelo mecanismo existente do store, qualifica ou remove premissas de dependências inexistentes e é relido após a gravação; valores anterior e final e sua justificativa constam no relatório.",
+      "Após busca por equivalentes, cada lacuna ainda não registrada recebe um ticket planned: um para a capacidade recorrente ausente sobre os componentes existentes e outro para reconciliar referências de segurança removidas, sem criar core/security nesta entrega.",
+      "Se o control store estiver indisponível ou ilegível, o relatório e docs/FASE_ATUAL.md marcam a reconciliação como bloqueada com a causa, e nenhum estado de USR-449 é inferido ou sobrescrito por GitHub ou HANDOFF.",
+      "docs/FASE_ATUAL.md resume a baseline reconciliada, o resultado da leitura do store e os IDs dos defeitos planned criados ou reutilizados.",
+      "python scripts/line_validate.py passa e o portão oficial termina com [HARNESS_PASS]."
+    ],
+    "tests_to_add": [],
+    "smoke": []
+  }
+]
