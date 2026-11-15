@@ -14907,5 +14907,34 @@
     "dependencies": [],
     "created_at": "2026-11-14T09:42:08.769411Z",
     "updated_at": "2026-11-20T09:30:21.893822Z"
+  },
+  {
+    "id": "USR-518",
+    "project_id": "darkfac",
+    "title": "Verificar imagem em execucao no darkfac-cloud apos deploy no Dokploy",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 15/11/2026, o deploy do SHA 060e4f41 concluiu. O Dokploy marcou done e docker.getContainers confirmou o SHA exato e coordinator/worker saudaveis, mas a verificacao rejeitou o titulo generico Manual deployment e pulou o backup pos-deploy.",
+    "core_journey": [
+      "Em 15/11/2026, o deploy do SHA 060e4f41 concluiu. O Dokploy marcou done e docker.getContainers confirmou o SHA exato e coordinator/worker saudaveis, mas a verificacao rejeitou o titulo generico Manual deployment e pulou o backup pos-deploy."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com prova do SHA em execucao, o fluxo segue para o backup existente e registra evidencia por servico"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-15T09:21:33.547955Z",
+    "updated_at": "2026-11-15T09:21:33.547955Z"
   }
 ]
