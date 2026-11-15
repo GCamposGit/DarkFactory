@@ -1,0 +1,43 @@
+{
+  "assumptions": [
+    "Esta rodada é só de leitura. Nenhum arquivo, ticket ou acesso externo foi criado ou executado.",
+    "Retenção permanente, limites de custo por projeto junto com os tetos globais, e alertas no DarkHub e no Telegram sem repetição inalterada já foram decididos pelo owner e não são reabertos.",
+    "Prova vencida perde a validade e aparece como pendência, conforme a decisão técnica já registrada.",
+    "Reaproveitar CloudCoordinator, FeederCycle, BacklogFeeder, ProjectRegistry, o roteador e o control store. Não criar componentes paralelos antes de reconciliar a base entregue, porque QualityCycle e core/security não foram encontrados.",
+    "A demonstração é só no darkfac, com integração real, versões resolvidas (não apenas requeridas) e ambiente identificado. Mock não conta como entrega.",
+    "Falha de fonte ou ausência de advisory aparece como desconhecido, nunca como ausência de vulnerabilidade.",
+    "Retomada concorrente, deduplicação persistente, reavaliação por evento e rechecagem após correção seguem as premissas já registradas, com mecanismos determinísticos.",
+    "Projetos sem perfil, acesso ou parâmetros ficam bloqueados com motivo visível. Nenhum segredo novo é pedido nesta rodada.",
+    "Os painéis ampliam o DarkHub existente, com isolamento por projeto."
+  ],
+  "technical": [],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Quais prazos de reteste por perfil devem valer para o perfil do darkfac na demonstração, e qual o prazo padrão para perfis sem valor definido?",
+      "kind": "business",
+      "options": [
+        "Crítico 7 dias, padrão 30 dias; perfil sem prazo fica bloqueado com motivo visível",
+        "Crítico 3 dias, padrão 14 dias",
+        "Somente darkfac definido agora (30 dias); os demais perfis permanecem bloqueados até terem prazo"
+      ],
+      "recommended": "Somente darkfac definido agora (30 dias); os demais perfis permanecem bloqueados até terem prazo",
+      "why": "A decisão do owner exige prazo por perfil, mas nenhum valor foi informado. Inventar prazos violaria o Gate G1. Definir só o darkfac permite a demonstração sem fixar parâmetros dos outros projetos."
+    },
+    {
+      "id": "q2",
+      "text": "Qual é o destino durável autorizado para registrar as provas do darkfac na demonstração?",
+      "kind": "account",
+      "options": [
+        "Usar o destino já declarado no perfil do darkfac, se existir",
+        "Aguardar a definição do destino pelo owner antes de armazenar qualquer prova"
+      ],
+      "recommended": "Usar o destino já declarado no perfil do darkfac, se existir",
+      "why": "A retenção permanente foi decidida, mas o destino só vale se estiver autorizado no perfil. Se o perfil não tiver destino, a demanda fica em WAITING_HUMAN e vira uma ação do owner (OA-NNN), sem armazenar dados."
+    }
+  ],
+  "deadline": "2026-11-15T21:30:03.831455Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
