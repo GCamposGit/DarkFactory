@@ -67,6 +67,36 @@ def read_history(path: Path) -> list[dict[str, Any]]:
         return []
 
 
+def _last_row(rows: list[dict[str, Any]], quota_id: str, *, unflagged: bool) -> dict[str, Any] | None:
+    return next((r for r in reversed(rows) if r.get("quota_id") == quota_id and r.get("used_percent") is not None
+                 and (not r.get("flags") if unflagged else True)), None)
+
+
+def _repeats_flagged_reading(rows: list[dict[str, Any]], usage: ProviderAccountUsage) -> bool:
+    """True when the previous reading of every measured window was flagged and says the same thing."""
+    measured = [w for w in usage.windows if w.used_percent is not None]
+    for window in measured:
+        last = _last_row(rows, window.quota_id, unflagged=False)
+        if (last is None or not last.get("flags")
+                or last.get("period_start") != (usage.period_start or window.resets_at)
+                or abs(float(last["used_percent"]) - window.used_percent) > 0.1):
+            return False
+    return bool(measured)
+
+
+def _pessimistic(window: Any, rows: list[dict[str, Any]], usage: ProviderAccountUsage) -> Any:
+    """Unconfirmed suspicious reading: keep the larger `used` of the previous and the new one, never unknown."""
+    if window.used_percent is None:
+        return window
+    prior = _last_row(rows, window.quota_id, unflagged=True)
+    if prior is None or prior.get("period_start") != (usage.period_start or window.resets_at):
+        return window
+    if float(prior["used_percent"]) <= window.used_percent:
+        return window
+    return window.model_copy(update={"used_percent": float(prior["used_percent"]),
+                                     "remaining_percent": 100.0 - float(prior["used_percent"])})
+
+
 def record_probe(usage: ProviderAccountUsage, snapshot_dir: Path) -> ProviderAccountUsage:
     """Check a real reading against earlier readings, then append sanitized evidence."""
     if usage.provider_id not in _ALLOWED_RAW:
@@ -115,12 +145,15 @@ def record_probe(usage: ProviderAccountUsage, snapshot_dir: Path) -> ProviderAcc
                 flags = []
         except (OSError, ValueError, KeyError, TypeError):
             logger.warning("Invalid quota confirmation for %s", usage.provider_id)
+    if flags and _repeats_flagged_reading(rows, usage):
+        logger.warning("Suspicious quota reading for %s repeated; accepting it (auto-confirmation)", usage.provider_id)
+        flags = []
     if flags:
         logger.warning("Suspicious quota reading for %s: %s", usage.provider_id, "; ".join(flags))
         usage = usage.model_copy(update={"status": AccountConnectionStatus.DEGRADED,
                                          "plausibility_flags": flags,
                                          "message": "SUSPEITA: " + "; ".join(flags),
-                                         "windows": [w.model_copy(update={"used_percent": None, "remaining_percent": None}) for w in usage.windows]})
+                                         "windows": [_pessimistic(w, rows, usage) for w in usage.windows]})
     path.parent.mkdir(parents=True, exist_ok=True)
     # Rotate whole files: previous lines are never rewritten. Archive once the oldest
     # entry passes the retention horizon, then start a new append-only current file.

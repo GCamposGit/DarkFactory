@@ -1930,6 +1930,9 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     if req.mode == "write":
         modified_files = _apply_openrouter_write_blocks(response.text or "", req.cwd)
         logger.info("OpenRouter write mode applied edits to %d files: %s", len(modified_files), modified_files)
+        from core.line.routing import record_openrouter_edits  # local import: routing imports agent_cli
+
+        record_openrouter_edits(len(modified_files))
         if not modified_files and not (response.text or "").strip():
             logger.warning("OpenRouter write mode produced no file edits and empty text")
     return AgentResult(

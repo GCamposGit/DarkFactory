@@ -119,6 +119,14 @@ class ModelUsageLedger:
         except Exception:
             pass
 
+    def spent_usd(self, ticket_id: str, provider: str) -> float:
+        """Sum of recorded cost for one ticket on one provider (bounded to the retained raw events)."""
+        total = 0.0
+        for row in self._store.read().get("events", []):
+            if row.get("ticket_id") == ticket_id and str(row.get("provider", "")).lower() == provider.lower():
+                total += float(row.get("cost_usd") or 0.0)
+        return round(total, 8)
+
     def recompute_aggregates(self) -> int:
         """Rebuild lifetime aggregates from the durable invocation evidence."""
         with self._store.transaction() as data:

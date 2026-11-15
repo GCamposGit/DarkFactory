@@ -71,16 +71,21 @@ def schedule(ticket_id: str, worktree: Path, stage: str, *, resume_delivery: boo
 
 
 def _cached_quota(provider: str) -> float | None:
-    """Read snapshots only: an idle scheduler must not infer to measure its quota."""
+    """Read snapshots only: an idle scheduler must not infer to measure its quota.
+
+    A snapshot older than the freshness window is not discarded: routing's hold keeps the last valid
+    reading (pessimistic margin) until its window resets, at most 6 h.
+    """
     from datetime import datetime, timezone
+    from core.line.routing import _stale_until_reset_headroom
     from core.router.token_budget import _quota_headroom
     from core.usage.models import ProviderAccountUsage
+    snapshot = state_root() / "usage" / "providers" / f"{provider}.json"
     try:
-        usage = ProviderAccountUsage.model_validate_json(
-            (state_root() / "usage" / "providers" / f"{provider}.json").read_text(encoding="utf-8"))
+        usage = ProviderAccountUsage.model_validate_json(snapshot.read_text(encoding="utf-8"))
         checked = datetime.fromisoformat(str(usage.checked_at).replace("Z", "+00:00"))
         if checked.tzinfo is None or (datetime.now(timezone.utc) - checked).total_seconds() > 3600:
-            return None
+            return _stale_until_reset_headroom(snapshot, datetime.now(timezone.utc))
         if usage.plausibility_flags:
             return None
         return _quota_headroom(usage)

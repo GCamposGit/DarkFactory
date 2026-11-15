@@ -60,3 +60,8 @@ def test_contingency_record_must_carry_level_persona_and_reason() -> None:
     assert not valid_contingency(None)
     assert not valid_contingency({"level": 1, "persona": "standard", "reason": "x"})
     assert not valid_contingency({"level": 3, "persona": "standard"})
+
+
+def test_openrouter_also_serves_level_three_so_a_balance_never_ends_in_no_route() -> None:
+    route = _select("claude", "anthropic", None, ("openrouter", "sonnet"))
+    assert route is not None and route.harness == "openrouter" and route.level == 3 and route.contingency
