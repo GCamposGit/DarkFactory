@@ -22,7 +22,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -545,6 +547,15 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         # External repositories do not carry DarkFac's central demand ledger.
         return workspace
 
+    # A prior attempt's eligible worktree is already isolated from the shared checkout. Resume it
+    # before checking the checkout: the latter may have unrelated user edits that must remain intact.
+    workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
+    if workspace is not None:
+        ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
+        if ledger.get_ticket(ticket.id) is None:
+            ledger.save_ticket(ticket)
+        return workspace
+
     if not args.allow_dirty_shared_checkout:
         dirty = [
             p
@@ -553,10 +564,8 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         ]
         if dirty:
             raise SharedCheckoutDirty(dirty)
-    workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
-    is_new_workspace = workspace is None
-    if workspace is None:
-        workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
+    workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
+    is_new_workspace = True
     ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     generated_discard_hashes: dict[str, str] = {}
     if ledger.get_ticket(ticket.id) is None:
@@ -565,6 +574,33 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
             ledger_path = workspace.path / LEDGER_RELATIVE
             generated_discard_hashes[LEDGER_RELATIVE] = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
     return replace(workspace, discard_path_hashes=generated_discard_hashes)
+
+
+def _publish_admission_receipt(ticket: UserTicket, workspace: TicketWorkspace) -> Path:
+    """Atomically publish this launch's admission after routing and worktree selection (USR-520 T1)."""
+    receipt_dir = PROJECT_ROOT / ".factory" / "tmp" / "launch_receipts"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    receipt_id = os.environ.get("DARKFAC_LAUNCH_RECEIPT_ID") or uuid.uuid4().hex
+    receipt_path = receipt_dir / f"{receipt_id}.json"
+    payload = {
+        "ticket": ticket.id,
+        "pid": os.getpid(),
+        "worktree": str(workspace.path.resolve()),
+        "launch_id": receipt_id,
+    }
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{receipt_id}-", suffix=".tmp", dir=receipt_dir)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as receipt_file:
+            json.dump(payload, receipt_file, ensure_ascii=False, sort_keys=True)
+            receipt_file.write("\n")
+            receipt_file.flush()
+            os.fsync(receipt_file.fileno())
+        # Hard-link creation is atomic and fails if a same-name receipt already exists.
+        os.link(temporary_path, receipt_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return receipt_path
 
 
 def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
@@ -5217,6 +5253,12 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     workspace, ws_exit = _stage_workspace(args, ticket, progress)
     if workspace is None:
         return ws_exit
+    try:
+        _publish_admission_receipt(ticket, workspace)
+    except OSError as exc:
+        # The receipt is an internal hand-off for the owner express lane. Keep execution behavior
+        # intact if local runtime storage is unavailable, while making the loss observable.
+        logger.warning("Could not publish admission receipt for %s: %s", ticket.id, exc)
     if _cancelled():
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 

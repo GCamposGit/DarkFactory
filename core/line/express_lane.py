@@ -19,10 +19,14 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -325,6 +329,9 @@ def _index_edits(
 _IN_FLIGHT_STATUSES = frozenset({"implementing", "validating"})
 _TERMINAL_STATUSES = frozenset({"completed", "cancelled", "canceled"})
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+_ADMISSION_WAIT_SECONDS = 5.0
+_ADMISSION_POLL_SECONDS = 0.05
+_RECEIPT_ENV = "DARKFAC_LAUNCH_RECEIPT_ID"
 
 
 @dataclass(frozen=True)
@@ -462,6 +469,9 @@ def run_express(
     running: set[str] | None = None,
     spawn: Callable[[list[str]], Any] | None = None,
     run_ticket: Path | None = None,
+    receipt_dir: Path | None = None,
+    admission_wait_seconds: float = _ADMISSION_WAIT_SECONDS,
+    poll_interval: float = _ADMISSION_POLL_SECONDS,
 ) -> int:
     """Valida o host inteiro e executa o ticket uma vez.
 
@@ -489,15 +499,29 @@ def run_express(
         return 1
     host = _this_host(host_id)
     argv = launch_argv(ticket_id, host, run_ticket=run_ticket)
-    launcher = spawn if spawn is not None else _spawn_ticket
+    attempt_id = uuid.uuid4().hex
+    receipts = receipt_dir if receipt_dir is not None else _receipt_directory()
+    started_at = time.time()
     try:
-        launcher(argv)
+        process = (spawn or _spawn_ticket)(argv, attempt_id)
     except Exception as exc:  # o owner ve a falha; nao ha segundo processo
         print(f"requisito ausente: lancamento: {type(exc).__name__}")
         logger.warning("via expressa: lancamento de %s falhou (%s)", ticket_id, type(exc).__name__)
         return 1
-    print(f"lancado: run_ticket.py {ticket_id} --fleet --host-id {host}")
-    return 0
+    deadline = time.monotonic() + max(0.0, admission_wait_seconds)
+    while True:
+        receipt = _read_admission_receipt(receipts / f"{attempt_id}.json", ticket_id, process, started_at)
+        if receipt is not None:
+            print(f"admitido: {ticket_id}; worktree: {receipt['worktree']}")
+            return 0
+        return_code = process.poll()
+        if return_code is not None:
+            print(f"recusado: {ticket_id}; processo terminou ({return_code}); causa: {_launch_failure_cause(process)}")
+            return 1
+        if time.monotonic() >= deadline:
+            print(f"recibo de admissao ausente: {ticket_id}; processo continua ativo; log: {getattr(process, '_express_log_path', 'indisponivel')}")
+            return 1
+        time.sleep(max(0.001, poll_interval))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -575,16 +599,68 @@ def _is_express_action(action: Any, ticket_id: str, command: str) -> bool:
     return commands == [command] or commands == [legacy]
 
 
-def _spawn_ticket(argv: list[str]) -> None:
+def _receipt_directory() -> Path:
     from core.paths import project_root
 
-    subprocess.Popen(
-        argv,
-        cwd=str(project_root()),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=_CREATE_NO_WINDOW,
-    )
+    return project_root() / ".factory" / "tmp" / "launch_receipts"
+
+
+def _read_admission_receipt(path: Path, ticket_id: str, process: Any, started_at: float) -> dict[str, str] | None:
+    try:
+        if path.stat().st_mtime < started_at:
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("ticket") != ticket_id or payload.get("launch_id") != path.stem:
+            return None
+        if payload.get("pid") != getattr(process, "pid", None):
+            return None
+        worktree = payload.get("worktree")
+        if not isinstance(worktree, str) or not worktree.strip():
+            return None
+        return {"worktree": worktree}
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def _launch_failure_cause(process: Any) -> str:
+    path = getattr(process, "_express_log_path", None)
+    if path is None:
+        return "recibo de admissao nao publicado"
+    try:
+        tail = Path(path).read_text(encoding="utf-8", errors="replace")[-4000:]
+    except OSError:
+        return "recibo de admissao nao publicado; log indisponivel"
+    ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+    lines = [" ".join(ansi.sub("", line).split()) for line in tail.splitlines()]
+    lines = [re.sub(r"[\x00-\x1f\x7f]", "", line) for line in lines if line.strip()]
+    for line in reversed(lines):
+        match = re.search(r"\bcausa:\s*([a-z][a-z0-9_]{1,79})\b", line, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        match = re.search(r"requisito ausente:\s*([a-z][a-z0-9_]{1,79})\s*:", line, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return "recibo de admissao nao publicado"
+
+
+def _spawn_ticket(argv: list[str], launch_id: str) -> subprocess.Popen[bytes]:
+    from core.paths import project_root
+    runtime_dir = project_root() / ".factory" / "tmp" / "express_lane"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    log_path = runtime_dir / f"{launch_id}.log"
+    with log_path.open("xb") as output:
+        process = subprocess.Popen(
+            argv,
+            cwd=str(project_root()),
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, _RECEIPT_ENV: launch_id},
+            creationflags=_CREATE_NO_WINDOW,
+        )
+    process._express_log_path = str(log_path)  # type: ignore[attr-defined]
+    return process
 
 
 # --- alerta unico da falha repetida (USR-494 T4) ---------------------------------------------------

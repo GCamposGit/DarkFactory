@@ -132,6 +132,20 @@ Checkpoint legado so migra automaticamente se comprovar que todas as fatias do p
 
 Se `SPEC.md`, `tickets.json` ou `progress.json` estiverem ausentes e a worktree tiver diff fora do ledger ou commits alem da base, a retomada falha fechada antes de `reset` ou novo PLAN. Sem prova de candidato e plano, os arquivos e commits preservados nao viram uma tentativa nova.
 
+## Worktree preservada antes do checkout sujo, e recibo de admissao (USR-520)
+
+`_prepare_workspace` tenta reaproveitar uma worktree preservada elegivel do mesmo ticket
+(mesma busca de `_resume_preserved_workspace` usada na retomada pos-timeout) antes de checar
+se o checkout compartilhado (`C:\dev\DarkFac`) esta sujo. Uma worktree elegivel ja e um
+diretorio isolado; o checkout principal com mudancas do usuario so e inspecionado, e so pode
+bloquear o lancamento com `SharedCheckoutDirty`, quando nao ha nada elegivel para retomar.
+
+Logo depois de `_stage_workspace` escolher essa worktree (nova ou reaproveitada), o launcher
+publica um recibo de admissao em `.factory/tmp/launch_receipts/<launch_id>.json` (arquivo
+temporario com `fsync`, promovido por hard link atomico). Esse recibo e o unico sinal que a
+via expressa do owner aceita como prova de que o lancamento foi admitido, nao so disparado;
+o contrato completo (disparo vs. admissao vs. recusa) esta em
+[`docs/manual/frota.md`](frota.md).
 ## Sequencia canonica de estagios (USR-375 S2)
 
 `core/line/stages.py` define a ordem: INTAKE, GRILL, PLAN, RESEARCH, BUILD, VALIDATE, REVIEW, MERGE, DEPLOY_SMOKE, DOCS, LEARNING.
