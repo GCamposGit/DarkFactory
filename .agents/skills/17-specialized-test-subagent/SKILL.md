@@ -27,7 +27,7 @@ O **Specialized Test Subagent** isola a execução de testes em subagentes efici
      mesmo host já estiver validando — isso é intencional (evita disputa de
      CPU/sqlite), mas não é o caminho rápido de TDD.
 2. **Invocação Isolada por Harness**:
-   - **Antigravity**: `invoke_subagent(TypeName="self", Role="Specialized Test Runner", Model="flash_lite", Prompt=...)`.
+   - **Antigravity**: `invoke_subagent(TypeName="self", Role="Specialized Test Runner", Model="flash", Prompt=...)` — adotar o **Gemini 4 Hydrogen High** para tarefas simples de codificação, testes e subagentes (reservando o **Gemini 4 Argon High** para planejamento e coordenação da fábrica).
    - **OpenAI / Codex**: Modelo com `reasoning_effort: "low"` para testes rotineiros; escala para `max` apenas em falhas assíncronas complexas.
    - **Grok Build**: `grok build --reasoning-effort low --exec "python ... "`.
    - **Claude Code**: Subagente declarativo (modelo gerado do registro):
