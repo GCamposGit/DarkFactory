@@ -1,0 +1,77 @@
+[
+  {
+    "id": "T1",
+    "title": "Perfil de habilitação explícita por projeto (fail-closed)",
+    "goal": "Criar o contrato e o carregador do perfil de habilitação do domínio por projeto, com validação fail-closed e motivo estruturado para cada campo obrigatório ausente.",
+    "files_hint": [
+      "core/portfolio/models.py",
+      "core/portfolio/dependency_watch.py",
+      ".factory/config/dependency_watch.json",
+      "docs/manual/portfolio.md",
+      "tests/test_dependency_watch_profile.py"
+    ],
+    "acceptance": [
+      "DependencyWatchProfile (Pydantic v2, extra=forbid) exige project_id existente no ProjectRegistry, profile_enabled, access_granted, referência de destino durável de evidência, limite de custo por projeto em USD e prazo de reteste em dias; retenção é permanente (nenhum campo de expiração).",
+      "O carregador lê .factory/config/dependency_watch.json em UTF-8 e devolve, para cada projeto, status enabled ou blocked com código de motivo (profile_missing, access_denied, durable_sink_missing, cost_limit_missing, retest_deadline_missing, config_invalid); nunca `except: pass` e nunca segredo em log.",
+      "Projeto apenas cadastrado no registry, sem entrada no perfil, fica blocked com motivo profile_missing.",
+      "Config inexistente ou inválido não derruba o processo: todos os projetos ficam blocked com motivo visível.",
+      "`python scripts/line_validate.py` passa ao fim do ticket.",
+      "docs/manual/portfolio.md documenta os campos do perfil e cada código de motivo."
+    ],
+    "tests_to_add": [
+      "tests/test_dependency_watch_profile.py: perfil completo vira enabled; cada campo obrigatório ausente produz exatamente o seu código de motivo; projeto fora do registry é rejeitado; config ausente/JSON inválido bloqueia tudo sem exceção vazada; referência de destino durável não aceita valor com aparência de segredo."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Elegibilidade operacional com tetos globais e validade de reteste",
+    "goal": "Resolver a elegibilidade efetiva de cada projeto combinando perfil, tetos globais de custo já existentes e validade da última prova de reteste, com CLI read-only de status do portfólio.",
+    "files_hint": [
+      "core/portfolio/dependency_watch.py",
+      "core/portfolio/models.py",
+      "core/portfolio/budget_manager.py",
+      "docs/manual/portfolio.md",
+      "tests/test_dependency_watch_eligibility.py"
+    ],
+    "acceptance": [
+      "DependencyWatchEligibility informa, por projeto: status (enabled, blocked, overdue), motivo, limite por projeto, teto global aplicado e data de validade da última prova.",
+      "Limite por projeto é respeitado em conjunto com os tetos globais do PortfolioBudgetManager: o menor dos dois vale e o teto global nunca é furado por um limite por projeto maior.",
+      "Projeto com orçamento esgotado (BudgetStatus de corte) fica blocked com motivo budget_exhausted, sem avaliar.",
+      "Prova de reteste mais antiga que o prazo do perfil deixa o projeto overdue (pendência explícita); ausência de prova não é tratada como ausência de vulnerabilidade e nunca aparece como enabled e em dia.",
+      "`python -m core.portfolio.dependency_watch --json` imprime uma linha por projeto em UTF-8, sem efeito colateral de escrita, e termina com código 0; sem projeto habilitado também termina 0 com lista explícita de bloqueios.",
+      "`python scripts/line_validate.py` passa ao fim do ticket."
+    ],
+    "tests_to_add": [
+      "tests/test_dependency_watch_eligibility.py: menor limite entre projeto e teto global vence; orçamento esgotado bloqueia; prova vencida vira overdue; prova ausente nunca resulta em enabled em dia; CLI --json devolve o status de todos os projetos sem escrever em disco."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Alertas acionáveis no DarkHub e Telegram sem repetição inalterada",
+    "goal": "Publicar alertas de novidade acionável, falha e prazo vencido nos dois canais decididos pelo owner, deduplicados por fingerprint de estado, reusando NotificationService e TelegramGateway.",
+    "files_hint": [
+      "core/portfolio/dependency_watch.py",
+      "core/notifications/service.py",
+      "core/integrations/telegram.py",
+      "docs/manual/portfolio.md",
+      "docs/FASE_ATUAL.md",
+      "tests/test_dependency_watch_alerts.py"
+    ],
+    "acceptance": [
+      "Transição de estado por projeto (nova pendência, falha de carregamento/fonte, prazo de reteste vencido) gera uma notificação no DarkHub e uma mensagem no Telegram do owner.",
+      "Estado inalterado entre dois ciclos não gera nova notificação em nenhum dos canais; mudança de motivo ou de projeto gera.",
+      "Falha do Telegram (rede, token ausente) não impede o registro no DarkHub e produz erro estruturado em log, sem vazar credencial e sem `except: pass`.",
+      "Projeto blocked por falta de destino durável não tem evidência nem histórico gravado em nenhum lugar; apenas o alerta de bloqueio é emitido.",
+      "Retenção permanente: nenhuma rotina do módulo apaga evidência ou histórico por idade, inclusive sob a retenção padrão do NotificationStore.",
+      "`python scripts/line_validate.py` passa ao fim do ticket; docs/manual/portfolio.md e docs/FASE_ATUAL.md registram canais, gatilhos e política de retenção."
+    ],
+    "tests_to_add": [
+      "tests/test_dependency_watch_alerts.py: primeiro ciclo alerta nos dois canais; segundo ciclo com mesmo estado não alerta; mudança de motivo alerta de novo; Telegram indisponível mantém o registro no DarkHub e não vaza token; projeto sem destino durável não grava evidência; histórico não é apagado por idade."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  }
+]

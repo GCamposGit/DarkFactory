@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Métricas de cobertura do domínio por projeto",
+    "demand_text": "Produzir, para cada projeto habilitado, métricas de cobertura do domínio que separem controles e dependências avaliados, desconhecidos, omitidos e com evidência vencida, a partir de versões resolvidas do ambiente identificado (requisito declarado não comprova versão instalada). Ausência de advisory ou falha de fonte deve aparecer como desconhecido ou falha, nunca como ausência de vulnerabilidade. Expor as métricas por biblioteca e CLI headless, com proveniência da fonte e do ambiente."
+  },
+  {
+    "title": "Custo e consumo medidos por projeto e execução",
+    "demand_text": "Apresentar custo e consumo da operação do domínio por projeto e por execução, distinguindo valor medido de estimativa, reusando o contador de orçamento do portfólio e os limites por projeto já exigidos no perfil. Sem baseline, nenhum limiar adicional de cobertura é introduzido; apenas o registro medido e a comparação com o limite autorizado."
+  },
+  {
+    "title": "Painéis operacionais no DarkHub com isolamento por projeto",
+    "demand_text": "Ampliar os painéis existentes do DarkHub com a visão operacional do domínio: projetos habilitados e bloqueados com motivo, cobertura, custo, pendências de reteste e evidências. Evidência fica restrita ao projeto a que pertence, com isolamento verificado; cadastro de projeto não concede acesso novo a evidência."
+  },
+  {
+    "title": "Provas periódicas de reteste e demonstração real em darkfac",
+    "demand_text": "Executar as provas periódicas de reteste conforme o prazo por perfil, com retomada concorrente, deduplicação persistente, reavaliação por evento e rechecagem após correção, registrando a prova no destino durável autorizado. Demonstrar ponta a ponta no projeto darkfac, com versões resolvidas e ambiente identificado, usando integração real e não mock."
+  },
+  {
+    "title": "Reconciliação da baseline do domínio e da divergência de USR-449",
+    "demand_text": "Reconciliar a base entregue do domínio com as dependências citadas em rodadas anteriores (QualityCycle e core/security não encontrados nos caminhos inspecionados) e resolver a divergência de registro de USR-449, com evidência de leitura do store de controle, antes de qualquer componente novo ser proposto sobre essa base."
+  }
+]
