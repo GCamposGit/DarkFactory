@@ -1,0 +1,105 @@
+[
+  {
+    "id": "T1",
+    "title": "Contrato de origem (medido/estimado/ausente) e agregação por execução sobre os ledgers existentes",
+    "goal": "Rotular cada valor de custo e consumo com a origem certa e agregar por projeto e por execução, reaproveitando TicketCostRecord e cost_by_ticket, sem nunca transformar ausência em zero nem somar estimado com medido sem rótulo.",
+    "files_hint": [
+      "core/portfolio/models.py",
+      "core/usage/ticket_cost.py",
+      "core/usage/ledger.py",
+      "tests/test_ticket_cost*.py"
+    ],
+    "acceptance": [
+      "O Enum CostOrigin (medido, estimado, ausente) e os modelos UsageEntry e BudgetComparison são Pydantic v2 com type hints.",
+      "api_cost_usd vindo do provedor ou do harness é classificado como medido; implicit_cost_usd da tabela de preços, como estimado.",
+      "Harness de assinatura sem custo em moeda registra o consumo medido (weekly/five_hour delta) com custo em moeda None ou estimado rotulado, nunca inventado.",
+      "Registro sem delta e sem custo sai como origem ausente e custo None; nenhum caminho devolve 0.0 nesse caso.",
+      "TicketCost expõe measured_usd, estimated_usd e missing_sources separados; total_cost_usd continua para compatibilidade.",
+      "usage_by_execution(project_id) agrega por execução filtrando pelo projeto.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Consolidar os testes de cost_by_ticket num teste parametrizado que cubra medido, estimado, ausente e assinatura sem moeda, e confira que medido e estimado ficam em campos separados.",
+      "Teste de que a ausência de fonte gera origem ausente e custo None, e não 0.0."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Limite obrigatório por projeto, teto global e bloqueio fail-closed na admissão",
+    "goal": "Remover o limite padrão silencioso do PortfolioBudgetManager, exigir limite explícito por projeto, aplicar o teto global e bloquear novas execuções com motivo registrado quando faltar limite ou quando um limite for atingido.",
+    "files_hint": [
+      "core/portfolio/budget_manager.py",
+      "core/portfolio/models.py",
+      "core/portfolio/scheduler.py",
+      "core/portfolio/router_optimizer.py",
+      "core/workflow/qualified_routes.py",
+      "run_ticket.py",
+      "tests/test_portfolio_budget*.py"
+    ],
+    "acceptance": [
+      "get_budget não cria mais limite padrão; projeto sem limite explícito fica BLOCKED com reason 'limite_ausente'.",
+      "check_execution_allowed(project_id) devolve deny com motivo para limite ausente, limite do projeto atingido ou teto global atingido, e allow nos outros casos.",
+      "A admissão de execução (scheduler/run_ticket) consulta check_execution_allowed e falha fechada, registrando o motivo.",
+      "record_spend aceita origem e guarda o estimado em campo separado (estimated_spent_usd); o percentual medido e o percentual total são calculados à parte.",
+      "Os chamadores atuais (router_optimizer, qualified_routes, hub) continuam funcionando.",
+      "Projetos registrados sem limite explícito geram um item OA-NNN em .factory/owner_actions/owner_actions.json pedindo ao owner que defina o limite, sem valor inventado.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Substituir os testes de limite padrão do budget manager por testes de limite ausente bloqueando, limite atingido bloqueando, teto global bloqueando e caminho permitido.",
+      "Teste de admissão: execução negada não inicia e registra o motivo."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Alertas deduplicados de limite próximo, excedido, ausente e medição ausente",
+    "goal": "Emitir alertas acionáveis no DarkHub e no Telegram, reaproveitando _send_telegram_alert e owner_actions, sem repetir alerta inalterado.",
+    "files_hint": [
+      "core/portfolio/budget_manager.py",
+      "core/notifications",
+      "core/owner_actions",
+      "tests/test_portfolio_budget*.py"
+    ],
+    "acceptance": [
+      "Os tipos limite_proximo, limite_excedido, limite_ausente e medicao_ausente geram alerta no DarkHub e no Telegram (quando configurado).",
+      "Alerta com a mesma chave (projeto, tipo, status) não é reenviado; mudança de estado gera alerta novo.",
+      "Falha ao enviar ao Telegram vira log estruturado sem vazar credencial e não derruba o fluxo.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Teste parametrizado de dedupe: mesmo estado não reenvia, transição envia, com o gateway de Telegram falso."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Painel de custo no DarkHub por projeto e por execução, com documentação",
+    "goal": "Expor no DarkHub a comparação medido/estimado/limite/% por projeto e o detalhe por execução, com isolamento por projeto, e atualizar manual, FASE_ATUAL e learning pack.",
+    "files_hint": [
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/backend/service_progress.py",
+      "hub/frontend",
+      "docs/manual/roteamento.md",
+      "docs/manual/dicionario_dados.md",
+      "docs/FASE_ATUAL.md"
+    ],
+    "acceptance": [
+      "GET /api/portfolio/costs devolve a BudgetComparison de cada projeto com measured_usd, estimated_usd, limit_usd, percentuais, status e motivo.",
+      "GET /api/portfolio/projects/{project_id}/costs devolve só as execuções daquele projeto, com origem por linha, sem evidência bruta nem credencial.",
+      "O painel mostra medido e estimado em colunas separadas, o selo 'ausente' no lugar de 0 e o motivo de bloqueio visível.",
+      "Projeto sem destino durável autorizado aparece como 'destino_nao_autorizado' e não tem registros persistidos.",
+      "Manual, docs/FASE_ATUAL.md e learning pack foram atualizados na mesma entrega; docs_sync passa.",
+      "python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Teste de API com TestClient: isolamento por projeto, origem por linha e valor ausente serializado como null (não 0). Consolidar com os testes atuais de /api/portfolio."
+    ],
+    "smoke": [
+      "/api/portfolio/costs",
+      "/api/portfolio/projects/darkfac/costs"
+    ]
+  }
+]
