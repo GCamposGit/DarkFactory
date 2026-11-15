@@ -10,8 +10,5 @@
 - (technical) Se o store de controle estiver indisponível ou ilegível durante a reconciliação, como proceder? -> **Falhar fechado: marcar a reconciliação de USR-449 como bloqueada com motivo visível e não inferir o estado por outras fontes** (A demanda exige evidência de leitura do store. Inferir por outra fonte contradiz a premissa de não concluir que o store está disponível e esconderia a falha.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [business] Qual é a fonte de verdade para reconciliar USR-449 quando o registro divergir entre o store de controle (.factory/demands/demands.json), o HANDOFF (PR #846 com CI vermelho, blocked deploy_evidence_missing) e o GitHub? (id=q1)
-- [intent] Se QualityCycle e core/security realmente não existirem na base entregue, o que acontece com as dependências citadas em rodadas anteriores? (id=q2)
+- [business] Qual é a fonte de verdade para reconciliar USR-449 quando o registro divergir entre o store de controle (.factory/demands/demands.json), o HANDOFF (PR #846 com CI vermelho, blocked deploy_evidence_missing) e o GitHub? -> **Store de controle prevalece; GitHub e HANDOFF servem de evidência e a divergência vira correção de registro** (respondida pelo owner)
+- [intent] Se QualityCycle e core/security realmente não existirem na base entregue, o que acontece com as dependências citadas em rodadas anteriores? -> **Tratar como premissas inválidas: reconciliar o escopo sobre o que existe (CloudCoordinator, FeederCycle, BacklogFeeder, ProjectRegistry) e registrar tickets para o que faltar** (respondida pelo owner)
