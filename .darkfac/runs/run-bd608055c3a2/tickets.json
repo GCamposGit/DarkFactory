@@ -1,0 +1,160 @@
+[
+  {
+    "id": "T1",
+    "title": "Perfil operacional e grants explícitos",
+    "goal": "Definir a habilitação operacional fora do cadastro de projetos, com bloqueios determinísticos quando faltar perfil, acesso, destino, prazo de reteste ou limite de custo.",
+    "files_hint": [
+      "core/projects/operational.py",
+      ".factory/project_operations.json",
+      "tests/test_project_operational_access.py",
+      "docs/manual/paineis_operacionais.md"
+    ],
+    "acceptance": [
+      "O registro operacional modela perfil e grants como registros separados, sem valores secretos.",
+      "Cadastrar um ProjectDescriptor não cria perfil nem grant e mantém o projeto bloqueado.",
+      "A habilitação exige perfil ativo, ao menos um grant explícito aplicável, destino durável autorizado, prazo de reteste positivo e limite financeiro explícito.",
+      "Cada configuração ausente ou inválida produz código e mensagem de bloqueio estáveis para exibição no DarkHub.",
+      "O perfil inicial de darkfac é explícito; os demais projetos continuam bloqueados até configuração própria.",
+      "python scripts/line_validate.py passa e o portão oficial termina com [HARNESS_PASS]."
+    ],
+    "tests_to_add": [
+      "Consolidar os testes multiprojeto em um teste comportamental que registre um projeto e prove que ele continua sem perfil, sem grant e bloqueado.",
+      "Testar separadamente cada motivo de bloqueio e a transição para habilitado somente após todos os requisitos explícitos."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Repositório permanente de evidências isoladas",
+    "goal": "Persistir e consultar evidências por projeto sem permitir enumeração ou leitura cruzada por lista, ID, download ou agregação.",
+    "files_hint": [
+      "core/projects/evidence.py",
+      "core/projects/operational.py",
+      "tests/test_project_evidence_isolation.py",
+      "docs/manual/paineis_operacionais.md"
+    ],
+    "acceptance": [
+      "Toda evidência possui project_id, execution_id, tipo, fonte e versão resolvida, timestamps UTC, validade e locator do artefato.",
+      "A gravação é append-only no destino durável autorizado pelo perfil; projeto bloqueado ou sem destino não armazena nada.",
+      "Lista, detalhe, download e agregação exigem principal com grant para o projeto solicitado e aplicam project_id na consulta ao store.",
+      "No contexto do projeto A, o ID de uma evidência do projeto B responde como não encontrado e não revela metadados, contagens ou existência.",
+      "Histórico e evidências não são removidos automaticamente; correções e retestes criam novos registros vinculados.",
+      "python scripts/line_validate.py passa e o portão oficial termina com [HARNESS_PASS]."
+    ],
+    "tests_to_add": [
+      "Substituir testes de forma de evidência por um cenário A/B que prove isolamento em lista, ID direto, download e agregação.",
+      "Testar que cadastro, perfil e grant são eventos independentes e que falha de destino não deixa registro parcial."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Projeção de cobertura, custo e retestes",
+    "goal": "Produzir uma visão headless por projeto e execução, reutilizando as fontes existentes e representando explicitamente desconhecidos e evidências vencidas.",
+    "files_hint": [
+      "core/projects/operations_view.py",
+      "core/usage/ledger.py",
+      "core/workflow/job_board.py",
+      "tests/test_project_operations_view.py"
+    ],
+    "acceptance": [
+      "A projeção lista projetos habilitados e bloqueados com todos os motivos aplicáveis.",
+      "Cobertura de controles e dependências usa somente evaluated, unknown, omitted ou expired, com totais e itens rastreáveis.",
+      "Fonte indisponível, advisory ausente ou evidência insuficiente resulta em unknown, nunca em ausência de vulnerabilidade.",
+      "Evidência vencida pelo prazo vigente do perfil passa para expired e gera pendência de reteste sem apagar o histórico.",
+      "Custos são agregados por projeto e execution_id, mantendo measured_cost e estimated_cost em campos separados; eventos sem project_id ficam não atribuídos.",
+      "A integração reconcilia capacidades eventualmente entregues pelo USR-449 e, quando a fonte não existe, informa source_unavailable em vez de criar um ciclo concorrente.",
+      "python scripts/line_validate.py passa e o portão oficial termina com [HARNESS_PASS]."
+    ],
+    "tests_to_add": [
+      "Testar os quatro estados de cobertura, inclusive falha de fonte e ausência de advisory como unknown.",
+      "Testar vencimento com clock UTC injetado e mudança do prazo do perfil.",
+      "Testar agregação de custos medidos, estimados e não atribuídos sem dupla contagem."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Limites operacionais e alertas deduplicados",
+    "goal": "Bloquear novas execuções no primeiro teto atingido e notificar apenas mudanças acionáveis, falhas ou vencimentos.",
+    "files_hint": [
+      "core/portfolio/budget_manager.py",
+      "core/line/admission.py",
+      "core/projects/operations_alerts.py",
+      "tests/test_project_operations_policy.py"
+    ],
+    "acceptance": [
+      "A admissão exige limite explícito do projeto e verifica atomicamente esse limite junto aos tetos globais existentes antes de reservar trabalho.",
+      "A execução não inicia quando o limite do projeto ou qualquer teto global estiver esgotado, registrando qual limite bloqueou.",
+      "Estimativas servem para reserva; o consumo final preserva o valor medido sem sobrescrever a estimativa original.",
+      "Novidade acionável, falha de fonte/execução e prazo vencido geram alerta no DarkHub e Telegram pela infraestrutura existente.",
+      "A fingerprint persistente inclui projeto, condição e versão relevante; reinício ou reavaliação inalterada não repete alerta.",
+      "Resolução seguida de nova ocorrência gera um novo alerta, enquanto projeto sem grant não inclui detalhes de evidência na mensagem.",
+      "python scripts/line_validate.py passa e o portão oficial termina com [HARNESS_PASS]."
+    ],
+    "tests_to_add": [
+      "Testar concorrência de duas reservas próximas ao teto e provar que nenhuma ultrapassa o menor limite entre projeto e global.",
+      "Testar deduplicação após recriar o serviço e novo alerta após resolução e recorrência.",
+      "Testar que o payload de alerta não contém evidência de projeto sem grant."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "API operacional escopada do DarkHub",
+    "goal": "Expor a projeção e as evidências por endpoints autenticados que mantenham o isolamento no servidor.",
+    "files_hint": [
+      "hub/backend/models.py",
+      "hub/backend/service_operations.py",
+      "hub/backend/api.py",
+      "tests/test_project_operations_api.py"
+    ],
+    "acceptance": [
+      "GET /api/operations/projects retorna somente projetos visíveis ao principal e seus estados habilitado ou bloqueado.",
+      "GET /api/operations/projects/{project_id} retorna cobertura, custos medidos e estimados, pendências de reteste e fontes da projeção.",
+      "Os endpoints de lista, detalhe e download de evidência ficam sob /api/operations/projects/{project_id}/evidence e validam principal, grant e project_id antes da leitura.",
+      "Agregados e contagens usam a mesma consulta escopada das evidências; não há filtragem posterior em memória.",
+      "Principal sem grant recebe resposta sem vazamento de existência, e falha da fonte canônica não é convertida em lista vazia saudável.",
+      "Os modelos da API limitam tamanho de locators e diagnósticos e não retornam caminho local ou credencial bruta.",
+      "python scripts/line_validate.py passa e o portão oficial termina com [HARNESS_PASS]."
+    ],
+    "tests_to_add": [
+      "Testar por HTTP que o contexto A não acessa evidência B por lista, ID, download nem agregado.",
+      "Testar projetos bloqueados, fonte indisponível e diferenciação entre 401/403 autorizado pela política e 404 sem vazamento.",
+      "Testar que os campos measured_cost e estimated_cost permanecem distintos no JSON."
+    ],
+    "smoke": [
+      "/health",
+      "/api/portfolio"
+    ]
+  },
+  {
+    "id": "T6",
+    "title": "Painéis operacionais e demonstração darkfac",
+    "goal": "Adicionar a visão operacional ao portfólio existente e validar o fluxo real de darkfac sem criar nova aplicação.",
+    "files_hint": [
+      "hub/frontend/portfolio.js",
+      "hub/frontend/index.html",
+      "tests/js/project_operations.test.cjs",
+      "docs/manual/paineis_operacionais.md"
+    ],
+    "acceptance": [
+      "O drawer de portfólio mostra projetos habilitados e bloqueados, incluindo motivos de bloqueio acionáveis.",
+      "O detalhe do projeto apresenta cobertura por estado, custos medidos versus estimados, execuções, pendências de reteste e evidências autorizadas.",
+      "A UI nunca recebe evidências de outro projeto e trata acesso negado, fonte indisponível e unknown sem exibir estado saudável falso.",
+      "A demonstração em darkfac usa integração real, identifica ambiente e versões das fontes e percorre perfil, grant, evidência, projeção, API e painel.",
+      "Uma evidência vencida real ou fixture persistida no ambiente identificado aparece como reteste pendente, sem apagar a versão anterior.",
+      "Manual, docs/FASE_ATUAL.md e learning pack são atualizados com o comportamento entregue e a reconciliação final do USR-449.",
+      "python scripts/line_validate.py passa, o portão oficial termina com [HARNESS_PASS] e as checagens pós-deploy respondem 2xx."
+    ],
+    "tests_to_add": [
+      "Adicionar teste JS comportamental para alternar projetos, renderizar bloqueios e estados de cobertura e impedir reaproveitamento de dados do projeto anterior.",
+      "Testar tratamento visual distinto para custo medido, estimado, unknown e evidência vencida, sem assertions de mera presença de texto estático."
+    ],
+    "smoke": [
+      "/",
+      "/health",
+      "/api/portfolio"
+    ]
+  }
+]
