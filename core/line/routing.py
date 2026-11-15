@@ -912,23 +912,23 @@ def resolve_pareto_openrouter_model(
 
 
 _OPENROUTER_CARD_TTL_S = 120.0
-_openrouter_card_cache: tuple[float, Any] = (0.0, None)
+_openrouter_card_cache: tuple[float, Any, Any] = (0.0, None, None)
 
 
 def _openrouter_card() -> Any:
     """Credit card of the OpenRouter account (balance and month spend), cached briefly; None on failure."""
     global _openrouter_card_cache
-    stamp, card = _openrouter_card_cache
-    if card is not None and time.monotonic() - stamp < _OPENROUTER_CARD_TTL_S:
-        return card
     try:
         from core.usage.api_credits import ApiCreditsMonitor
 
+        stamp, card, source = _openrouter_card_cache
+        if card is not None and source is ApiCreditsMonitor and time.monotonic() - stamp < _OPENROUTER_CARD_TTL_S:
+            return card
         card = ApiCreditsMonitor().inspect_openrouter()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to verify OpenRouter credits: %s", exc)
         return None
-    _openrouter_card_cache = (time.monotonic(), card)
+    _openrouter_card_cache = (time.monotonic(), card, ApiCreditsMonitor)
     return card
 
 

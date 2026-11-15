@@ -186,8 +186,7 @@ def test_check_openrouter_monthly_budget_triggers_alert_when_exceeding_threshold
             return fake_card
 
     monkeypatch.setattr("core.usage.api_credits.ApiCreditsMonitor", _FakeMonitor)
-    monkeypatch.setattr("core.line.routing._openrouter_card_cache", (0.0, None))
-
+    
     dispatched_events = []
 
     class _FakeNotificationService:
