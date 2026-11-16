@@ -8,6 +8,11 @@ está definida, senão o SQLite local `.factory/control.db`. Tabelas (criadas co
 - `tickets (project_id, ticket_id, status, payload, updated_at)`
 - `owner_actions (action_id, status, payload, updated_at)`
 
+No Hub em produção, o compose preenche `DARKFAC_HF02_DATABASE_URL` com
+`DARKHUB_CONTROL_DATABASE_URL` quando a primeira está vazia: as duas apontam para o mesmo
+Postgres. Com `DARKFAC_OWNER_ACTIONS_MODE=control` e nenhum banco configurado, a fila do owner
+responde "indisponível" (503) em vez de aparecer vazia.
+
 ## Registrar um ticket
 
 ```powershell

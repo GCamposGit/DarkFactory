@@ -330,3 +330,16 @@ def test_ui_escapes_untrusted_text_and_has_no_inline_command_injection() -> None
     assert "escapeInterventionsHtml(step.command)" in card
     # commands are copied by index from state, never interpolated into an onclick handler
     assert "copyOwnerActionCommand(" in card and "step.command)}'" not in card
+
+
+def test_control_mode_without_database_is_unavailable_not_empty(monkeypatch) -> None:
+    import pytest
+
+    from core.owner_actions import control_queue
+
+    monkeypatch.setattr(control_queue, "is_configured", lambda: False)
+    monkeypatch.setenv("DARKFAC_OWNER_ACTIONS_MODE", "control")
+    with pytest.raises(control_queue.ControlQueueUnavailable):
+        control_queue.list_control_rows()
+    monkeypatch.delenv("DARKFAC_OWNER_ACTIONS_MODE")
+    assert control_queue.list_control_rows() == []
