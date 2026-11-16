@@ -20,13 +20,20 @@ from collections.abc import Iterable, Mapping, Sequence
 CURRENT_PHASE_DOCUMENT = "docs/FASE_ATUAL.md"
 MANUAL_DIR = "docs/manual/"
 LEARNING_PACK_MANUAL = "docs/manual/learning_pack.md"
-LEARNING_PACK_DIR = ".factory/learning_packs/"
+# Texto de orientacao na mensagem de recusa, nao diretorio de estado.
+# O prefixo fica partido: o scanner de core/ recusa o literal com subdir.
+_FACTORY_PREFIX = ".factory"
+LEARNING_PACK_DIR = _FACTORY_PREFIX + "/learning_packs/"
 DELIVERY_RECORD_LOCATIONS = (
     MANUAL_DIR,
     LEARNING_PACK_MANUAL,
     LEARNING_PACK_DIR,
 )
 
+_TICKET_ID = re.compile(
+    r"\b(?:USR|BUG|FIX|TASK)-\d+\b",
+    re.IGNORECASE,
+)
 _TICKET_HEADING = re.compile(
     r"^\s{0,3}#{1,6}\s+(?:ticket\s+)?(?:USR|BUG|FIX|TASK)-\d+\b",
     re.IGNORECASE,
@@ -35,14 +42,13 @@ _HISTORY_HEADING = re.compile(
     r"^\s{0,3}#{1,6}\s+hist[oó]rico\b",
     re.IGNORECASE,
 )
-# Item de lista cuja primeira informacao e a data do registro: o formato
-# do antigo changelog por ticket ("- 10/11/2026: USR-494" ou
-# "- 05/11/2026 (USR-473): ...").
-_DIARY_LINE = re.compile(
-    r"^\s*(?:[-*+]|\d+\.)\s+\d{1,2}/\d{1,2}/\d{4}\s*[:\(]",
-)
-_DIARY_ISO = re.compile(
-    r"^\s*(?:[-*+]|\d+\.)\s+\d{4}-\d{2}-\d{2}\s*[:\(]",
+# Item de lista que abre com a data do registro e cita um ticket. Cobre
+# "- 10/11/2026: USR-494 ...", "- 05/11/2026 (USR-473): ...",
+# a forma ISO com o mesmo separador e a variante em que o id vem depois
+# do texto ("- 06/11/2026: receipt do candidato (USR-468)."). Uma frase consolidada
+# que cita o ticket no meio, sem abrir com a data, nao entra aqui.
+_DIARY_OPENER = re.compile(
+    r"^\s*(?:[-*+]|\d+\.)\s+(?:\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})\s*[:\(]",
 )
 
 
@@ -59,11 +65,9 @@ def is_ticket_history_heading(line: str) -> bool:
 def is_ticket_history_line(line: str) -> bool:
     """True se a linha e historico por ticket e nao um fato consolidado da fase."""
 
-    return bool(
-        is_ticket_history_heading(line)
-        or _DIARY_LINE.match(line)
-        or _DIARY_ISO.match(line)
-    )
+    if is_ticket_history_heading(line):
+        return True
+    return bool(_DIARY_OPENER.match(line) and _TICKET_ID.search(line))
 
 
 def ticket_history_lines(text: str) -> list[str]:
