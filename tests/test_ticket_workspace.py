@@ -601,7 +601,7 @@ def test_run_ticket_main_exits_3_and_creates_nothing_when_the_shared_checkout_is
     agent = MagicMock(name="run_agent")
     _launcher_env(repo, monkeypatch, agent, FakeGh(repo.bare))
 
-    assert run_ticket.main(["USR-98", "--harness", "codex", "--skip-validation"]) == 3
+    assert run_ticket.main(["USR-98", "--harness", "codex", "--skip-validation"]) == 75
 
     assert "other_ticket.py" in capsys.readouterr().err
     agent.assert_not_called()

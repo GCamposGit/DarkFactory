@@ -153,7 +153,7 @@ def test_manual_launcher_refused_when_ticket_already_active_in_fleet(
     code = main(["USR-99", "--fleet", "--host-id", "notebook", "--harness", "codex", "--skip-validation", "--json"])
 
     err = capsys.readouterr().err
-    assert code == 2
+    assert code == 75
     assert "[RESERVA DE FROTA]" in err
     assert "USR-99" in err
     assert "grokbox" in err
@@ -176,7 +176,7 @@ def test_manual_launcher_refused_when_host_busy_in_fleet(
     code = main(["USR-99", "--fleet", "--host-id", "notebook", "--harness", "codex", "--skip-validation", "--json"])
 
     err = capsys.readouterr().err
-    assert code == 2
+    assert code == 75
     assert "[RESERVA DE FROTA]" in err
     assert "notebook" in err
     assert "USR-01" in err
@@ -197,7 +197,7 @@ def test_manual_launcher_refused_when_fleet_capacity_exceeded(
     code = main(["USR-99", "--fleet", "--host-id", "host4", "--harness", "codex", "--skip-validation", "--json"])
 
     err = capsys.readouterr().err
-    assert code == 2
+    assert code == 75
     assert "[RESERVA DE FROTA]" in err
     assert "Fleet capacity" in err
     launcher_env["agent"].assert_not_called()

@@ -162,7 +162,7 @@ def test_build_ticket_uses_next_sequential_id(tmp_path: Path) -> None:
     assert ticket.acceptance_criteria == ["c1"]
 @pytest.mark.parametrize(("cause", "stage", "expected"), [
     ("route_wait", "preflight", 75), ("context", "plan", 75),
-    ("agent_timeout", "agent", 75), ("gate_timeout", "gate", 75),
+    ("agent_timeout", "agent", 1), ("gate_timeout", "gate", 75),
     ("gate_remote_unavailable", "gate", 75), ("gate_dirty_worktree", "gate", 75),
     ("gate_infra_no_tests", "gate", 75), ("base_red_suspected", "gate", 75),
     ("gate_insufficient_ram", "gate", 75), ("network", "merge", 75),

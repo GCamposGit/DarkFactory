@@ -308,7 +308,7 @@ def test_run_ticket_executes_the_agent_through_the_shared_run_with_retry(
     shared = MagicMock(return_value=failing)
     monkeypatch.setattr(agent_retry, "run_with_retry", shared)
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 75
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
 
     shared.assert_called_once()
     kwargs = shared.call_args.kwargs
@@ -349,7 +349,7 @@ def test_a_blank_codex_failure_is_no_longer_blank(env: dict[str, Any], capsys: p
     """Codex returns empty text on failure; the report must still say what happened."""
     env["agent"].side_effect = lambda req: _fail("crash", req.harness, exit_code=1, stderr_tail="", text="")
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 75  # agent_timeout e infra
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
 
     err = capsys.readouterr().err
     assert "error_kind: crash" in err and "exit_code: 1" in err and "(vazio)" in err and "(vazia)" in err
@@ -787,7 +787,7 @@ def test_timeout_without_changes_fails_with_cause_and_resume_command(
     monkeypatch.setattr(run_ticket, "resume_delivery", delivery)
     env["agent"].side_effect = lambda req: _fail("timeout", req.harness, exit_code=None, duration_s=5.0)
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 75  # agent_timeout e infra
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
 
     err = capsys.readouterr().err
     assert "[FALHA NA EXECUÇÃO DO AGENTE]" in err

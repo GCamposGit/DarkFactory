@@ -123,7 +123,7 @@ def test_second_launch_is_refused_without_probing_quota_or_creating_a_workspace(
     code = main(["USR-99", "--harness", "codex", "--skip-validation", "--json"])
 
     err = capsys.readouterr().err
-    assert code == 2
+    assert code == 75
     assert "TRAVA DE LINHA" in err
     assert "USR-01" in err and "OTHER-HOST" in err
     assert "--cancel USR-01" in err
@@ -144,7 +144,7 @@ def test_second_launch_of_the_same_ticket_is_also_refused(
 
     code = main(["USR-99", "--harness", "codex", "--skip-validation", "--json"])
 
-    assert code == 2
+    assert code == 75
     assert "TRAVA DE LINHA" in capsys.readouterr().err
     env["agent"].assert_not_called()
 

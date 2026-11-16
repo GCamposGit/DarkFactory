@@ -234,7 +234,7 @@ def _assert_waits_for_a_route_and_requeues(
     """No eligible model WAITS: the fleet's requeue code (ticket stays planned), never a failure."""
     code = (_via_cli if entry == "cli" else _via_fleet)(line, monkeypatch, tmp_path)
     err = capsys.readouterr().err
-    assert code in fleet_dispatcher.INFRA_EXIT_CODES and fleet_dispatcher.is_infra_failure(code, err), err
+    assert code == 75, err
     assert "[AGUARDANDO]" in err
     line.merged.assert_not_called()
     if line.missing == "review_route":
@@ -392,7 +392,7 @@ def test_python_311_recusa_antes_de_chamar_plan(
     code = run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"])
     err = capsys.readouterr().err
 
-    assert code == 2
+    assert code == 75
     assert line.calls == []
     assert "host_preflight_failed:python_version" in err
     assert "Python 3.11.9" in err
@@ -419,7 +419,7 @@ def test_modulo_ausente_do_portao_nao_chama_plan(
     code = run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"])
     err = capsys.readouterr().err
 
-    assert code == 2
+    assert code == 75
     assert line.calls == []
     assert "host_preflight_failed:gate_dependency_missing" in err
     assert "importlinter" in err

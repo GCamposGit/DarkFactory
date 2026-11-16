@@ -83,6 +83,7 @@ IMPORT_RESTART_SHA_ENV = "DARKFAC_DISPATCHER_IMPORT_RESTART_SHA"
 LOG_DIR = state_root() / "runs" / "fleet_dispatcher_logs"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
+USAGE_PUBLISH_SEC = 300.0
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
 MIN_NOTEBOOK_WORKERS = 1
 LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -1317,6 +1318,21 @@ class FleetDispatcher:
         except Exception:  # noqa: BLE001 - sentinela nunca derruba o ciclo
             logger.exception("gancho do sentinela falhou")
 
+    def publish_usage(self, now: Optional[float] = None) -> None:
+        """Publica as cotas no Hub a cada 5 min, sem sonda paga; falha so registra em log."""
+        current = time.time() if now is None else now
+        if self.dry_run or current - getattr(self, "_usage_published_at", 0.0) < USAGE_PUBLISH_SEC:
+            return
+        self._usage_published_at = current
+        try:
+            from core.usage.sync_task import publish_once
+
+            result = publish_once()
+            if not result.ok:
+                logger.warning("publicacao de cotas no Hub falhou: %s", result.error)
+        except Exception:  # noqa: BLE001 - publicacao nunca derruba o ciclo
+            logger.exception("publicacao de cotas no Hub falhou")
+
     def run_forever(self, stop: Callable[[], bool] = lambda: False) -> None:
         while not stop():
             # --once nao entra aqui. Mudanca de SHA substitui antes do ciclo.
@@ -1332,6 +1348,7 @@ class FleetDispatcher:
                 return
             self.run_digest_hook()
             self.run_sentinel_hook()
+            self.publish_usage()
             time.sleep(self.config.cycle_sec)
 
 

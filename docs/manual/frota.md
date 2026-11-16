@@ -474,3 +474,5 @@ falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.
 Saida com codigo 75 (route_wait, no_build_route) e espera estruturada: aplica backoff persistido por ticket, mas nunca ativa a recuperacao global da frota. O mesmo vale para recusa por trava de linha ou reserva de outro ticket vivo (kind lock): fica registrada por ticket, sem recuperacao global.
 
 A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: aplica backoff infra sem consumir candidato nem acender a recuperacao global. O mesmo vale para a recusa `ja possui PR ativo` (ticket com PR aberto, codigo 2).
+
+O laço do despachante publica as cotas no Hub a cada 5 minutos por `core.usage.sync_task.publish_once()`, sem sonda paga. Falha de publicação fica só no log e não interrompe o ciclo.
