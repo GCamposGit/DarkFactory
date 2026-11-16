@@ -14612,5 +14612,36 @@
     "dependencies": [],
     "created_at": "2026-11-14T21:52:09.597471Z",
     "updated_at": "2026-11-16T11:02:28.629156Z"
+  },
+  {
+    "id": "USR-512",
+    "project_id": "darkfac",
+    "title": "Cascata tenta modelo Grok pelo Codex e esgota revisao preservada",
+    "origin": "user",
+    "status": "validating",
+    "delivery_evidence": "technical_failed: rebase_conflict: core/line/pending_delivery.py, docs/FASE_ATUAL.md",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Na retomada oficial de USR-467 em 13/11, review_route.json gravou harness=codex com modelo da família Grok no nível 4; Codex entrou em cooldown por crash e o launcher saiu com review_agent_exhausted. implementation_families inclui autores de mais de uma família; rota de contingência deve continuar compatível com seu CLI e os bloqueios de política vigentes. pending_delivery fica bloqueado e o candidato com gate vigente segue preservado. Reproduzir a seleção em core/line/review_cascade.py e investigar também reabertura da espera quando há rota independente válida.",
+    "core_journey": [
+      "Na retomada oficial de USR-467 em 13/11, review_route.json gravou harness=codex com modelo da família Grok no nível 4; Codex entrou em cooldown por crash e o launcher saiu com review_agent_exhausted. implementation_families inclui autores de mais de uma família; rota de contingência deve continuar compatível com seu CLI e os bloqueios de política vigentes. pending_delivery fica bloqueado e o candidato com gate vigente segue preservado. Reproduzir a seleção em core/line/review_cascade.py e investigar também reabertura da espera quando há rota independente válida."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Seleção de revisão nunca retorna combinação harness/modelo incompatível; teste focado cobre candidato com múltiplas famílias e Grok excluído após JSON inválido.",
+      "Ausência de revisão válida persiste espera com causa estruturada e preserva portão e candidato; retomada só publica com evidência de revisão exigida.",
+      "Verificar retomada de USR-467 com rota elegível sem outro BUILD."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-13T22:57:34.949586Z",
+    "updated_at": "2026-11-14T01:53:46.894735Z"
   }
 ]
