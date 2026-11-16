@@ -73,6 +73,20 @@ class Env:
         return 0
 
 
+def _main_thread_sleep(record):
+    """``fd.time`` is the real ``time`` module: threads left by other tests also call the patched
+    ``sleep``. Only the thread running the test counts; the others just yield."""
+    import threading
+
+    owner = threading.get_ident()
+
+    def fake_sleep(seconds):
+        if threading.get_ident() == owner:
+            record(seconds)
+
+    return fake_sleep
+
+
 def test_selection_filters():
     dem = [_d("USR-01"), _d("USR-02", tags=["congelado-v0"]), _d("USR-03", tags=["waiting_human"]),
            _d("USR-04", deps=["USR-09"]), _d("USR-05", deps=["USR-06"]), _d("USR-06", "completed"), _d("USR-07")]
@@ -1891,7 +1905,7 @@ def test_stale_import_restarts_once_after_cycle_when_head_is_unchanged(
         sentinel_hook=lambda: events.append("sentinel"),
     )
     seen = _track_cycle(dispatcher, events)
-    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+    monkeypatch.setattr(fd.time, "sleep", _main_thread_sleep(lambda _seconds: events.append("sleep")))
     handle, child, checkout, removed, planted = _plant_live_work(dispatcher, tmp_path, monkeypatch)
     try:
         dispatcher.run_forever(stop=_stop_after(1))
@@ -1936,7 +1950,7 @@ def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
         sentinel_hook=lambda: events.append("sentinel"),
     )
     seen = _track_cycle(dispatcher, events)
-    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    monkeypatch.setattr(fd.time, "sleep", _main_thread_sleep(lambda seconds: events.append(f"sleep:{seconds}")))
     dispatcher.run_forever(stop=_stop_after(1))
     assert execs == []
     assert events == ["cycle", "digest", "sentinel", "sleep:0"]
@@ -2013,7 +2027,7 @@ def test_stale_import_exec_failure_is_logged_and_does_not_exec_twice(
         sentinel_hook=lambda: events.append("sentinel"),
     )
     seen = _track_cycle(dispatcher, events)
-    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    monkeypatch.setattr(fd.time, "sleep", _main_thread_sleep(lambda seconds: events.append(f"sleep:{seconds}")))
     try:
         dispatcher.run_forever(stop=_stop_after(2))
         assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
@@ -2050,7 +2064,7 @@ def test_stale_import_without_complete_sha_does_not_replace(tmp_path: Path, monk
         sentinel_hook=lambda: events.append("sentinel"),
     )
     seen = _track_cycle(dispatcher, events)
-    monkeypatch.setattr(fd.time, "sleep", lambda seconds: events.append(f"sleep:{seconds}"))
+    monkeypatch.setattr(fd.time, "sleep", _main_thread_sleep(lambda seconds: events.append(f"sleep:{seconds}")))
     dispatcher.run_forever(stop=_stop_after(1))
     assert execs == []
     assert events == ["cycle", "digest", "sentinel", "sleep:0"]
