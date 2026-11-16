@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -79,6 +79,190 @@ def test_selection_filters():
     q, sk = fd.select_tickets(dem, busy_ids={"USR-07"})
     assert q == ["USR-01", "USR-05"]
     assert sk["USR-02"].startswith("tag:") and sk["USR-04"] == "dependencia_aberta" and sk["USR-07"] == "em_voo"
+
+
+def test_active_canonical_reservation_blocks_dispatch_until_lease_expires(tmp_path):
+    from core.workflow.control_store import SQLiteControlStore
+
+    now = datetime.now(timezone.utc)
+    now_epoch = [now.timestamp()]
+    control_store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    external = control_store.reserve_cycle(
+        project_id="darkfac",
+        ticket_id="USR-449",
+        run_id="external-run-449",
+        host_id="grokbox",
+        now=now,
+        lease_duration_sec=2,
+    )
+    launched = []
+
+    def launch(ticket_id, host, **kwargs):
+        launched.append((ticket_id, host.id))
+        return fd.InFlight(ticket_id, host.id, Handle(), run_id=kwargs.get("run_id"))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("grokbox", 1, "http://g")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [_d("USR-453")],
+        probe=lambda host: fd.HostProbe(True, "ready"),
+        launch=launch,
+        clock=lambda: now_epoch[0],
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        control_store_factory=lambda: control_store,
+    )
+
+    occupied = dispatcher.run_cycle()
+    assert launched == []
+    assert occupied["free_hosts"] == []
+    assert occupied["idle_reasons"]["grokbox"] == "host_reserved:USR-449"
+    assert occupied["canonical_reservations"]["grokbox"]["run_id"] == "external-run-449"
+    assert control_store.get_reservation(external.reservation_id).status == "active"
+
+    now_epoch[0] = (now + timedelta(seconds=3)).timestamp()
+    expired = dispatcher.run_cycle()
+    assert launched == [("USR-453", "grokbox")]
+    assert control_store.get_reservation(external.reservation_id).status == "expired"
+    assert expired["dispatched"] == [{"ticket": "USR-453", "host": "grokbox"}]
+
+
+def test_reservation_created_by_probe_is_revalidated_before_launch_and_not_renewed(tmp_path):
+    from core.workflow.control_store import SQLiteControlStore
+
+    now = datetime.now(timezone.utc)
+    control_store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    external_reservation = None
+    launched = []
+
+    def probe(host):
+        nonlocal external_reservation
+        if external_reservation is None:
+            external_reservation = control_store.reserve_cycle(
+                project_id="darkfac",
+                ticket_id="USR-449",
+                run_id="external-run-449",
+                host_id=host.id,
+                now=now,
+                lease_duration_sec=300,
+            )
+        return fd.HostProbe(True, "ready")
+
+    def launch(ticket_id, host, **kwargs):
+        launched.append((ticket_id, host.id))
+        return fd.InFlight(ticket_id, host.id, Handle(), run_id=kwargs.get("run_id"))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("grokbox", 1, "http://g")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [_d("USR-453")],
+        probe=probe,
+        launch=launch,
+        clock=lambda: now.timestamp(),
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        control_store_factory=lambda: control_store,
+    )
+
+    cycle = dispatcher.run_cycle()
+
+    persisted = control_store.get_reservation(external_reservation.reservation_id)
+    assert launched == []
+    assert cycle["dispatched"] == []
+    assert cycle["free_hosts"] == []
+    assert cycle["idle_reasons"]["grokbox"] == "host_reserved:USR-449"
+    assert persisted.status == external_reservation.status == "active"
+    assert persisted.expires_at == external_reservation.expires_at
+
+
+@pytest.mark.parametrize("failure_point", ["factory", "list_active_reservations"])
+def test_canonical_reservation_read_failure_fails_closed(tmp_path, failure_point):
+    launched = []
+    probed = []
+
+    class BrokenControlStore:
+        def reconcile_fleet_reservations(self, now):
+            return None
+
+        def list_active_reservations(self):
+            raise OSError("canonical store unavailable")
+
+    def control_store_factory():
+        if failure_point == "factory":
+            raise OSError("canonical store unavailable")
+        return BrokenControlStore()
+
+    def probe(host):
+        probed.append(host.id)
+        return fd.HostProbe(True, "ready")
+
+    def launch(ticket_id, host, **kwargs):
+        launched.append((ticket_id, host.id))
+        return fd.InFlight(ticket_id, host.id, Handle(), run_id=kwargs.get("run_id"))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("grokbox", 1, "http://g")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [_d("USR-453")],
+        probe=probe,
+        launch=launch,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        control_store_factory=control_store_factory,
+    )
+
+    cycle = dispatcher.run_cycle()
+
+    assert probed == []
+    assert launched == []
+    assert cycle["dispatched"] == []
+    assert cycle["free_hosts"] == []
+    assert cycle["idle_reasons"]["grokbox"] == "canonical_reservations_unavailable"
+    assert cycle["reservation_error"] == "OSError"
+
+
+def test_canonical_reservation_failure_during_prelaunch_revalidation_fails_closed(tmp_path):
+    launched = []
+    list_calls = 0
+
+    class FailingSecondReadStore:
+        def reconcile_fleet_reservations(self, now):
+            return None
+
+        def list_active_reservations(self):
+            nonlocal list_calls
+            list_calls += 1
+            if list_calls == 2:
+                raise OSError("canonical store unavailable")
+            return []
+
+    def launch(ticket_id, host, **kwargs):
+        launched.append((ticket_id, host.id))
+        return fd.InFlight(ticket_id, host.id, Handle(), run_id=kwargs.get("run_id"))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("grokbox", 1, "http://g")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [_d("USR-453")],
+        probe=lambda host: fd.HostProbe(True, "ready"),
+        launch=launch,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        control_store_factory=FailingSecondReadStore,
+    )
+
+    cycle = dispatcher.run_cycle()
+
+    assert list_calls == 2
+    assert launched == []
+    assert cycle["dispatched"] == []
+    assert cycle["free_hosts"] == []
+    assert cycle["idle_reasons"]["grokbox"] == "canonical_reservations_unavailable"
+    assert cycle["reservation_error"] == "OSError"
 
 
 def test_infra_backoff_survives_dispatcher_restart_then_retries(tmp_path, monkeypatch):
@@ -1282,11 +1466,11 @@ def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypat
     e.d.config.recovery_tickets = ("USR-01", "USR-02")
     e.d.admission_store.set_recovery(active=True, cause="infra", fingerprint="fp")
     dispatch = e.d._dispatch_ticket
-    def attempt(host, probe, tid, demand, queue, idle, skipped, dispatched, now):
+    def attempt(host, probe, tid, demand, queue, idle, skipped, dispatched, now, reservation_state):
         if tid == "USR-01":
             skipped[tid] = blocked
             return
-        return dispatch(host, probe, tid, demand, queue, idle, skipped, dispatched, now)
+        return dispatch(host, probe, tid, demand, queue, idle, skipped, dispatched, now, reservation_state)
     monkeypatch.setattr(e.d, "_dispatch_ticket", attempt)
     cycle = e.d.run_cycle()
     assert e.launched == [("USR-02", "grokbox")]

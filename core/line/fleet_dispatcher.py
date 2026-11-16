@@ -606,6 +606,28 @@ def _reconcile_failure(exc: BaseException) -> dict[str, Any]:
     }
 
 
+def _default_control_store_factory() -> Any:
+    """Create the same canonical reservation store used by fleet workers."""
+    from core.line.store_selection import default_control_store
+
+    return default_control_store()
+
+
+def _reservation_is_live(reservation: Any, now: datetime) -> bool:
+    """Treat active and draining reservations as occupied until their lease expires."""
+    if str(getattr(reservation, "status", "")) not in {"active", "draining"}:
+        return False
+    try:
+        expires_at = datetime.fromisoformat(str(reservation.expires_at))
+    except (AttributeError, TypeError, ValueError):
+        # A malformed active lease must not make a host appear free.
+        logger.warning("canonical reservation has an unreadable expiry; preserving its host")
+        return True
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at.astimezone(timezone.utc) > now.astimezone(timezone.utc)
+
+
 class _UnwiredDemands:
     """Ledger vazio quando o processo nao e o daemon.
 
@@ -649,6 +671,7 @@ class FleetDispatcher:
         exec_fn: Optional[Callable[[str, Sequence[str]], Any]] = None,
         launch_argv: Optional[Sequence[str]] = None,
         demands_store_factory: Optional[Callable[[], Any]] = None,
+        control_store_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -694,6 +717,25 @@ class FleetDispatcher:
         self._launch_argv = tuple(launch_argv) if launch_argv is not None else tuple(sys.argv[1:])
         self._startup_sha = self._read_checkout_sha()
         self.demands_store_factory = demands_store_factory
+        self.control_store_factory = control_store_factory or _default_control_store_factory
+        self._control_store: Any = None
+
+    def _read_canonical_reservations(self, now: float) -> dict[str, Any]:
+        """Reconcile expired leases and return currently occupied hosts.
+
+        The dispatcher only observes canonical reservations. The owner of a
+        reservation remains responsible for renewing or releasing it.
+        """
+        if self._control_store is None:
+            self._control_store = self.control_store_factory()
+        instant = datetime.fromtimestamp(now, timezone.utc)
+        self._control_store.reconcile_fleet_reservations(instant)
+        reservations = self._control_store.list_active_reservations()
+        return {
+            str(reservation.host_id): reservation
+            for reservation in reservations
+            if _reservation_is_live(reservation, instant)
+        }
 
     def _read_checkout_sha(self) -> str | None:
         try:
@@ -973,6 +1015,7 @@ class FleetDispatcher:
         skipped: dict[str, str],
         dispatched: list[dict[str, str]],
         now: float,
+        reservation_state: dict[str, Any],
     ) -> None:
         project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
         candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or ticket_candidate_digest(tid))
@@ -1046,6 +1089,34 @@ class FleetDispatcher:
             return
         try:
             run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
+            try:
+                current_reservations = self._read_canonical_reservations(self.clock())
+            except Exception as exc:  # noqa: BLE001 - never launch with unknown canonical capacity
+                reservation_state["reservations"] = {}
+                reservation_state["error"] = type(exc).__name__
+                for configured_host in self.config.hosts:
+                    idle[configured_host.id] = "canonical_reservations_unavailable"
+                logger.error("canonical reservation revalidation failed for %s (%s)", host.id, type(exc).__name__)
+                self._release_reservation(InFlight(
+                    tid, host.id, None, project_id=project_id, candidate_digest=candidate,
+                    context_digest=context, resource_version=resource_version,
+                    admission_token=token, recovery_token=recovery_token,
+                ))
+                skipped[tid] = "canonical_reservations_unavailable"
+                queue.insert(0, tid)
+                return
+            reservation_state["reservations"] = current_reservations
+            reservation = current_reservations.get(host.id)
+            if reservation is not None:
+                idle[host.id] = f"host_reserved:{reservation.ticket_id}"
+                self._release_reservation(InFlight(
+                    tid, host.id, None, project_id=project_id, candidate_digest=candidate,
+                    context_digest=context, resource_version=resource_version,
+                    admission_token=token, recovery_token=recovery_token,
+                ))
+                skipped[tid] = f"host_reserved:{reservation.ticket_id}"
+                queue.insert(0, tid)
+                return
             if self.launch is None:
                 job = default_launch(tid, host, demand, run_id=run_id,
                                      recovery=bool(self.recovery.get("active")),
@@ -1055,6 +1126,7 @@ class FleetDispatcher:
             self._register_flight(host.id, job, project_id, candidate, context, resource_version, token,
                                   run_id, recovery_token)
             dispatched.append({"ticket": tid, "host": host.id})
+            skipped.pop(tid, None)
         except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
             self._record_launch_failure(
                 host, tid, project_id, candidate, context, resource_version,
@@ -1126,6 +1198,7 @@ class FleetDispatcher:
         dispatched: list[dict[str, str]],
         orphan_hosts: set[str],
         now: float,
+        reservation_state: dict[str, Any],
     ) -> None:
         for host in sorted(self.config.hosts, key=lambda h: h.priority):
             if self.pending_releases:
@@ -1135,6 +1208,14 @@ class FleetDispatcher:
                 continue
             if host.id in orphan_hosts:
                 idle[host.id] = "run_orfao_em_execucao"
+                continue
+            if reservation_state["error"]:
+                idle[host.id] = "canonical_reservations_unavailable"
+                continue
+            reserved_hosts = reservation_state["reservations"]
+            reservation = reserved_hosts.get(host.id)
+            if reservation is not None:
+                idle[host.id] = f"host_reserved:{reservation.ticket_id}"
                 continue
             pr = self.probe(host)
             if not pr.free:
@@ -1153,7 +1234,8 @@ class FleetDispatcher:
                     skipped[tid] = "demand_disappeared"
                     idle[host.id] = "demand_disappeared"
                     break
-                self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
+                self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now,
+                                      reservation_state)
                 if skipped.get(tid) != "backoff_infra" and not skipped.get(tid, "").startswith("ticket_hold:"):
                     break
             if any(row.get("host") == host.id for row in dispatched):
@@ -1319,14 +1401,40 @@ class FleetDispatcher:
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
         orphan_hosts = self.busy_hosts_loader()
-        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now)
+        reservation_state: dict[str, Any] = {"reservations": {}, "error": ""}
+        try:
+            reservation_state["reservations"] = self._read_canonical_reservations(self.clock())
+        except Exception as exc:  # noqa: BLE001 - capacity cannot be announced from an unknown snapshot
+            reservation_state["error"] = type(exc).__name__
+            logger.error("canonical reservation snapshot failed (%s)", reservation_state["error"])
+        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now,
+                             reservation_state)
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
+        canonical_reservations = reservation_state["reservations"]
+        reservation_error = reservation_state["error"]
+        if reservation_error:
+            for host in self.config.hosts:
+                idle[host.id] = "canonical_reservations_unavailable"
         return self._finish_cycle({
             "resumptions": resumptions,
             "ts": datetime.now(timezone.utc).isoformat(),
-            "free_hosts": [h.id for h in self.config.hosts if h.id not in self.in_flight
-                           and h.id not in orphan_hosts and not idle.get(h.id, "").startswith("host_indisponivel:")],
+            "free_hosts": [] if reservation_error else [
+                h.id for h in self.config.hosts
+                if h.id not in self.in_flight and h.id not in orphan_hosts
+                and h.id not in canonical_reservations
+                and not idle.get(h.id, "").startswith("host_indisponivel:")
+            ],
+            "canonical_reservations": {
+                host_id: {
+                    "ticket": reservation.ticket_id,
+                    "run_id": reservation.run_id,
+                    "status": reservation.status,
+                    "expires_at": reservation.expires_at,
+                }
+                for host_id, reservation in canonical_reservations.items()
+            },
+            "reservation_error": reservation_error,
             "in_flight": {h: j.ticket_id for h, j in self.in_flight.items()},
             "dispatched": dispatched,
             "idle_reasons": idle,
