@@ -23,8 +23,8 @@ This module gives every ticket its own worktree and makes its removal reliable:
   ever MOVED to the trash (:func:`trash_directory`), never deleted directly.
 * :func:`classify_ownerless` -- pure verdict for one worktree (eligible for a
   later sweep, or preserved, with a reason). It never calls :func:`cleanup`,
-  never removes a directory and never deletes a branch. The age limit is
-  :data:`OWNERLESS_MAX_AGE_S` (36 hours), leaving a margin before 48 hours.
+  never removes a directory and never deletes a branch. Worktrees are eligible
+  only after :data:`OWNERLESS_MAX_AGE_S` (48 hours).
 
 Stdlib-only (it must not import ``core.git.autonomy``, which imports it).
 """
@@ -470,7 +470,7 @@ def _outside_dir(path: Path, fallback_root: Path) -> Iterator[None]:
 
 
 def _find_holders(path: Path) -> Optional[list[str]]:
-    """Process cwd holders, or ``None`` when process inspection is inconclusive."""
+    """Processes using the worktree, or ``None`` when inspection is inconclusive."""
     holders = probe_worktree_holders(path)
     return None if holders is None else list(holders)
 
@@ -481,7 +481,7 @@ def removal_hint(path: Path, main_root: Path) -> str:
     if holders is None:
         who = "process state could not be inspected"
     elif holders:
-        who = "processes with cwd inside it: " + ", ".join(holders)
+        who = "processes using it: " + ", ".join(holders)
     else:
         who = "a process or filesystem handle may still be using it"
     return (
@@ -511,7 +511,7 @@ def cleanup(
        data, never leave a half-registered worktree) and ``git worktree prune``.
 
     Each destructive operation rechecks that ``path`` is a registered, unlocked,
-    clean worktree and that no process has its cwd inside it. Unknown Git or process
+    clean worktree and that no process is using it. Unknown Git or process
     state preserves the worktree. This process cwd is moved out of ``path`` before
     those final checks (:func:`_outside_dir`).
     Never raises; ``CleanupResult.outcome`` records removal, dirty/process blocks,
@@ -598,7 +598,7 @@ def _cleanup_safety_issue(
         )
     if holders:
         return _CleanupSafetyIssue(
-            "blocked_process", "live_process", "preserved because processes have cwd inside it: " + ", ".join(holders)
+            "blocked_process", "live_process", "preserved because processes are using it: " + ", ".join(holders)
         )
     return None
 
@@ -1118,9 +1118,8 @@ def find_preserved_workspaces(
 # Ownerless worktrees (USR-500): classify only, never delete
 # ----------------------------------------------------------------------
 
-# Sweep after 36h so the six-hour scheduler cadence leaves a 12h margin before 48h.
-# The boundary itself is preserved; eligibility requires strictly older.
-OWNERLESS_MAX_AGE_S = 36 * 60 * 60
+# The boundary itself is preserved; eligibility requires strictly older than 48h.
+OWNERLESS_MAX_AGE_S = 48 * 60 * 60
 # Exact repo-relative paths that are factory bookkeeping, not product work.
 _OWNERLESS_LEDGER = ".factory/demands/demands.json"
 _TERMINAL_TICKET_STATUSES = frozenset({"completed", "cancelled", "canceled"})
@@ -1313,11 +1312,11 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
         return _preserved(path, "age_unknown", "no stamp and no directory mtime")
     if facts.age_s <= OWNERLESS_MAX_AGE_S:
         return _preserved(path, "too_young", f"age {facts.age_s:.0f}s <= {OWNERLESS_MAX_AGE_S}s")
-    return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 36h")
+    return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
 
 
 def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
-    """``name (pid)`` of processes whose cwd is inside ``path``.
+    """``name (pid)`` of processes using ``path`` as cwd or through an open file.
 
     ``None`` when ``psutil`` cannot be imported or process inspection fails.
     Callers must preserve the worktree in that case. An empty tuple means no
@@ -1332,16 +1331,18 @@ def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
     try:
         for proc in psutil.process_iter(["pid", "name"]):
             try:
-                cwd = proc.cwd()
+                using_path = _is_within(proc.cwd(), path)
+                if not using_path:
+                    using_path = any(_is_within(open_file.path, path) for open_file in proc.open_files())
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
             except psutil.AccessDenied:
-                logger.warning("Could not inspect process cwd for %s; preserving it", path)
+                logger.warning("Could not inspect process paths for %s; preserving it", path)
                 return None
             except Exception:  # noqa: BLE001 -- cannot prove the worktree is idle
-                logger.warning("Could not inspect process cwd for %s; preserving it", path)
+                logger.warning("Could not inspect process paths for %s; preserving it", path)
                 return None
-            if _is_within(cwd, path):
+            if using_path:
                 found.append(f"{proc.info.get('name')} (pid {proc.info.get('pid')})")
     except Exception:  # noqa: BLE001 -- cannot prove the worktree is idle
         logger.warning("Could not inspect processes for %s; preserving it", path)

@@ -108,8 +108,8 @@ def _old_worktree(local: Path, ticket_id: str = "USR-500") -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_ownerless_max_age_leaves_twelve_hour_sweep_margin() -> None:
-    assert OWNERLESS_MAX_AGE_S == 36 * 60 * 60
+def test_ownerless_max_age_is_48_hours() -> None:
+    assert OWNERLESS_MAX_AGE_S == 48 * 60 * 60
 
 
 def test_age_uses_directory_stamp_and_ignores_mtime(tmp_path: Path) -> None:
@@ -119,10 +119,10 @@ def test_age_uses_directory_stamp_and_ignores_mtime(tmp_path: Path) -> None:
     os.utime(stamped, (future.timestamp(), future.timestamp()))
     missing = tmp_path / f"usr-2-{STAMP}-3"
     # The directory is never created: a stamp must be enough on its own.
-    now = BORN + timedelta(hours=36, seconds=1)
+    now = BORN + timedelta(hours=48, seconds=1)
     assert worktree_age_s(stamped, now=now) == OWNERLESS_MAX_AGE_S + 1
     assert worktree_age_s(missing, now=now) == OWNERLESS_MAX_AGE_S + 1
-    assert worktree_age_s(stamped, now=BORN + timedelta(hours=36)) == OWNERLESS_MAX_AGE_S
+    assert worktree_age_s(stamped, now=BORN + timedelta(hours=48)) == OWNERLESS_MAX_AGE_S
 
 
 def test_age_uses_directory_mtime_only_when_the_stamp_is_absent(tmp_path: Path) -> None:
@@ -242,14 +242,14 @@ def test_reader_age_boundary_follows_the_stamp_not_mtime(repo: SimpleNamespace, 
     monkeypatch.setattr(ticket_workspace, "cleanup", _fail_cleanup)
     at_limit = classify_ownerless_worktree(
         path,
-        now=BORN + timedelta(hours=36),
+        now=BORN + timedelta(hours=48),
         statuses={"USR-500": "completed"},
         holder_probe=_idle,
         run_git=_forbid_removal,
     )
     over = classify_ownerless_worktree(
         path,
-        now=BORN + timedelta(hours=36, seconds=1),
+        now=BORN + timedelta(hours=48, seconds=1),
         statuses={"usr-500": "completed"},
         holder_probe=_idle,
         run_git=_forbid_removal,

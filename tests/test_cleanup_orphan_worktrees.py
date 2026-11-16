@@ -61,7 +61,7 @@ def test_sweep_delegates_removal_and_repeated_sweeps_are_idempotent(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _workspace(repo.local, "USR-601")
-    now = BORN + timedelta(hours=36, seconds=1)
+    now = BORN + timedelta(hours=48, seconds=1)
     real_cleanup = ticket_workspace.cleanup
     calls: list[Path] = []
 
@@ -89,13 +89,38 @@ def test_sweep_delegates_removal_and_repeated_sweeps_are_idempotent(
     assert second.removed == 0
 
 
+@pytest.mark.parametrize("age", [timedelta(hours=48), timedelta(hours=48) - timedelta(seconds=1)])
+def test_sweep_does_not_send_worktrees_at_or_under_48_hours_to_cleanup(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, age: timedelta
+) -> None:
+    path = _workspace(repo.local, "USR-607")
+    calls: list[Path] = []
+
+    def tracked_cleanup(candidate: Path, _root: Path, **_kwargs: object) -> CleanupResult:
+        calls.append(candidate)
+        return CleanupResult(path=candidate, removed=True, method="git", outcome="removed")
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
+    summary = sweep.sweep_orphan_worktrees(
+        repo.local,
+        now=BORN + age,
+        holder_probe=_idle,
+        statuses={"USR-607": "completed"},
+    )
+
+    assert calls == []
+    assert summary.ignored == 2  # primary checkout plus the young ticket worktree
+    assert any(item["path"] == str(path) and item["reason"] == "too_young" for item in summary.details)
+    assert path.exists()
+
+
 def test_dirty_and_held_worktrees_are_reported_blocked_without_cleanup(
-    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     dirty = _workspace(repo.local, "USR-602")
     held = _workspace(repo.local, "USR-603")
     (dirty / "keep.txt").write_text("working copy\n", encoding="utf-8")
-    now = BORN + timedelta(hours=40)
+    now = BORN + timedelta(hours=50)
 
     def holder_probe(path: Path) -> tuple[str, ...]:
         return ("python (pid 42)",) if path == held else ()
@@ -116,6 +141,11 @@ def test_dirty_and_held_worktrees_are_reported_blocked_without_cleanup(
         "dirty",
         "holder",
     }
+    assert summary.to_dict()["preserved"] == summary.blocked + summary.ignored == 3
+    assert summary.to_dict()["failures"] == 0
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(f"path={dirty} reason=dirty" in message for message in messages)
+    assert any(f"path={held} reason=holder" in message for message in messages)
     assert (dirty / "keep.txt").is_file() and held.is_dir()
 
 
@@ -131,7 +161,7 @@ def test_active_ticket_from_demands_ledger_is_ignored(repo: SimpleNamespace, mon
     monkeypatch.setattr(ticket_workspace, "cleanup", forbidden_cleanup)
     summary = sweep.sweep_orphan_worktrees(
         repo.local,
-        now=BORN + timedelta(hours=40),
+        now=BORN + timedelta(hours=50),
         holder_probe=_idle,
         queue_lookup=lambda _ticket_id: None,
     )
@@ -163,7 +193,7 @@ def test_one_classification_failure_does_not_stop_later_candidates(
     monkeypatch.setattr(ticket_workspace, "cleanup", cleanup)
     summary = sweep.sweep_orphan_worktrees(
         repo.local,
-        now=BORN + timedelta(hours=40),
+        now=BORN + timedelta(hours=50),
         holder_probe=_idle,
         statuses={"USR-605": "completed", "USR-606": "completed"},
     )
@@ -173,7 +203,7 @@ def test_one_classification_failure_does_not_stop_later_candidates(
     assert any(item["path"] == str(broken) and item["reason"] == "classification_error" for item in summary.details)
 
 
-def test_scheduler_guard_runs_every_six_hours_and_skips_repeated_calls(tmp_path: Path) -> None:
+def test_scheduler_guard_runs_daily_and_skips_repeated_calls(tmp_path: Path) -> None:
     start = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
     runs: list[Path] = []
 
@@ -184,10 +214,10 @@ def test_scheduler_guard_runs_every_six_hours_and_skips_repeated_calls(tmp_path:
     assert sweep.maybe_run_scheduled(tmp_path, now_fn=lambda: start, sweep_fn=fake_sweep) is not None
     assert sweep.maybe_run_scheduled(tmp_path, now_fn=lambda: start, sweep_fn=fake_sweep) is None
     assert sweep.maybe_run_scheduled(
-        tmp_path, now_fn=lambda: start + timedelta(hours=6) - timedelta(seconds=1), sweep_fn=fake_sweep
+        tmp_path, now_fn=lambda: start + timedelta(days=1) - timedelta(seconds=1), sweep_fn=fake_sweep
     ) is None
     assert sweep.maybe_run_scheduled(
-        tmp_path, now_fn=lambda: start + timedelta(hours=6), sweep_fn=fake_sweep
+        tmp_path, now_fn=lambda: start + timedelta(days=1), sweep_fn=fake_sweep
     ) is not None
     assert runs == [tmp_path, tmp_path]
 

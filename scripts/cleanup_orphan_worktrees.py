@@ -22,7 +22,7 @@ from core.git import ticket_workspace  # noqa: E402
 
 logger = logging.getLogger("darkfac.git.orphan_worktree_cleanup")
 
-SWEEP_INTERVAL = timedelta(hours=6)
+SWEEP_INTERVAL = timedelta(days=1)
 SCHEDULE_STATE = Path(".factory") / "runs" / "orphan_worktree_cleanup.json"
 _LOCK_STALE_S = 300.0
 _LOCK_WAIT_S = 2.0
@@ -51,7 +51,10 @@ class CleanupSummary:
         self.details.append(item)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["preserved"] = self.blocked + self.ignored
+        payload["failures"] = self.errors
+        return payload
 
 
 def sweep_orphan_worktrees(
@@ -107,6 +110,13 @@ def sweep_orphan_worktrees(
                 "errors" if verdict.reason in _ERROR_REASONS else "ignored"
             )
             summary.record(category, path, verdict.reason, verdict.detail)
+            if category in {"blocked", "errors"}:
+                logger.warning(
+                    "ownerless worktree preserved path=%s reason=%s detail=%s",
+                    path,
+                    verdict.reason,
+                    verdict.detail,
+                )
             continue
 
         try:
@@ -126,15 +136,28 @@ def sweep_orphan_worktrees(
             summary.record("removed", path, result.outcome, result.detail)
         elif result.outcome in {"blocked_changes", "blocked_process"}:
             summary.record("blocked", path, result.reason or result.outcome, result.detail)
+            logger.warning(
+                "ownerless worktree preserved path=%s reason=%s detail=%s",
+                path,
+                result.reason or result.outcome,
+                result.detail,
+            )
         else:
             summary.record("errors", path, result.reason or result.outcome, result.detail or "; ".join(result.errors))
+            logger.error(
+                "ownerless worktree cleanup failed path=%s reason=%s detail=%s",
+                path,
+                result.reason or result.outcome,
+                result.detail or "; ".join(result.errors),
+            )
 
     logger.info(
-        "orphan worktree sweep: removed=%d blocked=%d ignored=%d errors=%d",
+        "orphan worktree sweep: removed=%d preserved=%d failures=%d (blocked=%d ignored=%d)",
         summary.removed,
+        summary.blocked + summary.ignored,
+        summary.errors,
         summary.blocked,
         summary.ignored,
-        summary.errors,
     )
     return summary
 
@@ -212,7 +235,7 @@ def maybe_run_scheduled(
     now_fn: Callable[[], datetime] = utc_now,
     sweep_fn: Callable[..., CleanupSummary] = sweep_orphan_worktrees,
 ) -> Optional[CleanupSummary]:
-    """Run at most once per six hours; wired into the boot-scheduled fleet dispatcher."""
+    """Run at most once per day; wired into the boot-scheduled fleet dispatcher."""
     state_path = root / SCHEDULE_STATE
     try:
         due = _claim_due_run(state_path, now_fn())
@@ -231,7 +254,7 @@ def maybe_run_scheduled(
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scheduled", action="store_true", help="honor the persistent six-hour schedule guard")
+    parser.add_argument("--scheduled", action="store_true", help="honor the persistent daily schedule guard")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.scheduled:

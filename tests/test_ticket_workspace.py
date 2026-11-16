@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -258,6 +259,9 @@ def test_cleanup_retries_a_transient_failure_with_backoff(repo: SimpleNamespace)
     assert not ws.path.exists()
     assert os.path.normcase(os.path.realpath(ws.path)) not in _registered(repo.local)
 
+    repeated = cleanup(ws.path, ws.main_root)
+    assert repeated.removed and repeated.method == "absent" and repeated.outcome == "removed"
+
 
 def test_cleanup_falls_back_to_rmtree_and_clears_read_only_files(repo: SimpleNamespace) -> None:
     ws = create_workspace("USR-211", cwd=repo.local)
@@ -315,7 +319,7 @@ def test_cleanup_reports_failure_when_even_the_rename_fails(
 
 @pytest.mark.parametrize("change_kind", ["tracked", "untracked", "staged"])
 def test_cleanup_preserves_worktrees_with_any_git_changes(
-    repo: SimpleNamespace, change_kind: str
+    repo: SimpleNamespace, change_kind: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     ws = create_workspace(f"USR-217-{change_kind}", cwd=repo.local)
     if change_kind == "tracked":
@@ -329,7 +333,9 @@ def test_cleanup_preserves_worktrees_with_any_git_changes(
     result = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ())
 
     assert not result.removed and result.method == "preserved" and result.outcome == "blocked_changes"
+    assert result.reason == "worktree_dirty"
     assert "changes" in result.detail
+    assert any("preserved because the worktree has" in record.getMessage() for record in caplog.records)
     assert ws.path.exists()
     if change_kind == "tracked":
         assert (ws.path / "README.md").read_text(encoding="utf-8") == "changed\n"
@@ -344,7 +350,34 @@ def test_cleanup_preserves_a_worktree_with_a_live_process(repo: SimpleNamespace)
     result = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ("python (pid 42)",))
 
     assert not result.removed and result.method == "preserved" and result.outcome == "blocked_process"
+    assert result.reason == "live_process"
     assert "python (pid 42)" in result.detail
+    assert ws.path.exists()
+
+
+def test_cleanup_preserves_a_worktree_opened_by_a_process_with_an_external_cwd(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = create_workspace("USR-218-open-file", cwd=repo.local)
+    held_file = SimpleNamespace(path=str(ws.path / "README.md"))
+    process = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: [held_file],
+        info={"name": "worker", "pid": 314},
+    )
+    fake_psutil = SimpleNamespace(
+        process_iter=lambda _attrs: [process],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=type("AccessDenied", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    result = cleanup(ws.path, ws.main_root)
+
+    assert not result.removed and result.method == "preserved" and result.outcome == "blocked_process"
+    assert result.reason == "live_process"
+    assert "worker (pid 314)" in result.detail
     assert ws.path.exists()
 
 
@@ -354,6 +387,7 @@ def test_cleanup_preserves_when_process_state_cannot_be_inspected(repo: SimpleNa
     result = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: None)
 
     assert not result.removed and result.method == "preserved" and result.outcome == "error"
+    assert result.reason == "process_state_unknown"
     assert "process state is unknown" in result.detail
     assert ws.path.exists()
 

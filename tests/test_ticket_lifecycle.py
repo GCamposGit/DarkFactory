@@ -74,6 +74,24 @@ def test_blocked_cleanup_preserves_worktree_and_records_reason(
     assert "python (pid 42)" in caplog.text
 
 
+def test_dirty_worktree_is_preserved_when_ticket_closes(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
+    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: [])
+    (workspace.path / "README.md").write_text("uncommitted work\n", encoding="utf-8")
+    store = DemandsStore(checkout / ".factory" / "demands" / "demands.json")
+    store.save_ticket(_ticket("USR-500-T2"))
+
+    closed = store.update_status("USR-500-T2", DeliveryStatus.CANCELLED)
+
+    assert closed.status == DeliveryStatus.CANCELLED
+    assert store.get_ticket("USR-500-T2").status == DeliveryStatus.CANCELLED
+    assert workspace.path.is_dir()
+    assert (workspace.path / "README.md").read_text(encoding="utf-8") == "uncommitted work\n"
+    assert "worktree_dirty" in caplog.text
+
+
 def test_repeated_terminal_event_is_idempotent(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
     monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: [])
@@ -86,6 +104,37 @@ def test_repeated_terminal_event_is_idempotent(checkout: Path, monkeypatch: pyte
     assert first.status == second.status == DeliveryStatus.CANCELLED
     assert not workspace.path.exists()
     assert store.get_ticket("USR-500-T2").status == DeliveryStatus.CANCELLED
+
+
+def test_terminal_status_without_worktree_is_ok(checkout: Path) -> None:
+    store = DemandsStore(checkout / ".factory" / "demands" / "demands.json")
+    store.save_ticket(_ticket("USR-500-T2"))
+
+    closed = store.update_status("USR-500-T2", DeliveryStatus.CANCELLED)
+
+    assert closed.status == DeliveryStatus.CANCELLED
+    assert store.get_ticket("USR-500-T2").status == DeliveryStatus.CANCELLED
+
+
+def test_unexpected_cleanup_error_does_not_prevent_terminal_status(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
+    store = DemandsStore(checkout / ".factory" / "demands" / "demands.json")
+    store.save_ticket(_ticket("USR-500-T2"))
+
+    def fail_cleanup(*_args: object, **_kwargs: object) -> ticket_workspace.CleanupResult:
+        raise RuntimeError("cleanup failure")
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", fail_cleanup)
+
+    closed = store.update_status("USR-500-T2", DeliveryStatus.CANCELLED)
+
+    assert closed.status == DeliveryStatus.CANCELLED
+    assert store.get_ticket("USR-500-T2").status == DeliveryStatus.CANCELLED
+    assert workspace.path.is_dir()
+    assert "cleanup failed unexpectedly" in caplog.text
+    assert "cleanup failure" in caplog.text
 
 
 def test_complete_ticket_cleans_worktree_when_delivery_is_not_requested(

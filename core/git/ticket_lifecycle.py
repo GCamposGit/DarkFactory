@@ -39,12 +39,22 @@ def cleanup_terminal_ticket_worktree(
     if worktree is None:
         return None
 
-    result = ticket_workspace.cleanup(
-        worktree,
-        main_root,
-        sleep_fn=sleep_fn,
-        now_fn=now_fn,
-    )
+    try:
+        result = ticket_workspace.cleanup(
+            worktree,
+            main_root,
+            sleep_fn=sleep_fn,
+            now_fn=now_fn,
+        )
+    except Exception as exc:  # noqa: BLE001 - cleanup failure must not undo the terminal event
+        logger.warning(
+            "ticket %s is terminal; worktree cleanup failed unexpectedly and was preserved at %s: %s: %s",
+            ticket_id,
+            worktree,
+            type(exc).__name__,
+            exc,
+        )
+        return None
     if not result.removed:
         logger.warning(
             "ticket %s remains terminal; worktree preserved at %s: outcome=%s reason=%s detail=%s",

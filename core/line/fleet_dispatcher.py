@@ -754,7 +754,7 @@ class FleetDispatcher:
         self.dry_run = dry_run
         self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
         self.sentinel_hook = sentinel_hook  # sentinela da linha a cada 45m (USR-439); idempotente
-        self.orphan_worktree_cleanup_hook = orphan_worktree_cleanup_hook  # sweep de worktrees a cada 6h (USR-500)
+        self.orphan_worktree_cleanup_hook = orphan_worktree_cleanup_hook  # sweep diario de worktrees (USR-500)
         self.usage_hook = usage_hook  # publica cotas no Hub; so o processo real injeta
         self._usage_published_at = 0.0
         if admission_store is None:

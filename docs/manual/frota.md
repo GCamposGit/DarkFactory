@@ -186,16 +186,17 @@ worktree. A deduplicação do deploy continua agrupando merges pela janela de si
 O dispatcher de frota, iniciado pela tarefa persistente `DarkFac-Fleet-Dispatcher` no
 checkout principal, chama `scripts/cleanup_orphan_worktrees.py` pelo seu gancho de manutenção.
 Uma trava de estado em `.factory/runs/orphan_worktree_cleanup.json` limita a execução a uma
-tentativa a cada seis horas, inclusive após reinício do processo. A rotina considera uma
+tentativa por dia, inclusive após reinício do processo. A rotina considera uma
 worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets e não há
-processo, alteração, lock ou commit detached sem referência segura. O limite é 36 horas;
-com a cadência de seis horas, uma candidata limpa é removida até 42 horas após a criação.
+processo, alteração, lock ou commit detached sem referência segura. O limite é 48 horas;
+worktrees com idade igual ou inferior ao limite não são enviadas para remoção.
 
 Cada remoção é delegada a `ticket_workspace.cleanup`, que revalida alterações e processos
-logo antes de remover. O resumo JSON registra contagens de `removed`, `blocked`, `ignored`
-e `errors`, com o motivo por caminho. Falha de leitura ou de limpeza de uma worktree é
-registrada e a análise continua nas demais. Para executar manualmente, use
-`python scripts/cleanup_orphan_worktrees.py`; `--scheduled` respeita o mesmo controle de seis horas.
+logo antes de remover. O resumo JSON registra contagens agregadas de `removed`, `preserved`
+e `failures`, além de `blocked`, `ignored` e `errors`, com o motivo por caminho. Falha de
+leitura ou de limpeza de uma worktree é registrada e a análise continua nas demais. Para
+executar manualmente, use
+`python scripts/cleanup_orphan_worktrees.py`; `--scheduled` respeita o mesmo controle diário.
 
 ## Reinício quando o SHA do checkout muda (USR-508)
 

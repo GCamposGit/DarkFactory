@@ -1672,17 +1672,17 @@ class GitAutonomyManager:
         if proof_error:
             return proof_error
 
-        # A successful merge already removes the linked worktree in deliver_branch. The
-        # no-push/direct-push completion paths still need the same safe terminal cleanup.
-        if delivery is None:
-            from core.git.ticket_lifecycle import cleanup_terminal_ticket_worktree
+        # A successful merge may already have removed its linked worktree. This
+        # idempotent terminal cleanup also covers direct completion paths and leaves
+        # any remaining worktree intact when cleanup's safety checks refuse removal.
+        from core.git.ticket_lifecycle import cleanup_terminal_ticket_worktree
 
-            cleanup_terminal_ticket_worktree(
-                ticket.id,
-                root=target_dir,
-                sleep_fn=self.cleanup_sleep_fn,
-                now_fn=self.now_fn,
-            )
+        cleanup_terminal_ticket_worktree(
+            ticket.id,
+            root=target_dir,
+            sleep_fn=self.cleanup_sleep_fn,
+            now_fn=self.now_fn,
+        )
 
         return TicketCompletionReport(
             ok=True,
