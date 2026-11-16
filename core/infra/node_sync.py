@@ -267,6 +267,25 @@ KNOWN_EPHEMERAL_PATTERNS = (
     "ticket_quota_usage.jsonl",
 )
 
+# Fleet runtime state can be untracked on nodes that have not yet received the
+# matching .gitignore entries. These generated files must not prevent checkout
+# convergence; source files elsewhere in the tree remain dirty as usual.
+FLEET_RUNTIME_UNTRACKED_FILES = frozenset(
+    {
+        ".factory/runs/fleet_dispatcher_state.json",
+        ".factory/runs/sentinel_state.json",
+        ".factory/runs/fleet_policy_snapshot.json",
+        ".factory/runs/model_audit_receipt.json",
+        ".factory/runs/recovery_list_state.json",
+    }
+)
+FLEET_RUNTIME_UNTRACKED_DIRECTORIES = (
+    ".factory/runs/fleet_dispatcher_logs",
+    ".factory/runs/outcomes",
+    ".factory/runs/ci_recovery",
+    ".factory/runs/node_sync_conflicts",
+)
+
 
 # USR-343 S4b / USR-374: these ledgers are generated snapshots (scripts/snapshot_queue.py); a local edit is
 # never authoritative, so a node resets them (keeping a backup) instead of refusing to pull.
@@ -364,6 +383,17 @@ def is_ephemeral_dirty_file(path_str: str) -> bool:
     return any(pattern in norm for pattern in KNOWN_EPHEMERAL_PATTERNS)
 
 
+def is_fleet_runtime_untracked_file(path_str: str) -> bool:
+    """Return whether an untracked path is generated local fleet runtime state."""
+    norm = path_str.replace("\\", "/").strip().strip('"').strip("/").casefold()
+    if norm in FLEET_RUNTIME_UNTRACKED_FILES:
+        return True
+    return any(
+        norm == directory or norm.startswith(f"{directory}/")
+        for directory in FLEET_RUNTIME_UNTRACKED_DIRECTORIES
+    )
+
+
 def classify_checkout(
     root: Path,
     git: GitRunner,
@@ -397,10 +427,18 @@ def classify_checkout(
             dirty_files["tracked_modified"] = [l[2:].strip() for l in lines if not l.startswith("??")]
         try:
             untracked = [p.strip() for p in git(root, ["ls-files", "--others", "--exclude-standard"]).splitlines() if p.strip()]
-            dirty_files["untracked"] = sorted(set(untracked))
+            dirty_files["untracked"] = sorted(
+                {p for p in untracked if not is_fleet_runtime_untracked_file(p)}
+            )
         except Exception:
             lines = [l.strip() for l in status_porcelain.splitlines() if l.strip()]
-            dirty_files["untracked"] = [l[2:].strip() for l in lines if l.startswith("??")]
+            dirty_files["untracked"] = sorted(
+                {
+                    l[2:].strip()
+                    for l in lines
+                    if l.startswith("??") and not is_fleet_runtime_untracked_file(l[2:].strip())
+                }
+            )
         try:
             ignored = [p.strip() for p in git(root, ["ls-files", "--others", "-i", "--exclude-standard"]).splitlines() if p.strip()]
             dirty_files["ignored"] = sorted(set(ignored))

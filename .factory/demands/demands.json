@@ -14645,5 +14645,36 @@
     "dependencies": [],
     "created_at": "2026-11-13T22:57:34.949586Z",
     "updated_at": "2026-11-16T15:12:33.574866Z"
+  },
+  {
+    "id": "USR-491",
+    "project_id": "darkfac",
+    "title": "Arquivos de runtime nao rastreados impedem convergencia e pulam backup pos-deploy",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "No deploy de e5bd40a4 em 08/11 o Notebook estava no sha esperado, mas node sync marcou divergent por dirty worktree com 2 untracked: .factory/runs/fleet_policy_snapshot.json e .factory/runs/model_audit_receipt.json. dokploy_redeploy saiu com 3 e o backup pos-deploy foi pulado.",
+    "core_journey": [
+      "No deploy de e5bd40a4 em 08/11 o Notebook estava no sha esperado, mas node sync marcou divergent por dirty worktree com 2 untracked: .factory/runs/fleet_policy_snapshot.json e .factory/runs/model_audit_receipt.json. dokploy_redeploy saiu com 3 e o backup pos-deploy foi pulado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Arquivos de runtime gerados pela frota nao contam como worktree suja na convergencia",
+      "Backup pos-deploy roda quando o sha converge",
+      "Teste de comportamento cobre untracked de runtime e untracked de codigo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-08T23:24:31.064420Z",
+    "updated_at": "2026-11-08T23:24:31.064420Z"
   }
 ]
