@@ -557,7 +557,18 @@ def _codex_cli_slug(model: str) -> str:
     return model
 
 
-def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[str]:
+_CODEX_OPENROUTER_OVERRIDES = (
+    'model_provider="openrouter"',
+    'model_providers.openrouter.name="OpenRouter"',
+    'model_providers.openrouter.base_url="https://openrouter.ai/api/v1"',
+    'model_providers.openrouter.env_key="OPENROUTER_API_KEY"',
+    'model_providers.openrouter.wire_api="responses"',
+)
+
+
+def build_codex_argv(
+    executable: str, req: AgentRequest, tmp_out: Path, *, gateway_model: Optional[str] = None,
+) -> list[str]:
     """Build the Codex CLI argv for read or write mode. Prompt goes on stdin via trailing '-'.
 
     Flags verified against codex-cli 0.159.3 (`codex-rs/exec/src/cli.rs` and
@@ -578,7 +589,12 @@ def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[
             sandbox = "workspace-write" if req.mode == "write" else "read-only"
         argv += ["--sandbox", sandbox]
     argv += ["--skip-git-repo-check", "--json"]
-    if req.model:
+    if gateway_model:
+        # Contingencia paga: o mesmo agente, com o OpenRouter como provedor (chave em OPENROUTER_API_KEY).
+        argv += ["-m", gateway_model]
+        for override in _CODEX_OPENROUTER_OVERRIDES:
+            argv += ["-c", override]
+    elif req.model:
         argv += ["-m", _codex_cli_slug(req.model)]
     # codex-cli 0.162.0 has no --effort flag (`codex exec --help`). The documented override is
     # `-c key=value`, and this build's config schema names the key `model_reasoning_effort`.
@@ -1264,7 +1280,9 @@ def _grok_reported_identity(parsed: dict[str, Any]) -> tuple[Optional[str], Opti
     return model, effort
 
 
-def _run_codex(req: AgentRequest) -> AgentResult:
+def _run_codex(
+    req: AgentRequest, *, gateway_model: Optional[str] = None, env: Optional[dict[str, str]] = None,
+) -> AgentResult:
     executable = find_codex_binary()
     if not executable:
         return AgentResult(
@@ -1280,7 +1298,7 @@ def _run_codex(req: AgentRequest) -> AgentResult:
     tmp_dir = mocked_tmp if (REPO_ROOT != project_root()) else (state_root() / "tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_out = tmp_dir / f"codex_line_{uuid.uuid4().hex[:8]}.json"
-    argv = build_codex_argv(executable, req, tmp_out)
+    argv = build_codex_argv(executable, req, tmp_out, gateway_model=gateway_model)
 
     try:
         res = _run_bounded(
@@ -1288,6 +1306,7 @@ def _run_codex(req: AgentRequest) -> AgentResult:
             input_text=req.prompt,
             cwd=req.cwd,
             timeout_s=req.timeout_s,
+            env=env,
             capabilities=tuple(req.capabilities),
         )
     except OSError as exc:
@@ -1875,6 +1894,46 @@ def _openrouter_truncated(response: Any) -> bool:
     return bool(getattr(response, "truncated", False)) or derived
 
 
+def _changed_paths(cwd: Path | str | None) -> set[str]:
+    """Paths git reports as changed in ``cwd``; empty when git cannot answer."""
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line[3:].strip() for line in res.stdout.splitlines() if len(line) > 3}
+
+
+def _run_openrouter_agent(req: AgentRequest, model: str) -> Optional[AgentResult]:
+    """Write mode through the Codex CLI agent loop billed to OpenRouter.
+
+    A single completion cannot read the worktree, so it edited nothing. The agent reads files
+    and applies patches itself. None when the CLI or the key is missing: the caller falls back.
+    """
+    from core.execution.providers import get_openrouter_api_key
+
+    key = get_openrouter_api_key()
+    if not key or not find_codex_binary():
+        return None
+    if "/" not in model:  # nome do registro: o gateway exige "fornecedor/modelo"
+        try:
+            from core.models.registry import gateway_id
+
+            model = gateway_id(model)
+        except Exception:  # noqa: BLE001 - sem id de gateway nao ha agente; o chamador usa a resposta unica
+            return None
+    before = _changed_paths(req.cwd)
+    result = _run_codex(req, gateway_model=model, env={**os.environ, "OPENROUTER_API_KEY": key})
+    edited = _changed_paths(req.cwd) - before
+    logger.info("OpenRouter agent write mode changed %d files", len(edited))
+    from core.line.routing import record_openrouter_edits  # local import: routing imports agent_cli
+
+    record_openrouter_edits(len(edited))
+    return result.model_copy(update={"harness": "openrouter", "model": model})
+
+
 def _run_openrouter(req: AgentRequest) -> AgentResult:
     # OpenRouter gateway runner supporting read and write (via patch application) modes
     from core.execution.providers import OpenRouterModelProvider  # local import: keeps agent_cli import-light
@@ -1889,6 +1948,10 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             model = resolve_model(model_raw)
         except Exception:
             model = model_raw
+    if req.mode == "write":
+        agent_result = _run_openrouter_agent(req, model)
+        if agent_result is not None:
+            return agent_result
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     prompt = req.prompt + _OPENROUTER_WRITE_PROMPT_APPENDIX if req.mode == "write" else req.prompt

@@ -120,6 +120,7 @@ def test_openrouter_write_mode_executes_and_modifies_files(tmp_path: Path, monke
             return _FakeResponse()
 
     monkeypatch.setattr("core.execution.providers.OpenRouterModelProvider", _FakeProvider)
+    monkeypatch.setattr("core.line.agent_cli.find_codex_binary", lambda: None)  # sem o agente: resposta unica
 
     req = AgentRequest(
         prompt="Implemente multiply",
@@ -134,6 +135,37 @@ def test_openrouter_write_mode_executes_and_modifies_files(tmp_path: Path, monke
     assert result.harness == "openrouter"
     assert (tmp_path / "core" / "calc.py").is_file()
     assert "def multiply" in (tmp_path / "core" / "calc.py").read_text(encoding="utf-8")
+
+
+def test_openrouter_write_mode_uses_the_agent_loop_when_the_cli_and_key_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.line import agent_cli, routing
+
+    seen: dict[str, object] = {}
+
+    def fake_codex(req, *, gateway_model=None, env=None):
+        seen.update(gateway=gateway_model, key=(env or {}).get("OPENROUTER_API_KEY"))
+        return agent_cli.AgentResult(ok=True, text="feito", harness="codex", model="x", duration_s=1.0)
+
+    states = iter([set(), {"core/calc.py"}])
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: "codex")
+    monkeypatch.setattr("core.execution.providers.get_openrouter_api_key", lambda: "chave-de-teste")
+    monkeypatch.setattr(agent_cli, "_run_codex", fake_codex)
+    monkeypatch.setattr(agent_cli, "_changed_paths", lambda _cwd: next(states))
+    monkeypatch.setattr(routing, "record_openrouter_edits", lambda count, **_: seen.update(edits=count))
+
+    result = run_agent(AgentRequest(
+        prompt="Implemente multiply", cwd=tmp_path, mode="write", harness="openrouter", model="review.openrouter",
+    ))
+
+    assert (result.ok, result.harness) == (True, "openrouter")
+    assert seen == {"gateway": result.model, "key": "chave-de-teste", "edits": 1}
+    assert "/" in str(result.model)  # id de gateway, nao slug de CLI
+    argv = agent_cli.build_codex_argv("codex", AgentRequest(prompt="p", cwd=tmp_path, mode="write", harness="openrouter"), tmp_path / "o",
+                                      gateway_model="fornecedor/modelo")
+    assert argv[argv.index("-m") + 1] == "fornecedor/modelo"
+    assert 'model_provider="openrouter"' in argv
 
 
 def test_openrouter_fallback_elected_for_both_planning_and_development(tmp_path: Path) -> None:
