@@ -74,14 +74,15 @@ class Env:
 
 
 def _main_thread_sleep(record):
-    """``fd.time`` is the real ``time`` module: threads left by other tests also call the patched
-    ``sleep``. Only the thread running the test counts; the others just yield."""
-    import threading
+    """``fd.time`` is the real ``time`` module, so the patch replaces ``sleep`` for the whole process.
 
-    owner = threading.get_ident()
+    On POSIX ``subprocess`` polls a child with short sleeps on this same thread, and other threads
+    sleep too. Only the call made by the dispatcher loop itself is the event under test.
+    """
+    import sys
 
     def fake_sleep(seconds):
-        if threading.get_ident() == owner:
+        if sys._getframe(1).f_code.co_name == "run_forever":
             record(seconds)
 
     return fake_sleep
