@@ -265,6 +265,18 @@ def delivery_success_result(
 
 
 # ---------------------------------------------------------------- estagios de _run
+# O agente lia o AGENTS.md, rodava a suite inteira dentro do turno e estourava o tempo sem
+# entregar (USR-463 em 16/11: 40 min e 38 pontos da janela, nenhuma alteracao aproveitada).
+DEV_VALIDATION_BUDGET = (
+    "Validacao dentro do turno: rode somente os arquivos de teste que voce criou ou alterou, de forma "
+    "sincrona (python -m pytest <arquivos> -q -n 0 -p no:cacheprovider). NAO rode "
+    "core/harness/runner.py, scripts/line_validate.py nem a suite completa: a fabrica roda o portao "
+    "depois do seu turno. Nao deixe comando em segundo plano nem termine o turno esperando por um. "
+    "Nao edite docs/FASE_ATUAL.md. Termine assim que o codigo e os testes do ticket estiverem escritos "
+    "e passando.\n"
+)
+
+
 def build_dev_prompt(ticket: Any, workspace: Any) -> str:
     return (
         f"Voce e o agente de desenvolvimento autonomo da DarkFac.\n"
@@ -276,6 +288,7 @@ def build_dev_prompt(ticket: Any, workspace: Any) -> str:
         f"Escreva/ajuste testes unitarios e o codigo funcional.\n"
         f"Voce trabalha numa worktree propria deste ticket (branch {workspace.branch}); "
         f"nao leia nem altere arquivos fora dela e nao faca commit, push nem merge: a fabrica entrega.\n"
+        + DEV_VALIDATION_BUDGET
     )
 
 

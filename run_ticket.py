@@ -3837,12 +3837,9 @@ def _stage_build(
     if _cancelled():  # cancelled right as the agent finished: do not even look at its output
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
-    from core.git.autonomy import GitAutonomyManager
-
-    git_mgr = GitAutonomyManager(workspace.main_root)
-    implementation_paths = [
-        path for path in git_mgr.changed_paths(workspace.path) if path != LEDGER_RELATIVE
-    ]
+    # Trabalho ja commitado por uma tentativa anterior conta: sem isso a worktree preservada
+    # virava "agente sem alteracoes" e o ticket ia para hold com a implementacao pronta.
+    implementation_paths = _implementation_diff_paths(workspace.path)
     if not implementation_paths:
         return _stage_agent_no_changes(
             args, ticket, workspace, agent_result, selected_harness, ticket_size, cost_record, progress
