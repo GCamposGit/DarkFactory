@@ -24,6 +24,15 @@ RECHECK_SECONDS = 900
 STALE_DISPATCHER_IMPORT = "stale_dispatcher_import"
 # Red CI repair is still a delivery, even after the ledger was marked completed (USR-509).
 CI_RECOVERY_CAUSES = frozenset({"ci_fix_requires_revalidation", "ci_fix_route_wait", "ci_red"})
+# These stay blocked even when a review route appears (USR-512 T3).
+_PERMANENT_BLOCK_CAUSES = frozenset({
+    "deploy_evidence_missing",
+    "deploy_evidence_mismatch",
+    "implementing_family_unknown",
+})
+# Preserved exit of the USR-467 review crash. Not a general launcher failure.
+_LEGACY_REVIEW_EXIT = "launcher_exit:1"
+_RESUMABLE_REVIEW_MARKERS = ("no_route_available", "review_agent_exhausted", "route_wait")
 _children: dict[int, subprocess.Popen] = {}
 
 
@@ -122,6 +131,77 @@ def _ci_recovery_without_merge(row: PendingDelivery, release: Path, merge_path: 
     return True
 
 
+def _review_cause_resumable(cause: str) -> bool:
+    """True when a REVIEW wait may be tried again after a compatible route appears."""
+    if cause in _PERMANENT_BLOCK_CAUSES or cause == _LEGACY_REVIEW_EXIT:
+        return False
+    if cause.startswith("launcher_exit:"):
+        return False
+    return any(marker in cause for marker in _RESUMABLE_REVIEW_MARKERS)
+
+
+def _blocked_review_reopen(row: PendingDelivery) -> str:
+    """``resumable`` or ``legacy`` when a blocked REVIEW row may leave ``blocked``.
+
+    Empty means the block stays. ``legacy`` is only the preserved USR-467 exit and
+    still has to pass the candidate, gate and absent-review checks before launch.
+    """
+    if row.status != "blocked" or row.stage != "review":
+        return ""
+    if row.cause in _PERMANENT_BLOCK_CAUSES:
+        return ""
+    if row.cause == _LEGACY_REVIEW_EXIT:
+        return "legacy"
+    if _review_cause_resumable(row.cause):
+        return "resumable"
+    return ""
+
+
+def _ticket_run_dir(ticket_id: str) -> Path:
+    from core.line.ticket_engine import artifacts_root
+    return artifacts_root() / ticket_id / ".darkfac" / "runs" / ticket_id
+
+
+def _live_candidate_digest(worktree: str) -> str | None:
+    """Digest of the preserved worktree, or None when git cannot show it."""
+    from core.line.stage_review import _candidate_digest
+    from core.line.workspace import RunWorkspace, WorkspaceError
+    ws = RunWorkspace(
+        project_id="darkfac",
+        run_id="pending-review",
+        branch="ticket/pending-review",
+        path=Path(worktree),
+        base_sha="0" * 40,
+    )
+    try:
+        return _candidate_digest(ws, "main")
+    except (OSError, WorkspaceError):
+        logger.warning("candidate digest unavailable for preserved review wait at %s", worktree)
+        return None
+
+
+def _review_still_absent(context: Path, digest: str) -> bool:
+    """True when this candidate has no verdict, execution receipt or bound approval."""
+    if (context / "review_verdict.json").is_file() or (context / "review_execution.json").is_file():
+        return False
+    state_path = context / "review_state.json"
+    if not state_path.is_file():
+        return True
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    rounds = payload.get("rounds") if isinstance(payload, dict) else None
+    if not isinstance(rounds, list):
+        return False
+    for item in rounds:
+        if not isinstance(item, dict):
+            continue
+        if item.get("verdict") == "approve" and item.get("candidate_digest") == digest and not item.get("forced"):
+            return False
+    return True
+
+
 def _budget_store(now: float) -> AdmissionStore:
     return AdmissionStore(state_root() / "admission.sqlite3",
                           clock=lambda: datetime.fromtimestamp(now, timezone.utc))
@@ -150,6 +230,26 @@ def _child_finished(path: Path, row: PendingDelivery, rc: int, repo_root: Path, 
             row.status = "blocked"
     _save(path, row)
     return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause, "next_check": row.next_check}
+
+
+def _legacy_review_exit_ready(row: PendingDelivery) -> bool:
+    """USR-467: reopen ``launcher_exit:1`` only with a candidate, a current gate and no review."""
+    context = _ticket_run_dir(row.ticket_id)
+    if not (context / "progress.json").is_file():
+        return False
+    try:
+        validation = json.loads((context / "validation.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(validation, dict) or validation.get("passed") is not True:
+        return False
+    digest = validation.get("candidate_digest")
+    if not isinstance(digest, str) or not digest.strip():
+        return False
+    digest = digest.strip()
+    if _live_candidate_digest(row.worktree) != digest:
+        return False
+    return _review_still_absent(context, digest)
 
 
 def _pid_running(row: PendingDelivery) -> bool:
@@ -197,10 +297,13 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         row.next_check = float(admission.budget(row.project_id, row.ticket_id)["next_attempt_at"])
         _save(path, row)
         return {"ticket": row.ticket_id, "status": row.status, "cause": reason, "next_check": row.next_check}
-    if row.status == "blocked" and row.cause.startswith("launcher_exit:"):
-        row.status = "waiting"
-    if row.status == "blocked" or row.next_check > now or is_locked():
+    reopen = _blocked_review_reopen(row)
+    if (row.status == "blocked" and not reopen) or row.next_check > now or is_locked():
         return {"ticket": row.ticket_id, "status": row.status, "next_check": row.next_check}
+    if reopen == "legacy" and not _legacy_review_exit_ready(row):
+        row.next_check = now + RECHECK_SECONDS
+        _save(path, row)
+        return {"ticket": row.ticket_id, "status": "blocked", "cause": row.cause, "next_check": row.next_check}
     store = control_store()
     if getattr(store, "mock_mode", False):
         raise RuntimeError("pending delivery requires the durable control store")
@@ -260,13 +363,25 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             row.status, row.cause = "blocked", "implementing_family_unknown"
             _save(path, row)
             return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
+        if row.status == "blocked":
+            return {
+                "ticket": row.ticket_id, "status": "blocked", "cause": row.cause,
+                "next_check": row.next_check,
+            }
         return {"ticket": row.ticket_id, "status": "waiting_route", "next_check": row.next_check}
+    if row.stage == "review":
+        # REVIEW never restarts PLAN or BUILD. The same worktree is the candidate.
+        row.resume_delivery = True
+    if reopen:
+        logger.info("reopening preserved review wait for %s cause=%s", row.ticket_id, row.cause)
     row.run_id = f"pending-{row.ticket_id}-{uuid.uuid4().hex}"
     env = dict(os.environ, DARKFAC_STATE_ROOT=str(state_root().resolve()), DARKFAC_RUN_ID=row.run_id)
     env.pop("DARKFAC_OPERATING_HARNESS", None)
     cmd = [sys.executable, str(repo_root / "run_ticket.py")]
-    cmd += (["--resume-delivery", row.ticket_id, "--worktree", str(worktree)] if row.resume_delivery
-            else [row.ticket_id])
+    if row.resume_delivery:
+        cmd += ["--resume-delivery", row.ticket_id, "--worktree", str(worktree)]
+    else:
+        cmd += [row.ticket_id]
     log_path = path.with_suffix(".log")
     env["DARKFAC_RUN_LOG"] = str(log_path)
     with log_path.open("ab") as log:
