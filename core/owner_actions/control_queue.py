@@ -46,6 +46,9 @@ def list_control_rows() -> list[dict[str, Any]]:
     from core.demands.queue_store import control_store
 
     if not is_configured():
+        if os.environ.get("DARKFAC_OWNER_ACTIONS_MODE", "").strip().lower() == "control":
+            # Deployed service told to read the shared store but given no database: say so.
+            raise ControlQueueUnavailable("control store nao configurado")
         return []  # local store not created yet: a genuinely empty queue, not a masked failure
     try:
         return [r for r in control_store().list_owner_actions() if isinstance(r, dict)]

@@ -40,7 +40,8 @@ services:
       - DOKPLOY_DEPLOY_URL=${DOKPLOY_DEPLOY_URL:-}
       - DARKFAC_TELEMETRY_KEY=${DARKFAC_TELEMETRY_KEY:-}
       # Shared live owner-action queue: the same writable PostgreSQL used by the factory.
-      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL:-}
+      # Falls back to the control URL so the Hub never reads a container-local SQLite.
+      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL:-${DARKHUB_CONTROL_DATABASE_URL:-}}
       - DARKFAC_OWNER_ACTIONS_MODE=control
       # USR-42: read-only view of the coordinator's control store for the task board
       - DARKHUB_CONTROL_DATABASE_URL=${DARKHUB_CONTROL_DATABASE_URL:-}
