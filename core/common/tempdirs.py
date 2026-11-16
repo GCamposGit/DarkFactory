@@ -1,16 +1,12 @@
-"""Sandbox temp directories whose cleanup never raises from a finalizer (USR-457).
+"""Owned temporary sandboxes with explicit, synchronous cleanup (USR-457).
 
-``tempfile.TemporaryDirectory`` removes its directory from a ``weakref.finalize``
-callback. On Windows, a probe subprocess run under a restricted sandbox identity can
-leave files whose ACL the current process cannot ``chmod``; when that failure surfaces
-from the finalizer at interpreter shutdown it prints an unhandled "Exception ignored
-in" trace instead of a normal, catchable error -- the WinError 5 seen cleaning up
-``darkfac-quota-probe`` directories.
-
-:func:`probe_sandbox` avoids the finalizer entirely: it creates the directory with
-``tempfile.mkdtemp`` and removes it synchronously at the end of the ``with`` block, in
-a ``finally`` so a raising body still gets cleanup. A removal failure is logged and
-returned as a structured :class:`SandboxCleanup` rather than propagated.
+``tempfile.TemporaryDirectory`` delegates removal to ``weakref.finalize``. On
+Windows, files left by a restricted probe subprocess can make that finalizer
+raise ``PermissionError [WinError 5]`` during interpreter shutdown. A
+``ProbeSandbox`` instead records the directory and each child process it owns,
+stops those children, then attempts removal once before leaving its context.
+Cleanup failures are logged and retained as :class:`SandboxCleanup` results;
+there is no deferred finalizer.
 """
 
 from __future__ import annotations
@@ -20,19 +16,28 @@ import os
 import shutil
 import stat
 import tempfile
-from contextlib import contextmanager
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Optional, Protocol
 
 logger = logging.getLogger("darkfac.common.tempdirs")
 
 
-def chmod_and_retry(func: Callable[[str], Any], target: str, exc: BaseException) -> None:
-    """``shutil.rmtree`` ``onexc`` hook: clear the read-only bit (git objects, Windows) and retry once.
+class _Process(Protocol):
+    """Minimal process surface needed by a sandbox owner."""
 
-    The single source of this hook; ``core.git.ticket_workspace.robust_rmtree`` reuses it
-    instead of keeping its own copy.
+    def poll(self) -> Optional[int]: ...
+
+
+ProcessStopper = Callable[[_Process], None]
+
+
+def chmod_and_retry(func: Callable[[str], Any], target: str, exc: BaseException) -> None:
+    """``shutil.rmtree`` hook: clear read-only bits and retry once.
+
+    The single source of this hook; ``core.git.ticket_workspace.robust_rmtree``
+    reuses it instead of keeping a second copy.
     """
     if isinstance(exc, FileNotFoundError):
         return
@@ -44,13 +49,13 @@ def chmod_and_retry(func: Callable[[str], Any], target: str, exc: BaseException)
 
 
 def robust_rmtree(path: Path) -> None:
-    """``shutil.rmtree`` that clears read-only attributes once; raises the last error on failure."""
+    """Remove a tree after clearing read-only attributes once; propagate failures."""
     shutil.rmtree(path, onexc=chmod_and_retry)
 
 
 @dataclass(frozen=True)
 class SandboxCleanup:
-    """Outcome of removing one sandbox directory created by :func:`probe_sandbox`."""
+    """Structured outcome of a sandbox's one explicit cleanup attempt."""
 
     path: Path
     ok: bool
@@ -59,53 +64,191 @@ class SandboxCleanup:
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class _OwnedDirectory:
+    path: Path
+    owner_token: object
+    device: int
+    inode: int
+
+
+_OWNERSHIP_LOCK = threading.RLock()
+_OWNED_DIRECTORIES: dict[str, _OwnedDirectory] = {}
+
+
+def _path_key(path: Path) -> str:
+    """Canonical comparison key that handles relative, dot, and case aliases."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(path))))
+
+
 def _within_system_tempdir(path: Path) -> bool:
-    """True when ``path.resolve()`` is a strict descendant of the system tempdir."""
+    """True only for a strict descendant of the current system temporary root."""
     try:
-        resolved = path.resolve()
-        temp_root = Path(tempfile.gettempdir()).resolve()
-    except OSError:
+        resolved = os.path.normcase(os.path.abspath(os.fspath(path)))
+        temp_root = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
+        common = os.path.commonpath((resolved, temp_root))
+    except (OSError, RuntimeError, ValueError):
         return False
-    return temp_root in resolved.parents
+    return resolved != temp_root and common == temp_root
 
 
-def remove_sandbox_dir(path: Path) -> SandboxCleanup:
-    """Remove ``path``; never raises.
+def _cleanup_failure(path: Path, error_kind: str, detail: str, winerror: Optional[int] = None) -> SandboxCleanup:
+    logger.warning(
+        "Sandbox cleanup failed for %s (error_kind=%s winerror=%s): %s",
+        path,
+        error_kind,
+        winerror,
+        detail,
+    )
+    return SandboxCleanup(path=path, ok=False, error_kind=error_kind, winerror=winerror, detail=detail)
 
-    Refuses -- and reports, without touching the filesystem -- any ``path`` whose
-    ``resolve()`` does not land inside ``tempfile.gettempdir()``: a sandbox helper must
-    never be able to delete an external directory because of a bad prefix or caller
-    bug. A removal failure (e.g. ``PermissionError``/``WinError 5`` from a
-    restricted-ACL sandbox subprocess) is logged with the path and error code and
-    reported via the returned result instead of propagating.
+
+def remove_sandbox_dir(path: Path, *, owner: Optional["ProbeSandbox"] = None) -> SandboxCleanup:
+    """Remove only the exact directory still owned by ``owner``.
+
+    A path merely being under the system temp root is not proof of ownership.
+    Shared, caller-provided, replaced, or external directories are left intact,
+    including when the supplied spelling normalizes to an owned path.
     """
-    if not _within_system_tempdir(path):
-        detail = f"refusing to remove {path}: outside {tempfile.gettempdir()}"
-        logger.warning(detail)
-        return SandboxCleanup(path=path, ok=False, error_kind="outside_tempdir", detail=detail)
+    candidate = Path(path)
+    key = _path_key(candidate)
+    with _OWNERSHIP_LOCK:
+        record = _OWNED_DIRECTORIES.get(key)
+    if record is None or owner is None or record.owner_token is not owner._owner_token:
+        return _cleanup_failure(candidate, "unowned_directory", "directory is not registered to this sandbox")
+
+    owned_path = record.path
+    if not _within_system_tempdir(owned_path):
+        _release_directory(key, record)
+        return _cleanup_failure(
+            owned_path,
+            "outside_tempdir",
+            f"refusing to remove path outside {tempfile.gettempdir()}",
+        )
+
     try:
-        robust_rmtree(path)
+        current = owned_path.lstat()
     except FileNotFoundError:
-        return SandboxCleanup(path=path, ok=True)
+        _release_directory(key, record)
+        return SandboxCleanup(path=owned_path, ok=True)
     except OSError as exc:
-        winerror = getattr(exc, "winerror", None)
-        detail = f"could not remove sandbox {path}: {exc}"
-        logger.warning("Sandbox cleanup failed for %s (winerror=%s): %s", path, winerror, exc)
-        return SandboxCleanup(path=path, ok=False, error_kind=type(exc).__name__, winerror=winerror, detail=detail)
-    return SandboxCleanup(path=path, ok=True)
+        _release_directory(key, record)
+        return _cleanup_failure(owned_path, type(exc).__name__, str(exc), getattr(exc, "winerror", None))
 
+    identity_matches = (current.st_dev, current.st_ino) == (record.device, record.inode)
+    if not stat.S_ISDIR(current.st_mode) or stat.S_ISLNK(current.st_mode) or not identity_matches:
+        _release_directory(key, record)
+        return _cleanup_failure(owned_path, "ownership_changed", "registered directory identity changed")
 
-@contextmanager
-def probe_sandbox(prefix: str) -> Iterator[Path]:
-    """A ``tempfile.mkdtemp`` directory removed synchronously when the block exits.
-
-    Unlike ``tempfile.TemporaryDirectory`` there is no ``weakref.finalize`` callback:
-    removal happens here, even when the body raises, and a failure is handled by
-    :func:`remove_sandbox_dir` (logged, never raised) instead of surfacing later as an
-    "Exception ignored in" trace at interpreter shutdown.
-    """
-    directory = Path(tempfile.mkdtemp(prefix=prefix))
     try:
-        yield directory
+        robust_rmtree(owned_path)
+    except FileNotFoundError:
+        result = SandboxCleanup(path=owned_path, ok=True)
+    except OSError as exc:
+        result = _cleanup_failure(
+            owned_path,
+            type(exc).__name__,
+            f"could not remove sandbox {owned_path}: {exc}",
+            getattr(exc, "winerror", None),
+        )
+    except Exception as exc:
+        result = _cleanup_failure(
+            owned_path,
+            type(exc).__name__,
+            f"could not remove sandbox {owned_path}: {exc}",
+        )
+    else:
+        result = SandboxCleanup(path=owned_path, ok=True)
     finally:
-        remove_sandbox_dir(directory)
+        _release_directory(key, record)
+    return result
+
+
+def _release_directory(key: str, record: _OwnedDirectory) -> None:
+    with _OWNERSHIP_LOCK:
+        if _OWNED_DIRECTORIES.get(key) is record:
+            _OWNED_DIRECTORIES.pop(key, None)
+
+
+class ProbeSandbox:
+    """A temporary directory and child processes owned by one probe execution."""
+
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+        self.path: Optional[Path] = None
+        self.cleanup_result: Optional[SandboxCleanup] = None
+        self._owner_token = object()
+        self._processes: list[tuple[_Process, ProcessStopper]] = []
+        self._entered = False
+        self._cleanup_requested = False
+
+    def __enter__(self) -> Path:
+        if self._entered:
+            raise RuntimeError("probe sandbox cannot be entered more than once")
+        directory = Path(tempfile.mkdtemp(prefix=self.prefix))
+        info = directory.lstat()
+        record = _OwnedDirectory(directory, self._owner_token, info.st_dev, info.st_ino)
+        key = _path_key(directory)
+        with _OWNERSHIP_LOCK:
+            if key in _OWNED_DIRECTORIES:
+                raise RuntimeError("temporary directory path is already registered as owned")
+            _OWNED_DIRECTORIES[key] = record
+        self.path = directory
+        self._entered = True
+        return directory
+
+    def register_process(self, process: _Process, stop: ProcessStopper) -> None:
+        """Register a child that must be stopped and reaped before directory cleanup."""
+        if not self._entered or self._cleanup_requested:
+            raise RuntimeError("process registration requires an open probe sandbox")
+        if any(owned is process for owned, _ in self._processes):
+            raise ValueError("process is already registered to this probe sandbox")
+        self._processes.append((process, stop))
+
+    def close(self) -> SandboxCleanup:
+        """Stop registered children and request directory cleanup at most once."""
+        if self._cleanup_requested:
+            assert self.cleanup_result is not None
+            return self.cleanup_result
+        self._cleanup_requested = True
+        if self.path is None:
+            self.cleanup_result = SandboxCleanup(Path(), ok=True)
+            return self.cleanup_result
+
+        failures: list[str] = []
+        for process, stop in reversed(self._processes):
+            try:
+                stop(process)
+                if process.poll() is None:
+                    failures.append("registered child remained alive after its stop callback")
+            except Exception as exc:
+                failures.append(f"{type(exc).__name__}: {exc}")
+        if failures:
+            key = _path_key(self.path)
+            with _OWNERSHIP_LOCK:
+                record = _OWNED_DIRECTORIES.get(key)
+            if record is not None and record.owner_token is self._owner_token:
+                _release_directory(key, record)
+            self.cleanup_result = _cleanup_failure(
+                self.path,
+                "process_cleanup_failed",
+                "; ".join(failures),
+            )
+            return self.cleanup_result
+
+        self.cleanup_result = remove_sandbox_dir(self.path, owner=self)
+        return self.cleanup_result
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        self.close()
+        return False
+
+
+def probe_sandbox(prefix: str) -> ProbeSandbox:
+    """Create an explicit owner for a new temporary probe directory.
+
+    ``with probe_sandbox(...) as path`` remains compatible with existing callers;
+    callers that spawn children should retain the owner and register each process
+    so ``close`` stops them before attempting removal.
+    """
+    return ProbeSandbox(prefix)

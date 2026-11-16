@@ -11,11 +11,12 @@ window is readable) and must not escape as an exception.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import sys
-import time
+from pathlib import Path
 
 import pytest
 
@@ -64,7 +65,14 @@ def test_probe_claude_headless_stays_fail_closed_when_sandbox_cleanup_fails(
         result = adapter._probe_claude_headless("claude")
 
     assert result is None  # fail-closed: no quota window was readable
+    assert adapter.last_probe_cleanup is not None
+    assert adapter.last_probe_cleanup.ok is False
+    assert adapter.last_probe_cleanup.error_kind == "PermissionError"
+    assert adapter.last_probe_cleanup.winerror == 5
     assert "winerror=5" in caplog.text  # the cleanup failure is a structured log, not a swallowed exception
+    monkeypatch.undo()
+    if adapter.last_probe_cleanup.path.exists():
+        tempdirs.robust_rmtree(adapter.last_probe_cleanup.path)
 
 
 def test_probe_claude_headless_still_returns_a_window_when_cleanup_fails(
@@ -95,36 +103,137 @@ def test_probe_claude_headless_still_returns_a_window_when_cleanup_fails(
     assert result is not None
     assert result.quota_supported is True
     assert any(w.used_percent == 42.0 for w in result.windows)
+    assert adapter.last_probe_cleanup is not None
+    assert adapter.last_probe_cleanup.ok is False
+    assert adapter.last_probe_cleanup.winerror == 5
+    monkeypatch.undo()
+    if adapter.last_probe_cleanup.path.exists():
+        tempdirs.robust_rmtree(adapter.last_probe_cleanup.path)
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows ACL and process tree integration")
-def test_real_probe_subprocess_with_restricted_acl_is_cleaned_without_finalizer_error() -> None:
-    """Kill a real process tree before cleaning a sandbox containing a restricted ACL file."""
-    username = subprocess.check_output(["whoami"], text=True).strip()
-    with tempdirs.probe_sandbox(prefix="darkfac-quota-probe-integration-") as directory:
-        ready = directory / "ready.flag"
-        worker = (
-            "from pathlib import Path; import subprocess, sys, time; "
-            "p=Path('restricted.txt'); p.write_text('probe', encoding='utf-8'); "
-            "subprocess.run(['icacls', str(p), '/inheritance:r', '/grant:r', 'SYSTEM:(F)', "
-            "'/deny', sys.argv[1] + ':(D)'], check=True, capture_output=True); "
-            "Path('ready.flag').write_text('ready', encoding='utf-8'); time.sleep(30)"
+@pytest.mark.skipif(os.name != "nt", reason="Windows file sharing and process tree integration")
+def test_real_quota_probe_subprocess_reaps_locked_child_before_cleanup(tmp_path: Path) -> None:
+    """Exercise adapter shutdown in a fresh process with a child-held Windows file lock.
+
+    The child opens a file without FILE_SHARE_DELETE, so Windows refuses removal while
+    it is alive. The real probe cleanup must terminate the process tree first, retain a
+    structured result, and remove only its own ``darkfac-quota-probe`` directory. The
+    outer subprocess also makes interpreter shutdown observable on captured stderr.
+    """
+    sentinel = tmp_path / "external-sentinel.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    harness = r'''
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+from core.usage import adapters
+from core.usage.adapters import ClaudeCodeAccountAdapter, ProviderFamily, ProviderSpec
+
+case_root = Path(sys.argv[1]).resolve()
+tempfile.tempdir = str(case_root)
+probe_cli = r"""
+import ctypes
+import json
+import sys
+import time
+from ctypes import wintypes
+from pathlib import Path
+
+path = Path("restricted-open.txt")
+path.write_text("probe", encoding="utf-8")
+kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+kernel.CreateFileW.restype = wintypes.HANDLE
+handle = kernel.CreateFileW(str(path), 0x80000000, 1, None, 3, 0x80, None)
+assert handle != ctypes.c_void_p(-1).value, ctypes.get_last_error()
+Path(sys.argv[1]).write_text("ready", encoding="utf-8")
+print(json.dumps({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": 0.42}}}}), flush=True)
+while True:
+    time.sleep(1)
+"""
+
+real_popen = subprocess.Popen
+probe_processes = []
+
+class ProbeProcess:
+    """Real subprocess with a short communicate deadline to exercise timeout cleanup."""
+    def __init__(self, command, **kwargs):
+        self._cwd = Path(kwargs["cwd"])
+        self.delete_blocked = False
+        self._process = real_popen(
+            [sys.executable, "-c", probe_cli, str(case_root / "darkfac-quota-probe-child-ready")],
+            **kwargs,
         )
-        parent = (
-            "import subprocess, sys, time; "
-            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]], "
-            "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
-            "time.sleep(30)"
-        )
-        process = subprocess.Popen(
-            [sys.executable, "-c", parent, worker, username], cwd=directory,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
-        deadline = time.monotonic() + 15
-        while not ready.exists() and time.monotonic() < deadline and process.poll() is None:
-            time.sleep(0.05)
-        assert ready.exists(), "ACL restricted subprocess did not become ready"
-        adapters._terminate_probe_process_tree(process)
-        assert process.poll() is not None
-        assert (directory / "restricted.txt").is_file()
+        probe_processes.append(self)
+    @property
+    def pid(self):
+        return self._process.pid
+    @property
+    def returncode(self):
+        return self._process.returncode
+    def communicate(self, timeout=None):
+        try:
+            return self._process.communicate(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            try:
+                (self._cwd / "restricted-open.txt").unlink()
+            except PermissionError:
+                self.delete_blocked = True
+            else:
+                raise AssertionError("Windows allowed deleting a file held without FILE_SHARE_DELETE")
+            raise
+    def poll(self):
+        return self._process.poll()
+    def wait(self, timeout=None):
+        return self._process.wait(timeout=timeout)
+    def kill(self):
+        return self._process.kill()
+
+adapters.subprocess = SimpleNamespace(
+    Popen=ProbeProcess, run=subprocess.run, PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL,
+    CREATE_NEW_PROCESS_GROUP=subprocess.CREATE_NEW_PROCESS_GROUP,
+    TimeoutExpired=subprocess.TimeoutExpired, CompletedProcess=subprocess.CompletedProcess,
+)
+spec = ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/usage")
+adapter = ClaudeCodeAccountAdapter(spec, case_root / "snapshots")
+usage = adapter._probe_claude_headless("probe-cli")
+cleanup = adapter.last_probe_cleanup
+print(json.dumps({
+    "quota_is_fail_closed": usage is None,
+    "cleanup": None if cleanup is None else {
+        "ok": cleanup.ok, "error_kind": cleanup.error_kind, "winerror": cleanup.winerror,
+        "detail": cleanup.detail, "path": str(cleanup.path), "exists": cleanup.path.exists(),
+    },
+    "probe_ready": (case_root / "darkfac-quota-probe-child-ready").exists(),
+    "delete_was_blocked": bool(probe_processes and probe_processes[0].delete_blocked),
+}))
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", harness, str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    stderr = completed.stderr.lower()
+    assert "exception ignored" not in stderr
+    assert "weakref" not in stderr
+    assert "temporarydirectory" not in stderr
+    result = json.loads(completed.stdout.splitlines()[-1])
+    assert result["quota_is_fail_closed"] is True
+    assert result["probe_ready"] is True
+    assert result["delete_was_blocked"] is True
+    assert result["cleanup"] is not None
+    assert result["cleanup"]["ok"] is True, result["cleanup"]
+    sandbox_path = Path(result["cleanup"]["path"])
+    assert sandbox_path.name.startswith("darkfac-quota-probe-")
+    assert sandbox_path.parent == tmp_path.resolve()
+    assert result["cleanup"]["exists"] is False
+    assert sentinel.read_text(encoding="utf-8") == "keep"
