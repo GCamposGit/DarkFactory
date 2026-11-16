@@ -26,10 +26,11 @@ import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.models.registry import id_of, resolve_known
+from core.models.registry import id_of, resolve_claude_probe_model, resolve_known
 from core.usage.models import (
     AccountConnectionStatus,
     ProbeFailure,
@@ -1490,6 +1491,8 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         # Claude Code client with a hand-built API request: that can fail while leaving old data.
         executable = self._find_claude()
         if executable:
+            # Validate the exact quota-probe model before invoking any Claude CLI command.
+            resolve_claude_probe_model("haiku")
             cli_usage = self._probe_claude_cli(executable)
             if cli_usage and cli_usage.quota_supported:
                 return cli_usage
@@ -1689,15 +1692,17 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
 
         `--output-format stream-json --verbose` emits `rate_limit_event` messages carrying the
         unified 5h/7d utilization (0..1) and reset epoch. Runs in an empty temp dir (no CLAUDE.md
-        context) with the cheapest model. Returns None when no event carries a utilization.
+        context) with the explicitly selected, allowlisted Haiku alias. Returns None unless the
+        CLI confirms that model and reports both real quota windows without a model rejection.
         """
         if not self._paid_probe_allowed():
             return None
+        selection = resolve_claude_probe_model("haiku")
         try:
             with tempfile.TemporaryDirectory(prefix="darkfac-quota-probe-") as neutral:
                 result = subprocess.run(
                     [executable, "-p", "ok", "--output-format", "stream-json", "--verbose",
-                     "--model", id_of("haiku"), "--max-turns", "1"],
+                     "--model", selection.cli_model_id, "--max-turns", "1"],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=40, check=False, cwd=neutral, stdin=subprocess.DEVNULL,
                     creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -1705,27 +1710,63 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.debug("Claude headless quota probe failed: %s", type(exc).__name__)
             return None
+        stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else (result.stdout or "")
+        stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
+        if "unrecognized_model" in f"{stdout}\n{stderr}".casefold():
+            # Structured JSON errors and plain diagnostics are equally fatal, even when
+            # the CLI also emitted quota events before rejecting the requested model.
+            logger.warning("Claude quota probe rejected the explicitly selected model")
+            return None
+        if result.returncode != 0:
+            logger.debug("Claude headless quota probe exited with status %s", result.returncode)
+            return None
+
         limits: Dict[str, Any] = {}
-        for line in (result.stdout or "").splitlines():
+        effective_models: set[str] = set()
+        for line in stdout.splitlines():
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
+            for container in (event, event.get("message"), event.get("data"), event.get("result")):
+                if isinstance(container, dict):
+                    model = container.get("model")
+                    if isinstance(model, str) and model.strip():
+                        effective_models.add(model.strip())
             info = event.get("rate_limit_info") if isinstance(event, dict) and event.get("type") == "rate_limit_event" else None
             if not isinstance(info, dict):
                 continue
             # CLI 2.1.x: utilization per window lives in `unifiedWindows`; older events carry it flat.
             windows_info = info.get("unifiedWindows")
             if not isinstance(windows_info, dict):
-                windows_info = {str(info.get("rateLimitType")): info}
+                rate_limit_type = str(info.get("rateLimitType", "")).casefold()
+                aliases = {
+                    "five_hour": "five_hour", "5h": "five_hour", "primary": "five_hour",
+                    "seven_day": "seven_day", "7d": "seven_day", "weekly": "seven_day", "secondary": "seven_day",
+                }
+                kind = aliases.get(rate_limit_type)
+                windows_info = {kind: info} if kind else {}
             for kind in ("five_hour", "seven_day"):
                 window = windows_info.get(kind)
                 utilization = window.get("utilization") if isinstance(window, dict) else None
                 if isinstance(utilization, bool) or not isinstance(utilization, (int, float)):
                     continue
-                limits[kind] = {"used_percentage": float(utilization) * 100.0, "resets_at": window.get("resetsAt")}
-        windows = self._claude_cli_rate_limit_windows(limits)
-        if not windows:
+                utilization = float(utilization)
+                if not 0.0 <= utilization <= 1.0:
+                    continue
+                limits[kind] = {
+                    "used_percentage": float(Decimal(str(utilization)) * Decimal("100")),
+                    "resets_at": window.get("resetsAt", info.get("resetsAt")),
+                }
+        if set(limits) != {"five_hour", "seven_day"} or not effective_models:
+            return None
+        if any(not self._claude_probe_model_matches(selection.alias, model) for model in effective_models):
+            logger.warning("Claude quota probe reported an effective model outside the allowlisted alias")
+            return None
+        windows = self._claude_cli_rate_limit_windows(limits, preserve_percentages=True)
+        if {window.quota_id for window in windows} != {"claude:5h", "claude:weekly"}:
             return None
         limited = any(w.used_percent is not None and w.used_percent >= 100 for w in windows)
         usage = ProviderAccountUsage(
@@ -1739,13 +1780,33 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             windows=windows,
             message="Limites de uso lidos por chamada minima da CLI autenticada do Claude.",
             dashboard_url=self.spec.dashboard_url,
+            raw_fields={
+                "model_selection": {
+                    "alias": selection.alias,
+                    "requested_model": selection.cli_model_id,
+                    "effective_models": sorted(effective_models),
+                    "cost_model_id": selection.cost_model_id,
+                    "max_turns": 1,
+                    "prompt_characters": len("ok"),
+                }
+            },
         )
-        usage = record_probe(usage, self.snapshot_dir)
+        # Preserve the percentages reported by Claude. History plausibility correction is not
+        # applied here because it can replace a real current-window value with an older one.
         self._save_snapshot(usage)
         return usage
 
     @staticmethod
-    def _claude_cli_rate_limit_windows(rate_limits: Any) -> List[QuotaWindow]:
+    def _claude_probe_model_matches(alias: str, model: str) -> bool:
+        """Check that the CLI-reported model identifies the explicitly selected alias."""
+        if model.strip().casefold() == alias.casefold():
+            return True
+        return re.search(rf"(?:^|[/_-]){re.escape(alias)}(?:$|[/_-])", model.strip(), re.IGNORECASE) is not None
+
+    @staticmethod
+    def _claude_cli_rate_limit_windows(
+        rate_limits: Any, *, preserve_percentages: bool = False
+    ) -> List[QuotaWindow]:
         """Convert the CLI's rate_limits object to the provider's quota window contract."""
         if not isinstance(rate_limits, dict):
             return []
@@ -1758,7 +1819,14 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             if raw is None:
                 continue
             used_value = raw.get("used_percentage", raw.get("used_percent", raw.get("utilization")))
-            used = _clamp_percent(used_value)
+            if preserve_percentages:
+                if isinstance(used_value, bool) or not isinstance(used_value, (int, float)):
+                    continue
+                used = float(used_value)
+                if not 0.0 <= used <= 100.0:
+                    continue
+            else:
+                used = _clamp_percent(used_value)
             if used is None:
                 continue
             reset = raw.get("resets_at", raw.get("reset_at"))
@@ -1772,7 +1840,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 quota_id=quota_id,
                 label=label,
                 used_percent=used,
-                remaining_percent=round(100.0 - used, 2),
+                remaining_percent=(100.0 - used) if preserve_percentages else round(100.0 - used, 2),
                 window_duration_minutes=duration,
                 resets_at=reset,
                 metric="subscription",

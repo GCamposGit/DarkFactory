@@ -86,6 +86,7 @@
       "aliases": [
         "haiku"
       ],
+      "claude_cli_model_id": "haiku",
       "gateway_ids": [
         "anthropic/claude-haiku-5-5"
       ],

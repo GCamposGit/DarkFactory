@@ -39,6 +39,40 @@ def test_resolve_unknown_and_forbidden() -> None:
         reg.resolve("fable", parsed)
 
 
+def test_claude_probe_selection_separates_cli_selector_from_cost_identity() -> None:
+    selection = reg.resolve_claude_probe_model("haiku", reg.parse_registry(_raw()))
+    assert selection.alias == "haiku"
+    assert selection.cli_model_id == "haiku"
+    assert selection.cost_model_id == "claude-haiku-5-5"
+    assert reg.resolve_claude_probe_model("haiku", reg.embedded_registry()) == selection
+
+
+@pytest.mark.parametrize("alias", ["sonnet", "opus", "subagent.haiku", "claude-haiku-5-5"])
+def test_claude_probe_rejects_aliases_outside_the_probe_allowlist(alias: str) -> None:
+    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="not permitted"):
+        reg.resolve_claude_probe_model(alias, reg.parse_registry(_raw()))
+
+
+def test_claude_probe_rejects_missing_or_incompatible_configuration() -> None:
+    raw = _raw()
+    haiku = next(model for model in raw["models"] if model["id"] == "claude-haiku-5-5")
+    del haiku["claude_cli_model_id"]
+    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="no compatible"):
+        reg.resolve_claude_probe_model("haiku", reg.parse_registry(raw))
+
+    raw = _raw()
+    haiku = next(model for model in raw["models"] if model["id"] == "claude-haiku-5-5")
+    haiku["claude_cli_model_id"] = "claude-haiku-5-5"
+    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="no compatible"):
+        reg.resolve_claude_probe_model("haiku", reg.parse_registry(raw))
+
+
+def test_claude_probe_does_not_use_embedded_fallback_for_missing_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(reg, "DEFAULT_REGISTRY_PATH", tmp_path / "missing.json")
+    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="missing or invalid"):
+        reg.resolve_claude_probe_model("haiku")
+
+
 def test_forbidden_model_cannot_take_a_role() -> None:
     raw = copy.deepcopy(_raw())
     for model in raw["models"]:
