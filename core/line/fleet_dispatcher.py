@@ -1015,6 +1015,7 @@ class FleetDispatcher:
         skipped: dict[str, str],
         dispatched: list[dict[str, str]],
         now: float,
+        reservation_state: dict[str, Any],
     ) -> None:
         project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
         candidate = str(demand.get("candidate_digest") or demand.get("baseline_sha") or ticket_candidate_digest(tid))
@@ -1088,6 +1089,34 @@ class FleetDispatcher:
             return
         try:
             run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
+            try:
+                current_reservations = self._read_canonical_reservations(self.clock())
+            except Exception as exc:  # noqa: BLE001 - never launch with unknown canonical capacity
+                reservation_state["reservations"] = {}
+                reservation_state["error"] = type(exc).__name__
+                for configured_host in self.config.hosts:
+                    idle[configured_host.id] = "canonical_reservations_unavailable"
+                logger.error("canonical reservation revalidation failed for %s (%s)", host.id, type(exc).__name__)
+                self._release_reservation(InFlight(
+                    tid, host.id, None, project_id=project_id, candidate_digest=candidate,
+                    context_digest=context, resource_version=resource_version,
+                    admission_token=token, recovery_token=recovery_token,
+                ))
+                skipped[tid] = "canonical_reservations_unavailable"
+                queue.insert(0, tid)
+                return
+            reservation_state["reservations"] = current_reservations
+            reservation = current_reservations.get(host.id)
+            if reservation is not None:
+                idle[host.id] = f"host_reserved:{reservation.ticket_id}"
+                self._release_reservation(InFlight(
+                    tid, host.id, None, project_id=project_id, candidate_digest=candidate,
+                    context_digest=context, resource_version=resource_version,
+                    admission_token=token, recovery_token=recovery_token,
+                ))
+                skipped[tid] = f"host_reserved:{reservation.ticket_id}"
+                queue.insert(0, tid)
+                return
             if self.launch is None:
                 job = default_launch(tid, host, demand, run_id=run_id,
                                      recovery=bool(self.recovery.get("active")),
@@ -1097,6 +1126,7 @@ class FleetDispatcher:
             self._register_flight(host.id, job, project_id, candidate, context, resource_version, token,
                                   run_id, recovery_token)
             dispatched.append({"ticket": tid, "host": host.id})
+            skipped.pop(tid, None)
         except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
             self._record_launch_failure(
                 host, tid, project_id, candidate, context, resource_version,
@@ -1168,6 +1198,7 @@ class FleetDispatcher:
         dispatched: list[dict[str, str]],
         orphan_hosts: set[str],
         now: float,
+        reservation_state: dict[str, Any],
     ) -> None:
         for host in sorted(self.config.hosts, key=lambda h: h.priority):
             if self.pending_releases:
@@ -1178,12 +1209,10 @@ class FleetDispatcher:
             if host.id in orphan_hosts:
                 idle[host.id] = "run_orfao_em_execucao"
                 continue
-            try:
-                reserved_hosts = self._read_canonical_reservations(self.clock())
-            except Exception as exc:  # noqa: BLE001 - do not launch with unknown canonical capacity
+            if reservation_state["error"]:
                 idle[host.id] = "canonical_reservations_unavailable"
-                logger.error("canonical reservation check failed for %s (%s)", host.id, type(exc).__name__)
                 continue
+            reserved_hosts = reservation_state["reservations"]
             reservation = reserved_hosts.get(host.id)
             if reservation is not None:
                 idle[host.id] = f"host_reserved:{reservation.ticket_id}"
@@ -1205,7 +1234,8 @@ class FleetDispatcher:
                     skipped[tid] = "demand_disappeared"
                     idle[host.id] = "demand_disappeared"
                     break
-                self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
+                self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now,
+                                      reservation_state)
                 if skipped.get(tid) != "backoff_infra" and not skipped.get(tid, "").startswith("ticket_hold:"):
                     break
             if any(row.get("host") == host.id for row in dispatched):
@@ -1371,18 +1401,21 @@ class FleetDispatcher:
         idle: dict[str, str] = {}
         lock_busy, self.lock_busy = self.lock_busy, {}
         orphan_hosts = self.busy_hosts_loader()
-        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now)
+        reservation_state: dict[str, Any] = {"reservations": {}, "error": ""}
+        try:
+            reservation_state["reservations"] = self._read_canonical_reservations(self.clock())
+        except Exception as exc:  # noqa: BLE001 - capacity cannot be announced from an unknown snapshot
+            reservation_state["error"] = type(exc).__name__
+            logger.error("canonical reservation snapshot failed (%s)", reservation_state["error"])
+        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now,
+                             reservation_state)
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
         deployed = self._maybe_deploy()
-        reservation_error = ""
-        try:
-            canonical_reservations = self._read_canonical_reservations(self.clock())
-        except Exception as exc:  # noqa: BLE001 - capacity cannot be announced from a stale snapshot
-            canonical_reservations = {}
-            reservation_error = type(exc).__name__
-            logger.error("canonical reservation snapshot failed (%s)", reservation_error)
+        canonical_reservations = reservation_state["reservations"]
+        reservation_error = reservation_state["error"]
+        if reservation_error:
             for host in self.config.hosts:
-                idle.setdefault(host.id, "canonical_reservations_unavailable")
+                idle[host.id] = "canonical_reservations_unavailable"
         return self._finish_cycle({
             "resumptions": resumptions,
             "ts": datetime.now(timezone.utc).isoformat(),
