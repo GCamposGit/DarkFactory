@@ -1526,7 +1526,21 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if self._is_snapshot_fresh(snapshot):
             return False
         usage = self._from_snapshot(snapshot)
-        return all(w.remaining_percent is None or w.remaining_percent > 15.0 for w in usage.windows)
+        now = datetime.now(timezone.utc)
+
+        def already_reset(resets_at: Optional[str]) -> bool:
+            # A window whose reset already passed no longer says anything about today's quota:
+            # without this the probe stayed forbidden forever and the provider stayed "unknown".
+            try:
+                parsed = datetime.fromisoformat(str(resets_at).replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)) <= now
+
+        return all(
+            w.remaining_percent is None or w.remaining_percent > 15.0 or already_reset(w.resets_at)
+            for w in usage.windows
+        )
 
     @staticmethod
     def _extract_claude_oauth_info() -> tuple[Optional[str], Optional[str], Optional[str]]:

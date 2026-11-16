@@ -73,6 +73,7 @@ S4U precisa ter acesso local aos snapshots e ao `.env`; validar HTTPS no context
 
 A sonda Claude aproveita o snapshot de statusLine por 15 minutos, inclusive com force.
 A chamada paga so e permitida depois dessa idade e com todas as janelas conhecidas
-acima de 15%; no piso, retorna a ultima leitura, sem inferencia. A publicacao nunca
+acima de 15%; no piso, retorna a ultima leitura, sem inferencia. Janela cujo `resets_at`
+ja passou nao bloqueia a sonda: a leitura antiga nao vale para a janela nova. A publicacao nunca
 aciona essa sonda. Apos deploy, conferir `received_at`, aguardar/simular mais de 20 minutos
 sem publicacao e verificar `stale` e destaque visual; observar recibos do publicador.
