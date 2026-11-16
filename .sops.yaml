@@ -2,4 +2,4 @@
 # de cada maquina/owner que pode ler o cofre, separadas por virgula. Vazio = nao cifra.
 creation_rules:
   - path_regex: secrets/.*\.enc\.yaml$
-    age: ""   # ex.: "age1abc...,age1def..."
+    age: "age1d20jk5qvhqnru47cf5x9wktmp9ycth3xnhmr7zszrax3a39k6vgqys4s5u"   # ex.: "age1abc...,age1def..."

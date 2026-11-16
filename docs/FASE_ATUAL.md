@@ -22,7 +22,7 @@ Como manter: este arquivo não é protegido. O owner edita quando quiser, e a f�
 ## Canais de entrada
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
 - Os três devem funcionar sem erro e levar a demanda pelo mesmo motor (`run_ticket.py` / despachante).
-- Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
+- Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger — adotando o **Gemini 4 Argon High** como modelo de alta inteligência para planejamento e coordenação da fábrica e o **Gemini 4 Hydrogen High** para tarefas simples de codificação, testes e subagentes. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
 
 ## Ambiente e máquinas
 - Recuperação de05/11/2026 (USR-473): testes remotos direcionados ao Desktop saudável (`100.78.181.90:8080`); Grokbox indisponível fica excluído. Modo persistente `DARKFAC_FLEET_RESUME_ONLY=1` mantém retomadas sem novos BUILDs até estabilizar a saída. A exclusão histórica do Desktop descrita abaixo não representa essa configuração de recuperação.

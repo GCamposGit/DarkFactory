@@ -52,6 +52,8 @@ A fonte única e canônica de modelos, provedores, timeouts e cascatas para a es
 
 | Tipo de Tarefa | Complexidade | Perfil Típico | Provedor / Endpoint |
 | :--- | :--- | :--- | :--- |
+| **Planejamento & Coordenação (Antigravity)** | Alta / Crítica | Gemini 4 Argon High | Antigravity / Google |
+| **Codificação Simples, Testes & Subagentes (Antigravity)** | Baixa / Média | Gemini 4 Hydrogen High | Antigravity / Google |
 | **Ingestão & Mapeamento** | Qualquer | Gemini 3.8 Flash | Antigravity / Google |
 | **Pesquisa Web & Docs Vivos** | Média / Alta | Grok 4.6 | xAI |
 | **Arquitetura & PRD** | Alta / Crítica | Claude 3.7 Sonnet / Opus | Anthropic |
