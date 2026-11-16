@@ -1298,7 +1298,9 @@ def _run_codex(
     tmp_dir = mocked_tmp if (REPO_ROOT != project_root()) else (state_root() / "tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_out = tmp_dir / f"codex_line_{uuid.uuid4().hex[:8]}.json"
-    argv = build_codex_argv(executable, req, tmp_out, gateway_model=gateway_model)
+    # O argumento so vai quando ha gateway: chamadores e testes que trocam o construtor seguem validos.
+    gateway_kwargs = {"gateway_model": gateway_model} if gateway_model else {}
+    argv = build_codex_argv(executable, req, tmp_out, **gateway_kwargs)
 
     try:
         res = _run_bounded(
