@@ -975,7 +975,7 @@ def test_run_pytest_memory_budget_and_parallel_split(monkeypatch, tmp_path, gib,
         assert calls == []
     else:
         assert calls[0][0][-1] == "--collect-only"
-        assert 198 < calls[1][1]["timeout"] <= 200
+        assert 198 < calls[1][1]["timeout"] <= 200.5  # resto do prazo: tolera arredondamento do relogio
         assert calls[1][0][calls[1][0].index("-n") + 1] == ("3" if workers > 1 else "0")
         assert len(calls) == (3 if workers > 1 else 2)
 
