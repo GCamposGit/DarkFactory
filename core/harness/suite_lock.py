@@ -328,7 +328,13 @@ def _try_lock_file(path: Path) -> object | None:
 
     try:
         try:
+        try:
         path.touch(exist_ok=True)
+    except PermissionError:
+        # The lock file may already exist but be unwritable to this identity.
+        # Treat it as unavailable so acquire() can retry and report its normal
+        # structured timeout/error instead of leaking a PermissionError.
+        return False
     except PermissionError:
         return False
         handle = open(path, "r+b")
