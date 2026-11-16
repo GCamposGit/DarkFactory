@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # run on loaded Windows workers. The test is serial because it starts pytest.
 _PYTEST_DEADLINE_SEC = 110
 _SUMMARY_LINE = re.compile(
-    r"^(?:=+\s+)?\d+ [A-Za-z]\w*(?:, \d+ [A-Za-z]\w*)* in \d+(?:\.\d+)?s(?:\s+=+)?$"
+    r"^(?:=+\s+)?\d+ [A-Za-z]\w*(?:, \d+ [A-Za-z]\w*)* in \d+(?:\.\d+)?s(?: \(\d+:\d\d:\d\d\))?(?:\s+=+)?$"
 )
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _FOCUS_FILE = "tests/test_fleet_dispatcher.py"
