@@ -327,7 +327,10 @@ def _try_lock_file(path: Path) -> object | None:
     """
 
     try:
+        try:
         path.touch(exist_ok=True)
+    except PermissionError:
+        return False
         handle = open(path, "r+b")
     except PermissionError as exc:
         raise SuiteLockUnwritable(path, str(exc)) from exc
