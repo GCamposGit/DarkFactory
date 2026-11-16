@@ -24,17 +24,23 @@ Pedido do owner em 15/11: a fábrica "corre atrás do rabo". Este roadmap conser
 
 | Frente | Ticket | Estado em 15/11 | Onde está |
 |---|---|---|---|
-| E1 Rotas degradam com cota baixa ou desconhecida | USR-504 | Em implementação | branch `fix/rotas-degradam` |
-| E2 Falha classificada, orçamento durável, backoff persistido | USR-490 | Implementado, falta validar e abrir PR | branch `fix/falha-classificada-orcamento`, worktree `.worktrees/est-falhas` |
-| E3 Portão elástico: ticket roda afetados, suíte no CI | USR-502 | Implementado, falta validar e abrir PR | branch `fix/portao-elastico`, worktree `.worktrees/est-portao` |
-| E4 DarkHub: fonte única e frescor | USR-513 | PR #859 aberto | branch `fix/hub-fonte-unica` |
+| E1 Rotas degradam com cota baixa ou desconhecida | USR-504 | **Entregue** (PR #861, em produção em 15/11) | falta ligar `plan_exists` no launcher (ver E5) |
+| E2 Falha classificada, orçamento durável, backoff persistido | USR-490 | PR #862 (mesclar com CI verde) | branch `fix/falha-classificada-orcamento` |
+| E3 Portão elástico: ticket roda afetados, suíte no CI | USR-502 | **Entregue** (PR #863) | `main` |
+| E4 DarkHub: fonte única e frescor | USR-513 | **Entregue** (PR #859, verificado em produção em 15/11) | `main` |
 | E5 Retomar na etapa certa | USR-447 | Não iniciado | ver abaixo |
 | E6 Dieta do pipeline de entrega | USR-499, USR-500 | Não iniciado | ver abaixo |
 | E7 Custo e contingência | USR-445, USR-512 | Não iniciado | ver abaixo |
 | E8 Hosts e reconciliação | USR-498, USR-492 | Não iniciado | ver abaixo |
 | E9 Poda da suíte | (sem ticket) | Auditoria incompleta | ver abaixo |
 
-Como concluir uma frente que está "implementada, falta validar": na worktree indicada, rodar só os arquivos de teste alterados (`python -m pytest <arquivos> -q -n 0 -p no:cacheprovider`), depois `lint-imports`, `python scripts/complexity_ratchet.py`, commitar, rodar `python -m core.harness.docs_sync --base origin/main --head HEAD`, `git push` e `gh pr create`. O CI do PR roda a suíte em Linux; mesclar com squash quando verde. Não rodar `runner.py --quick` no Notebook.
+Como entregar cada frente restante: worktree nova a partir de `origin/main`, rodar só os arquivos de teste alterados (`python -m pytest <arquivos> -q -n 0 -p no:cacheprovider`), depois `lint-imports`, `python scripts/complexity_ratchet.py`, commitar, `python -m core.harness.docs_sync --base origin/main --head HEAD`, `git push` e `gh pr create`. O CI do PR roda a suíte em Linux em cerca de 3 minutos; mesclar com squash quando verde. Não rodar `runner.py --quick` no Notebook.
+
+Lições desta rodada, para quem retomar:
+- Mudou código de saída do launcher? Rode também `tests/test_run_ticket*.py`, `tests/test_ticket_workspace.py`, `tests/test_line_fleet_execution.py`: vários testes fixam o código de saída.
+- Timeout de agente é falha do **candidato** (gasta orçamento), nunca infra: é inferência paga.
+- Teste novo com relógio precisa de tolerância: o shard Windows do `main` reprovou por 200,00000000000006 contra 200.
+- Antes de `git checkout` em uma worktree, confirme que a pasta existe; se não existir, o comando roda na pasta atual.
 
 ### E1 Rotas (USR-504)
 Comportamento alvo: ordem de escrita é assinatura com cota conhecida acima de 15%, depois assinatura com cota desconhecida, depois OpenRouter barato dentro do teto, e só então esperar. Leitura velha usa a última válida com margem de 10 pontos até o reset (todos os provedores). Leitura "suspeita" repetida duas vezes é aceita; antes disso vale a mais pessimista. Planejamento aceita modelo intermediário quando não há alto nível. Teto mensal do OpenRouter bloqueia de verdade (`run_caps.openrouter_monthly_cap_usd`; 28,13 em novembro pela decisão OA-090, **voltar a 10,0 em 01/12/2026**). Admissão exige só rota de desenvolvimento (e de planejamento quando não há plano); revisão e portão decidem na hora deles.
@@ -48,14 +54,11 @@ Pendência conhecida: o agente parou ao tratar "espera sem rota não pode consum
 Comportamento alvo: `_gate_build_command` usa `runner.py --profile pr` local (afetados, compileall, tipos, fumaça, `lint-imports`, ratchet). `DARKFAC_GATE_SCOPE=full` restaura a suíte completa. Um worker usa `-n 0`. Mínimo de 1,5 GiB livres para afetados em série; espera de RAM cai de 1800 s para 300 s. Queda de worker xdist reexecuta uma vez em série. Remoto inalcançável falha em 5 s e cai para local.
 
 ### E4 DarkHub (USR-513)
-Depois do merge do PR #859:
-1. Deploy do Hub (`python C:\dev\DarkFac\scripts\dokploy_redeploy.py`) e conferir no Dokploy `DARKFAC_OWNER_ACTIONS_MODE=control` e `DARKFAC_HF02_DATABASE_URL` com escrita.
-2. Comparar `GET https://darkhub.ggcampos.com/api/owner-actions` com o Postgres; conferir a migração dos overlays e o destaque de cota desatualizada.
-3. Ligar `core.usage.sync_task.publish_once()` no ciclo do despachante (`core/line/fleet_dispatcher.py`, a cada 5 min, falha só registra em log). Com isso a publicação de cotas deixa de depender da tarefa `DarkFac-Usage-Cloud-Sync`, que pode ser removida.
+Entregue e verificado em 15/11: `/api/owner-actions` lê do Postgres (2 abertas, 52 fechadas) e `/api/usage/accounts` recebe as cotas por `core.usage.sync_task.publish_once()`, sem sonda paga. O PR #862 liga essa publicação no ciclo do despachante (a cada 5 min). Resta: remover a tarefa agendada `DarkFac-Usage-Cloud-Sync` (desabilitada desde 06/11) depois de um dia com o despachante publicando.
 
 ### E5 Retomar na etapa certa (USR-447; absorve parte do USR-475)
 Problema: o despachante sempre relança `run_ticket.py <ID>` completo. `_stage_plan` chama `ticket_engine.reset`, que apaga o plano; `_can_resume_built_candidate` exige que `build_binding.json` bata com o HEAD, e qualquer commit do agente de conserto invalida o vínculo. Resultado: replanejamento com modelo de alto nível e novo build para um candidato que só precisava repetir portão ou entrega.
-Fazer: (1) se a worktree preservada tem commits à frente do `origin/main` e plano válido, o despachante lança `--resume-delivery --worktree <caminho>` (mesmo caminho de `pending_delivery`); (2) regravar o vínculo de build após cada commit do agente de conserto; (3) `reset` nunca apaga plano com candidato existente; (4) BUILD retoma só as fatias que faltam. Fechar o PR #845 se o trabalho for refeito.
+Fazer: (0) `evaluate_admission` em `run_ticket.py` passa `plan_exists=True` a `admission.admit` quando a worktree preservada do ticket já tem `SPEC.md` e `tickets.json`; (1) se a worktree preservada tem commits à frente do `origin/main` e plano válido, o despachante lança `--resume-delivery --worktree <caminho>` (mesmo caminho de `pending_delivery`); (2) regravar o vínculo de build após cada commit do agente de conserto; (3) `reset` nunca apaga plano com candidato existente; (4) BUILD retoma só as fatias que faltam. Fechar o PR #845 se o trabalho for refeito.
 Aceite: teste de comportamento em que falha de portão seguida de relançamento não chama planejamento nem build.
 
 ### E6 Dieta do pipeline de entrega
@@ -89,4 +92,4 @@ A auditoria de testes não terminou. Roteiro: (1) `python -m pytest --collect-on
 
 ## Ordem de execução
 
-E4 (PR aberto) → E2 → E3 → E1 → E5 → E8 (USR-498 e vagas por RAM) → E7 (USR-445) → E6 → E9. E2 e E3 tocam `run_ticket.py` em regiões diferentes: mesclar um, rebasear o outro.
+E2 (mesclar #862) → religar o despachante e observar um dia → E5 → E8 (USR-498 e vagas por RAM) → E7 (USR-445) → E6 → E9.
