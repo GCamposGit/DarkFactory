@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -79,6 +79,53 @@ def test_selection_filters():
     q, sk = fd.select_tickets(dem, busy_ids={"USR-07"})
     assert q == ["USR-01", "USR-05"]
     assert sk["USR-02"].startswith("tag:") and sk["USR-04"] == "dependencia_aberta" and sk["USR-07"] == "em_voo"
+
+
+def test_active_canonical_reservation_blocks_dispatch_until_lease_expires(tmp_path):
+    from core.workflow.control_store import SQLiteControlStore
+
+    now = datetime.now(timezone.utc)
+    now_epoch = [now.timestamp()]
+    control_store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    external = control_store.reserve_cycle(
+        project_id="darkfac",
+        ticket_id="USR-449",
+        run_id="external-run-449",
+        host_id="grokbox",
+        now=now,
+        lease_duration_sec=2,
+    )
+    launched = []
+
+    def launch(ticket_id, host, **kwargs):
+        launched.append((ticket_id, host.id))
+        return fd.InFlight(ticket_id, host.id, Handle(), run_id=kwargs.get("run_id"))
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("grokbox", 1, "http://g")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [_d("USR-453")],
+        probe=lambda host: fd.HostProbe(True, "ready"),
+        launch=launch,
+        clock=lambda: now_epoch[0],
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+        control_store_factory=lambda: control_store,
+    )
+
+    occupied = dispatcher.run_cycle()
+    assert launched == []
+    assert occupied["free_hosts"] == []
+    assert occupied["idle_reasons"]["grokbox"] == "host_reserved:USR-449"
+    assert occupied["canonical_reservations"]["grokbox"]["run_id"] == "external-run-449"
+    assert control_store.get_reservation(external.reservation_id).status == "active"
+
+    now_epoch[0] = (now + timedelta(seconds=3)).timestamp()
+    expired = dispatcher.run_cycle()
+    assert launched == [("USR-453", "grokbox")]
+    assert control_store.get_reservation(external.reservation_id).status == "expired"
+    assert expired["dispatched"] == [{"ticket": "USR-453", "host": "grokbox"}]
 
 
 def test_infra_backoff_survives_dispatcher_restart_then_retries(tmp_path, monkeypatch):

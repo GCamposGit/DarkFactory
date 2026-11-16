@@ -120,6 +120,13 @@ de host tem prazo; quando o host desaparece, o próximo reconciliador expira a r
 o job volta a ser elegível para admissão em outro host. A indisponibilidade de uma VM é
 tratada como falha normal de infraestrutura, sem concluir o ticket.
 
+Antes de despachar e antes de publicar `free_hosts`, o dispatcher reconcilia e consulta as
+reservas canônicas do control store. Hosts com reserva `active` ou `draining` ficam fora da
+capacidade livre, mesmo que não apareçam no `in_flight` deste processo. A consulta não libera
+reservas de outros processos; leases vencidas são expiradas pelo reconciliador e só então o host
+volta a ser elegível. Se o control store não puder ser consultado, o dispatcher fecha a admissão
+e não anuncia hosts livres naquele ciclo.
+
 Cada despacho inicia `run_ticket.py` em um worktree operacional limpo criado de `origin/main`.
 O despachante copia para esse checkout somente o registro do ticket selecionado; arquivos
 alterados no checkout compartilhado, inclusive estado de runtime, ficam preservados e fora
