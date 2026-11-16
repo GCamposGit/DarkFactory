@@ -75,6 +75,31 @@ control store, o checkout compartilhado e `origin/main`. O ledger e o
 candidato atual nao sao reexecutados; `merge.json` e o relatorio de deploy do
 attempt anterior sao apagados.
 
+## Reentrada na fila (USR-498)
+
+`DemandsStore.requeue_ticket` continua o unico caminho que devolve um ticket a `planned`.
+`completed` e `cancelled` seguem recusados quando `reopen` nao e pedido. Com `reopen=True`,
+o completed exige motivo, a evidencia anterior e limpa e o motivo entra em
+`problem_statement`; `cancelled` nao reabre. O argumento `evidence` e ignorado nesse
+caminho.
+
+Na transicao comum, `evidence` e acrescentado ao `delivery_evidence` que ja existia,
+numa linha nova. A linha igual nao e repetida. Ticket que ja esta `planned` nao e
+regravado e nao ganha outra linha. Branch, worktree e trava de linha nao entram
+nesse metodo.
+
+## Reconciliação no ciclo do despachante (USR-498)
+
+No início de cada ciclo, antes de montar a fila (`select_tickets`), o despachante chama `reconcile_stale_active`. O limiar default é 24 horas: ticket `implementing` ou `validating` sem vida além desse prazo volta a `planned` e pode ser despachado no mesmo ciclo. A causa fica no ticket (`delivery_evidence`) e a ação fica em `cycle["reconciled"]`, gravado em `.factory/runs/fleet_dispatcher_state.json`.
+
+`--resume-only` não reconcilia. `--dry-run` do despachante só lista (`would_requeue`) e não grava. Ticket em `in_flight` deste despachante fica de fora. Falha do sweep vira ação `error` (`stale_active_reconcile_failed`) e o ciclo segue.
+
+```powershell
+python -m core.line.stale_active --dry-run
+```
+
+`--dry-run` lista o que voltaria a `planned` e não grava o ledger. `--max-actions` (padrão 25) e `--idle-hours` (padrão 24) limitam o sweep manual.
+
 ## Acoes do owner e status (S4b)
 
 - Escritores de `owner_actions` (respostas e cliques do Hub, espelhos, alertas de CI, CLI)

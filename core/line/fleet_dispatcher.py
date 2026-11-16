@@ -33,6 +33,13 @@ do exec. Com a variavel igual ao HEAD atual, a ocorrencia seguinte registra a ca
 loop dorme, sem segundo exec. A troca de SHA do checkout nao define essa variavel.
 ``--dry-run``, ``--once`` e um ``launch`` presente tambem nao disparam esse reinicio.
 
+Antes de montar a fila, cada ciclo reconcilia ticket ``implementing`` ou ``validating``
+sem vida ha mais de 24 horas (``reconcile_stale_active``). O ticket devolvido a
+``planned`` pode sair no mesmo ciclo. ``--resume-only`` nao reconcilia. ``--dry-run``
+lista sem gravar. Ticket em ``in_flight`` deste processo nao entra. Falha do sweep fica
+em ``reconciled`` e o ciclo segue. O estado, inclusive ``reconciled``, vai para
+``fleet_dispatcher_state.json``.
+
 Uso::
 
     python -m core.line.fleet_dispatcher --loop
@@ -586,6 +593,37 @@ def _delivery_evidence(log_tail: str) -> bool:
     return "merged_awaiting_deploy" in log_tail or "[DELIVERY_MERGED]" in log_tail
 
 
+def _reconcile_failure(exc: BaseException) -> dict[str, Any]:
+    """Acao estavel quando o sweep inteiro levanta. O ciclo grava isto e segue."""
+    detail = f"{type(exc).__name__}: {exc}"
+    return {
+        "ticket_id": "",
+        "previous_status": "",
+        "cause": "stale_active_reconcile_failed",
+        "idle_seconds": 0,
+        "action": "error",
+        "detail": detail[:200],
+    }
+
+
+class _UnwiredDemands:
+    """Ledger vazio quando o processo nao e o daemon.
+
+    ``FleetDispatcher`` construido pelos testes nao abre o ``demands.json`` do
+    checkout. O daemon passa ``daemon_demands_store`` em ``main``.
+    """
+
+    def list_tickets(self) -> list[Any]:
+        return []
+
+
+def daemon_demands_store() -> Any:
+    """Ledger que o despachante continuo reconcilia. Import tardio, sem efeito na importacao."""
+    from core.demands.store import DemandsStore
+
+    return DemandsStore()
+
+
 # --- despachante ----------------------------------------------------------------------------------
 
 
@@ -610,6 +648,7 @@ class FleetDispatcher:
         code_sha_reader: Optional[Callable[[], object]] = None,
         exec_fn: Optional[Callable[[str, Sequence[str]], Any]] = None,
         launch_argv: Optional[Sequence[str]] = None,
+        demands_store_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -654,6 +693,7 @@ class FleetDispatcher:
         self._exec_fn = exec_fn or os.execv
         self._launch_argv = tuple(launch_argv) if launch_argv is not None else tuple(sys.argv[1:])
         self._startup_sha = self._read_checkout_sha()
+        self.demands_store_factory = demands_store_factory
 
     def _read_checkout_sha(self) -> str | None:
         try:
@@ -1159,6 +1199,66 @@ class FleetDispatcher:
             cause = "recovery_list_no_admissible"
         return {"live": live, "tickets": tickets, "pending": pending, "cause": cause}
 
+    def _demands_store(self) -> Any:
+        if self.demands_store_factory is None:
+            return _UnwiredDemands()
+        return self.demands_store_factory()
+
+    def _reconcile_stale_active(self) -> list[dict[str, Any]]:
+        """Devolve status ativo sem vida a planned antes da fila deste ciclo.
+
+        ``resume_only`` nao le o ledger. ``dry_run`` so lista. Ticket em
+        ``in_flight`` deste processo e vivo antes de qualquer sonda. Excecao
+        vira acao ``error`` e nao escapa.
+        """
+        if self.config.resume_only:
+            return []
+        in_flight = {job.ticket_id for job in self.in_flight.values()}
+        try:
+            from dataclasses import asdict
+
+            from core.line.stale_active import collect_liveness, reconcile_stale_active
+
+            def is_alive(ticket_id: str) -> bool:
+                if ticket_id in in_flight:
+                    return True
+                return collect_liveness(ticket_id)
+
+            actions = reconcile_stale_active(
+                self._demands_store(),
+                is_alive=is_alive,
+                dry_run=self.dry_run,
+            )
+        except Exception as exc:  # noqa: BLE001 - reconciliacao nunca derruba o ciclo
+            logger.exception("reconciliacao de status ativo sem processo falhou")
+            return [_reconcile_failure(exc)]
+        return [asdict(action) for action in actions]
+
+    def _apply_reconciled_queue(self, demands: list[Any], reconciled: Sequence[Mapping[str, Any]]) -> None:
+        """O snapshot da fila pode ainda dizer implementing; o sweep deste ciclo ja devolveu a planned.
+
+        Ticket em ``in_flight`` nao muda de status aqui, mesmo se uma acao o citar.
+        """
+        protected = {job.ticket_id for job in self.in_flight.values()}
+        requeued = {
+            str(row.get("ticket_id") or "")
+            for row in reconciled
+            if isinstance(row, Mapping) and row.get("action") == "requeued"
+        }
+        requeued.discard("")
+        requeued.difference_update(protected)
+        if not requeued:
+            return
+        for demand in demands:
+            if not isinstance(demand, dict):
+                continue
+            ticket_id = str(demand.get("id") or "")
+            if ticket_id not in requeued:
+                continue
+            if str(demand.get("status") or "") not in {"implementing", "validating"}:
+                continue
+            demand["status"] = "planned"
+
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
         from core.line.pending_delivery import tick, acknowledge_deploy
@@ -1176,6 +1276,8 @@ class FleetDispatcher:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
                                        "resumptions": resumptions, "dispatched": [],
                                        "deployed": deployed_resume})
+        # USR-498: antes da fila, para o ticket reconciliado poder sair neste ciclo.
+        reconciled = self._reconcile_stale_active()
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
         if self.recovery.get("active"):
@@ -1190,6 +1292,7 @@ class FleetDispatcher:
             load_error = str(exc)
         else:
             load_error = ""
+        self._apply_reconciled_queue(demands, reconciled)
         busy = ({j.ticket_id for j in self.in_flight.values()} | set(self.busy_ids_loader())
                 | {r["ticket"] for r in resumptions if "ticket" in r})
         self._main_sha = run_outcome.main_sha(PROJECT_ROOT)
@@ -1244,6 +1347,7 @@ class FleetDispatcher:
                          "receipt_cause": self.recovery.get("receipt_cause", ""),
                          "receipt_digest": self.recovery.get("receipt_digest", ""),
                          "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")},
+            "reconciled": reconciled,
         })
 
     def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
@@ -1251,6 +1355,7 @@ class FleetDispatcher:
         observed = self._read_checkout_sha()
         cycle["code_sha"] = observed
         cycle["code_sha_changed"] = _checkout_sha_changed(self._startup_sha, observed)
+        cycle.setdefault("reconciled", [])
         self.last_cycle = cycle
         self._write_state()
         return cycle
@@ -1389,7 +1494,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
                         usage_hook=publish_once,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
-                        launch_argv=list(sys.argv[1:] if argv is None else argv))
+                        launch_argv=list(sys.argv[1:] if argv is None else argv),
+                        demands_store_factory=daemon_demands_store)
     if args.loop and not args.once:
         d.run_forever()
         return 0

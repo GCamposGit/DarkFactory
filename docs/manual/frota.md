@@ -1,4 +1,4 @@
-<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/line/admission_store.py, core/line/failure_taxonomy.py, core/line/run_outcome.py, core/line/failure_alerts.py -->
+<!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/line/admission_store.py, core/line/failure_taxonomy.py, core/line/run_outcome.py, core/line/failure_alerts.py, core/line/stale_active.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 # Operação da frota
 
@@ -417,6 +417,21 @@ reserva ativa e receipt incompleto são espera, nunca sucesso.
 Na recuperação, há no máximo uma entrega em voo para toda a frota. A concorrência normal só volta após uma linha `[RECOVERY_RECEIPT] {JSON}` no log da entrega. O receipt deve ser real (`simulated: false`), recente (até sete dias), vinculado ao digest do candidato em cada estágio e incluir `[HARNESS_PASS]`, revisão independente aprovada, CI verde, SHA de merge alcançável, deploy desse SHA, smoke HTTP 2xx e learning pack indexado. Evidência ausente, stale, simulada ou de outro candidato deixa a trava ativa e registra a primeira causa recusada. O hash do receipt e o candidato recuperado ficam persistidos, tornando o retorno ao teto normal idempotente após reinício.
 
 Para diagnosticar, consulte o estado do ciclo em `.factory/runs` e o SQLite de admissão em `DARKFAC_STATE_ROOT` (ou a raiz de estado configurada). `recovery.active=true` mantém a frota serializada; `recovery.receipt_cause` aponta o estágio que falta. Corrija a evidência ou altere de modo verificável o candidato/recurso e deixe o despachante retomar com backoff. Não apague reservas nem a trava manualmente.
+
+## Status ativo sem processo (USR-498)
+
+Ticket `implementing` ou `validating` sem processo da frota, sem trava de linha no proprio ticket, sem entrega pendente `running` e sem job aberto, parado ha mais de 24 horas, volta a `planned`. A causa fica numa linha nova de `delivery_evidence`: `stale_active cause=stale_active_no_liveness previous_status=<status anterior>`. O texto que ja estava na evidencia permanece, e a mesma linha nao e gravada de novo. A segunda varredura seguida nao altera o ledger.
+
+A reconciliacao nao remove nem reescreve branch, worktree ou arquivo de trava. Run com alguma dessas evidencias de vida nao entra na lista. `completed` e `cancelled` continuam recusados por `requeue_ticket`. Cada acao emite uma linha de log `stale_active_reconciled` com o ticket, o status anterior, a idade em segundos e a causa.
+
+O despachante chama esse sweep no início de cada ciclo, depois de recolher os jobs encerrados e antes de montar a fila (`select_tickets`). O limiar default é 24 horas. O ticket devolvido a `planned` nesse ciclo já pode ser despachado no mesmo ciclo. `--resume-only` não reconcilia e não admite ticket novo. `--dry-run` do despachante só lista a ação `would_requeue` e não grava o ledger. Ticket que está em `in_flight` neste despachante não é reconciliado. Se o sweep falha, o ciclo registra a ação `error` com a causa `stale_active_reconcile_failed` em `reconciled` e segue. As ações do ciclo ficam em `cycle["reconciled"]` e em `.factory/runs/fleet_dispatcher_state.json`.
+
+```powershell
+python -m core.line.stale_active --dry-run
+python -m core.line.stale_active --max-actions 25 --idle-hours 24
+```
+
+`--dry-run` so lista o que seria devolvido a `planned` e nao grava o ledger. `--max-actions` limita quantos tickets um sweep altera (padrao 25). O mesmo comando de dry-run vale fora do despachante, para ver o sweep sem esperar o ciclo.
 
 ## Gancho do sentinela da linha (USR-439)
 
