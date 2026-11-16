@@ -21,6 +21,19 @@ logger = logging.getLogger(__name__)
 DEFAULT_DEMANDS_PATH = Path(".factory/demands/demands.json")
 
 
+def _append_delivery_evidence(current: str | None, addition: str) -> str:
+    """Append one evidence line. An identical line already stored is left as it is."""
+    line = addition.strip()
+    existing = (current or "").strip()
+    if not line:
+        return existing
+    if line in (existing.splitlines() if existing else []):
+        return existing
+    if not existing:
+        return line
+    return f"{existing}\n{line}"
+
+
 def _choose_delivery_row(local: UserTicket | None, queued: UserTicket | None) -> UserTicket | None:
     """File row wins when it is missing from the queue or already terminal.
 
@@ -393,7 +406,12 @@ class DemandsStore:
             return updated
 
     def requeue_ticket(
-        self, ticket_id: str, reason: str = "", *, reopen: bool = False
+        self,
+        ticket_id: str,
+        reason: str = "",
+        *,
+        reopen: bool = False,
+        evidence: str | None = None,
     ) -> tuple[UserTicket, bool]:
         """Single mutex-protected path to put a ticket back on the active queue (status ``planned``).
 
@@ -401,7 +419,11 @@ class DemandsStore:
         and an already planned ticket is left untouched (idempotent under concurrency).
         With ``reopen=True`` (USR-337) a completed ticket is explicitly reopened: ``reason`` is required, the
         delivery evidence is cleared and the reason is appended to ``problem_statement`` (history preserved).
-        Cancelled tickets are never reopened.
+        ``evidence`` is ignored on that path. Cancelled tickets are never reopened.
+
+        On the ordinary transition, ``evidence`` is appended to ``delivery_evidence`` (USR-498). The previous
+        text stays. A line that is already present is not written again. An already planned ticket does not
+        gain another line.
         """
         with self._lock:
             ticket = self.get_ticket(ticket_id)
@@ -425,7 +447,11 @@ class DemandsStore:
                 raise ValueError(f"Ticket {ticket_id} is {ticket.status.value}; refusing to requeue")
             if ticket.status == DeliveryStatus.PLANNED:
                 return ticket, False
-            updated = ticket.model_copy(update={"status": DeliveryStatus.PLANNED, "updated_at": utc_now()})
+            updates: dict[str, Any] = {"status": DeliveryStatus.PLANNED, "updated_at": utc_now()}
+            addition = (evidence or "").strip()
+            if addition:
+                updates["delivery_evidence"] = _append_delivery_evidence(ticket.delivery_evidence, addition)
+            updated = ticket.model_copy(update=updates)
             self.save_ticket(updated)
             logger.info("Requeued %s (%s -> planned) %s", ticket_id, ticket.status.value, reason)
             return updated, True
