@@ -14618,8 +14618,8 @@
     "project_id": "darkfac",
     "title": "Cascata tenta modelo Grok pelo Codex e esgota revisao preservada",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "technical_failed: rebase_conflict: core/line/pending_delivery.py, docs/FASE_ATUAL.md\nstale_active cause=stale_active_no_liveness previous_status=validating",
+    "status": "completed",
+    "delivery_evidence": "680bc644526440d859513afeed075a49da243dd5",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14642,6 +14642,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-13T22:57:34.949586Z",
-    "updated_at": "2026-11-16T12:45:21.440152Z"
+    "updated_at": "2026-11-16T15:12:33.574866Z"
   }
 ]
