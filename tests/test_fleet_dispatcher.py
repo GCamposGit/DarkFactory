@@ -1912,3 +1912,238 @@ def test_main_forwards_original_argv_and_once_skips_the_loop(monkeypatch) -> Non
 @pytest.fixture(autouse=True)
 def _isolate_budget_notifications(monkeypatch):
     monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: None)
+
+
+def _bind_review_tick(monkeypatch, tmp_path: Path, worktree: Path, ticket_id: str):
+    """Isolated dispatcher tick: durable queue, registered worktree, captured launcher."""
+    import json
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pending
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(pending, "_children", {})
+    monkeypatch.setattr(pending.run_outcome, "main_sha", lambda _repo: "")
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [{"id": ticket_id, "status": "planned"}],
+    ))
+    monkeypatch.setattr(
+        "core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(worktree)}],
+    )
+    calls: list[list[str]] = []
+    handle = SimpleNamespace(pid=515151, poll=lambda: None)
+    monkeypatch.setattr(pending.subprocess, "Popen", lambda cmd, **_kw: calls.append(list(cmd)) or handle)
+    worktree.mkdir(parents=True, exist_ok=True)
+    return pending, calls, json
+
+
+def _save_review_wait(pending, directory: Path, worktree: Path, ticket_id: str, **fields: object):
+    row = pending.PendingDelivery(
+        ticket_id=ticket_id,
+        worktree=str(worktree),
+        stage=fields.get("stage", "review"),
+        status=fields.get("status", "blocked"),
+        implementing_harness=fields.get("harness", "grok"),
+        resume_delivery=bool(fields.get("resume_delivery", True)),
+        cause=str(fields["cause"]),
+        next_check=float(fields.get("next_check", 0)),
+        pid=fields.get("pid"),
+        started_at=float(fields.get("started_at", 0)),
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{ticket_id}.json"
+    pending._save(path, row)
+    return path
+
+
+def _plant_current_gate(tmp_path: Path, ticket_id: str, digest: str, *, passed: bool = True) -> Path:
+    context = (
+        tmp_path / "state" / "artifacts" / "ticket_runs" / ticket_id / ".darkfac" / "runs" / ticket_id
+    )
+    context.mkdir(parents=True, exist_ok=True)
+    (context / "progress.json").write_text(
+        '{"harness": "grok", "tickets_done": ["' + ticket_id + '"]}\n', encoding="utf-8",
+    )
+    payload = {"passed": passed, "gate": "core/harness/runner.py --quick", "detail": "", "candidate_digest": digest}
+    import json
+    (context / "validation.json").write_text(json.dumps(payload), encoding="utf-8")
+    return context
+
+
+def test_resumable_review_wait_runs_when_a_compatible_route_appears(tmp_path: Path, monkeypatch) -> None:
+    """A blocked REVIEW wait with a route cause is retried on the same worktree, without PLAN or BUILD."""
+    worktree = tmp_path / "wt-resumable"
+    ticket_id = "USR-512"
+    pending, calls, _json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    directory = tmp_path / "pending"
+    cause = "review_retry:no_route_available not_before=2026-11-13T01:00:00+00:00"
+    path = _save_review_wait(pending, directory, worktree, ticket_id, cause=cause)
+    monkeypatch.setattr(pending, "_route", lambda _row: None)
+    held = pending.tick(tmp_path, directory=directory, now=10)[0]
+    assert held["status"] == "blocked"
+    assert held["cause"] == cause
+    assert calls == []
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    opened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]
+    assert opened["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", ticket_id, "--worktree", str(worktree.resolve())]
+    assert "--fleet" not in calls[0]
+    assert "PLAN" not in calls[0] and "BUILD" not in calls[0]
+    running = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert running.resume_delivery is True
+    assert running.status == "running"
+
+
+def test_review_agent_exhausted_reopens_without_a_new_plan(tmp_path: Path, monkeypatch) -> None:
+    worktree = tmp_path / "wt-exhausted"
+    ticket_id = "USR-512A"
+    pending, calls, _json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    _save_review_wait(
+        pending, tmp_path / "pending", worktree, ticket_id, cause="review_agent_exhausted", resume_delivery=False,
+    )
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=5)[0]
+    assert result["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", ticket_id, "--worktree", str(worktree.resolve())]
+    assert "PLAN" not in calls[0] and "BUILD" not in calls[0]
+
+
+@pytest.mark.parametrize("cause", ["deploy_evidence_missing", "deploy_evidence_mismatch", "implementing_family_unknown"])
+def test_evidence_and_unknown_family_blocks_stay_blocked(tmp_path: Path, monkeypatch, cause: str) -> None:
+    worktree = tmp_path / "wt-permanent"
+    ticket_id = "USR-512B"
+    harness = None if cause == "implementing_family_unknown" else "grok"
+    pending, calls, _json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    path = _save_review_wait(
+        pending, tmp_path / "pending", worktree, ticket_id, cause=cause, harness=harness,
+    )
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=5)[0]
+    assert result["status"] == "blocked"
+    assert calls == []
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    assert saved.cause == cause
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["no_validation", "gate_failed", "digest_moved", "verdict_present", "execution_present", "approval_present", "other_exit"],
+)
+def test_legacy_launcher_exit_stays_blocked_until_the_usr467_checks_pass(
+    tmp_path: Path, monkeypatch, case: str,
+) -> None:
+    """launcher_exit:1 is not a general reopen. Other exits never use this path."""
+    digest = "a" * 64
+    worktree = tmp_path / "wt-legacy"
+    ticket_id = "USR-467"
+    pending, calls, json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    monkeypatch.setattr(pending, "_live_candidate_digest", lambda _worktree: digest)
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    cause = "launcher_exit:2" if case == "other_exit" else "launcher_exit:1"
+    if case != "no_validation":
+        context = _plant_current_gate(tmp_path, ticket_id, digest, passed=case != "gate_failed")
+        if case == "digest_moved":
+            monkeypatch.setattr(pending, "_live_candidate_digest", lambda _worktree: "b" * 64)
+        if case == "verdict_present":
+            (context / "review_verdict.json").write_text('{"verdict": "approve"}', encoding="utf-8")
+        if case == "execution_present":
+            (context / "review_execution.json").write_text(
+                json.dumps({"candidate_digest": digest, "reviewer_family": "anthropic"}), encoding="utf-8",
+            )
+        if case == "approval_present":
+            (context / "review_state.json").write_text(json.dumps({"rounds": [{
+                "round": 1, "verdict": "approve", "candidate_digest": digest, "forced": False,
+            }]}), encoding="utf-8")
+    path = _save_review_wait(pending, tmp_path / "pending", worktree, ticket_id, cause=cause)
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=5)[0]
+    assert result["status"] == "blocked"
+    if "cause" in result:
+        assert result["cause"] == cause
+    assert calls == []
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.status == "blocked"
+    assert saved.cause == cause
+
+
+def test_legacy_launcher_exit_runs_resume_delivery_when_gate_is_current(tmp_path: Path, monkeypatch) -> None:
+    digest = "c" * 64
+    worktree = tmp_path / "wt-usr-467"
+    ticket_id = "USR-467"
+    pending, calls, json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    context = _plant_current_gate(tmp_path, ticket_id, digest)
+    (context / "review_state.json").write_text('{"rounds": []}', encoding="utf-8")
+    monkeypatch.setattr(pending, "_live_candidate_digest", lambda _worktree: digest)
+    monkeypatch.setattr(pending, "_route", lambda _row: None)
+    path = _save_review_wait(pending, tmp_path / "pending", worktree, ticket_id, cause="launcher_exit:1")
+    held = pending.tick(tmp_path, directory=tmp_path / "pending", now=20)[0]
+    assert held["status"] == "blocked"
+    assert calls == []
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    opened = pending.tick(tmp_path, directory=tmp_path / "pending", now=saved.next_check + 1)[0]
+    assert opened["status"] == "running"
+    assert calls[0][2:] == ["--resume-delivery", ticket_id, "--worktree", str(worktree.resolve())]
+    assert "--fleet" not in calls[0]
+    assert "PLAN" not in calls[0] and "BUILD" not in calls[0]
+    assert json.loads((context / "validation.json").read_text(encoding="utf-8"))["candidate_digest"] == digest
+    assert json.loads((context / "progress.json").read_text(encoding="utf-8"))["harness"] == "grok"
+
+
+def test_development_launcher_exit_is_not_reopened_by_the_review_rule(tmp_path: Path, monkeypatch) -> None:
+    worktree = tmp_path / "wt-dev"
+    ticket_id = "USR-512C"
+    pending, calls, _json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    _plant_current_gate(tmp_path, ticket_id, "d" * 64)
+    monkeypatch.setattr(pending, "_live_candidate_digest", lambda _worktree: "d" * 64)
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    path = _save_review_wait(
+        pending, tmp_path / "pending", worktree, ticket_id, cause="launcher_exit:1", stage="development",
+    )
+    result = pending.tick(tmp_path, directory=tmp_path / "pending", now=5)[0]
+    assert result["status"] == "blocked"
+    assert calls == []
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.cause == "launcher_exit:1"
+
+
+def test_review_child_crash_without_a_known_marker_stays_blocked_and_never_reopens_blindly(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A classified crash cause outside the resumable markers holds; it is not the USR-467 legacy exit."""
+    from types import SimpleNamespace
+
+    from core.line.admission_store import AdmissionStore
+
+    worktree = tmp_path / "wt-crash"
+    ticket_id = "USR-467"
+    pending, calls, _json = _bind_review_tick(monkeypatch, tmp_path, worktree, ticket_id)
+    monkeypatch.setattr(pending.run_outcome, "main_sha", lambda _repo: "a" * 40)
+    monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
+    directory = tmp_path / "pending"
+    now = 100.0
+    result = {}
+    for index in range(3):
+        pending._children[4242] = SimpleNamespace(poll=lambda: 1)
+        row = pending.PendingDelivery(
+            ticket_id=ticket_id, worktree=str(worktree), stage="review", status="running",
+            implementing_harness="grok", pid=4242, started_at=now - 1, run_id=f"crash-{index}",
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        pending._save(directory / f"{ticket_id}.json", row)
+        result = pending.tick(tmp_path, directory=directory, now=now)[0]
+        now = result["next_check"] + 1
+    assert result["status"] == "blocked"
+    saved = pending.PendingDelivery.model_validate_json(
+        (directory / f"{ticket_id}.json").read_text(encoding="utf-8"),
+    )
+    assert saved.status == "blocked" and saved.cause != "launcher_exit:1"
+    assert not calls
+    budget = AdmissionStore(tmp_path / "state" / "admission.sqlite3").budget("darkfac", ticket_id)
+    assert budget["candidate_failures"] == 3
+    reopened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]
+    assert reopened["status"] == "blocked"
+    assert not calls

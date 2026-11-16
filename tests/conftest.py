@@ -600,7 +600,29 @@ def _offline_ticket_stage_agents(request: pytest.FixtureRequest, monkeypatch: py
         ticket_engine.write_minimal_plan(rws, ticket)
         return None
 
-    def review(_ticket: Any, _worktree: Any, rws: Any) -> StageResult:
+    def review(ticket: Any, worktree: Any, rws: Any) -> StageResult:
+        import json
+
+        digest, policy = run_ticket._candidate_binding(
+            rws, Path(worktree), run_ticket._review_base_branch(ticket),
+        )
+        if digest and policy:
+            line_workspace.write_context(
+                rws,
+                "review_state.json",
+                json.dumps({"rounds": [{
+                    "round": 1,
+                    "verdict": "approve",
+                    "forced": False,
+                    "candidate_digest": digest,
+                    "policy_digest": policy,
+                }]}),
+            )
+            line_workspace.write_context(
+                rws,
+                "review_execution.json",
+                json.dumps({"candidate_digest": digest}),
+            )
         line_workspace.write_context(rws, VERDICT_FILE, ReviewVerdict(verdict="approve").model_dump_json())
         return StageResult(outcome="success", output_refs=["test"])
 

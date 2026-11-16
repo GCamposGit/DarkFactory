@@ -74,6 +74,35 @@ def _family(harness: str, model: Optional[str]) -> Optional[str]:
         return None
 
 
+def _model_provider(model: Optional[str]) -> Optional[str]:
+    """Return a registered model's provider; unknown local models fail closed."""
+    if not model:
+        return None
+    from core.models.registry import get_registry
+
+    needle = model.strip().lower()
+    for entry in get_registry().models:
+        if needle in {value.lower() for value in (entry.id, *entry.aliases, *entry.gateway_ids)}:
+            return entry.provider.lower()
+    return None
+
+
+_HARNESS_PROVIDER = {
+    "claude": "anthropic",
+    "codex": "openai",
+    "grok": "xai",
+    "antigravity": "google",
+}
+
+
+def _local_model_compatible(harness: str, model: Optional[str]) -> bool:
+    """Local CLIs accept only their provider's model (or no explicit model)."""
+    if harness == "openrouter" or model is None:
+        return True
+    provider = _model_provider(model)
+    return provider is not None and provider == _HARNESS_PROVIDER.get(harness)
+
+
 def _paid_independent(model: Optional[str], families: Collection[str], fallbacks: Iterable[str]) -> Optional[str]:
     from core.models.registry import resolve
 
@@ -128,7 +157,7 @@ def select_review_route(
             model = _paid_independent(model, families, openrouter_fallbacks)
             if model:
                 return ReviewRoute(LEVEL_OTHER_OPENROUTER, harness, model, REASONS[LEVEL_OTHER_OPENROUTER])
-        elif _family(harness, model) not in families:
+        elif _local_model_compatible(harness, model) and _family(harness, model) not in families:
             return ReviewRoute(LEVEL_OTHER_HARNESS, harness, model, REASONS[LEVEL_OTHER_HARNESS])
 
     from core.models.registry import resolve
@@ -152,12 +181,23 @@ def select_review_route(
             alternative = _paid_independent(model, families, openrouter_fallbacks) or (
                 model if model and model != writer_model else None
             )
-        else:
-            alternative = _other_model(harness, writer_model) if harness == implementing_harness else model
-        if alternative is None:
-            fallback = fallback or (harness, model if model else writer_model)
+            if alternative is None:
+                fallback = fallback or (harness, model if model else writer_model)
+                continue
+            return ReviewRoute(LEVEL_OTHER_MODEL, harness, alternative, REASONS[LEVEL_OTHER_MODEL])
+        if not _local_model_compatible(harness, model):
             continue
-        return ReviewRoute(LEVEL_OTHER_MODEL, harness, alternative, REASONS[LEVEL_OTHER_MODEL])
+        # Level 3 is specifically a demonstrably different model in the same
+        # implementation family. Cross-family routes are only level 4 fallback.
+        harness_family = _family(harness, model)
+        if harness == implementing_harness and harness_family in families:
+            alternative = _other_model(harness, writer_model)
+            if alternative and _local_model_compatible(harness, alternative) and alternative != writer_model:
+                return ReviewRoute(LEVEL_OTHER_MODEL, harness, alternative, REASONS[LEVEL_OTHER_MODEL])
+        fallback_model = model
+        if fallback_model is None and _local_model_compatible(harness, writer_model):
+            fallback_model = writer_model
+        fallback = fallback or (harness, fallback_model)
     if fallback is None:
         return None
     return ReviewRoute(

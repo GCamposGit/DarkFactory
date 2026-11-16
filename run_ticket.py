@@ -2139,6 +2139,12 @@ def _deliver_worktree(
     )
     if review_outcome is not None:
         return review_outcome
+    if ticket.project_id == "darkfac":
+        bound_digest, bound_policy = _candidate_binding(
+            rws, target_worktree, _review_base_branch(ticket),
+        )
+        if bound_digest and not ticket_engine.review_approves(rws, bound_digest, bound_policy):
+            return refused(Stage.REVIEW, "review_not_bound_to_candidate")
     learning = None if external_project else ticket_extras.build_learning(target_worktree, ticket.id, "origin/main")
     try:
         require_artifact(Stage.VALIDATE, rws)

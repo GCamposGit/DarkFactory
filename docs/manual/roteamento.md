@@ -114,6 +114,15 @@ primeira rota disponivel, sempre acima do piso de cota e dentro dos tetos
    bloquear.
 
 O OpenRouter tambem vale no nivel 3 (mesma familia, outro modelo): havendo saldo, a revisao nunca termina sem rota.
+Para rotas locais, o modelo precisa pertencer ao provedor do harness (`claude`/
+Anthropic, `codex`/OpenAI, `grok`/xAI, `antigravity`/Google). Modelo ausente e
+permitido; modelo desconhecido ou de outro provedor e descartado, e a cascata
+continua consultando `pick` com as exclusoes e capacidades vigentes. OpenRouter
+mantem o contrato cross-provider. Nivel 3 so descreve outro modelo nativo do
+mesmo harness e familia, distinto do modelo de implementacao; quando essa
+distincao nao pode ser demonstrada, uma rota local compativel usa nivel 4 com
+persona adversarial.
+
 A admissao nao exige mais rota de revisao nem de portao. Revisao e retomada usam o mesmo `select_review_route`
 (`core/line/review_cascade.py`). A revisao e sempre uma chamada de agente nova,
 somente leitura, sobre diff e contexto da tarefa, sem a sessao do implementador.
@@ -151,3 +160,22 @@ dentro dos tetos; (4) so entao esperar. Cota conhecida abaixo do piso continua e
   seguidas com 0 arquivos aplicados colocam o `openrouter` em cooldown (`record_openrouter_edits`).
 - **Verba temporaria**: o teto mensal esta em US$ 28,13 por decisao do owner (OA-090, verba adicional deste
   mes) e volta a US$ 10,00 em 01/12/2026.
+
+## Espera retomavel da revisao USR-512
+
+Falha de infraestrutura ou JSON invalido exclui a rota que acabou de falhar para o mesmo
+`candidate_digest` e a mesma `policy_digest` antes da proxima rota compativel. JSON invalido exclui o
+harness inteiro. Falha de infraestrutura com modelo exclui o par harness/modelo; timeout tambem tira o
+harness de `timed_out_harnesses`. Cancelamento, caminho protegido e self-modification ficam na rota que
+os produziu. Quando nenhuma rota valida resta, o estagio devolve a espera do `RouteWaiter`
+(`no_route_available`), nao o encerramento `review_agent_exhausted`. A espera nao grava
+`review_verdict.json` nem `review_execution.json` e nao altera `validation.json` nem o digest do
+candidato. A retomada so publica com aprovacao ligada a esse mesmo digest.
+
+O dispatcher reabre uma espera de REVIEW bloqueada quando a causa e retomavel
+(`no_route_available`, `review_agent_exhausted` ou `route_wait`) e surge rota compativel.
+O processo e `--resume-delivery` na mesma worktree, sem PLAN e sem BUILD. Evidencia ausente,
+evidencia divergente e familia de implementacao desconhecida permanecem bloqueadas. O
+`launcher_exit:1` preservado de USR-467 so entra nessa reabertura depois de candidato com
+digest, gate `passed` nesse digest e revisao ainda ausente. Sem a revisao ligada ao digest,
+nao ha publicacao, e o BUILD e o `validation.json` ficam como estavam.
