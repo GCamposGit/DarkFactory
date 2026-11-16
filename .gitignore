@@ -125,6 +125,8 @@ hub/data/owner_actions/
 .factory/runs/fleet_policy_snapshot.json
 .factory/runs/model_audit_receipt.json
 .factory/runs/recovery_list_state.json
+.factory/runs/outcomes/
+.factory/runs/ci_recovery/
 .factory/daily_digest_state.json
 .factory/queue_snapshot.json
 
