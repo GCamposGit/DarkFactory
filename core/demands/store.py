@@ -403,7 +403,14 @@ class DemandsStore:
                 updates["delivery_evidence"] = delivery_evidence
             updated = ticket.model_copy(update=updates)
             self.save_ticket(updated)
-            return updated
+
+        if status in (DeliveryStatus.COMPLETED, DeliveryStatus.CANCELLED):
+            # Do this after releasing the ledger lock: cleanup can retry Git operations and
+            # must never hold the ticket-store mutex while inspecting or removing a worktree.
+            from core.git.ticket_lifecycle import cleanup_terminal_ticket_worktree
+
+            cleanup_terminal_ticket_worktree(ticket_id, root=self.path.parent)
+        return updated
 
     def requeue_ticket(
         self,

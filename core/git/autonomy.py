@@ -1471,7 +1471,10 @@ class GitAutonomyManager:
                 cwd, main_root, sleep_fn=self.cleanup_sleep_fn, now_fn=self.now_fn
             )
             if not removal.removed:
-                logger.warning("worktree cleanup failed for %s: %s", cwd, removal.detail or removal.errors)
+                logger.warning(
+                    "worktree cleanup failed for %s: outcome=%s reason=%s detail=%s",
+                    cwd, removal.outcome, removal.reason, removal.detail or removal.errors,
+                )
                 ok = False
             elif removal.method == "trash":
                 logger.warning("worktree %s could not be deleted; moved to %s", cwd, removal.trash_path)
@@ -1570,7 +1573,10 @@ class GitAutonomyManager:
                     report.trashed_worktrees.append(str(path))
                 occupied.discard(br)
             else:
-                report.skipped.append(f"worktree:{path} ({removal.detail or '; '.join(removal.errors)})")
+                report.skipped.append(
+                    f"worktree:{path} (outcome={removal.outcome}, reason={removal.reason}; "
+                    f"{removal.detail or '; '.join(removal.errors)})"
+                )
 
         current = self._current_branch(main_root)
         out = self._git_out(["branch", "--format=%(refname:short)", "--list", "ticket/*", "df/*"], main_root)
@@ -1665,6 +1671,18 @@ class GitAutonomyManager:
         )
         if proof_error:
             return proof_error
+
+        # A successful merge already removes the linked worktree in deliver_branch. The
+        # no-push/direct-push completion paths still need the same safe terminal cleanup.
+        if delivery is None:
+            from core.git.ticket_lifecycle import cleanup_terminal_ticket_worktree
+
+            cleanup_terminal_ticket_worktree(
+                ticket.id,
+                root=target_dir,
+                sleep_fn=self.cleanup_sleep_fn,
+                now_fn=self.now_fn,
+            )
 
         return TicketCompletionReport(
             ok=True,

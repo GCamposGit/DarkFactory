@@ -168,12 +168,34 @@ Em host com `worker_url`, o filho do despacho recebe `DARKFAC_TEST_WORKERS` igua
 No Notebook, host sem `worker_url`, o filho segue com `DARKFAC_REMOTE_HARNESS=off` e o despacho não substitui `DARKFAC_TEST_WORKERS`.
 
 Ao encerrar um job, ou desfazer um checkout criado parcialmente, o despachante usa
-`core.git.ticket_workspace.cleanup`. Antes de remover o registro Git ou os arquivos, a rotina
-verifica processos com o diretório atual dentro do checkout. Se encontrar um holder, deixa o
-checkout registrado e intacto e grava no log seu caminho e o processo identificado; depois que
-ele encerrar, uma execução posterior da limpeza pode removê-lo. Para checkout sem holder, a
-limpeza ocorre normalmente após o término do job. A deduplicação do deploy continua agrupando
-merges pela janela de silêncio configurada.
+`core.git.ticket_workspace.cleanup`. Antes de remover, a rotina confirma que o caminho é uma
+worktree secundária registrada e desbloqueada, verifica `git status` (incluindo arquivos
+rastreados, staged e não rastreados) e procura processos com o diretório atual dentro do
+checkout. Alteração ou processo vivo preserva os arquivos e o registro Git. O comando Git de
+remoção não usa `--force`, então uma alteração criada depois da inspeção também faz o Git
+recusar a remoção. Inspeção inconclusiva ou outra falha preserva o checkout e retorna erro.
+
+`CleanupResult.outcome` registra `removed`, `blocked_changes`, `blocked_process` ou `error`;
+`reason` identifica a causa e `method` informa como a remoção foi concluída. Os chamadores
+registram esses campos. Qualquer nova tentativa de remoção deve passar novamente por
+`ticket_workspace.cleanup`; não use comandos Git ou de filesystem em paralelo para remover a
+worktree. A deduplicação do deploy continua agrupando merges pela janela de silêncio configurada.
+
+## Varredura de worktrees sem owner (USR-500)
+
+O dispatcher de frota, iniciado pela tarefa persistente `DarkFac-Fleet-Dispatcher` no
+checkout principal, chama `scripts/cleanup_orphan_worktrees.py` pelo seu gancho de manutenção.
+Uma trava de estado em `.factory/runs/orphan_worktree_cleanup.json` limita a execução a uma
+tentativa a cada seis horas, inclusive após reinício do processo. A rotina considera uma
+worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets e não há
+processo, alteração, lock ou commit detached sem referência segura. O limite é 36 horas;
+com a cadência de seis horas, uma candidata limpa é removida até 42 horas após a criação.
+
+Cada remoção é delegada a `ticket_workspace.cleanup`, que revalida alterações e processos
+logo antes de remover. O resumo JSON registra contagens de `removed`, `blocked`, `ignored`
+e `errors`, com o motivo por caminho. Falha de leitura ou de limpeza de uma worktree é
+registrada e a análise continua nas demais. Para executar manualmente, use
+`python scripts/cleanup_orphan_worktrees.py`; `--scheduled` respeita o mesmo controle de seis horas.
 
 ## Reinício quando o SHA do checkout muda (USR-508)
 

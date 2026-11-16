@@ -2226,6 +2226,18 @@ def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
     assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
 
 
+def test_run_forever_invokes_orphan_worktree_cleanup_hook(tmp_path: Path, monkeypatch) -> None:
+    events: list[str] = []
+    dispatcher, _execs = _sha_dispatcher(tmp_path / "state", lambda: _SHA_A)
+    dispatcher.run_cycle = lambda: events.append("cycle") or {}
+    dispatcher.orphan_worktree_cleanup_hook = lambda: events.append("cleanup")
+    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+
+    dispatcher.run_forever(stop=_stop_after(1))
+
+    assert events == ["cycle", "cleanup", "sleep"]
+
+
 def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(
     tmp_path: Path, monkeypatch,
 ) -> None:

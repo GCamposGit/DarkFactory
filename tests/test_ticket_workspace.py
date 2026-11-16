@@ -85,8 +85,10 @@ class FlakyGit:
         self.fail_first = fail_first
         self.always = always
         self.remove_calls = 0
+        self.commands: list[list[str]] = []
 
     def __call__(self, args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        self.commands.append(list(args))
         if list(args[:2]) == ["worktree", "remove"]:
             self.remove_calls += 1
             if self.always or self.remove_calls <= self.fail_first:
@@ -244,12 +246,14 @@ def test_commit_in_a_worktree_stages_explicit_paths_never_add_all(
 
 def test_cleanup_retries_a_transient_failure_with_backoff(repo: SimpleNamespace) -> None:
     ws = create_workspace("USR-210", cwd=repo.local)
-    (ws.path / "work.txt").write_text("w\n", encoding="utf-8")
     flaky, sleeps = FlakyGit(fail_first=2), []
 
-    result = cleanup(ws.path, ws.main_root, sleep_fn=sleeps.append, run_git=flaky)
+    result = cleanup(
+        ws.path, ws.main_root, sleep_fn=sleeps.append, run_git=flaky, holder_probe=lambda _path: ()
+    )
 
-    assert result.removed and result.method == "git" and result.attempts == 3
+    assert result.removed and result.method == "git" and result.outcome == "removed" and result.attempts == 3
+    assert all("--force" not in args for args in flaky.commands if args[:2] == ["worktree", "remove"])
     assert sleeps == [0.5, 1.0]  # backoff between the failed attempts, never after the last one
     assert not ws.path.exists()
     assert os.path.normcase(os.path.realpath(ws.path)) not in _registered(repo.local)
@@ -259,11 +263,16 @@ def test_cleanup_falls_back_to_rmtree_and_clears_read_only_files(repo: SimpleNam
     ws = create_workspace("USR-211", cwd=repo.local)
     locked = ws.path / "readonly.txt"
     locked.write_text("r\n", encoding="utf-8")
+    _git(ws.path, "add", "readonly.txt")
+    _git(ws.path, "commit", "--quiet", "-m", "add readonly file")
     os.chmod(locked, 0o444)
 
-    result = cleanup(ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True), retries=2)
+    result = cleanup(
+        ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True), retries=2,
+        holder_probe=lambda _path: (),
+    )
 
-    assert result.removed and result.method == "rmtree"
+    assert result.removed and result.method == "rmtree" and result.outcome == "removed"
     assert not ws.path.exists()
     assert os.path.normcase(os.path.realpath(ws.path)) not in _registered(repo.local)  # pruned
 
@@ -271,14 +280,16 @@ def test_cleanup_falls_back_to_rmtree_and_clears_read_only_files(repo: SimpleNam
 def test_cleanup_moves_an_undeletable_worktree_to_the_recoverable_trash(repo: SimpleNamespace) -> None:
     ws = create_workspace("USR-212", cwd=repo.local)
     (ws.path / "precious.txt").write_text("keep me\n", encoding="utf-8")
+    _git(ws.path, "add", "precious.txt")
+    _git(ws.path, "commit", "--quiet", "-m", "add recoverable content")
 
     result = cleanup(
         ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True),
-        rmtree_fn=_locked_rmtree, now_fn=lambda: NOW,
+        rmtree_fn=_locked_rmtree, now_fn=lambda: NOW, holder_probe=lambda _path: (),
     )
 
     expected = repo.local / ".factory" / "backups" / "trash" / f"{ws.path.name}-{STAMP}"
-    assert result.removed and result.method == "trash" and result.trash_path == expected
+    assert result.removed and result.method == "trash" and result.outcome == "removed" and result.trash_path == expected
     assert not ws.path.exists()
     assert (expected / "precious.txt").read_text(encoding="utf-8") == "keep me\n"  # recoverable
     assert os.path.normcase(os.path.realpath(ws.path)) not in _registered(repo.local)
@@ -295,10 +306,143 @@ def test_cleanup_reports_failure_when_even_the_rename_fails(
 
     monkeypatch.setattr(ticket_workspace, "trash_directory", refuse)
     result = cleanup(
-        ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True), rmtree_fn=_locked_rmtree
+        ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True),
+        rmtree_fn=_locked_rmtree, holder_probe=lambda _path: (),
     )
-    assert not result.removed and result.method == "failed"
+    assert not result.removed and result.method == "failed" and result.outcome == "error"
     assert ws.path.exists() and "rename blocked" in "; ".join(result.errors)  # nothing was lost
+
+
+@pytest.mark.parametrize("change_kind", ["tracked", "untracked", "staged"])
+def test_cleanup_preserves_worktrees_with_any_git_changes(
+    repo: SimpleNamespace, change_kind: str
+) -> None:
+    ws = create_workspace(f"USR-217-{change_kind}", cwd=repo.local)
+    if change_kind == "tracked":
+        (ws.path / "README.md").write_text("changed\n", encoding="utf-8")
+    else:
+        added = ws.path / "precious.txt"
+        added.write_text("keep me\n", encoding="utf-8")
+        if change_kind == "staged":
+            _git(ws.path, "add", "precious.txt")
+
+    result = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ())
+
+    assert not result.removed and result.method == "preserved" and result.outcome == "blocked_changes"
+    assert "changes" in result.detail
+    assert ws.path.exists()
+    if change_kind == "tracked":
+        assert (ws.path / "README.md").read_text(encoding="utf-8") == "changed\n"
+    else:
+        assert (ws.path / "precious.txt").exists()
+    assert os.path.normcase(os.path.realpath(ws.path)) in _registered(repo.local)
+
+
+def test_cleanup_preserves_a_worktree_with_a_live_process(repo: SimpleNamespace) -> None:
+    ws = create_workspace("USR-218", cwd=repo.local)
+
+    result = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ("python (pid 42)",))
+
+    assert not result.removed and result.method == "preserved" and result.outcome == "blocked_process"
+    assert "python (pid 42)" in result.detail
+    assert ws.path.exists()
+
+
+def test_cleanup_preserves_when_process_state_cannot_be_inspected(repo: SimpleNamespace) -> None:
+    ws = create_workspace("USR-219", cwd=repo.local)
+
+    result = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: None)
+
+    assert not result.removed and result.method == "preserved" and result.outcome == "error"
+    assert "process state is unknown" in result.detail
+    assert ws.path.exists()
+
+
+def test_cleanup_revalidates_changes_before_a_retry_or_fallback(repo: SimpleNamespace) -> None:
+    ws = create_workspace("USR-220-cleanup-recheck", cwd=repo.local)
+    calls = 0
+
+    def dirty_after_first_remove(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        nonlocal calls
+        if list(args[:2]) == ["worktree", "remove"]:
+            calls += 1
+            if calls == 1:
+                (ws.path / "late-work.txt").write_text("keep me\n", encoding="utf-8")
+                return subprocess.CompletedProcess(["git", *args], 1, "", "temporary lock")
+        return ticket_workspace._git(args, cwd)
+
+    result = cleanup(
+        ws.path,
+        ws.main_root,
+        sleep_fn=lambda _s: None,
+        retries=2,
+        run_git=dirty_after_first_remove,
+        holder_probe=lambda _path: (),
+    )
+
+    assert calls == 1  # the next removal attempt sees the newly created untracked file
+    assert not result.removed and result.method == "preserved" and result.outcome == "blocked_changes"
+    assert "changes" in result.detail
+    assert (ws.path / "late-work.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert os.path.normcase(os.path.realpath(ws.path)) in _registered(repo.local)
+
+
+def test_cleanup_does_not_force_remove_changes_created_after_the_final_check(repo: SimpleNamespace) -> None:
+    ws = create_workspace("USR-220-cleanup-race", cwd=repo.local)
+    remove_commands: list[list[str]] = []
+
+    def add_change_before_git_remove(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        if list(args[:2]) == ["worktree", "remove"]:
+            remove_commands.append(list(args))
+            (ws.path / "late-work.txt").write_text("keep me\n", encoding="utf-8")
+        return ticket_workspace._git(args, cwd)
+
+    result = cleanup(
+        ws.path,
+        ws.main_root,
+        retries=1,
+        run_git=add_change_before_git_remove,
+        holder_probe=lambda _path: (),
+    )
+
+    assert len(remove_commands) == 1 and "--force" not in remove_commands[0]
+    assert not result.removed and result.outcome == "blocked_changes"
+    assert result.reason == "worktree_dirty"
+    assert (ws.path / "late-work.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert os.path.normcase(os.path.realpath(ws.path)) in _registered(repo.local)
+
+
+def test_cleanup_reports_git_status_errors_without_attempting_removal(repo: SimpleNamespace) -> None:
+    ws = create_workspace("USR-220-cleanup-status-error", cwd=repo.local)
+    mutations: list[Sequence[str]] = []
+
+    def fail_status(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        if list(args[:1]) == ["status"]:
+            return subprocess.CompletedProcess(["git", *args], 1, "", "index unavailable")
+        if list(args[:2]) == ["worktree", "remove"]:
+            mutations.append(args)
+        return ticket_workspace._git(args, cwd)
+
+    result = cleanup(ws.path, ws.main_root, run_git=fail_status, holder_probe=lambda _path: ())
+
+    assert not result.removed and result.outcome == "error" and result.reason == "git_status_error"
+    assert "index unavailable" in result.detail
+    assert not mutations and ws.path.exists()
+
+
+def test_cleanup_converts_runner_exceptions_into_error_results(repo: SimpleNamespace) -> None:
+    ws = create_workspace("USR-220-cleanup-runner-error", cwd=repo.local)
+
+    def broken_remove(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        if list(args[:2]) == ["worktree", "remove"]:
+            raise RuntimeError("git process failed")
+        return ticket_workspace._git(args, cwd)
+
+    result = cleanup(ws.path, ws.main_root, run_git=broken_remove, holder_probe=lambda _path: ())
+
+    assert not result.removed and result.method == "failed"
+    assert result.outcome == "error" and result.reason == "cleanup_exception"
+    assert "git process failed" in result.detail and ws.path.exists()
 
 
 def test_cleanup_never_touches_a_locked_worktree(repo: SimpleNamespace) -> None:
@@ -306,9 +450,9 @@ def test_cleanup_never_touches_a_locked_worktree(repo: SimpleNamespace) -> None:
     _git(repo.local, "worktree", "lock", "--reason", "agent running", str(ws.path))
     sleeps: list[float] = []
 
-    result = cleanup(ws.path, ws.main_root, sleep_fn=sleeps.append)
+    result = cleanup(ws.path, ws.main_root, sleep_fn=sleeps.append, holder_probe=lambda _path: ())
 
-    assert not result.removed and "locked" in result.detail
+    assert not result.removed and result.outcome == "error" and "locked" in result.detail
     assert ws.path.exists() and sleeps == []
 
 
@@ -316,7 +460,7 @@ def test_cleanup_of_an_absent_directory_just_prunes(repo: SimpleNamespace) -> No
     ws = create_workspace("USR-215", cwd=repo.local)
     ticket_workspace.robust_rmtree(ws.path)  # the directory vanished behind git's back
     result = cleanup(ws.path, ws.main_root)
-    assert result.removed and result.method == "absent"
+    assert result.removed and result.method == "absent" and result.outcome == "removed"
     assert os.path.normcase(os.path.realpath(ws.path)) not in _registered(repo.local)
 
 
@@ -332,6 +476,7 @@ def test_delivery_cleanup_uses_the_robust_removal(repo: SimpleNamespace, monkeyp
 
     def stubborn(path: Path, main_root: Path, **kwargs: object) -> object:
         kwargs["run_git"] = FlakyGit(fail_first=1)  # one transient lock, then git succeeds
+        kwargs["holder_probe"] = lambda _path: ()
         return real_cleanup(path, main_root, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(ticket_workspace, "cleanup", stubborn)
@@ -427,7 +572,11 @@ def test_purge_trash_falls_back_to_mtime_for_unstamped_entries(repo: SimpleNames
     assert report.purged == ["no-timestamp-here"] and not odd.exists()
 
 
-def test_sweep_does_not_touch_dirty_worktrees_or_unmerged_branches(repo: SimpleNamespace) -> None:
+def test_sweep_does_not_touch_dirty_worktrees_or_unmerged_branches(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This fixture repository has no external processes; avoid querying unrelated host processes.
+    monkeypatch.setattr(ticket_workspace, "probe_worktree_holders", lambda _path: ())
     local = repo.local
     # merged branch + dirty worktree: must stay
     dirty = create_workspace("USR-221", cwd=local, now_fn=lambda: NOW)
@@ -461,7 +610,10 @@ def test_sweep_does_not_touch_dirty_worktrees_or_unmerged_branches(repo: SimpleN
     assert any("branch:ticket/loose-unmerged (not merged)" == s for s in report.skipped)
 
 
-def test_sweep_spares_a_fresh_worktree_without_commits_and_the_one_it_runs_in(repo: SimpleNamespace) -> None:
+def test_sweep_spares_a_fresh_worktree_without_commits_and_the_one_it_runs_in(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ticket_workspace, "probe_worktree_holders", lambda _path: ())
     fresh = create_workspace("USR-225", cwd=repo.local)
     current = create_workspace("USR-226", cwd=repo.local)
 
@@ -537,6 +689,7 @@ def test_prepare_workspace_adds_a_new_ticket_to_the_worktree_ledger_not_the_shar
 def test_discarding_an_untouched_workspace_removes_worktree_and_branch(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(ticket_workspace, "probe_worktree_holders", lambda _path: ())
     monkeypatch.setattr(run_ticket, "PROJECT_ROOT", repo.local)
     untouched = create_workspace("USR-233", cwd=repo.local)
     touched = create_workspace("USR-234", cwd=repo.local)
@@ -613,6 +766,7 @@ def test_run_ticket_removes_the_worktree_when_the_agent_fails_without_touching_a
 ) -> None:
     from core.line.agent_cli import AgentResult
 
+    monkeypatch.setattr(ticket_workspace, "probe_worktree_holders", lambda _path: ())
     _github_like_origin(repo)
     _seed_ledger_ticket(repo, "USR-97")
     seen: dict[str, Path] = {}

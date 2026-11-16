@@ -403,20 +403,20 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
 
         root = main_root or ticket_workspace.main_checkout_root(PROJECT_ROOT)
         result = ticket_workspace.cleanup(path, root)
-        if result.method == "preserved":
+        if result.outcome in {"blocked_changes", "blocked_process"}:
             logger.warning(
-                "checkout operacional preservado: path=%s holder=%s; recuperacao possivel "
-                "apos o processo encerrar, repetindo cleanup pelo despachante",
-                path, result.detail,
+                "checkout operacional preservado: path=%s outcome=%s reason=%s detalhe=%s; "
+                "recuperacao possivel repetindo cleanup pelo despachante",
+                path, result.outcome, result.reason, result.detail,
             )
         elif not result.removed:
             logger.error(
-                "nao foi possivel remover checkout operacional: path=%s metodo=%s detalhe=%s; "
+                "nao foi possivel remover checkout operacional: path=%s outcome=%s reason=%s metodo=%s detalhe=%s; "
                 "recuperacao possivel repetindo cleanup apos liberar os handles",
-                path, result.method, result.detail or "; ".join(result.errors),
+                path, result.outcome, result.reason, result.method, result.detail or "; ".join(result.errors),
             )
         else:
-            logger.info("checkout operacional removido: path=%s metodo=%s", path, result.method)
+            logger.info("checkout operacional removido: path=%s outcome=%s metodo=%s", path, result.outcome, result.method)
     except Exception:
         logger.exception("falha ao remover checkout operacional %s", path)
 
@@ -733,6 +733,7 @@ class FleetDispatcher:
         dry_run: bool = False,
         digest_hook: Optional[Callable[[], Any]] = None,
         sentinel_hook: Optional[Callable[[], Any]] = None,
+        orphan_worktree_cleanup_hook: Optional[Callable[[], Any]] = None,
         usage_hook: Optional[Callable[[], Any]] = None,
         admission_store: Any = None,
         express_alert: Optional[Callable[[Any], bool]] = None,
@@ -753,6 +754,7 @@ class FleetDispatcher:
         self.dry_run = dry_run
         self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
         self.sentinel_hook = sentinel_hook  # sentinela da linha a cada 45m (USR-439); idempotente
+        self.orphan_worktree_cleanup_hook = orphan_worktree_cleanup_hook  # sweep de worktrees a cada 6h (USR-500)
         self.usage_hook = usage_hook  # publica cotas no Hub; so o processo real injeta
         self._usage_published_at = 0.0
         if admission_store is None:
@@ -1636,6 +1638,14 @@ class FleetDispatcher:
         except Exception:  # noqa: BLE001 - sentinela nunca derruba o ciclo
             logger.exception("gancho do sentinela falhou")
 
+    def run_orphan_worktree_cleanup_hook(self) -> None:
+        if self.orphan_worktree_cleanup_hook is None or self.dry_run:
+            return
+        try:
+            self.orphan_worktree_cleanup_hook()
+        except Exception:  # noqa: BLE001 - manutencao nunca derruba o ciclo da frota
+            logger.exception("gancho de limpeza de worktrees sem dono falhou")
+
     def publish_usage(self, now: Optional[float] = None) -> None:
         """Publica as cotas no Hub a cada 5 min, sem sonda paga; falha so registra em log."""
         current = time.time() if now is None else now
@@ -1664,6 +1674,7 @@ class FleetDispatcher:
                 return
             self.run_digest_hook()
             self.run_sentinel_hook()
+            self.run_orphan_worktree_cleanup_hook()
             self.publish_usage()
             time.sleep(self.config.cycle_sec)
 
@@ -1691,6 +1702,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
     from core.usage.sync_task import publish_once
+    from scripts.cleanup_orphan_worktrees import maybe_run_scheduled
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
@@ -1698,6 +1710,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                         recovery_tickets=recovery), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
+                        orphan_worktree_cleanup_hook=lambda: maybe_run_scheduled(PROJECT_ROOT),
                         usage_hook=publish_once,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
                         launch_argv=list(sys.argv[1:] if argv is None else argv),
