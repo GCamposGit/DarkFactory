@@ -600,6 +600,7 @@ class FleetDispatcher:
         dry_run: bool = False,
         digest_hook: Optional[Callable[[], Any]] = None,
         sentinel_hook: Optional[Callable[[], Any]] = None,
+        usage_hook: Optional[Callable[[], Any]] = None,
         admission_store: Any = None,
         express_alert: Optional[Callable[[Any], bool]] = None,
         code_sha_reader: Optional[Callable[[], object]] = None,
@@ -617,6 +618,8 @@ class FleetDispatcher:
         self.dry_run = dry_run
         self.digest_hook = digest_hook  # resumo diario ao owner (USR-376); idempotente por dia
         self.sentinel_hook = sentinel_hook  # sentinela da linha a cada 45m (USR-439); idempotente
+        self.usage_hook = usage_hook  # publica cotas no Hub; so o processo real injeta
+        self._usage_published_at = 0.0
         if admission_store is None:
             from core.line.admission_store import AdmissionStore
             from core.paths import state_root
@@ -1321,13 +1324,11 @@ class FleetDispatcher:
     def publish_usage(self, now: Optional[float] = None) -> None:
         """Publica as cotas no Hub a cada 5 min, sem sonda paga; falha so registra em log."""
         current = time.time() if now is None else now
-        if self.dry_run or current - getattr(self, "_usage_published_at", 0.0) < USAGE_PUBLISH_SEC:
+        if self.usage_hook is None or self.dry_run or current - self._usage_published_at < USAGE_PUBLISH_SEC:
             return
         self._usage_published_at = current
         try:
-            from core.usage.sync_task import publish_once
-
-            result = publish_once()
+            result = self.usage_hook()
             if not result.ok:
                 logger.warning("publicacao de cotas no Hub falhou: %s", result.error)
         except Exception:  # noqa: BLE001 - publicacao nunca derruba o ciclo
@@ -1374,6 +1375,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     configure_logging(log_dir)
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
+    from core.usage.sync_task import publish_once
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
@@ -1381,6 +1383,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                         recovery_tickets=recovery), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
+                        usage_hook=publish_once,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
                         launch_argv=list(sys.argv[1:] if argv is None else argv))
     if args.loop and not args.once:
