@@ -132,3 +132,4 @@ hub/data/owner_actions/
 
 # Gate runtime: lock and timing observations, never candidate source.
 .factory/harness/
+/.factory/runtime/harness-lock-*/

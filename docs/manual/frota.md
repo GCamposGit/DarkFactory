@@ -120,6 +120,14 @@ da execução. Falhas ao atualizar a referência ou criar o worktree aparecem co
 lançamento no estado do ciclo e colocam o ticket em cooldown; não são tratadas como despacho
 bem-sucedido.
 
+O processo filho recebe `DARKFAC_STATE_ROOT` resolvido no checkout do despachante (ou o
+override configurado), pois fila, reservas e demais dados mutáveis são compartilhados entre
+workers. Ele não herda `DARKFAC_PROJECT_ROOT`: essa variável apontaria para o checkout
+operacional e faria o portão confundir alterações locais nesse checkout com sujeira do
+candidato. Durante a entrega, `run_ticket.py` define `DARKFAC_PROJECT_ROOT` para a worktree
+do ticket em cada tentativa do portão, inclusive nos retries remotos. Assim o portão recusa
+uma worktree candidata suja e ignora alterações presentes apenas no checkout operacional.
+
 ## Pin de execução e admissão (USR-510)
 
 Em host com `worker_url`, o filho do despacho recebe `DARKFAC_TEST_WORKERS` igual só a essa URL, `DARKFAC_REMOTE_HARNESS=required` e `DARKFAC_FLEET_GATE_REMOTE=1`. Esse valor é o pin de execução do portão. O pin de execução não é a lista que a admissão lê. O mesmo filho recebe `DARKFAC_ADMISSION_WORKERS` com a lista que já estava em `DARKFAC_TEST_WORKERS` no ambiente do despachante, ou o default grokbox+desktop (`http://100.77.130.5:8080,http://100.78.181.90:8080`) quando essa lista estava vazia, mais a URL do pin, sem repetir uma URL.

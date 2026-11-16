@@ -1121,7 +1121,12 @@ def _retry_gate_remote_unavailable(
         time.sleep(delay)
         previous = _rotate_gate_workers(out)
         try:
-            gate_res = _run_bounded(gate_cmd, cwd=target_worktree, timeout_s=GATE_TIMEOUT_S)
+            gate_res = _run_bounded(
+                gate_cmd,
+                cwd=target_worktree,
+                timeout_s=GATE_TIMEOUT_S,
+                env=_gate_environment(target_worktree),
+            )
         finally:
             if previous is None:
                 os.environ.pop(rd.ENV_TEST_WORKERS, None)
@@ -1172,6 +1177,11 @@ def _gate_build_command(target_worktree: Path) -> list[str]:
     return gate_cmd
 
 
+def _gate_environment(target_worktree: Path) -> dict[str, str]:
+    """Bind the harness project root to this ticket while retaining fleet state settings."""
+    return {**os.environ, "DARKFAC_PROJECT_ROOT": str(target_worktree.resolve())}
+
+
 def _gate_run_official(
     st: ticket_stages.GateState,
     target_worktree: Path,
@@ -1210,6 +1220,7 @@ def _gate_run_official(
         gate_cmd,
         cwd=target_worktree,
         timeout_s=GATE_TIMEOUT_S,
+        env=_gate_environment(target_worktree),
     )
     if getattr(gate_res, "cancelled", False) is True or _cancelled():
         return ticket_stages.STEP_CANCEL, gate_cmd, gate_res

@@ -444,6 +444,10 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
     from core.paths import state_root
 
     env["DARKFAC_STATE_ROOT"] = str(state_root().resolve())
+    # The child starts in an operational checkout, while delivery targets a
+    # separate candidate worktree. Do not pin project_root() to the dispatcher
+    # checkout: run_ticket binds it to the candidate for each gate invocation.
+    env.pop("DARKFAC_PROJECT_ROOT", None)
     env["DARKFAC_HOST_ID"] = host.id
     if run_id:
         env["DARKFAC_RUN_ID"] = run_id
