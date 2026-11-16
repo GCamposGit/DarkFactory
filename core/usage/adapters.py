@@ -1692,7 +1692,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
 
         `--output-format stream-json --verbose` emits `rate_limit_event` messages carrying the
         unified 5h/7d utilization (0..1) and reset epoch. Runs in an empty temp dir (no CLAUDE.md
-        context) with the explicitly selected, allowlisted Haiku alias. Returns None unless the
+        context) with the explicitly selected, registry-pinned Haiku model ID. Returns None unless the
         CLI confirms that model and reports both real quota windows without a model rejection.
         """
         if not self._paid_probe_allowed():
@@ -1762,8 +1762,8 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 }
         if set(limits) != {"five_hour", "seven_day"} or not effective_models:
             return None
-        if any(not self._claude_probe_model_matches(selection.alias, model) for model in effective_models):
-            logger.warning("Claude quota probe reported an effective model outside the allowlisted alias")
+        if any(not self._claude_probe_model_matches(selection.cost_model_id, model) for model in effective_models):
+            logger.warning("Claude quota probe reported an effective model outside the pinned registry model")
             return None
         windows = self._claude_cli_rate_limit_windows(limits, preserve_percentages=True)
         if {window.quota_id for window in windows} != {"claude:5h", "claude:weekly"}:
@@ -1797,11 +1797,9 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         return usage
 
     @staticmethod
-    def _claude_probe_model_matches(alias: str, model: str) -> bool:
-        """Check that the CLI-reported model identifies the explicitly selected alias."""
-        if model.strip().casefold() == alias.casefold():
-            return True
-        return re.search(rf"(?:^|[/_-]){re.escape(alias)}(?:$|[/_-])", model.strip(), re.IGNORECASE) is not None
+    def _claude_probe_model_matches(expected_model_id: str, model: str) -> bool:
+        """Require the CLI-reported model to equal the pinned registry model ID."""
+        return model.strip().casefold() == expected_model_id.casefold()
 
     @staticmethod
     def _claude_cli_rate_limit_windows(

@@ -39,10 +39,10 @@ def test_resolve_unknown_and_forbidden() -> None:
         reg.resolve("fable", parsed)
 
 
-def test_claude_probe_selection_separates_cli_selector_from_cost_identity() -> None:
+def test_claude_probe_selection_pins_cli_model_to_cost_identity() -> None:
     selection = reg.resolve_claude_probe_model("haiku", reg.parse_registry(_raw()))
     assert selection.alias == "haiku"
-    assert selection.cli_model_id == "haiku"
+    assert selection.cli_model_id == "claude-haiku-5-5"
     assert selection.cost_model_id == "claude-haiku-5-5"
     assert reg.resolve_claude_probe_model("haiku", reg.embedded_registry()) == selection
 
@@ -57,13 +57,13 @@ def test_claude_probe_rejects_missing_or_incompatible_configuration() -> None:
     raw = _raw()
     haiku = next(model for model in raw["models"] if model["id"] == "claude-haiku-5-5")
     del haiku["claude_cli_model_id"]
-    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="no compatible"):
+    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="pinned Claude CLI model ID"):
         reg.resolve_claude_probe_model("haiku", reg.parse_registry(raw))
 
     raw = _raw()
     haiku = next(model for model in raw["models"] if model["id"] == "claude-haiku-5-5")
-    haiku["claude_cli_model_id"] = "claude-haiku-5-5"
-    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="no compatible"):
+    haiku["claude_cli_model_id"] = "haiku"
+    with pytest.raises(reg.ClaudeProbeModelConfigurationError, match="pinned Claude CLI model ID"):
         reg.resolve_claude_probe_model("haiku", reg.parse_registry(raw))
 
 

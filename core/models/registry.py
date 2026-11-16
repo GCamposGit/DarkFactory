@@ -199,7 +199,7 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
     "models": [
         _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
         _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"], gateway_ids=["claude-sonnet"]),
-        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"], claude_cli_model_id="haiku"),
+        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"], claude_cli_model_id="claude-haiku-5-5"),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
         _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
         _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna", "openai/gpt-5-6-luna-high"]),
@@ -306,10 +306,10 @@ def resolve(alias_or_role: str, registry: Optional[ModelRegistry] = None) -> str
 def resolve_claude_probe_model(
     alias: str = "haiku", registry: Optional[ModelRegistry] = None
 ) -> ClaudeProbeModelSelection:
-    """Resolve only an explicitly permitted Claude CLI probe alias, without registry fallback.
+    """Resolve the permitted probe alias to its pinned Claude CLI model, without fallback.
 
-    The CLI selector and canonical registry ID are intentionally separate: the former is
-    accepted by Claude Code, while the latter identifies the model for cost accounting.
+    The public alias selects a registry entry; the CLI receives that entry's exact model ID
+    so an upstream alias change cannot silently select a different model or cost identity.
     Missing or invalid on-disk configuration is an error for this probe path; unlike general
     registry readers, it must never silently switch to the embedded registry.
     """
@@ -344,9 +344,9 @@ def resolve_claude_probe_model(
             f"Claude quota probe alias {key!r} resolves to an incompatible model {entry.id!r}"
         )
     cli_model_id = entry.claude_cli_model_id
-    if not cli_model_id or cli_model_id != key:
+    if not cli_model_id or cli_model_id != entry.id:
         raise ClaudeProbeModelConfigurationError(
-            f"Claude quota probe alias {key!r} has no compatible explicit Claude CLI model ID"
+            f"Claude quota probe alias {key!r} has no pinned Claude CLI model ID matching {entry.id!r}"
         )
     return ClaudeProbeModelSelection(alias=key, cli_model_id=cli_model_id, cost_model_id=entry.id)
 

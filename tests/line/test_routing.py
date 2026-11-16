@@ -736,20 +736,54 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     used = {w.quota_id: w.used_percent for w in usage.windows}
     assert used == {"claude:5h": 25.625, "claude:weekly": 65.625}
     assert "-p" in calls[0][0] and "--model" in calls[0][0]
-    assert calls[0][0][calls[0][0].index("--model") + 1] == "haiku"
+    assert calls[0][0][calls[0][0].index("--model") + 1] == "claude-haiku-5-5"
     assert calls[0][0][calls[0][0].index("--max-turns") + 1] == "1"
     from core.models.registry import resolve_claude_probe_model
 
     assert resolve_claude_probe_model("haiku").cost_model_id == "claude-haiku-5-5"
     assert usage.raw_fields["model_selection"] == {
         "alias": "haiku",
-        "requested_model": "haiku",
+        "requested_model": "claude-haiku-5-5",
         "effective_models": ["claude-haiku-5-5"],
         "cost_model_id": "claude-haiku-5-5",
         "max_turns": 1,
         "prompt_characters": 2,
     }
     assert (tmp_path / "anthropic.json").is_file()
+
+
+@pytest.mark.parametrize("reported_model", ["haiku", "claude-haiku-4-5", "anthropic/claude-haiku-5-5"])
+def test_claude_headless_probe_rejects_model_that_is_not_the_pinned_registry_id(
+    tmp_path, monkeypatch, reported_model: str
+):
+    import subprocess
+
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
+    events = [
+        {"type": "system", "subtype": "init", "model": reported_model},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "unifiedWindows": {
+            "five_hour": {"utilization": 0.2, "resetsAt": reset},
+            "seven_day": {"utilization": 0.4, "resetsAt": reset + 86400}}}},
+    ]
+    output = "\n".join(json.dumps(event) for event in events)
+    monkeypatch.setattr(
+        adapters_mod.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
+    )
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+
+    usage = adapter.inspect(force=True)
+
+    assert not usage.quota_supported
+    assert usage.windows == []
+    assert not (tmp_path / "anthropic.json").exists()
 
 
 @pytest.mark.parametrize(
