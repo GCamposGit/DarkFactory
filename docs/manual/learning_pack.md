@@ -108,3 +108,19 @@ log não abre episódio. Entrega concluída, ou outra causa classificada, encerr
 o episódio e uma repetição nova pode avisar uma vez. O aviso não liga
 `recovery.active`. O hold do ticket segue o limiar que já estava configurado.
 Esta lição não afirma CI, merge ou deploy.
+
+## Aprendizado: falhas classificadas e orçamento durável
+
+A fábrica distingue o ambiente indisponível de uma tentativa de corrigir código que falhou.
+O ambiente recebe uma espera crescente; três tentativas de candidato sem sucesso suspendem
+o ticket e emitem um alerta. Reiniciar o processo não restaura tentativas já gastas.
+
+No código, `failure_taxonomy` classifica a causa, `run_outcome` conserva o diagnóstico fora do
+contexto descartável e `AdmissionStore.record_attempt` cobra uma vez por `run_id` numa transação
+SQLite. O hold entra na mesma transação que o terceiro débito. Dispatcher e entrega pendente
+consultam `next_attempt_at`. `origin/main` novo só libera a espera de infraestrutura; merge
+comprovado limpa o orçamento. O sentinela relata fila integralmente bloqueada com causas agregadas.
+
+Perguntas de revisão: trocar de host devolve uma tentativa? Não. Timeout reduz o limite do
+candidato? Não. CI/revisão esgotados contam? Sim, uma vez por tentativa, mesmo após relançamento.
+Estes contratos têm validação focal local; não representam evidência de CI, merge ou deploy.

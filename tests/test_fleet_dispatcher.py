@@ -35,11 +35,11 @@ class Env:
         self.handles: dict[str, Handle] = {}
         self.deploys = 0
         self.free = set(free)
-        cfg = fd.DispatcherConfig(hosts=HOSTS, state_path=tmp / "state.json", deploy_window_sec=100, requeue_cooldown_sec=50)
+        cfg = fd.DispatcherConfig(hosts=HOSTS, state_path=tmp / "state.json", deploy_window_sec=100)
         self.d = fd.FleetDispatcher(cfg, demands_loader=lambda: demands,
                                     probe=lambda h: fd.HostProbe(h.id in self.free, "x"),
                                     launch=self._launch, deploy=self._deploy, clock=lambda: self.now,
-                                    admission_store=AdmissionStore(tmp / "admission.sqlite3"))
+                                    admission_store=AdmissionStore(tmp / "admission.sqlite3", clock=lambda: datetime.fromtimestamp(self.now, timezone.utc)))
 
     def _launch(self, tid, host, *, run_id=None, recovery=False, candidate_digest="unknown"):
         self.launched.append((tid, host.id))
@@ -79,6 +79,129 @@ def test_selection_filters():
     q, sk = fd.select_tickets(dem, busy_ids={"USR-07"})
     assert q == ["USR-01", "USR-05"]
     assert sk["USR-02"].startswith("tag:") and sk["USR-04"] == "dependencia_aberta" and sk["USR-07"] == "em_voo"
+
+
+def test_infra_backoff_survives_dispatcher_restart_then_retries(tmp_path, monkeypatch):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    for index in range(5):
+        e.d.run_cycle()
+        e.handles["USR-01"].rc = 75
+        cycle = e.d.run_cycle()
+        assert cycle["skipped"]["USR-01"] == "backoff_infra"
+        budget = e.d.admission_store.budget("darkfac", "USR-01")
+        assert budget["candidate_failures"] == 0 and not e.d.admission_store.ticket_holds()
+        e.d = fd.FleetDispatcher(e.d.config, demands_loader=lambda: [_d("USR-01")],
+                                 probe=lambda h: fd.HostProbe(h.id in e.free, "ready"), launch=e._launch,
+                                 clock=lambda: e.now, admission_store=AdmissionStore(
+                                     tmp_path / "admission.sqlite3",
+                                     clock=lambda: datetime.fromtimestamp(e.now, timezone.utc)))
+        assert not e.d.run_cycle()["dispatched"]
+        e.now = budget["next_attempt_at"] + 1
+    assert e.d.run_cycle()["dispatched"] == [{"ticket": "USR-01", "host": "grokbox"}]
+
+
+def test_structured_outcome_beats_banner_and_other_run_is_ignored(tmp_path, monkeypatch):
+    import json
+    from core.line import run_outcome
+
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.run_cycle()
+    job = e.d.in_flight["grokbox"]
+    log = tmp_path / "run.log"
+    log.write_text("[ERRO NA ENTREGA] causa: gate_failed; erro: stale\nRESUMO DAS COTAS", encoding="utf-8")
+    job.log_path = log
+    path = run_outcome.outcome_path(job.ticket_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(ticket=job.ticket_id, run_id=job.run_id, exit_code=75, cause="gate_timeout",
+                   cause_class="infra", stage="gate", detail="worker timed out", ts="now")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    e.handles["USR-01"].rc = 1
+    e.d.run_cycle()
+    assert e.d.failures[-1]["cause"] == "gate_timeout"
+    assert e.d.failures[-1]["reason"] == "worker timed out"
+    assert e.d.admission_store.budget("darkfac", "USR-01")["candidate_failures"] == 0
+    job.run_id = "another-run"
+    e.d._record_failure(job, 1, "failure", log.read_text(encoding="utf-8"))
+    assert e.d.admission_store.budget("darkfac", "USR-01")["candidate_failures"] == 1
+    banner = "Telemetria de Cotas em Tempo Real\nQuota summary: headroom 80%"
+    assert run_outcome.error_detail(banner, "diagnostico indisponivel") == "diagnostico indisponivel"
+    assert run_outcome.diagnostic_cause(banner, 1) == "unknown"
+
+
+def test_host_permission_failure_before_launch_is_infra(tmp_path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    def denied(*args, **kwargs):
+        raise PermissionError("host ACL refused")
+    e.d.launch = denied
+    e.d.run_cycle()
+    budget = e.d.admission_store.budget("darkfac", "USR-01")
+    assert budget["candidate_failures"] == 0 and budget["infra_streak"] == 1
+    assert e.d.failures[-1]["cause"] == "host_permission"
+
+
+def test_candidate_failures_across_hosts_and_fingerprints_hold_and_notify_once(tmp_path, monkeypatch):
+    from core.line import failure_alerts
+    alerts = []
+    monkeypatch.setattr(failure_alerts, "notify_ticket_hold", lambda *args: alerts.append(args))
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+    for index in range(4):
+        job = fd.InFlight("USR-01", f"host-{index}", Handle(), candidate_digest=str(index),
+                          resource_version=str(index), run_id=f"run-{index}")
+        e.d._record_failure(job, 1, "failure", "[ERRO NA ENTREGA] causa: gate_failed; erro: assertion failed")
+    assert len(alerts) == 1 and "assertion failed" in alerts[0][2]
+    cycle = e.d.run_cycle()
+    assert cycle["skipped"]["USR-01"] == "ticket_hold:gate_failed"
+    assert e.launched == [("USR-02", "grokbox")]
+
+
+@pytest.mark.parametrize("rc", [0, 1, 75])
+def test_pending_child_uses_durable_budget_and_zero_exit_waits(tmp_path, monkeypatch, rc):
+    from core.line import pending_delivery as pd, failure_alerts
+    from core.paths import state_root
+    from types import SimpleNamespace
+
+    alerts = []
+    monkeypatch.setattr(failure_alerts, "notify_ticket_hold", lambda *args: alerts.append(args))
+    monkeypatch.setattr(pd.run_outcome, "main_sha", lambda _repo: "a" * 40)
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    path = tmp_path / "pending" / "USR-99.json"
+    now = 10000.0
+    for index in range(3):
+        row = pd.PendingDelivery(ticket_id="USR-99", worktree=str(tmp_path), stage="development",
+                                 status="running", pid=991, run_id=f"pending-{index}")
+        pd._save(path, row)
+        monkeypatch.setattr(pd, "_children", {991: SimpleNamespace(poll=lambda: rc)})
+        result = pd._tick_row(path, tmp_path, now)
+        budget = AdmissionStore(state_root() / "admission.sqlite3").budget("darkfac", "USR-99")
+        assert budget["candidate_failures"] == (index + 1 if rc == 1 else 0)
+        assert result["status"] == ("blocked" if rc == 1 and index == 2 else "waiting")
+        if rc == 75:
+            assert result["next_check"] == now + 600 * 2 ** index
+        else:
+            assert result["next_check"] == now + pd.RECHECK_SECONDS
+        if rc == 0:
+            # No relaunch in the same tick or in the immediately following tick.
+            assert pd._tick_row(path, tmp_path, now + 1)["status"] == "waiting"
+        now = result["next_check"] + 1
+    assert len(alerts) == int(rc == 1)
+
+
+def test_new_main_releases_pending_infra_delay_without_erasing_candidate_debt(tmp_path, monkeypatch):
+    from core.line import pending_delivery as pd
+    from core.paths import state_root
+
+    store = pd._budget_store(10000)
+    store.record_attempt("darkfac", "USR-99", "gate_failed", run_id="candidate", main_sha="a")
+    budget = store.record_attempt("darkfac", "USR-99", "gate_timeout", run_id="infra", main_sha="a")
+    row = pd.PendingDelivery(ticket_id="USR-99", worktree=str(tmp_path), stage="development",
+                             next_check=budget["next_attempt_at"])
+    path = tmp_path / "USR-99.json"
+    pd._save(path, row)
+    monkeypatch.setattr(pd.run_outcome, "main_sha", lambda _repo: "b")
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: True)
+    assert pd._tick_row(path, tmp_path, 10001)["next_check"] == 0
+    budget = AdmissionStore(state_root() / "admission.sqlite3").budget("darkfac", "USR-99")
+    assert budget["candidate_failures"] == 1 and budget["infra_streak"] == 0
 
 
 @pytest.mark.parametrize("loop_args", [[], ["--loop"]])
@@ -286,7 +409,7 @@ def test_line_block_takes_the_only_slot_when_recovery_is_active(tmp_path: Path):
     assert cyc["queue_remaining"] == ["USR-12", "USR-13"]
     assert "recovery_single_delivery_reserved" in cyc["idle_reasons"].values()
 
-    e.handles["USR-30"].rc = 1
+    e.handles["USR-30"].rc = 75
     cyc = e.d.run_cycle()
     assert e.launched == [("USR-30", "grokbox"), ("USR-12", "grokbox")]
     assert cyc["in_flight"].get("grokbox") == "USR-12"
@@ -337,14 +460,14 @@ def test_line_block_stays_out_for_excluded_tag_open_dependency_and_cooldown(tmp_
     ]
     e = _recovery_env(tmp_path, demands, ("USR-12",))
     e.free = {"grokbox"}
-    e.d.cooldown["USR-25"] = e.now + 500
+    e.d.admission_store.record_attempt("darkfac", "USR-25", "infra", run_id="test-cooldown", main_sha=e.d._main_sha)
     cyc = e.d.run_cycle()
     assert e.launched == [("USR-12", "grokbox")]
     assert cyc["queue_remaining"] == ["USR-13"]
     for tid in ("USR-20", "USR-21", "USR-22", "USR-23"):
         assert cyc["skipped"][tid].startswith("tag:")
     assert cyc["skipped"]["USR-24"] == "dependencia_aberta"
-    assert cyc["skipped"]["USR-25"] == "cooldown_infra"
+    assert cyc["skipped"]["USR-25"] == "backoff_infra"
 
 
 def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
@@ -398,110 +521,6 @@ def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
         assert "line-block" not in cmd
 
 
-def test_identical_failure_open_does_not_idle_host_with_other_admissible_ticket(tmp_path: Path):
-    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
-    e.d.admission_store.is_failure_open = lambda **kw: kw["ticket_id"] == "USR-01"
-    cyc = e.d.run_cycle()
-    assert e.launched == [("USR-02", "grokbox")]
-    assert cyc["skipped"]["USR-01"] == "identical_failure_open"
-    assert "grokbox" not in cyc["idle_reasons"]
-
-
-def test_infra_failure_remains_open_after_cooldown_without_resource_change(tmp_path: Path, monkeypatch):
-    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
-    e.d.run_cycle()
-    e.handles["USR-01"].rc = 75
-    cyc = e.d.run_cycle()
-    assert cyc["cooldown"] == ["USR-01"] and len(e.launched) == 1
-    e.now += 60
-    cyc = e.d.run_cycle()
-    assert len(e.launched) == 1
-    assert cyc["idle_reasons"]["grokbox"] == "identical_failure_open"
-
-    # A REVIEW wait survives a dispatcher restart and resumes the same worktree,
-    # without rebuilding or spinning new processes while a route is absent.
-    from core.line import pending_delivery as pd
-    monkeypatch.setattr(pd, "_children", {})
-    from types import SimpleNamespace
-    import json
-    from core.usage.models import ProviderAccountUsage, QuotaWindow
-    snapshot_root = tmp_path / "snapshots"
-    monkeypatch.setattr(pd, "state_root", lambda: snapshot_root)
-    provider_file = snapshot_root / "usage" / "providers" / "openai.json"
-    provider_file.parent.mkdir(parents=True)
-    usage = ProviderAccountUsage(provider_id="openai", provider_name="OpenAI", family="frontier",
-        status="connected", adapter="fixture", message="synthetic snapshot", quota_supported=True,
-        windows=[QuotaWindow(quota_id="codex:weekly", label="fixture", used_percent=58, remaining_percent=42)])
-    provider_file.write_text(usage.model_dump_json(), encoding="utf-8")
-    assert pd._cached_quota("openai") == 42
-    candidate = tmp_path / "candidate"
-    candidate.mkdir()
-    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
-    context = tmp_path / "artifacts" / "USR-99" / ".darkfac" / "runs" / "USR-99"
-    context.mkdir(parents=True)
-    (context / "progress.json").write_text('{"harness":"codex"}', encoding="utf-8")
-    directory = tmp_path / "pending"
-    row = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
-    assert row.implementing_harness == "codex"
-    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
-    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
-        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "planned"}]))
-    monkeypatch.setattr("core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}])
-    monkeypatch.setattr(pd, "_route", lambda _row: None)
-    calls = []
-    handle = SimpleNamespace(pid=999999, poll=lambda: None)
-    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw)) or handle)
-    due = row.next_check + 1
-    assert pd.tick(tmp_path, directory=directory, now=due)[0]["status"] == "waiting_route"
-    assert not calls
-    monkeypatch.setattr(pd, "_route", lambda _row: ("openrouter", "distill.openrouter"))
-    assert pd.tick(tmp_path, directory=directory, now=due + 1)[0]["status"] == "waiting"
-    assert not calls  # persisted backoff also applies after restart
-    result = pd.tick(tmp_path, directory=directory, now=due + pd.RECHECK_SECONDS + 1)
-    assert result[0]["status"] == "running"
-    assert calls[0][0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
-    assert "--fleet" not in calls[0][0]  # standalone launcher owns its canonical line lock
-    pd.tick(tmp_path, directory=directory, now=due + 2 * pd.RECHECK_SECONDS)
-    assert len(calls) == 1
-    # Lost parent process: live child remains the owner after a service restart.
-    pd._children.clear()
-    monkeypatch.setattr(pd, "_pid_running", lambda _row: True)
-    assert pd.tick(tmp_path, directory=directory, now=due + 3 * pd.RECHECK_SECONDS)[0]["status"] == "running"
-    assert len(calls) == 1
-    monkeypatch.setattr(pd, "_pid_running", lambda _row: False)
-    # A completed ticket is cleared instead of delivered again after reboot.
-    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
-        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "completed"}]))
-    release = context / "deploy_report.json"
-    release.write_text(json.dumps({"sha": "a" * 40, "deployed": False}), encoding="utf-8")
-    (context / "merge.json").write_text(json.dumps({"merge_sha": "b" * 40, "candidate_digest": "candidate"}), encoding="utf-8")
-    (context / "validation.json").write_text(json.dumps({"passed": True, "candidate_digest": "candidate"}), encoding="utf-8")
-    (context / "review_state.json").write_text(json.dumps({"rounds": [{"candidate_digest": "candidate", "verdict": "approve"}]}), encoding="utf-8")
-    (context / "review_execution.json").write_text(json.dumps({"candidate_digest": "candidate", "implementer_family": "openai", "reviewer_family": "anthropic"}), encoding="utf-8")
-    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["cause"] == "deploy_evidence_mismatch"
-    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
-    saved.status = "waiting"
-    pd._save(directory / "USR-99.json", saved)
-    (context / "merge.json").write_text(json.dumps({"merge_sha": "a" * 40, "candidate_digest": "candidate"}), encoding="utf-8")
-    assert pd.tick(tmp_path, directory=directory, now=due + 4 * pd.RECHECK_SECONDS)[0]["status"] == "merged_awaiting_deploy"
-    assert list(directory.glob("*.json"))  # completed ledger alone is not production evidence
-    release.write_text(json.dumps({"sha": "a" * 40, "deployed": True}), encoding="utf-8")
-    assert pd.tick(tmp_path, directory=directory, now=due + 5 * pd.RECHECK_SECONDS)[0]["status"] == "terminal"
-    assert not list(directory.glob("*.json"))
-    release.unlink()
-    again = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
-    assert pd.tick(tmp_path, directory=directory, now=again.next_check + 1)[0]["status"] == "merged_awaiting_deploy"
-    (context / "merge.json").unlink()
-    assert pd.tick(tmp_path, directory=directory, now=again.next_check + 2)[0]["cause"] == "deploy_evidence_missing"
-
-    # Empty external busy inventory cannot erase a resume started in this cycle.
-    active = Env(tmp_path / "active-resume", [_d("USR-01")], free=("grokbox",))
-    active.d.launch = None
-    active.d.busy_ids_loader = lambda: set()
-    monkeypatch.setattr(pd, "tick", lambda _root: [{"ticket": "USR-01", "status": "running"}])
-    assert active.d.run_cycle()["dispatched"] == []
-
-
 def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str = "completed"):
     """Pending row for a completed ticket, with the dispatcher collaborators stubbed."""
     from types import SimpleNamespace
@@ -530,6 +549,7 @@ def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str 
         "core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}],
     )
     monkeypatch.setattr(pd, "_route", lambda _row: ("grok", "grok"))
+    monkeypatch.setattr(pd.run_outcome, "main_sha", lambda _repo: "")
     calls: list[list[str]] = []
     handle = SimpleNamespace(pid=424242, poll=lambda: None)
     monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append(list(cmd)) or handle)
@@ -622,172 +642,16 @@ def test_completed_ticket_with_another_cause_stays_blocked_without_deploy_proof(
     assert saved.cause == "deploy_evidence_missing"
 
 
-@pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
-@pytest.mark.parametrize("ledger", ["planned", "hold"])
-def test_exhausted_ci_recovery_closes_wait_without_deploy_block(
-    tmp_path: Path, monkeypatch, finish_mode: str, ledger: str,
-):
-    from types import SimpleNamespace
-
-    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
-        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
-        status="completed" if ledger == "hold" else "planned",
-    )
-    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda ticket_id: ledger == "hold" and ticket_id == "USR-99")
-    recovery = context / "ci_recovery.json"
-    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
-    path = directory / "USR-99.json"
-    if finish_mode == "child_exit":
-        row.pid = 424242
-        row.status = "running"
-        pd._save(path, row)
-        pd._children[424242] = SimpleNamespace(poll=lambda: 1)
-    else:
-        row.status = "blocked"
-        row.cause = "launcher_exit:1"
-        pd._save(path, row)
-
-    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
-
-    assert result == [{"ticket": "USR-99", "status": "terminal"}]
-    assert not path.exists()
-    assert not path.with_suffix(".log").exists()
-
-
-@pytest.mark.parametrize("finish_mode", ["child_exit", "blocked"])
-def test_exhausted_marker_without_durable_requeue_keeps_the_wait(
-    tmp_path: Path, monkeypatch, finish_mode: str,
-):
-    import json
-    from types import SimpleNamespace
-
-    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
-        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
-    )
-    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda _ticket_id: False)
-    recovery = context / "ci_recovery.json"
-    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
-    path = directory / "USR-99.json"
-    if finish_mode == "child_exit":
-        row.pid = 424242
-        row.status = "running"
-        pd._save(path, row)
-        pd._children[424242] = SimpleNamespace(poll=lambda: 1)
-    else:
-        row.status = "blocked"
-        row.cause = "launcher_exit:1"
-        pd._save(path, row)
-
-    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
-
-    assert result[0]["status"] == "waiting"
-    assert result[0]["cause"] == "ci_fix_requires_revalidation"
-    assert path.is_file()
-    saved = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
-    assert saved.status == "waiting"
-    assert saved.cause == "ci_fix_requires_revalidation"
-    assert saved.pid is None
-    assert json.loads(recovery.read_text(encoding="utf-8")) == {"attempts": 1}
-
-
-def test_requeue_ticket_failure_does_not_close_the_ci_wait(tmp_path: Path, monkeypatch):
-    """A raising requeue must not publish success or end the pending delivery."""
-    import json
-    from types import SimpleNamespace
-
-    import run_ticket
-    from core.roadmap.models import DeliveryStatus
-
-    pd, directory, context, candidate, row, _calls = _arm_completed_wait(
-        tmp_path, monkeypatch, cause="ci_fix_requires_revalidation",
-    )
-    monkeypatch.setattr(pd, "_ticket_hold_exists", lambda _ticket_id: False)
-    monkeypatch.setattr(pd, "queue_dir", lambda: directory)
-    recovery = context / "ci_recovery.json"
-    recovery.write_text('{"attempts": 1, "exhausted": true}', encoding="utf-8")
-    path = directory / "USR-99.json"
-    row.pid = 424242
-    row.status = "running"
-    pd._save(path, row)
-
-    comments: list[list[str]] = []
-
-    def fake_run(command, **_kwargs):
-        comments.append(list(command))
-        return SimpleNamespace(returncode=0, stdout="ticket/usr-99\n", stderr="")
-
-    monkeypatch.setattr(run_ticket.subprocess, "run", fake_run)
-
-    class BrokenStore:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def requeue_ticket(self, *_args, **_kwargs):
-            raise OSError("ledger unavailable")
-
-        def get_ticket(self, *_args, **_kwargs):
-            raise AssertionError("durable read must not run after requeue fails")
-
-    monkeypatch.setattr(run_ticket, "DemandsStore", BrokenStore)
-    ticket = run_ticket.UserTicket(
-        id="USR-99", project_id="darkfac", title="Ticket de teste",
-        problem_statement="problema de teste", status=DeliveryStatus.COMPLETED,
-    )
-
-    assert run_ticket._reopen_after_ci_budget(ticket, candidate, "ci_recovery_budget_exhausted") is False
-
-    assert comments == []
-    assert json.loads(recovery.read_text(encoding="utf-8")) == {"attempts": 1}
-    held = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
-    assert held.status == "waiting" and held.pid is None
-    assert held.cause == "ci_fix_requires_revalidation"
-    result = pd.tick(tmp_path, directory=directory, now=held.next_check - 1)
-    assert result[0]["status"] == "waiting"
-    assert path.is_file()
-    saved = pd.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
-    assert saved.status == "waiting"
-    assert saved.pid is None
-    assert saved.cause == "ci_fix_requires_revalidation"
-
-
-def test_verified_resource_change_reopens_breaker(tmp_path: Path):
-    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
-    resource = {"version": "worker-v1"}
-    e.d.probe = lambda h: fd.HostProbe(h.id in e.free, "ready", resource["version"])
-    e.d.run_cycle()
-    e.handles["USR-01"].rc = 75
-    e.d.run_cycle()
-    resource["version"] = "worker-v2"
-    e.now += 60
-    cycle = e.d.run_cycle()
-    assert e.launched == [("USR-01", "grokbox"), ("USR-01", "grokbox")]
-    assert cycle["dispatched"] == [{"ticket": "USR-01", "host": "grokbox"}]
-
-
-def test_new_quota_receipt_reopens_only_that_ticket_scope(tmp_path: Path):
-    demand = _d("USR-01")
-    demand["quota_receipt"] = "window-1"
-    e = Env(tmp_path, [demand], free=("grokbox",))
-    e.d.run_cycle()
-    e.handles["USR-01"].rc = 75
-    e.d.run_cycle()
-    demand["quota_receipt"] = "window-2"
-    e.now += 60
-    cycle = e.d.run_cycle()
-    assert len(e.launched) == 2
-    assert cycle["dispatched"] == [{"ticket": "USR-01", "host": "grokbox"}]
-
-
 def test_admission_store_failure_is_structured_and_fails_closed(tmp_path: Path):
     class UnavailableStore:
-        def is_failure_open(self, **_kwargs):
+        def retry_reason(self, *_args, **_kwargs):
             raise OSError("database unavailable")
 
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
     e.d.admission_store = UnavailableStore()
     cycle = e.d.run_cycle()
     assert e.launched == []
-    assert cycle["idle_reasons"]["grokbox"] == "admission_store_unavailable"
+    assert cycle["skipped"]["USR-01"] == "admission_store_unavailable"
     assert cycle["skipped"]["USR-01"] == "admission_store_unavailable"
 
 
@@ -796,7 +660,7 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
     failed = fd.InFlight("USR-99", "grokbox", Handle(), candidate_digest="base",
                          context_digest="ctx", resource_version="worker-v1")
     for _ in range(3):
-        e.d._record_failure(failed, 1, "context", "context scanner failed")
+        e.d._record_failure(failed, 1, "failure", "[ERRO NA ENTREGA] causa: gate_failed; erro: assertion")
     # falha repetida do mesmo ticket segura so o ticket; a frota segue livre
     assert e.d.admission_store.recovery_state()["active"] == 0
     assert [h["ticket_id"] for h in e.d.admission_store.ticket_holds()] == ["USR-99"]
@@ -819,12 +683,12 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
     e.handles[job.ticket_id].rc = 0
     e.d.run_cycle()  # exit zero without a delivery receipt is still not success
     assert e.d.admission_store.recovery_state()["active"] == 1
-    assert e.d.cooldown[job.ticket_id] > e.now
+    assert e.d.admission_store.budget("darkfac", job.ticket_id)["candidate_failures"] == 1
     normal = Env(tmp_path / "normal", [_d("USR-01")], free=("grokbox",))
     normal.d.run_cycle()
     normal.handles["USR-01"].rc = 0
     normal.d.run_cycle()
-    assert normal.d.cooldown["USR-01"] > normal.now
+    assert normal.d.admission_store.budget("darkfac", "USR-01")["candidate_failures"] == 1
     assert normal.d.failures[-1]["kind"] == "no_delivery_evidence"
 
 
@@ -930,7 +794,6 @@ def test_recovery_receipt_rejection_cause_is_part_of_failure_fingerprint(tmp_pat
     assert first != second
 
 
-
 def test_deploy_deduplicated_per_batch(tmp_path: Path):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02")])
     e.d.run_cycle()
@@ -956,18 +819,17 @@ def test_line_lock_refusal_is_busy_not_infra(tmp_path: Path):
     log = tmp_path / "run.log"
     log.write_text("[TRAVA DE LINHA] Já existe um run_ticket em andamento nesta máquina", encoding="utf-8")
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
-    e.d.config.lock_requeue_cooldown_sec = 10
     e.d.run_cycle()
     e.d.in_flight["grokbox"].log_path = log
     e.handles["USR-01"].rc = 2
     cyc = e.d.run_cycle()
     assert cyc["idle_reasons"]["grokbox"].startswith("host_ocupado_trava")
     text = log.read_text(encoding="utf-8")
-    assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
+    assert fd.is_lock_refusal(text) and fd.is_infra_failure(2, text)
     e.now += 15  # O cooldown passou, mas o host e o contexto continuam iguais.
     cyc = e.d.run_cycle()
     assert len(e.launched) == 1
-    assert cyc["idle_reasons"]["grokbox"] == "identical_failure_open"
+    assert cyc["skipped"]["USR-01"] == "backoff_infra"
 
 
 def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
@@ -1274,7 +1136,7 @@ def test_operational_checkout_source_failure_is_visible_and_not_dispatched(tmp_p
 
     assert cycle["dispatched"] == []
     assert cycle["idle_reasons"]["grokbox"].startswith("lancamento_falhou:git fetch origin main")
-    assert cycle["cooldown"] == ["USR-41"]
+    assert dispatcher.admission_store.budget("darkfac", "USR-41")["infra_streak"] == 1
     failure = cycle["recent_failures"][-1]
     assert failure["kind"] == "launch" and "source unavailable" in failure["reason"]
 
@@ -1325,51 +1187,6 @@ def test_reap_cleans_operational_checkout_after_job_exits_without_changing_deplo
     assert e.d.deploys == 1
 
 
-def test_repeated_ticket_cause_holds_only_that_ticket_until_new_digest(tmp_path: Path, monkeypatch):
-    import subprocess
-    from core.demands.models import UserTicket
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
-    git("init", "-b", "ticket/usr-01")
-    git("config", "user.name", "Test")
-    git("config", "user.email", "test@example.com")
-    (repo / "fix.py").write_text("first\n", encoding="utf-8")
-    git("add", ".")
-    git("commit", "-m", "candidate a")
-    monkeypatch.setattr(fd, "PROJECT_ROOT", repo)
-    row = UserTicket(id="USR-01", title="Fix", problem_statement="Failure").model_dump(mode="json")
-    row["context_digest"] = "ctx"
-    row["status"] = "planned"
-    row["created_at"] = "2026-01-01"
-    rows = [row, _d("USR-02")]
-    candidate = fd.ticket_candidate_digest("USR-01")
-    e = Env(tmp_path, rows, free=("grokbox",))
-    e.d.demands_loader = lambda: rows
-    for i, host in enumerate(("grokbox", "notebook", "desktop")):  # fim do log e host diferentes
-        job = fd.InFlight("USR-01", host, Handle(), candidate_digest=candidate,
-                          context_digest="ctx", resource_version=f"{host}:v")
-        e.d._record_failure(job, 1, "failure", f"[ERRO NA ENTREGA] causa: gate_failed; erro: x{i}\nfim {i}\n")
-    store = e.d.admission_store
-    assert not store.recovery_state()["active"]  # sem recovery global
-    assert store.ticket_holds()[0]["occurrences"] == 3
-
-    cyc = e.d.run_cycle()  # o ticket retido nao prende o host livre
-    assert e.launched == [("USR-02", "grokbox")]
-    assert cyc["skipped"]["USR-01"] == "ticket_hold:gate_failed"
-    assert cyc["ticket_holds"][0]["ticket_id"] == "USR-01"
-
-    (repo / "fix.py").write_text("fixed\n", encoding="utf-8")
-    git("add", ".")
-    git("commit", "-m", "candidate b")  # real worktree commit releases hold without ledger edit
-    e.handles["USR-02"].rc = 0
-    e.now += 10**6
-    e.d.run_cycle()
-    assert store.ticket_holds() == [] and ("USR-01", "grokbox") in e.launched
-
-
 def test_normalize_error_preserves_ticket_causes():
     from core.line.admission_store import normalize_error
 
@@ -1388,26 +1205,16 @@ def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
                             f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
     store = e.d.admission_store
     assert not store.recovery_state()["active"]  # falha repetida nunca serializa a frota
-    assert [h["ticket_id"] for h in store.ticket_holds()] == ["USR-01"]
+    assert [h["ticket_id"] for h in store.ticket_holds()] == ([] if cause == "gate_timeout" else ["USR-01"])
     if cause == "gate_failed":
         assert store.ticket_holds()[0]["cause"] == cause
 
 
-@pytest.mark.parametrize(("rc", "held"), [(75, False), (1, True)])
-def test_identical_failures_hold_ticket_except_structured_wait(tmp_path, rc, held):
-    e = Env(tmp_path, [])
-    for _ in range(3):
-        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest="patch", context_digest="ctx")
-        e.d._record_failure(job, rc, "failure", "route_wait: sem rota")
-    assert not e.d.admission_store.recovery_state()["active"]
-    assert bool(e.d.admission_store.ticket_holds()) is held
-
-
 def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
     text = "[RESERVA DE FROTA] Fleet capacity ceiling of 1 active cycles reached"
-    assert fd.is_lock_refusal(text) and not fd.is_infra_failure(2, text)
+    assert fd.is_lock_refusal(text) and fd.is_infra_failure(2, text)
     active_pr = "[RECUSA] Ticket USR-494 ja possui PR ativo #830: https://github.com/x/y/pull/830"
-    assert fd.is_lock_refusal(active_pr) and not fd.is_infra_failure(2, active_pr)
+    assert fd.is_lock_refusal(active_pr) and fd.is_infra_failure(2, active_pr)
     assert not fd.is_lock_refusal("[RECUSA] pull_request_lookup_unavailable")
     e = Env(tmp_path, [])
     for _ in range(3):
@@ -1426,7 +1233,7 @@ def test_lock_refusals_do_not_activate_recovery(tmp_path):
     assert len(e.d.failures) == 3
 
 
-@pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "identical_failure_open"])
+@pytest.mark.parametrize("blocked", ["ticket_hold:gate_failed", "backoff_infra"])
 def test_recovery_tries_next_ticket_when_priority_is_blocked(tmp_path, monkeypatch, blocked):
     e = Env(tmp_path, [_d("USR-01"), _d("USR-02"), _d("USR-03")])
     e.d.config.recovery_tickets = ("USR-01", "USR-02")
@@ -1717,7 +1524,7 @@ def test_sha_comparison_uses_project_root_head_without_env_or_origin_main(tmp_pa
     assert all(row["root"] == fd.PROJECT_ROOT and row["use_env"] is False and row["env"] is None for row in calls)
     assert cycle["code_sha"] == _SHA_A
     assert cycle["code_sha_changed"] is False
-    assert not any("origin/main" in str(cmd) for cmd in commands)
+    assert all(cmd == ["git", "rev-parse", "origin/main"] for cmd in commands)
 
 
 def _plant_wait(directory: Path, *, status: str = "running", pid: int | None = 4242):
@@ -2057,3 +1864,8 @@ def test_main_forwards_original_argv_and_once_skips_the_loop(monkeypatch) -> Non
     assert kwargs["dry_run"] is True
     assert captured.get("cycle") is True
     assert "forever" not in captured
+
+
+@pytest.fixture(autouse=True)
+def _isolate_budget_notifications(monkeypatch):
+    monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: None)

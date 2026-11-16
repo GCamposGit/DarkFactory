@@ -237,7 +237,7 @@ def test_the_recommendation_for_a_blocked_critical_harness_is_also_write_capable
     pick = MagicMock(return_value=("claude", "sonnet"))
     monkeypatch.setattr(run_ticket, "pick", pick)
 
-    assert main(["USR-99", "--harness", "codex", "--dry-run"]) == 2
+    assert main(["USR-99", "--harness", "codex", "--dry-run"]) == 75
 
     assert pick.call_args.kwargs["mode"] == "write"
     assert "Recomendação do Roteador: CLAUDE" in capsys.readouterr().err
@@ -439,6 +439,8 @@ def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_
     from core.git.autonomy import GitAutonomyManager
 
     monkeypatch.setattr(GitAutonomyManager, "_current_branch", lambda self, cwd: "ticket/usr-99")
+    # This stress test exercises routing; candidate binding has real-Git coverage in delivery tests.
+    monkeypatch.setattr(run_ticket, "_stage_deliver", lambda *_args: (0, {"ok": True, "status": "delivered"}))
     monkeypatch.setattr(GitAutonomyManager, "get_current_sha", lambda self, cwd: "0" * 40)
     assert real_time.sleep.__module__ in {"time", "builtins"}  # the shared module is NOT patched
 
@@ -498,7 +500,7 @@ def test_a_rate_limited_harness_gets_a_cooldown_recorded_by_the_launcher(
     monkeypatch.setattr(run_ticket, "pick", MagicMock(return_value=("claude", "sonnet")))
     env["agent"].side_effect = lambda req: _fail("rate_limited", req.harness, model=req.model, text="usage limit")
 
-    assert main(["USR-99", "--harness", "claude", "--skip-validation", "--no-commit"]) == 1
+    assert main(["USR-99", "--harness", "claude", "--skip-validation", "--no-commit"]) == 75
 
     entry = json.loads(env["cooldowns"].read_text(encoding="utf-8"))["claude"]
     assert entry["reason"] == "rate_limited"  # the next run (or stage) will skip it until the limit lifts
@@ -534,7 +536,7 @@ def test_a_dirty_shared_checkout_stops_the_run_before_any_agent_is_consumed(
 
     monkeypatch.setattr(run_ticket, "_prepare_workspace", refuse)
 
-    assert main(["USR-99", "--harness", "codex", "--skip-validation"]) == 3
+    assert main(["USR-99", "--harness", "codex", "--skip-validation"]) == 75  # infra: espera, nao gasta orcamento
 
     err = capsys.readouterr().err
     assert "core/other_ticket.py" in err and "checkout compartilhado" in err and "--allow-dirty-shared-checkout" in err

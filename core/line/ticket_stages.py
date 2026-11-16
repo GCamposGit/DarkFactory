@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from core.line import line_lock, local_cancel
+from core.line import line_lock, local_cancel, run_outcome
 from core.line.diagnostics import redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED
 from core.workflow import execution_registry
@@ -366,6 +366,8 @@ def delivery_child_env(progress: Any, exec_tracker: Any) -> dict[str, str]:
     # USR-370: deliberately NOT scrubbed with build_agent_env: this child is the delivery executor
     # (commit/push/PR/merge/deploy) and must keep GH/deploy credentials. Scrubbing applies to agents.
     child_env = dict(os.environ)
+    if run_outcome.current_run_id():
+        child_env["DARKFAC_RUN_ID"] = run_outcome.current_run_id()
     # The delivery subprocess is part of THIS run, not a second launch (USR-250): it inherits the
     # line lock instead of trying to acquire (and refusing itself on) a lock its own parent holds.
     child_env = line_lock.mark_inherited(child_env)

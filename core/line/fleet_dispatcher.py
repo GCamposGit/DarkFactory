@@ -58,6 +58,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from core.demands.models import TAG_LINE_BLOCK
+from core.line import run_outcome
+from core.line.failure_taxonomy import canonical_cause, classify
 from core.infra.git_sha import current_git_sha, normalize_sha
 from core.paths import state_root
 
@@ -81,11 +83,9 @@ IMPORT_RESTART_SHA_ENV = "DARKFAC_DISPATCHER_IMPORT_RESTART_SHA"
 LOG_DIR = state_root() / "runs" / "fleet_dispatcher_logs"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
+USAGE_PUBLISH_SEC = 300.0
 EXCLUDED_TAGS = frozenset({"congelado-v0", "not-authorized-for-execution", "planning-only", "waiting_human"})
 MIN_NOTEBOOK_WORKERS = 1
-INFRA_EXIT_CODES = frozenset({75})
-LOCK_MARKERS = ("[TRAVA DE LINHA]", "[RESERVA DE FROTA]", "ja possui PR ativo")
-INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "--remote-required:", "RemoteRequiredError", "harness_infra_error")
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 FAILURE_HISTORY_LIMIT = 20
@@ -143,10 +143,7 @@ class DispatcherConfig:
     hosts: list[HostSpec] = field(default_factory=default_hosts)
     cycle_sec: float = 30.0
     stable_probes: int = 3
-    requeue_cooldown_sec: float = 600.0
-    lock_requeue_cooldown_sec: float = 30.0  # host ocupado/trava: reenfileira quase de imediato
     deploy_window_sec: float = 180.0
-    recovery_failure_threshold: int = 3
     recovery_list_ttl_sec: float = 43200.0
     state_path: Path = STATE_PATH
 
@@ -182,7 +179,9 @@ def select_tickets(
     demands: Sequence[Mapping[str, Any]],
     *,
     busy_ids: set[str],
-    cooldown_ids: set[str] = frozenset(),  # type: ignore[assignment]
+    admission_store: Any = None,
+    main_sha: str = "",
+    now: float | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Tickets ``planned`` executaveis, em ordem estavel (id), mais o motivo de cada exclusao."""
     done = {d["id"] for d in demands if d.get("status") == "completed"}
@@ -197,12 +196,21 @@ def select_tickets(
             skipped[tid] = "tag:" + ",".join(sorted(tags & EXCLUDED_TAGS))
         elif tid in busy_ids:
             skipped[tid] = "em_voo"
-        elif tid in cooldown_ids:
-            skipped[tid] = "cooldown_infra"
         elif [x for x in (d.get("dependencies") or []) if x not in done]:
             skipped[tid] = "dependencia_aberta"
         else:
-            eligible.append((str(d.get("created_at", "")), tid))
+            try:
+                reason = admission_store.retry_reason(
+                    str(d.get("project_id") or d.get("project") or "darkfac"), tid,
+                    main_sha=main_sha, now=now,
+                ) if admission_store is not None else ""
+            except Exception:
+                logger.exception("Budget unavailable for %s", tid)
+                reason = "admission_store_unavailable"
+            if reason:
+                skipped[tid] = reason
+            else:
+                eligible.append((str(d.get("created_at", "")), tid))
     return [t for _, t in sorted(eligible)], skipped
 
 
@@ -454,6 +462,7 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
         env["DARKFAC_REMOTE_HARNESS"] = "off"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{ticket_id}-{host.id}.log"
+    env["DARKFAC_RUN_LOG"] = str(log_path.resolve())
     operational_checkout = _create_operational_checkout(ticket_id, host.id, demand)
     cmd = [sys.executable, str(operational_checkout / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
     if run_id:
@@ -505,19 +514,16 @@ def default_deploy() -> int:
 
 
 def is_lock_refusal(log_tail: str) -> bool:
-    return any(m in log_tail for m in LOCK_MARKERS)
+    return canonical_cause(log_tail) == "lock"
 
 
 def is_infra_failure(rc: int, log_tail: str) -> bool:
-    return rc in INFRA_EXIT_CODES or any(m in log_tail for m in INFRA_MARKERS)
+    return rc == 75 or classify(classify_log_cause(log_tail) or log_tail) == "infra"
 
 
 def failure_reason(rc: int, log_tail: str, lines: int = 8, chars: int = 800) -> str:
-    """Motivo da falha: ultimas linhas do log (sem segredo); nunca vazio."""
-    from core.line.agent_cli import redact_secrets
-
-    kept = chr(10).join(redact_secrets(log_tail or "").strip().splitlines()[-lines:])[-chars:]
-    return kept or f"sem saida no log; exit_code={rc}"
+    """Select the actual error line, excluding quota banners and secrets."""
+    return run_outcome.error_detail(log_tail, f"sem saida no log; exit_code={rc}")[:chars]
 
 
 _CAUSE_HUMAN_RE = re.compile(r"\[ERRO NA ENTREGA\][^\n]*?causa:\s*([a-z0-9_]+)")
@@ -621,9 +627,9 @@ class FleetDispatcher:
                 logger.error("admission store indisponivel na inicializacao (%s)", type(exc).__name__)
                 admission_store = None
         self.admission_store = admission_store
+        self._main_sha = run_outcome.main_sha(PROJECT_ROOT)
         self.express_alert = express_alert  # None usa o alerta ALL da via expressa (USR-494 T4)
         self.in_flight: dict[str, InFlight] = {}  # trava por host: no maximo um ticket por host
-        self.cooldown: dict[str, float] = {}
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
         self.last_merge_at: Optional[float] = None
         self.pending_deploy = False
@@ -633,7 +639,7 @@ class FleetDispatcher:
             self.pending_deploy = True
             self.last_merge_at = self.clock() - self.config.deploy_window_sec
         self.deploys = 0
-        self.last_cycle: dict[str, Any] = {}
+        self.last_cycle: dict[str, Any] = self._previous_cycle()
         self.failures: list[dict[str, Any]] = []  # ultimas falhas: ticket, host, exit_code, motivo, classe
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
@@ -720,39 +726,37 @@ class FleetDispatcher:
         return True
 
     def _record_failure(self, job: InFlight, rc: int, kind: str, tail: str) -> None:
-        reason = failure_reason(rc, tail)
+        outcome = run_outcome.read_outcome(job.ticket_id, job.run_id)
+        if outcome and not outcome.exit_code:
+            outcome = None
+        cause = outcome.cause if outcome else classify_log_cause(tail) or run_outcome.diagnostic_cause(tail, rc)
+        if not outcome and cause == "unknown":
+            cause = "infra" if rc == 75 else canonical_cause(kind)
+        reason = outcome.detail if outcome else failure_reason(rc, tail)
         self.failures = (self.failures + [{
             "ts": datetime.now(timezone.utc).isoformat(), "ticket": job.ticket_id, "host": job.host_id,
-            "exit_code": rc, "kind": kind, "reason": reason,
+            "exit_code": outcome.exit_code if outcome else rc, "kind": kind, "reason": reason,
+            "cause": cause, "cause_class": classify(cause),
             "log": str(job.log_path) if job.log_path else None,
         }])[-FAILURE_HISTORY_LIMIT:]
-        logger.error("%s falhou em %s: exit_code=%s kind=%s motivo=%s", job.ticket_id, job.host_id, rc, kind,
-                     " | ".join(reason.splitlines()))
-        cause = ""
+        logger.error("%s falhou em %s: causa=%s motivo=%s", job.ticket_id, job.host_id, cause, reason)
         try:
-            from core.line.admission_store import TICKET_CAUSES, make_fingerprint
+            from core.line.admission_store import make_fingerprint
 
-            cause = classify_log_cause(tail) if kind == "failure" else ""
-            ticket_cause = cause if cause in TICKET_CAUSES else ""
             fingerprint = make_fingerprint(
                 project_id=job.project_id, ticket_id=job.ticket_id,
                 candidate_digest=job.candidate_digest, context_digest=job.context_digest,
-                error=(f"{kind}:{tail}" if kind == "recovery_receipt" and tail else
-                       kind if kind != "failure" else (cause or kind)),
-                # causa de ticket nao depende do host: soma entre hosts
-                resource_version="ticket_cause" if ticket_cause else job.resource_version,
+                error=f"{kind}:{tail}" if kind == "recovery_receipt" else cause,
+                resource_version=job.resource_version, main_sha=run_outcome.main_sha(PROJECT_ROOT),
             )
-            occurrences = self.admission_store.record_failure(
-                fingerprint, initial_backoff_sec=int(self.config.requeue_cooldown_sec))
-            # repeticao e do mesmo ticket (o fingerprint inclui ticket_id): segura so ele; 75 e trava ocupada = espera
-            if occurrences >= max(1, self.config.recovery_failure_threshold) and (
-                    ticket_cause or (rc != 75 and kind != "lock")):
-                self.admission_store.set_ticket_hold(fingerprint, occurrences)
-                logger.error("%s em hold: causa=%s ocorrencias=%s", job.ticket_id,
-                             ticket_cause or fingerprint.error_class, occurrences)
-        except Exception:  # noqa: BLE001 - no admission can be trusted after persistence failure
-            logger.exception("falha ao persistir circuit breaker de %s", job.ticket_id)
-        self._note_express_failure(job.ticket_id, cause)
+            self.admission_store.record_failure(fingerprint)
+            self.admission_store.record_attempt(
+                job.project_id, job.ticket_id, cause, run_id=job.run_id or uuid.uuid4().hex,
+                main_sha=fingerprint.main_sha, detail=reason, log_path=str(job.log_path or ""),
+            )
+        except Exception:
+            logger.exception("falha ao persistir orcamento de %s", job.ticket_id)
+        self._note_express_failure(job.ticket_id, "" if cause == "unknown" else cause)
 
     def _express_episode_store(self) -> Any:
         from core.line.express_lane import ExpressEpisodeStore
@@ -811,11 +815,15 @@ class FleetDispatcher:
                 continue
             del self.in_flight[host_id]
             _remove_operational_checkout(job.operational_checkout)
+            outcome = run_outcome.read_outcome(job.ticket_id, job.run_id)
+            if outcome is not None:
+                rc = outcome.exit_code
             tail = _tail(job.log_path) if rc != 0 else ""
             if rc == 0:
                 tail = _tail(job.log_path)
                 in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
                 if _delivery_evidence(tail):
+                    self.admission_store.reset_budget(job.project_id, job.ticket_id)
                     self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
                     if in_recovery:
@@ -833,23 +841,18 @@ class FleetDispatcher:
                     self._record_failure(job, rc, "no_delivery_evidence", tail)
                     self.recovery = self.admission_store.record_recovery_receipt_cause("no_delivery_evidence")
                     self._release_reservation(job)
-                if not _delivery_evidence(tail):
-                    self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
-            elif is_lock_refusal(tail):
+            elif (outcome.cause == "lock" if outcome else is_lock_refusal(tail)):
                 self._record_failure(job, rc, "lock", tail)
                 self._release_reservation(job)
-                self.cooldown[job.ticket_id] = self.clock() + self.config.lock_requeue_cooldown_sec
                 self.lock_busy[host_id] = f"host_ocupado_trava:{job.ticket_id}"
                 logger.warning("trava de linha em %s; %s reenfileirado", host_id, job.ticket_id)
-            elif is_infra_failure(rc, tail):
+            elif (outcome.cause_class == "infra" if outcome else is_infra_failure(rc, tail)):
                 self._record_failure(job, rc, "infra", tail)
                 self._release_reservation(job)
-                self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec
                 logger.warning("infra em %s (%s); %s reenfileirado", host_id, rc, job.ticket_id)
             else:
                 self._record_failure(job, rc, "failure", tail)
                 self._release_reservation(job)
-                self.cooldown[job.ticket_id] = self.clock() + self.config.requeue_cooldown_sec * 3
 
     def _maybe_deploy(self) -> bool:
         """Um deploy por lote: so apos a janela de silencio desde o ultimo merge."""
@@ -953,19 +956,10 @@ class FleetDispatcher:
             candidate_key = safe_digest(candidate)
             context_key = safe_digest(context)
             resource_key = safe_digest(resource_version)
-            hold = self.admission_store.ticket_hold(
-                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key, context_digest=context_key)
-            if hold:
-                idle[host.id] = skipped[tid] = f"ticket_hold:{hold['cause']}"
-                return  # so o ticket fica retido; o host tenta o proximo
-            if self.admission_store.is_failure_open(
-                project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                context_digest=context_key, resource_version=resource_key,
-                error_class=normalize_error(demand["error_class"]) if demand.get("error_class") else None,
-            ):
-                idle[host.id] = "identical_failure_open"
-                skipped[tid] = "identical_failure_open"
-                return  # fora da fila neste ciclo: o host tenta o proximo admissivel
+            reason = self.admission_store.retry_reason(project_id, tid, main_sha=self._main_sha, now=self.clock())
+            if reason:
+                idle[host.id] = skipped[tid] = reason
+                return
             if self.recovery.get("active"):
                 recovery_token = self.admission_store.reserve_recovery()
                 if recovery_token is None:
@@ -1061,7 +1055,7 @@ class FleetDispatcher:
             tid, host.id, None, project_id=project_id, candidate_digest=candidate,
             context_digest=context, resource_version=resource_version,
         )
-        self._record_failure(failed_job, 1, "launch", str(exc))
+        self._record_failure(failed_job, 1, "launch", f"{type(exc).__name__}: {exc}")
         try:
             self.admission_store.release(
                 project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
@@ -1075,7 +1069,6 @@ class FleetDispatcher:
                     self.admission_store.release_recovery(recovery_token)
             except Exception:  # noqa: BLE001
                 logger.exception("falha ao liberar reserva global apos erro de launcher %s", tid)
-        self.cooldown[tid] = now + self.config.requeue_cooldown_sec
 
     def _dispatch_hosts(
         self,
@@ -1096,12 +1089,12 @@ class FleetDispatcher:
             if host.id in orphan_hosts:
                 idle[host.id] = "run_orfao_em_execucao"
                 continue
-            if not queue:
-                idle[host.id] = "sem_ticket_executavel"
-                continue
             pr = self.probe(host)
             if not pr.free:
                 idle[host.id] = f"host_indisponivel:{pr.reason}"
+                continue
+            if not queue:
+                idle[host.id] = "sem_ticket_executavel"
                 continue
             if self.recovery.get("active") and dispatched:
                 idle[host.id] = "recovery_single_delivery_reserved"
@@ -1114,7 +1107,7 @@ class FleetDispatcher:
                     idle[host.id] = "demand_disappeared"
                     break
                 self._dispatch_ticket(host, pr, tid, demand, queue, idle, skipped, dispatched, now)
-                if skipped.get(tid) != "identical_failure_open" and not skipped.get(tid, "").startswith("ticket_hold:"):
+                if skipped.get(tid) != "backoff_infra" and not skipped.get(tid, "").startswith("ticket_hold:"):
                     break
             if any(row.get("host") == host.id for row in dispatched):
                 idle.pop(host.id, None)
@@ -1183,7 +1176,6 @@ class FleetDispatcher:
                 if job.recovery_token and not self.admission_store.heartbeat_recovery(job.recovery_token):
                     logger.error("reserva global de recovery perdeu fencing para %s", job.ticket_id)
         now = self.clock()
-        self.cooldown = {t: u for t, u in self.cooldown.items() if u > now}
         try:
             demands = self.demands_loader()
         except Exception as exc:  # noqa: BLE001
@@ -1193,7 +1185,10 @@ class FleetDispatcher:
             load_error = ""
         busy = ({j.ticket_id for j in self.in_flight.values()} | set(self.busy_ids_loader())
                 | {r["ticket"] for r in resumptions if "ticket" in r})
-        queue, skipped = select_tickets(demands, busy_ids=busy, cooldown_ids=set(self.cooldown))
+        self._main_sha = run_outcome.main_sha(PROJECT_ROOT)
+        queue, skipped = select_tickets(demands, busy_ids=busy, admission_store=self.admission_store,
+                                        main_sha=self._main_sha, now=now)
+        self._pending_skip_reasons(resumptions, demands, skipped, now)
         terminal = {str(d.get("id")) for d in demands if d.get("status") in _TERMINAL_STATUSES}
         recovery_list = self._recovery_list_status(terminal, busy, queue, now)
         list_live = bool(recovery_list.get("live"))
@@ -1220,13 +1215,15 @@ class FleetDispatcher:
         return self._finish_cycle({
             "resumptions": resumptions,
             "ts": datetime.now(timezone.utc).isoformat(),
-            "free_hosts": [h.id for h in self.config.hosts if h.id not in self.in_flight],
+            "free_hosts": [h.id for h in self.config.hosts if h.id not in self.in_flight
+                           and h.id not in orphan_hosts and not idle.get(h.id, "").startswith("host_indisponivel:")],
             "in_flight": {h: j.ticket_id for h, j in self.in_flight.items()},
             "dispatched": dispatched,
             "idle_reasons": idle,
             "skipped": skipped,
+            "pending_tickets": [str(d["id"]) for d in demands if d.get("status") == "planned"],
             "queue_remaining": queue,
-            "cooldown": sorted(self.cooldown),
+            "cooldown": sorted(tid for tid, reason in skipped.items() if reason == "backoff_infra"),
             "deploys_total": self.deploys,
             "deployed_this_cycle": deployed,
             "demands_error": load_error,
@@ -1243,12 +1240,51 @@ class FleetDispatcher:
         })
 
     def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
+        self._record_queue_blockage(cycle)
         observed = self._read_checkout_sha()
         cycle["code_sha"] = observed
         cycle["code_sha_changed"] = _checkout_sha_changed(self._startup_sha, observed)
         self.last_cycle = cycle
         self._write_state()
         return cycle
+
+    def _previous_cycle(self) -> dict[str, Any]:
+        try:
+            return json.loads(self.config.state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _record_queue_blockage(self, cycle: dict[str, Any]) -> None:
+        pending = cycle.get("pending_tickets", [])
+        skipped = cycle.get("skipped", {})
+        causes: dict[str, int] = {}
+        for ticket in pending:
+            reason = str(skipped.get(ticket, ""))
+            if reason.startswith("ticket_hold:"):
+                key = "hold"
+            elif reason in {"backoff_infra", "admission_store_unavailable"}:
+                key = reason
+            elif reason.startswith("pending_delivery:"):
+                key = "delivery_failure"
+            else:
+                return
+            causes[key] = causes.get(key, 0) + 1
+        active = pending and cycle.get("free_hosts") and not cycle.get("in_flight") and not cycle.get("dispatched")
+        cycle["blocked_cycles"] = int(self.last_cycle.get("blocked_cycles", 0)) + 1 if active else 0
+        cycle["blocked_causes"] = causes if active else {}
+
+    def _pending_skip_reasons(self, resumptions: list[dict[str, Any]], demands: list[dict[str, Any]],
+                              skipped: dict[str, str], now: float) -> None:
+        projects = {str(d.get("id")): str(d.get("project_id") or "darkfac") for d in demands}
+        for row in resumptions:
+            ticket = row.get("ticket")
+            if ticket and row.get("status") not in {"running", "merged_awaiting_deploy", "terminal"}:
+                try:
+                    reason = self.admission_store.retry_reason(projects.get(ticket, "darkfac"), ticket,
+                                                               main_sha=self._main_sha, now=now)
+                except Exception:
+                    reason = "admission_store_unavailable"
+                skipped[ticket] = reason or f"pending_delivery:{row.get('cause') or row.get('status')}"
 
     def _ticket_holds(self) -> list[dict[str, Any]]:
         try:
@@ -1282,6 +1318,21 @@ class FleetDispatcher:
         except Exception:  # noqa: BLE001 - sentinela nunca derruba o ciclo
             logger.exception("gancho do sentinela falhou")
 
+    def publish_usage(self, now: Optional[float] = None) -> None:
+        """Publica as cotas no Hub a cada 5 min, sem sonda paga; falha so registra em log."""
+        current = time.time() if now is None else now
+        if self.dry_run or current - getattr(self, "_usage_published_at", 0.0) < USAGE_PUBLISH_SEC:
+            return
+        self._usage_published_at = current
+        try:
+            from core.usage.sync_task import publish_once
+
+            result = publish_once()
+            if not result.ok:
+                logger.warning("publicacao de cotas no Hub falhou: %s", result.error)
+        except Exception:  # noqa: BLE001 - publicacao nunca derruba o ciclo
+            logger.exception("publicacao de cotas no Hub falhou")
+
     def run_forever(self, stop: Callable[[], bool] = lambda: False) -> None:
         while not stop():
             # --once nao entra aqui. Mudanca de SHA substitui antes do ciclo.
@@ -1297,6 +1348,7 @@ class FleetDispatcher:
                 return
             self.run_digest_hook()
             self.run_sentinel_hook()
+            self.publish_usage()
             time.sleep(self.config.cycle_sec)
 
 
