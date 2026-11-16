@@ -14594,10 +14594,11 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "owner-decision:OA-094=A"
     ],
     "express_causes": [],
-    "problem_statement": "USR-515 no Notebook em 14/11/2026: caixa de entrega recebeu gate_dirty_worktree e TEST_COUNT=0. O log mostrou exatamente os arquivos modificados no checkout principal, enquanto a worktree do ticket no candidato 88b432d5 estava limpa. O caso de producao reapareceu apos USR-425. Reproduzir o caminho real de frota e confirmar a origem da propagacao do checkout incorreto.",
+    "problem_statement": "USR-515 no Notebook em 14/11/2026: caixa de entrega recebeu gate_dirty_worktree e TEST_COUNT=0. O log mostrou exatamente os arquivos modificados no checkout principal, enquanto a worktree do ticket no candidato 88b432d5 estava limpa. O caso de producao reapareceu apos USR-425. Reproduzir o caminho real de frota e confirmar a origem da propagacao do checkout incorreto.\n\n[Decisao do owner OA-094] Edicoes nao commitadas do Antigravity (14/11) travavam a frota: decidir destino -> opcao A (Fabrica abre PR com as edicoes (recomendado)), em 2026-11-15T19:36:19Z. Nota do owner: Owner escolheu A neste chat em 15/11: fabrica abre PR com as edicoes preservadas; AGENTS.md entra com assinatura.",
     "core_journey": [
       "USR-515 no Notebook em 14/11/2026: caixa de entrega recebeu gate_dirty_worktree e TEST_COUNT=0. O log mostrou exatamente os arquivos modificados no checkout principal, enquanto a worktree do ticket no candidato 88b432d5 estava limpa. O caso de producao reapareceu apos USR-425. Reproduzir o caminho real de frota e confirmar a origem da propagacao do checkout incorreto."
     ],
@@ -14610,6 +14611,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-14T21:52:09.597471Z",
-    "updated_at": "2026-11-14T21:52:09.597471Z"
+    "updated_at": "2026-11-15T19:36:26.635926Z"
   }
 ]
