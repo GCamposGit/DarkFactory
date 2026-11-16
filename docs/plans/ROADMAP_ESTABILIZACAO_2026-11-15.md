@@ -20,18 +20,48 @@ Pedido do owner em 15/11: a fábrica "corre atrás do rabo". Este roadmap conser
 - **Uma fonte de verdade por dado**, com frescor visível. Erro explícito em vez de dado velho ou vazio.
 - **Saldo de código.** Cada frente apaga mais do que cria quando possível.
 
+## Rodada de 16/11 (despachante religado)
+
+O despachante voltou às 07:19 de 16/11 com a coordenação acompanhando. O que a operação real mostrou:
+
+- **Entregas:** USR-516 saiu sozinho, do plano ao merge (PR #868). USR-498, USR-499 e USR-512 foram implementados pela frota, mas a entrega parou e a coordenação terminou à mão (rebase e merge).
+- **Sem queima em espera:** com as assinaturas no piso, os tickets ficaram em `route_wait` com backoff e não chamaram modelo. O orçamento por ticket segurou USR-463 e USR-491 na terceira falha.
+- **Cota é o gargalo.** Às 14:30: Codex 15%, Grok 8%, Claude semanal 30% e US$ 8 de OpenRouter até o teto. A frota e o chat do owner dividem o mesmo plano Claude; duas vezes no dia a frota esgotou a janela de 5h do owner.
+
+Defeitos achados em operação e já corrigidos:
+
+| Defeito | Correção |
+|---|---|
+| Hub lia um SQLite do contêiner e a fila do owner voltava vazia a cada deploy | PR #865 |
+| `.factory/runs/outcomes/` sem regra no `.gitignore` sujava o checkout e o portão recusava | PR #866 |
+| Publicação de cotas rodava de verdade nos testes do despachante (CI do `main` instável) | PR #867 |
+| Sonda de cota do Claude proibida para sempre depois de a janela cair abaixo de 15% | PR #869 |
+| Escrita via OpenRouter não via o repositório e não editava nada | PR #872 (agente do Codex CLI com provedor OpenRouter) |
+| Agente de desenvolvimento rodava a suíte inteira dentro do turno e estourava o tempo | PR #874 |
+| Worktree com trabalho já commitado virava `agent_no_changes` e hold | PR #875 |
+
+Abertos, em ordem de impacto (cada um cabe em um PR pequeno):
+
+1. **Conflito de rebase e merge antes do CI saem como `unknown`** e gastam tentativa do candidato. Classificar `rebase_conflict` e `merge_blocked_by_policy` como infra em `core/line/failure_taxonomy.py`; no segundo caso a entrega deve esperar o CI e tentar de novo (`gh pr update-branch` quando a branch está atrás). O ledger `.factory/demands/demands.json` conflita em todo rebase: resolver sempre com a versão do `main`.
+2. **Retomada ainda refaz PLAN e BUILD** (resto do E5): com `SPEC.md`, `tickets.json` e commits na worktree preservada, ir direto ao portão. O PR #875 só evita a falsa falha.
+3. **Reserva de cota do coordenador:** a frota não deve levar o plano Claude abaixo de uma reserva configurável enquanto houver sessão interativa. Hoje o contorno é manual: entrada `claude` com `reason: coordinator_reserve` em `.factory/usage/cooldowns.json`.
+4. **Gasto por execução da rota agente-OpenRouter** não entra no teto por execução (`run_caps.openrouter_usd`), só no mensal. Somar o custo a partir do uso em tokens devolvido pelo Codex CLI. Em 16/11 duas execuções de 30 minutos custaram cerca de US$ 1,70.
+5. **Limite da API do GitHub (5.000/h) estourou** à tarde. Medir quem chama `gh` no ciclo do despachante e na espera de entrega, e trocar sondagem por uma consulta por ciclo.
+6. **`trusted-pr-policy` com `startup_failure`** a partir das 14:34 de 16/11 bloqueou merges com CI verde. Se repetir, a entrega precisa tratar verificação obrigatória ausente como espera, não como falha.
+7. Linhas antigas de E8 (vagas por RAM) e E9 (poda da suíte) seguem como estavam.
+
 ## Frentes
 
 | Frente | Ticket | Estado em 15/11 | Onde está |
 |---|---|---|---|
 | E1 Rotas degradam com cota baixa ou desconhecida | USR-504 | **Entregue** (PR #861, em produção em 15/11) | falta ligar `plan_exists` no launcher (ver E5) |
-| E2 Falha classificada, orçamento durável, backoff persistido | USR-490 | PR #862 (mesclar com CI verde) | branch `fix/falha-classificada-orcamento` |
+| E2 Falha classificada, orçamento durável, backoff persistido | USR-490 | **Entregue** (PR #862; ajustes #866 e #867 em 16/11) | `main` |
 | E3 Portão elástico: ticket roda afetados, suíte no CI | USR-502 | **Entregue** (PR #863) | `main` |
 | E4 DarkHub: fonte única e frescor | USR-513 | **Entregue** (PR #859, verificado em produção em 15/11) | `main` |
-| E5 Retomar na etapa certa | USR-447 | Não iniciado | ver abaixo |
-| E6 Dieta do pipeline de entrega | USR-499, USR-500 | Não iniciado | ver abaixo |
-| E7 Custo e contingência | USR-445, USR-512 | Não iniciado | ver abaixo |
-| E8 Hosts e reconciliação | USR-498, USR-492 | Não iniciado | ver abaixo |
+| E5 Retomar na etapa certa | USR-447 | Parcial (PR #875: commit anterior conta como trabalho) | ver abaixo |
+| E6 Dieta do pipeline de entrega | USR-499, USR-500 | Parcial (USR-499 entregue no PR #870; prompt de validação no PR #874) | ver abaixo |
+| E7 Custo e contingência | USR-445, USR-512 | Parcial (agente via OpenRouter no PR #872; USR-512 no PR #873) | ver abaixo |
+| E8 Hosts e reconciliação | USR-498, USR-492 | Parcial (USR-498 entregue no PR #871) | ver abaixo |
 | E9 Poda da suíte | (sem ticket) | Auditoria incompleta | ver abaixo |
 
 Como entregar cada frente restante: worktree nova a partir de `origin/main`, rodar só os arquivos de teste alterados (`python -m pytest <arquivos> -q -n 0 -p no:cacheprovider`), depois `lint-imports`, `python scripts/complexity_ratchet.py`, commitar, `python -m core.harness.docs_sync --base origin/main --head HEAD`, `git push` e `gh pr create`. O CI do PR roda a suíte em Linux em cerca de 3 minutos; mesclar com squash quando verde. Não rodar `runner.py --quick` no Notebook.
@@ -92,4 +122,4 @@ A auditoria de testes não terminou. Roteiro: (1) `python -m pytest --collect-on
 
 ## Ordem de execução
 
-E2 (mesclar #862) → religar o despachante e observar um dia → E5 → E8 (USR-498 e vagas por RAM) → E7 (USR-445) → E6 → E9.
+Itens 1 a 5 da seção "Rodada de 16/11", nessa ordem; depois E8 (vagas por RAM) e E9. Com cota curta, a frota trabalha pela contingência OpenRouter e um ticket por vez.
