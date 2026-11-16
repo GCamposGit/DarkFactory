@@ -477,6 +477,7 @@ def test_openrouter_write_mode_success(tmp_path, monkeypatch):
             return _FakeResponse()
 
     monkeypatch.setattr("core.execution.providers.OpenRouterModelProvider", _FakeProvider)
+    monkeypatch.setattr("core.line.agent_cli.find_codex_binary", lambda: None)  # reserva sem agente; nunca chama o CLI real
     req = AgentRequest(prompt="do work", cwd=tmp_path, mode="write", harness="openrouter")
     result = run_agent(req)
 
