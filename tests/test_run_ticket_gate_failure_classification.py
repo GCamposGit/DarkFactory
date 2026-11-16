@@ -161,3 +161,13 @@ def test_mixed_failures_with_one_in_the_diff_are_real(tmp_path: Path) -> None:
     _write(tmp_path, "tests/test_mine.py", "def test_y():\n    pass\n")
     output = CLOCK_BOMB_FAILED + "\nFAILED tests/test_mine.py::test_y - assert 0\n"
     assert run_ticket._gate_failure_is_base_red(output, ["tests/test_mine.py"], tmp_path) is False
+
+def test_resource_exit_75_without_result_never_requests_code_fix(tmp_path):
+    from core.line import ticket_stages
+
+    state = ticket_stages.GateState()
+    log = []
+    result = SimpleNamespace(returncode=75, stdout="[ERROR] gate_insufficient_ram\n[HARNESS_FAIL]", stderr="")
+    assert run_ticket._gate_classify_failure(state, [], result, tmp_path, log, True, "resume")
+    assert state.last_cause == "gate_insufficient_ram" and state.last_exit_code == 75
+    assert log[-1]["event"] == "infra_error"

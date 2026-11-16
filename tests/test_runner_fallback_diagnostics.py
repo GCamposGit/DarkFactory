@@ -84,7 +84,7 @@ def test_run_step_caps_windows_gate_workers_before_spawning_pytest(
     assert result.returncode == 0
     assert captured_env is not None
     assert captured_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "4"
-    assert captured_command is not None and "--maxprocesses=4" in captured_command
+    assert captured_command is not None and captured_command[captured_command.index("-n") + 1] == "4"
     assert "[GATE_CAPACITY] workers=4" in capsys.readouterr().out
 
 
@@ -93,7 +93,7 @@ def test_timeout_saves_and_prints_partial_pytest_output(
 ) -> None:
     monkeypatch.setattr(runner, "PROJECT_ROOT", tmp_path)
     from core.line import gate_ram
-    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(4.1, 1))
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(4.1, 1))
 
     partial = b"collecting ... collected 42 items\ntests/test_slow.py::test_wait "
 
@@ -118,9 +118,9 @@ def test_timeout_saves_and_prints_partial_pytest_output(
     assert remote_worker._job_timeout_sec(tmp_path, quick=True, include_holdout=False) == (
         2 + remote_worker.JOB_TIMEOUT_BUFFER_SEC
     )
-    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(8.1, 3))
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(8.1, 3))
     assert runner.effective_step_timeout(step, workers=3) == 1
-    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(4.1, 1))
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(4.1, 1))
     execution = runner.run_step(step)
 
     captured = capsys.readouterr().out
@@ -134,5 +134,5 @@ def test_timeout_saves_and_prints_partial_pytest_output(
     assert "collected 42 items" in saved
     assert "test_slow.py::test_wait" in saved
     assert "timeout_sec=2" in captured
-    monkeypatch.setattr(gate_ram, "measure_workers", lambda: gate_ram.RamReading(2.1, 0))
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.1, 0))
     assert runner.run_step(step).returncode == 75  # no subprocess call and no duplicated RAM predicate

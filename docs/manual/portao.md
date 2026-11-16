@@ -1,34 +1,50 @@
 <!-- covers: core/harness/runner.py, core/harness/affected.py -->
 # Portao em camadas (USR-377 S5)
 
-No perfil completo, o orçamento da suíte paralela acompanha a capacidade real
-(USR-452): um worker recebe duas parcelas do prazo calibrado para dois workers.
-O watchdog remoto e os deadlines de cache usam o envelope conservador de um
-worker (6.000s para a suíte); o subprocesso mede uma vez e usa o prazo desse
-snapshot. A quantidade segura medida é passada ao pytest, evitando nova eleição
-de workers entre a medição e o início. O limite externo existente de7.200s cobre
-o envelope de6.540s de todas as checagens. Zero capacidade retorna espera75 pela
-mesma regra de elegibilidade, sem chamar modelo nem esperar com a suíte ocupada.
-Essa adaptação não altera timeout por teste, descoberta, trava ou cache por árvore.
+Tickets e frota executam localmente `runner.py --profile pr --local`, sem
+pré-teste focal duplicado. O perfil roda compileall, typecheck, `lint-imports`,
+`python scripts/complexity_ratchet.py`, testes afetados e fumaça fixa em
+`tests/test_harness_contract.py`. `docs_sync` permanece no CI com base/head.
+O perfil PR força `--no-cache --local`; o veredito continua exigindo candidato
+limpo e imutável, testes descobertos/executados e `[HARNESS_PASS]`.
 
-O `runner.py` também registra no início da suíte a capacidade medida (`workers`,
-RAM disponível e prazo calculado) e passa a mesma quantidade de workers ao
-subprocesso do pytest. Se o bloqueio de RAM não liberar a execução imediatamente,
-o passo termina com código75; ele não fica aguardando enquanto mantém a trava da
-suíte.
+A seleção compara o candidato inteiro ao merge-base com `origin/main`, incluindo
+alterações staged, unstaged e untracked na CLI. Não compara só o último commit.
+Usa imports transitivos, referências de texto e guards de repositório. Quando
+há mudança global (conftest/helpers de teste, pytest.ini, harness.config.json,
+requirements, governança, harness ou módulo muito importado), falha do grafo,
+base solicitada ausente, ativo sem associação ou código sem cobertura identificada,
+roda somente a fumaça fixa e registra `scope=affected_fallback`, junto da causa.
+Essa evidência cobre a seleção/fumaça; a suíte completa fica para Linux/CI de main.
+Mudança só de docs executa a fumaça do perfil.
 
-O census de IDs de modelos separa configurações e código de seleção dos ledgers
-de evidência histórica de demandas e ações do owner. Esses registros não escolhem
-modelos. A seleção ativa continua usando o registro canônico; não se reescreve
-uma evidência histórica para fazer o portão passar (reparo reutilizado do USR-468).
+O orçamento dos afetados usa a coleta real (inclusive parametrizações):
+`min(1800, 120 + 20 * testes_coletados)` segundos. A coleta tem limite de 120s
+e o passo externo tem teto de 1800s, incluindo seleção, coleta e eventual retry.
+O launcher mantém seu envelope externo para os demais contratos e fila do lock.
 
-O runner aceita `--profile pr|full` (padrao `full`, comportamento inalterado).
+Com pelo menos `MIN_SERIAL_AVAILABLE_GIB = 1.5` GiB livres o escopo PR degrada
+para execução serial. Até um worker usa `-n 0`, sem subprocesso xdist/gateway.
+A seleção de até 30 arquivos roda serial; seleções maiores usam a capacidade
+medida quando cabem dois ou mais workers, separando os marcados `serial`.
+A espera de RAM é de 300s (`DARKFAC_GATE_RAM_WAIT_S` pode alterar); abaixo de
+1,5 GiB após a espera retorna 75, `gate_insufficient_ram`, causa de infraestrutura.
 
-- `pr`: `syntax_only`, `static_types`, `affected_tests`
-  (`python -m core.harness.affected --base origin/main --run`; escala para a suite
-  completa se mudar config, governanca ou harness) e `smoke_tests` (`-m smoke`).
-  Forca `--no-cache --local`. Mudanca so de docs roda apenas o smoke.
-- `full`: os mesmos checks de sintaxe/tipos mais a suite completa (paralela e serial).
+Uma queda de worker em passo paralelo (INTERNALERROR, EOFError, worker crashed
+ou exit 3) repete uma única vez em série, dentro do mesmo prazo: `-n 0`, com
+`--lf` se existe cache lastfailed não vazio; sem cache, repete os mesmos alvos.
+Uma falha real sem crash não recebe esse retry; falha serial continua reprovando.
+
+Para uso manual, `DARKFAC_GATE_SCOPE=full` restaura no launcher `--quick` e seu
+despacho remoto anterior. Nesse escopo a primeira capacidade continua exigindo
+4 GiB livres (reserva de 2 GiB + 2 GiB/worker); um worker roda com `-n 0` e recebe
+o dobro do prazo paralelo calibrado para dois workers. Zero capacidade retorna 75.
+Cache por árvore, suite_lock e vínculo do veredito ao candidato permanecem.
+
+Health e envio remoto têm timeout de socket de no máximo 5s. Worker inacessível
+cede ao próximo; esgotados os workers, PR segue local mesmo com remoto required.
+`required` só é estrito com `DARKFAC_GATE_SCOPE=full`. O ticket PR já força local,
+portanto não espera wake, health ou job remoto.
 
 Quando `affected` recebe `--base HEAD` em uma worktree limpa, ele retorna somente
 os guards globais registrados sem montar o grafo de imports. Com qualquer mudanca

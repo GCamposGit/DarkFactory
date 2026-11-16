@@ -1,16 +1,34 @@
 <!-- covers: core/harness/remote_dispatch.py, core/harness/suite_lock.py, scripts/complexity_ratchet.py -->
 # Testes
 
-## Capacidade e prazo do portão (USR-452)
+## Capacidade e prazo do portão
 
-Um worker real é elegível; zero workers continua bloqueando a execução. O prazo
-configurado da suíte paralela foi calibrado para pelo menos dois workers. Quando
-só um cabe na RAM, `effective_step_timeout` concede as duas parcelas desse prazo,
-sem elevar workers nem alterar o timeout individual dos testes. O passo mede uma
-vez e fixa essa quantidade segura para o pytest. Deadlines de cache e watchdog
-remoto reservam o pior caso elegível (um worker), cobrindo uma mudança de memória
-entre admissão e início do passo. O prazo externo de7.200s cobre a suíte de6.000s
-mais540s das outras checagens. Overrides não aumentam a capacidade real da RAM.
+Ticket usa `python core/harness/runner.py --profile pr --local`: compileall,
+typecheck, contratos de camada e complexidade, afetados e fumaça fixa. Não há
+pré-teste focal adicional. A suíte inteira fica para Linux/CI de main; para
+restaurar o caminho anterior do launcher, use `DARKFAC_GATE_SCOPE=full`.
+
+Afetados usam merge-base de `origin/main`, nunca somente o último commit.
+Seleção incerta (configuração/helpers globais, falha de grafo, ausência da base,
+ativo sem teste ou código sem cobertura detectada) registra
+`scope=affected_fallback` e executa `tests/test_harness_contract.py`, sem ampliar
+para a suíte local inteira. A coleta conta casos parametrizados e define prazo
+`min(1800, 120 + 20 * N)` segundos; seleção/coleta/retry compartilham o teto externo
+de 1800s do passo. A coleta isolada é limitada a 120s.
+
+PR aceita 1,5 GiB livres e usa `-n 0` até um worker, sem gateway execnet; acima de
+30 arquivos e com dois workers disponíveis pode paralelizar, separando `serial`.
+Espera de RAM padrão: 300s; abaixo do mínimo retorna 75 (`gate_insufficient_ram`).
+Full conserva a conta de reserva de 2 GiB mais 2 GiB por worker e seu prazo
+calibrado: um worker recebe duas parcelas, executando em processo único.
+
+Crash xdist/INTERNALERROR/EOFError/exit 3 em execução paralela recebe um único
+retry serial no mesmo orçamento, com `--lf` quando lastfailed existe e não está
+vazio; sem cache repete os alvos. Falha real ou segundo crash continua reprovando.
+Health/envio remoto têm timeout de socket limitado a 5s. Worker inacessível cede
+para o próximo e depois para local no PR; `required` só é estrito no escopo full.
+Candidato imutável, suite_lock e `[HARNESS_PASS]` continuam obrigatórios.
+
 ## Observação de capacidade antes da admissão (USR-468)
 
 `core.harness.suite_lock.probe_free_slot()` verifica brevemente os slots de suíte

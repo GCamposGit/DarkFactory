@@ -462,3 +462,17 @@ def test_admission_allow_still_runs_plan_and_fresh_development_pick(
     assert line.calls[0] == "PLAN"
     assert "BUILD" in line.calls
     assert "development" in stages
+
+@pytest.mark.parametrize("fleet", [False, True])
+def test_ticket_gate_defaults_to_local_pr_even_with_required_remote(monkeypatch, tmp_path, fleet):
+    monkeypatch.delenv("DARKFAC_GATE_SCOPE", raising=False)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "required")
+    monkeypatch.setenv("DARKFAC_FLEET_GATE_REMOTE", "1")
+    monkeypatch.setattr(run_ticket.line_lock, "is_fleet_mode", lambda: fleet)
+    command = run_ticket._gate_build_command(tmp_path)
+    assert command[2:] == ["--profile", "pr", "--local"]
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "full")
+    command = run_ticket._gate_build_command(tmp_path)
+    assert "--quick" in command and "--profile" not in command
+    if fleet:
+        assert "--remote-required" in command

@@ -686,7 +686,7 @@ def test_docs_only_change_is_none(tmp_path: Path) -> None:
 
     config, _ = runner.load_config(Path(__file__).resolve().parents[1] / "harness.config.json")
     pr_names = [s.name for s in runner.config_for_profile(config, "pr").steps]
-    assert pr_names == ["syntax_only", "static_types", "affected_tests", "smoke_tests"]
+    assert set(pr_names) == {"syntax_only", "static_types", "layer_contracts", "complexity_ratchet", "affected_tests", "smoke_tests"}
     full_names = [s.name for s in runner.config_for_profile(config, "full").steps]
     assert "affected_tests" not in full_names and "smoke_tests" not in full_names
 
@@ -850,7 +850,7 @@ def test_smoke_real_repo_json_is_valid_and_fast(
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert payload["mode"] in {"none", "subset", "full"}
+    assert payload["mode"] in {"none", "subset", "full", "affected_fallback"}
     assert isinstance(payload["tests"], list)
     assert isinstance(payload["reasons"], dict)
     assert isinstance(payload["escalations"], list)
@@ -950,157 +950,75 @@ def test_uncovered_warning_printed_on_stderr_and_included_in_json(
     assert payload["uncovered"] == ["core/orphan.py"]
     # Mode stays whatever the rest of the selection computed -- an uncovered
     # file is informational, never an escalation on its own.
-    assert payload["mode"] == "none"
+    assert payload["mode"] == "affected_fallback"
 
 
 # --- B1: run_pytest two-pass (parallel not-serial, then serial) ---------------
 
 
-class _FakeCompletedProcess:
-    def __init__(self, returncode: int) -> None:
-        self.returncode = returncode
 
+@pytest.mark.parametrize("gib, workers, expected_code", [(1.49, 0, 75), (1.5, 1, 0), (3.9, 1, 0), (8.0, 3, 0)])
+def test_run_pytest_memory_budget_and_parallel_split(monkeypatch, tmp_path, gib, workers, expected_code):
+    from core.line import gate_ram
 
-def test_run_pytest_full_mode_runs_parallel_then_serial_pass(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        calls.append(cmd)
-        return _FakeCompletedProcess(0)
-
+    calls = []
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(gib, workers))
     monkeypatch.setattr(affected, "_xdist_available", lambda: True)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    selection = affected.Selection(mode="full", tests=[], reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 0
-    assert len(calls) == 2
-    parallel_cmd, serial_cmd = calls
-    assert "-n" in parallel_cmd and "auto" in parallel_cmd
-    assert "--dist" in parallel_cmd and "worksteal" in parallel_cmd
-    assert "not serial" in parallel_cmd
-    assert "-n" not in serial_cmd  # serial pass never runs under xdist
-    assert "serial" in serial_cmd and "not serial" not in serial_cmd
-
-
-def test_run_pytest_serial_pass_no_tests_collected_counts_as_success(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        if "not serial" in cmd:
-            return _FakeCompletedProcess(0)
-        return _FakeCompletedProcess(affected.PYTEST_EXIT_NO_TESTS_COLLECTED)
-
-    monkeypatch.setattr(affected, "_xdist_available", lambda: True)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    selection = affected.Selection(mode="full", tests=[], reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 0  # exit 5 on the serial-only pass is not a failure
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        output = "\n".join(f"tests/test_a.py::test_x[{i}]" for i in range(4)) if "--collect-only" in cmd else "4 passed in 0.1s"
+        return subprocess.CompletedProcess(cmd, 0, stdout=output)
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(31)], {}, [], ["x"])
+    assert affected.run_pytest(tmp_path, selection, []) == expected_code
+    if expected_code:
+        assert calls == []
+    else:
+        assert calls[0][0][-1] == "--collect-only"
+        assert 198 < calls[1][1]["timeout"] <= 200
+        assert calls[1][0][calls[1][0].index("-n") + 1] == ("3" if workers > 1 else "0")
+        assert len(calls) == (3 if workers > 1 else 2)
 
 
-def test_run_pytest_combines_failure_from_serial_pass(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        if "not serial" in cmd:
-            return _FakeCompletedProcess(0)
-        return _FakeCompletedProcess(1)  # a real serial failure, not "no tests"
-
-    monkeypatch.setattr(affected, "_xdist_available", lambda: True)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    selection = affected.Selection(mode="full", tests=[], reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 1
+@pytest.mark.parametrize("changed", ["tests/conftest.py", "conftest.py", "tests/line/conftest.py", "tests/_helper.py", "pytest.ini", "harness.config.json", "requirements.txt"])
+def test_pr_global_change_runs_fixed_smoke_instead_of_full(tmp_path, changed, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "tests/test_a.py", "def test_a(): assert True\n")
+    _commit_all(repo, "baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, changed, "# changed\n")
+    selection = affected.select_pr_tests(repo)
+    assert selection.mode == "affected_fallback"
+    assert selection.tests == list(affected.PR_SMOKE_TESTS)
+    assert affected.selected_test_timeout(1000) == 1800
 
 
-def test_run_pytest_combines_failure_from_parallel_pass(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
+def test_pr_diff_keeps_earlier_branch_commits(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "tests/test_a.py", "def test_a(): assert True\n")
+    _write(repo, "tests/test_b.py", "def test_b(): assert True\n")
+    _commit_all(repo, "baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-b", "feature")
+    _write(repo, "tests/test_a.py", "def test_a(): assert 1\n")
+    _commit_all(repo, "first change")
+    _write(repo, "tests/test_b.py", "def test_b(): assert 2\n")
+    _commit_all(repo, "second change")
+    selection = affected.select_pr_tests(repo)
+    assert selection.mode == "subset"
+    assert selection.tests == ["tests/test_a.py", "tests/test_b.py"]
+    _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    assert affected.select_pr_tests(repo).mode == "affected_fallback"
 
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        calls.append(cmd)
-        if "not serial" in cmd:
-            return _FakeCompletedProcess(2)
-        return _FakeCompletedProcess(0)
+def test_real_pytest_counts_parametrized_selection_and_runs_serial(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
 
-    monkeypatch.setattr(affected, "_xdist_available", lambda: True)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    selection = affected.Selection(mode="full", tests=[], reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 2
-    assert len(calls) == 2  # the serial pass still ran too, for full diagnostics
-
-
-def test_run_pytest_subset_over_30_files_uses_two_pass_split(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        calls.append(cmd)
-        return _FakeCompletedProcess(0)
-
-    monkeypatch.setattr(affected, "_xdist_available", lambda: True)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    tests = [f"tests/test_{i}.py" for i in range(31)]
-    selection = affected.Selection(mode="subset", tests=tests, reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 0
-    assert len(calls) == 2
-
-
-def test_run_pytest_subset_under_30_files_runs_single_pass_no_marker_split(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        calls.append(cmd)
-        return _FakeCompletedProcess(0)
-
-    monkeypatch.setattr(affected, "_xdist_available", lambda: True)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    tests = [f"tests/test_{i}.py" for i in range(5)]
-    selection = affected.Selection(mode="subset", tests=tests, reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 0
-    assert len(calls) == 1
-    assert "not serial" not in calls[0]
-    assert "serial" not in calls[0]
-    assert "-n" not in calls[0]
-
-
-def test_run_pytest_falls_back_to_single_pass_when_xdist_unavailable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    calls: list[list[str]] = []
-
-    def fake_run(cmd: list[str], cwd: str | None = None) -> _FakeCompletedProcess:
-        calls.append(cmd)
-        return _FakeCompletedProcess(0)
-
-    monkeypatch.setattr(affected, "_xdist_available", lambda: False)
-    monkeypatch.setattr(affected.subprocess, "run", fake_run)
-
-    selection = affected.Selection(mode="full", tests=[], reasons={}, escalations=[], changed_files=["x"])
-    code = affected.run_pytest(tmp_path, selection, [])
-
-    assert code == 0
-    assert len(calls) == 1
-    assert "-n" not in calls[0]
-    assert "not serial" not in calls[0]
-    assert "serial" not in calls[0]
+    _write(tmp_path, "tests/test_probe.py", "import pytest\n@pytest.mark.parametrize('n', [1, 2, 3])\ndef test_probe(n): assert n > 0\n")
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    selection = affected.Selection("subset", ["tests/test_probe.py"], {}, [], ["tests/test_probe.py"])
+    assert affected.run_pytest(tmp_path, selection, ["-p", "no:cacheprovider"]) == 0
+    output = capsys.readouterr().out
+    assert "selected=3 timeout_sec=180 workers=0" in output
+    assert "3 passed" in output

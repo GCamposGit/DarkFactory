@@ -221,7 +221,6 @@ def test_external_project_build_precedes_smoke_and_blocks_delivery_on_failure(
     )
     monkeypatch.setattr(registry, "get_project_registry", lambda: SimpleNamespace(get_project=lambda _id: project))
     # A product gate must never call the factory's focal runner.
-    monkeypatch.setattr(run_ticket, "_run_focal_tests", Mock(side_effect=AssertionError("factory suite forbidden")))
     progress = SimpleNamespace(phase=Mock())
     ticket = UserTicket(id="USR-259", project_id="fake-client", title="client build")
     result = run_ticket._run_gate_with_self_correction(

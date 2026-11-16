@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -71,6 +72,17 @@ def test_measure_workers_uses_worker_capacity_math(monkeypatch) -> None:
     monkeypatch.setenv("DARKFAC_MAX_WORKERS", "8")
     monkeypatch.setattr(wc, "get_available_memory_bytes", lambda: int(3.4 * wc.BYTES_PER_GIB))
     assert gate_ram.measure_workers().workers == 0  # override cannot fabricate available RAM
+
+
+@pytest.mark.parametrize("gib, workers", [(1.49, 0), (1.5, 1), (2.5, 1), (3.99, 1), (8, 3)])
+def test_affected_capacity_degrades_to_serial(monkeypatch, gib, workers) -> None:
+    from tests import _worker_capacity as wc
+
+    monkeypatch.delenv("DARKFAC_MAX_WORKERS", raising=False)
+    monkeypatch.delenv("PYTEST_XDIST_AUTO_NUM_WORKERS", raising=False)
+    monkeypatch.setattr(wc, "get_physical_cpu_count", lambda: 8)
+    monkeypatch.setattr(wc, "get_available_memory_bytes", lambda: int(gib * wc.BYTES_PER_GIB))
+    assert gate_ram.measure_workers("pr").workers == workers
 
 
 def test_gate_not_run_and_cause_explicit_when_ram_never_recovers(tmp_path: Path, capsys) -> None:

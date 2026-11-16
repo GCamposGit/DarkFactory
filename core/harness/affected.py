@@ -11,7 +11,8 @@ The selector never relies on prior test-run state (no coverage database):
 every worktree, on every host, produces the same answer from the same git
 diff. When the analysis cannot be confident (missing/broken graph,
 governance or config files, a module imported by most of the suite, an
-unmatched runtime asset) it conservatively escalates to the full suite.
+unmatched runtime asset) PR execution degrades to fixed smoke, leaving the
+full suite to Linux/CI. Explicit DARKFAC_GATE_SCOPE=full retains escalation.
 
 Usage::
 
@@ -25,6 +26,7 @@ import ast
 import importlib.util
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -157,7 +159,7 @@ class ImportGraph:
 
 @dataclass
 class Selection:
-    mode: str  # "none" | "subset" | "full"
+    mode: str  # "none" | "subset" | "full" | "affected_fallback"
     tests: list[str]
     reasons: dict[str, list[str]]
     escalations: list[str]
@@ -820,6 +822,39 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
     )
 
 
+PR_SMOKE_TESTS = ("tests/test_harness_contract.py",)
+PR_TIMEOUT_BASE_S = 120.0
+PR_TIMEOUT_PER_TEST_S = 20.0
+PR_TIMEOUT_MAX_S = 1800.0
+
+
+def select_pr_tests(repo_root: Path, base_ref: str = "origin/main") -> Selection:
+    """Select against the requested merge-base, degrading uncertain impact to fixed smoke."""
+    try:
+        if not _git_ref_exists(repo_root, base_ref):
+            raise GraphBuildError(f"requested base unavailable: {base_ref}")
+        selection = select_affected(repo_root, base_ref)
+    except (GraphBuildError, OSError, subprocess.CalledProcessError) as exc:
+        selection = Selection("full", [], {}, [str(exc)], [])
+    global_changes = [p for p in selection.changed_files
+                      if Path(p).name == "conftest.py" or _is_conftest_or_test_helper(p)
+                      or p.startswith(("core/harness/", "core/governance/", ".github/workflows/"))
+                      or p in ("AGENTS.md", "MISSION.md", "FACTORY_RULES.md")]
+    if selection.mode == "full" or selection.uncovered or global_changes:
+        return Selection(
+            "affected_fallback", list(PR_SMOKE_TESTS), {},
+            [*selection.escalations, *(f"global_change: {p}" for p in global_changes),
+             *(f"uncovered: {p}" for p in selection.uncovered)],
+            selection.changed_files, selection.uncovered,
+        )
+    return selection
+
+
+def selected_test_timeout(test_count: int) -> float:
+    """Budget actual collected test cases, including parametrization, up to thirty minutes."""
+    return min(PR_TIMEOUT_MAX_S, PR_TIMEOUT_BASE_S + PR_TIMEOUT_PER_TEST_S * test_count)
+
+
 # --- pytest execution ---------------------------------------------------------
 
 
@@ -827,60 +862,72 @@ def _xdist_available() -> bool:
     return importlib.util.find_spec("xdist") is not None
 
 
-def run_pytest(
-    repo_root: Path,
-    selection: Selection,
-    extra_args: Sequence[str],
-) -> int:
+def _collect_test_count(repo_root: Path, command: list[str]) -> tuple[int, int]:
+    result = subprocess.run(
+        [*command, "--collect-only"], cwd=repo_root, timeout=PR_TIMEOUT_BASE_S,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+    )
+    if result.returncode:
+        print(result.stdout or "")
+        return result.returncode, 0
+    # Quiet collection lists one node id per parametrized test case.
+    count = sum("::" in line and not line.startswith(" ") for line in (result.stdout or "").splitlines())
+    return (0, count) if count else (5, 0)
+
+
+def run_pytest(repo_root: Path, selection: Selection, extra_args: Sequence[str]) -> int:
+    """Run a bounded selection with RAM-aware serial degradation and one crash retry."""
+    from core.harness.pytest_runtime import run_with_serial_retry
+    from core.line import gate_ram
+
     if selection.mode == "none":
         print("No tests affected by the current changes.")
         return 0
+    full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
+    if selection.mode == "full" and not full:
+        selection = Selection("affected_fallback", list(PR_SMOKE_TESTS), {}, selection.escalations,
+                              selection.changed_files)
+    print(f"[TEST_SCOPE] scope={selection.mode if selection.mode == 'affected_fallback' else 'full' if full else 'affected'}")
+    ready = gate_ram.wait_for_gate_ram(scope="full" if full else "pr", limit_s=0)
+    if not ready.ok:
+        print("gate_insufficient_ram")
+        return 75
+    targets = (["tests", *[f"--ignore={p}" for p in sorted(EXCLUDED_TEST_FILES)]]
+               if selection.mode == "full" else selection.tests)
+    workers = ready.reading.workers if len(targets) > 30 or selection.mode == "full" else 0
+    workers = workers if workers > 1 else 0
+    xdist = _xdist_available()
+    command = [sys.executable, "-m", "pytest", *targets, "-q", *extra_args]
+    if xdist:
+        command += ["-n", "0"]
+    try:
+        code, count = _collect_test_count(repo_root, command)
+        if code:
+            return code
+        timeout = selected_test_timeout(count)
+        print(f"[TEST_BUDGET] selected={count} timeout_sec={timeout:.0f} workers={workers}")
+        deadline = time.monotonic() + timeout
+        passes = [(workers, "not serial"), (0, "serial")] if xdist and workers > 1 else [(0, None)]
+        codes = []
+        for worker_count, marker in passes:
+            from core.harness.pytest_runtime import with_workers
 
-    if selection.mode == "full":
-        args = ["tests"] + [f"--ignore={excluded}" for excluded in sorted(EXCLUDED_TEST_FILES)]
-        use_xdist = _xdist_available()
-    else:
-        args = selection.tests
-        use_xdist = _xdist_available() and len(args) > 30
-
-    if not use_xdist:
-        cmd = [sys.executable, "-m", "pytest", *args, "-q", *extra_args]
-        LOGGER.info("running: %s", " ".join(cmd))
-        result = subprocess.run(cmd, cwd=str(repo_root))
-        return result.returncode
-
-    # Mirror the official harness (harness.config.json): a parallel pass
-    # over everything not marked `serial`, then a sequential pass over just
-    # the `serial`-marked tests within the SAME selection (shared state,
-    # fixed ports, or real repo mutation can't run under xdist workers). A
-    # selection with no serial-marked tests at all is not a failure --
-    # pytest's own "no tests collected" exit code (5) counts as success for
-    # that pass, exactly like the harness config's serial step would see on
-    # a subset with nothing serial in it.
-    parallel_cmd = [
-        sys.executable,
-        "-m",
-        "pytest",
-        *args,
-        "-q",
-        "-n",
-        "auto",
-        "--dist",
-        "worksteal",
-        "-m",
-        "not serial",
-        *extra_args,
-    ]
-    LOGGER.info("running (parallel, not serial): %s", " ".join(parallel_cmd))
-    parallel_returncode = subprocess.run(parallel_cmd, cwd=str(repo_root)).returncode
-
-    serial_cmd = [sys.executable, "-m", "pytest", *args, "-q", "-m", "serial", *extra_args]
-    LOGGER.info("running (serial): %s", " ".join(serial_cmd))
-    serial_returncode = subprocess.run(serial_cmd, cwd=str(repo_root)).returncode
-    if serial_returncode == PYTEST_EXIT_NO_TESTS_COLLECTED:
-        serial_returncode = 0
-
-    return parallel_returncode if parallel_returncode != 0 else serial_returncode
+            cmd = with_workers(command, worker_count) if xdist else list(command)
+            if worker_count > 1:
+                cmd += ["--dist", "worksteal"]
+            if marker:
+                cmd += ["-m", marker]
+            result = run_with_serial_retry(
+                cmd, cwd=repo_root, timeout=max(0.01, deadline - time.monotonic()),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            )
+            print(result.stdout or "")
+            codes.append(0 if marker and result.returncode == PYTEST_EXIT_NO_TESTS_COLLECTED else result.returncode)
+        return next((code for code in codes if code), 0)
+    except subprocess.TimeoutExpired as exc:
+        print(exc.stdout or "")
+        print("[STEP_TIMEOUT] affected tests")
+        return 124
 
 
 # --- CLI -----------------------------------------------------------------
@@ -925,7 +972,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        selection = select_affected(repo_root, args.base)
+        selection = (select_affected(repo_root, args.base) if os.environ.get("DARKFAC_GATE_SCOPE") == "full"
+                     else select_pr_tests(repo_root, args.base))
     except GraphBuildError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -970,7 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _summarize_reasons(selection: Selection) -> str:
-    if selection.mode == "full":
+    if selection.mode in ("full", "affected_fallback"):
         joined = "; ".join(selection.escalations[:3])
         more = "" if len(selection.escalations) <= 3 else f" (+{len(selection.escalations) - 3} more)"
         return f"escalations={joined}{more}"

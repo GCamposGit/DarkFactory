@@ -85,37 +85,13 @@ EXIT_CANCELLED = 130
 GATE_TIMEOUT_S = 7200.0
 # Upper bound of the delivery subprocess (gate, PR, CI wait, merge): same as the board's "presumed dead".
 DELIVERY_TIMEOUT_S = 6 * 3600.0
-# How many times the delivery phase reinvokes the agent in-place after a focal-test or gate failure,
+# How many times the delivery phase reinvokes the agent in-place after a gate failure,
 # before giving the ticket back with a resume command (USR-245). 2 reinvocations = 3 total attempts.
 GATE_FIX_ATTEMPTS = 2
-# Upper bound of the focal-test pre-check (fast, scoped to the changed files' tests), well under
-# GATE_TIMEOUT_S since it exists to catch an unverified agent turn before paying for the full gate.
-# 600s (not 300s): even the capped, changed-files-only target set observed ~106s on an idle worker,
-# but this machine's xdist is capped to 1 worker under memory pressure (`_worker_capacity`), and a
-# concurrent session on the shared host (USR-188: the same contention this ticket's fix addresses for
-# Codex) can slow a serial run 3x+; 300s turned a passing pre-check into a false-positive timeout.
-FOCAL_TEST_TIMEOUT_S = 600.0
-# Cap on test files the "mentions a changed module" sweep in `_focal_test_targets` may add beyond the
-# changed test files themselves (USR-188). A foundational module (e.g. `routing.py`, `run_ticket.py`)
-# is genuinely imported by dozens of test files; running all of them serially-equivalent (this machine's
-# memory caps xdist to 1 worker, see `_worker_capacity`) blew well past FOCAL_TEST_TIMEOUT_S. Past the
-# cap, the sweep is dropped entirely rather than trimmed arbitrarily — the pre-check stays fast (just
-# the changed test files) and the official gate remains the final, complete word either way.
-FOCAL_SWEEP_MAX_EXTRA_FILES = 15
-# FOCAL_TEST_TIMEOUT_S above was calibrated against the changed-files-only set (~106s observed on an
-# idle worker); it was never budgeted for a full sweep of up to FOCAL_SWEEP_MAX_EXTRA_FILES extra files.
-# USR-249 (USR-245's own delivery): a legitimate 16-file sweep (15 extra, right at the cap) exceeded
-# 600s serialized under this host's 1-worker memory cap, even though every individual test passed --
-# the flat floor undercounted a sweep at the boundary it itself allows. The budget now scales with how
-# many files were actually swept, keeping the flat floor for small target sets (<=8 files, matching the
-# original calibration) and bounded by a ceiling well under GATE_TIMEOUT_S so a maximal sweep still
-# fails fast relative to the full gate.
-FOCAL_TEST_TIMEOUT_PER_TARGET_S = 75.0
-FOCAL_TEST_TIMEOUT_CEILING_S = 1800.0
 # Harnesses the in-place fix agent (USR-245) may be routed to; same set `_run()` offers development.
 _DEV_HOST_CAPS: tuple[str, ...] = ("harness:claude", "harness:codex", "harness:grok", "harness:antigravity")
 # Upper bound of one in-place fix-agent reinvocation (USR-245's `_invoke_fix_agent`); reported alongside
-# every reinvocation in `attempts_log` (USR-249) the same way `GATE_TIMEOUT_S`/`FOCAL_TEST_TIMEOUT_S` are.
+# every reinvocation in `attempts_log` (USR-249) the same way `GATE_TIMEOUT_S` are.
 FIX_AGENT_TIMEOUT_S = 1800.0
 # USR-375 S4: PLAN/REVIEW without an eligible route WAIT (route_wait semantics): the run ends with the
 # fleet's requeue code (fleet_dispatcher.INFRA_EXIT_CODES), the ticket stays `planned` and is retried
@@ -701,9 +677,6 @@ def repair_owner_action_duplicates_before_gate(git_mgr: Any, ticket_id: str, cwd
     return changes
 
 
-_TEST_FILE_RE = re.compile(r"(^|/)tests?/.*test_[^/]+\.py$|(^|/)test_[^/]+\.py$")
-
-
 def _implementation_diff_paths(cwd: Path) -> list[str]:
     """Repo-relative paths this ticket touched: the committed diff since the rebased base, plus any
     still-uncommitted edit (e.g. one just made by an in-place self-correction agent call, USR-245)."""
@@ -719,107 +692,6 @@ def _implementation_diff_paths(cwd: Path) -> list[str]:
     dirty_paths = GitAutonomyManager(PROJECT_ROOT).changed_paths(cwd)
     merged = list(dict.fromkeys([*committed_paths, *dirty_paths]))
     return [p for p in merged if p != LEDGER_RELATIVE]
-
-
-def _focal_test_targets(cwd: Path, changed_paths: list[str]) -> list[str]:
-    """Test files to run as a fast pre-check before the official gate (USR-245).
-
-    Includes every changed test file verbatim, plus any OTHER test file under ``tests/`` whose source
-    actually imports or references a changed (non-test) module: a module a ticket edits can break a
-    test it never touches (the USR-201 rescue: 3 tests broke that the agent never looked at).
-    Best-effort by design — a module whose name is too generic to search for, or a test with no textual
-    reference, is simply not found; the full official gate downstream is still the final word.
-
-    The reference must look like an import or an attribute/call on the module (``import stem``,
-    ``stem import ...``, ``stem.attr``, ``stem(...)``), not just the bare word anywhere in the file:
-    a stem like ``routing`` or ``run_ticket`` is also plain prose/an unrelated identifier, and a naive
-    whole-file word search swept in dozens of unrelated test files (USR-188: 61 targets for a 2-module
-    change, serialized well past ``FOCAL_TEST_TIMEOUT_S``).
-    """
-    targets: set[str] = set()
-    module_stems: list[str] = []
-    for raw in changed_paths:
-        if not raw.endswith(".py"):
-            continue
-        normalized = raw.replace("\\", "/")
-        if _TEST_FILE_RE.search(normalized):
-            if (cwd / normalized).is_file():
-                targets.add(normalized)
-            continue
-        stem = Path(normalized).stem
-        if stem and stem != "__init__":
-            module_stems.append(stem)
-
-    if module_stems:
-        tests_dir = cwd / "tests"
-        if tests_dir.is_dir():
-            stem_patterns = [
-                rf"\bimport\s+{re.escape(s)}\b|\b{re.escape(s)}\s+import\b|\b{re.escape(s)}\.\w|\b{re.escape(s)}\("
-                for s in dict.fromkeys(module_stems)
-            ]
-            pattern = re.compile("(?:" + "|".join(stem_patterns) + ")")
-            swept: set[str] = set()
-            for test_file in tests_dir.rglob("test_*.py"):
-                try:
-                    text = test_file.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                if pattern.search(text):
-                    swept.add(str(test_file.relative_to(cwd)).replace("\\", "/"))
-            if len(swept - targets) <= FOCAL_SWEEP_MAX_EXTRA_FILES:
-                targets |= swept
-    return sorted(targets)
-
-
-def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
-    """Run pytest scoped to `targets`; `None` when there is nothing to focus on (USR-245).
-
-    A ``DistilledTestReport`` (core.harness.test_subagent) on success or failure; never raises — a
-    broken pre-check must never block the real gate from having the final word.
-
-    Runs under pytest-xdist (``-n auto --dist worksteal``), same as the official gate's parallel step
-    (`harness.config.json`), excluding ``-m serial`` tests the same way: those assume exclusive access
-    (shared state, fixed ports, the suite lock) and the official gate re-checks them anyway, so the
-    pre-check only needs the parallel-safe majority. Without this, `TestSubagentEngine.execute_local`
-    runs plain single-process pytest, and even a handful of target files can exceed
-    ``FOCAL_TEST_TIMEOUT_S`` serially (USR-188). The actual timeout budget scales with ``len(targets)``
-    (``_focal_test_timeout_s``, USR-249) rather than staying flat at ``FOCAL_TEST_TIMEOUT_S``.
-    """
-    if not targets:
-        return None
-    if gate_ram.remote_workers_configured():
-        logger.info(
-            "[FOCAL] pre-teste local pulado: workers remotos configurados; "
-            "disponibilidade e validacao integral ficam para o portao oficial"
-        )
-        return None
-
-    ram_wait = gate_ram.wait_for_gate_ram(announce=logger.info)
-    if not ram_wait.ok:
-        logger.warning(
-            "[FOCAL] pre-teste local pulado: RAM insuficiente apos %.0f s de espera "
-            "(%.1f GiB livres, %s workers possiveis); o portao oficial decidira se pode executar",
-            ram_wait.waited_s,
-            ram_wait.reading.available_gib,
-            ram_wait.reading.workers,
-        )
-        return None
-
-    from core.harness.test_subagent import TestExecutionInstruction, TestSubagentEngine
-
-    engine = TestSubagentEngine(project_root=cwd)
-    extra_args = ["-n", "auto", "--dist", "worksteal", "-m", "not serial", *targets]
-    instruction = TestExecutionInstruction(
-        target=None,
-        extra_args=extra_args,
-        timeout_seconds=int(_focal_test_timeout_s(len(targets))),
-        worker_mode="local",
-    )
-    try:
-        return engine.execute_local(instruction)
-    except Exception as exc:  # noqa: BLE001 - a broken focal pre-check must never block the real gate
-        logger.warning("Focal test pre-check could not run in %s: %s", cwd, exc)
-        return None
 
 
 def _build_gate_fix_prompt(ticket: UserTicket, stage_label: str, feedback: str) -> str:
@@ -890,7 +762,6 @@ _GATE_REMOTE_INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "[REMOTE_FALLBACK]")
 _PYTEST_REAL_FAILURE_RE = re.compile(r"^(?:FAILED|ERROR) |\b\d+ (?:failed|errors?)\b", re.MULTILINE)
 # `TestSubagentEngine.execute_local` (core/harness/test_subagent.py) sets this exit code only from
 # `subprocess.TimeoutExpired`; any other nonzero code is an actual pytest failure the agent can act on.
-_FOCAL_TIMEOUT_EXIT_CODE = 124
 
 
 def _gate_failure_is_timeout(gate_res: Any) -> bool:
@@ -1009,21 +880,8 @@ def _gate_failure_is_base_red(output: str, diff_paths: list[str], cwd: Path) -> 
     return True
 
 
-def _focal_failure_is_timeout(focal_report: Any) -> bool:
-    """True when the focal pre-check failure was a timeout, not a real test failure."""
-    return focal_report.exit_code == _FOCAL_TIMEOUT_EXIT_CODE
 
 
-def _focal_test_timeout_s(target_count: int) -> float:
-    """Timeout budget for the focal pre-check given how many files it will actually run (USR-249).
-
-    `FOCAL_TEST_TIMEOUT_S` alone was calibrated for the changed-files-only set; a sweep up to
-    `FOCAL_SWEEP_MAX_EXTRA_FILES` extra files serialized onto one xdist worker needs more wall-clock
-    than that flat floor, so the budget grows with `target_count` -- bounded by
-    `FOCAL_TEST_TIMEOUT_CEILING_S` so even a maximal sweep stays far cheaper than `GATE_TIMEOUT_S`.
-    """
-    scaled = target_count * FOCAL_TEST_TIMEOUT_PER_TARGET_S
-    return min(FOCAL_TEST_TIMEOUT_CEILING_S, max(FOCAL_TEST_TIMEOUT_S, scaled))
 
 
 # Output of the official gate (`core/harness/runner.py`) when it refuses a dirty candidate worktree. It is
@@ -1173,7 +1031,7 @@ def _gate_should_require_remote() -> bool:
     """USR-354: True when the gate is configured for remote workers but the local host cannot take
     2+ xdist workers; then a busy worker must requeue (``--remote-required``) instead of running a
     1-worker local gate that blows through GATE_TIMEOUT_S."""
-    if not gate_ram.remote_workers_configured():
+    if os.environ.get("DARKFAC_GATE_SCOPE") != "full" or not gate_ram.remote_workers_configured():
         return False
     try:
         return gate_ram.measure_workers().workers < gate_ram.MIN_GATE_WORKERS
@@ -1183,9 +1041,11 @@ def _gate_should_require_remote() -> bool:
 
 def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
     """USR-262: only when the gate would run locally (no idle remote worker); None = nothing to wait for."""
-    if gate_ram.remote_worker_available() or _gate_should_require_remote():
+    full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
+    if full and (gate_ram.remote_worker_available() or _gate_should_require_remote()):
         return None
-    return gate_ram.wait_for_gate_ram(announce=None if not as_json else (lambda _msg: None))
+    return gate_ram.wait_for_gate_ram(announce=None if not as_json else (lambda _msg: None),
+                                      scope="full" if full else "pr")
 
 
 def _wait_gate_grokbox_if_needed(as_json: bool) -> None:
@@ -1270,68 +1130,6 @@ def _retry_gate_remote_unavailable(
     return gate_res
 
 
-def _gate_focal_step(
-    st: ticket_stages.GateState,
-    target_worktree: Path,
-    ticket: UserTicket,
-    as_json: bool,
-    progress: ProgressPublisher,
-    attempts_log: list[dict[str, Any]],
-) -> str:
-    """Focal pre-check of one attempt. STEP_PROCEED = focal passed (or no targets); else loop control."""
-    attempt = st.attempt
-    changed = _implementation_diff_paths(target_worktree)
-    focal_targets = _focal_test_targets(target_worktree, changed)
-    focal_report = _run_focal_tests(target_worktree, focal_targets) if focal_targets else None
-
-    if focal_report is None or focal_report.success:
-        return ticket_stages.STEP_PROCEED
-
-    st.last_output = focal_report.agent_feedback
-    st.last_exit_code = focal_report.exit_code or 1
-    if not as_json:
-        print(
-            f"[ERRO NOS TESTES FOCAIS]: {focal_report.concise_summary}\n{focal_report.agent_feedback}",
-            file=sys.stderr,
-        )
-
-    if _focal_failure_is_timeout(focal_report):
-        focal_timeout_limit = _focal_test_timeout_s(len(focal_targets))
-        st.last_cause = "focal_timeout"
-        attempts_log.append({
-            "event": "timeout",
-            "attempt": attempt + 1,
-            "stage": "focal",
-            "cause": st.last_cause,
-            "duration_s": round(focal_report.duration_seconds, 1),
-            "limit_s": focal_timeout_limit,
-        })
-        if not as_json:
-            print(
-                f"[TIMEOUT NO PRE-TESTE FOCAL]: {focal_report.duration_seconds:.1f}s "
-                f"(limite {focal_timeout_limit:.0f}s). Nao reinvocando o agente: timeout de "
-                f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
-                file=sys.stderr,
-            )
-        return ticket_stages.STEP_BREAK
-
-    st.last_cause = "focal_tests_failed"
-    if attempt >= GATE_FIX_ATTEMPTS:
-        return ticket_stages.STEP_BREAK
-    progress.phase(
-        "gate", "failed",
-        f"testes focais reprovados (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}): "
-        f"{focal_report.concise_summary}",
-        cause="focal_tests_failed",
-    )
-    if not as_json:
-        print(f"\n--> Reinvocando o agente na mesma worktree para corrigir ({', '.join(focal_targets)})...")
-    fix_result = _invoke_fix_agent(
-        target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback
-    )
-    return _gate_after_fix(st, target_worktree, ticket, "focal", fix_result, attempts_log)
-
-
 def _gate_after_fix(
     st: ticket_stages.GateState,
     target_worktree: Path,
@@ -1360,7 +1158,10 @@ def _gate_after_fix(
 
 
 def _gate_build_command(target_worktree: Path) -> list[str]:
-    gate_cmd = [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"]
+    runner = str(target_worktree / "core" / "harness" / "runner.py")
+    if os.environ.get("DARKFAC_GATE_SCOPE") != "full":
+        return [sys.executable, runner, "--profile", "pr", "--local"]
+    gate_cmd = [sys.executable, runner, "--quick"]
     if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
         # USR-366: o despachante da frota fixa o worker remoto do host (DARKFAC_TEST_WORKERS).
         gate_cmd.append("--remote-required")
@@ -1382,16 +1183,17 @@ def _gate_run_official(
     """Waits for grokbox/RAM, then runs the official gate. Returns (step, gate_cmd, gate_res)."""
     attempt = st.attempt
     # USR-310: grokbox estava fora no pre-flight -- da uma janela para ele acordar antes do portao.
-    _wait_gate_grokbox_if_needed(as_json)
+    if os.environ.get("DARKFAC_GATE_SCOPE") == "full":
+        _wait_gate_grokbox_if_needed(as_json)
 
-    # USR-262: gate local com 1 worker passa de GATE_TIMEOUT; espera RAM para 2+ workers ou falha explicito.
+    # PR degrades to in-process pytest; full retains its memory-based worker threshold.
     ram_wait = _wait_gate_ram_if_local(as_json)
     if ram_wait is not None and not ram_wait.ok:
         st.last_cause = gate_ram.CAUSE_INSUFFICIENT_RAM
-        st.last_exit_code = 1
+        st.last_exit_code = 75
         st.last_output = (
             f"{st.last_cause}: RAM livre {ram_wait.reading.available_gib:.1f} GiB, "
-            f"{ram_wait.reading.workers} workers possiveis (minimo {gate_ram.MIN_GATE_WORKERS}) "
+            f"{ram_wait.reading.workers} workers possiveis (PR: minimo {gate_ram.MIN_SERIAL_AVAILABLE_GIB} GiB) "
             f"apos {ram_wait.waited_s:.0f} s de espera; portao NAO executado. Retome com: {resume_cmd}"
         )
         attempts_log.append(ticket_stages.infra_error_entry(attempt, "gate", st.last_cause, error=st.last_output))
@@ -1399,11 +1201,11 @@ def _gate_run_official(
             print(f"[RAM INSUFICIENTE PARA O PORTAO]: {st.last_output}", file=sys.stderr)
         return ticket_stages.STEP_BREAK, None, None
 
-    progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
-    if not as_json:
-        print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
-    # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
     gate_cmd = _gate_build_command(target_worktree)
+    progress.phase("gate", "running", "portao oficial (" + " ".join(gate_cmd[1:]) + ")")
+    if not as_json:
+        print("\n--> Executando portão oficial da fábrica: " + " ".join(gate_cmd))
+    # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
     gate_res = _run_bounded(
         gate_cmd,
         cwd=target_worktree,
@@ -1457,7 +1259,7 @@ def _gate_classify_failure(
         return True
 
     codes = (_parse_harness_result(st.last_output) or {}).get("exit_codes")
-    if isinstance(codes, dict) and 75 in codes.values():
+    if gate_res.returncode == 75 or (isinstance(codes, dict) and 75 in codes.values()):
         st.last_exit_code = 75
         return _infra(gate_ram.CAUSE_INSUFFICIENT_RAM, "[GATE_RESOURCE_WAIT] Nenhum worker cabe na RAM; aguardar recurso sem reinvocar modelo.")
     if _gate_remote_unavailable(gate_cmd, st.last_output):
@@ -1530,7 +1332,10 @@ def _gate_reinvoke_for_gate(
     if not as_json:
         print("\n--> Reinvocando o agente na mesma worktree com o log destilado do portao...")
     fix_result = _invoke_fix_agent(
-        target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(st.last_output)
+        target_worktree, ticket,
+        "portao oficial (python core/harness/runner.py "
+        + ("--quick" if os.environ.get("DARKFAC_GATE_SCOPE") == "full" else "--profile pr") + ")",
+        distill_log(st.last_output)
     )
     return _gate_after_fix(st, target_worktree, ticket, "gate", fix_result, attempts_log)
 
@@ -1622,22 +1427,10 @@ def _run_gate_with_self_correction(
     cancelled_payload: Any,
     attempts_log: list[dict[str, Any]],
 ) -> Any:
-    """Focal tests + the official gate, self-correcting up to GATE_FIX_ATTEMPTS times (USR-245).
+    """Run the official gate and self-correct genuine candidate failures.
 
-    A headless agent that ends its turn deferring verification to a background task ("vou esperar o
-    pytest em segundo plano") never gets to see the gate fail before the ticket is handed back to the
-    operator (the USR-201 rescue). The focal pre-check runs regardless of `--skip-validation` (it is
-    the new, fast, mandatory check); `--skip-validation` only still skips the expensive official gate.
-
-    A timeout or infra hiccup (`_gate_failure_is_timeout`/`_focal_failure_is_timeout`, USR-249) never
-    reinvokes the agent: nothing in the diff caused it, so retrying just burns another
-    ``FOCAL_TEST_TIMEOUT_S``/``GATE_TIMEOUT_S`` for nothing (the USR-239 incident: ~28 extra minutes
-    across 2 blind reinvocations after a 3000s gate timeout). `attempts_log` is appended in place with
-    one entry per reinvocation and per timeout (cause, duration, limit applied) so the final report can
-    list them without opening logs.
-
-    Returns `None` on success (the caller proceeds to commit/push), or the usual failure payload/exit
-    code once every attempt is exhausted or a timeout/infra failure is hit.
+    The PR profile owns affected tests; no duplicate focal pre-check runs here.
+    Infrastructure failures preserve the candidate without invoking a fix agent.
     """
     if ticket.project_id != "darkfac":
         # Client delivery always fails closed without its declared project gate (skip_validation ignored).
@@ -1648,17 +1441,6 @@ def _run_gate_with_self_correction(
     st = ticket_stages.GateState()
     for attempt in range(GATE_FIX_ATTEMPTS + 1):
         st.attempt = attempt
-        if _cancelled():
-            return cancelled_payload()
-
-        step = _gate_focal_step(st, target_worktree, ticket, as_json, progress, attempts_log)
-        if step == ticket_stages.STEP_CANCEL:
-            return cancelled_payload()
-        if step == ticket_stages.STEP_BREAK:
-            break
-        if step == ticket_stages.STEP_CONTINUE:
-            continue
-
         if _cancelled():
             return cancelled_payload()
 

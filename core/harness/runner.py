@@ -41,6 +41,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from core.harness import cache as harness_cache
 from core.harness import remote_dispatch
+from core.harness.pytest_runtime import run_with_serial_retry, with_workers
 from core.harness import suite_lock as harness_suite_lock
 from core.testing import shards as test_shards
 from core.harness.markers import (
@@ -376,6 +377,10 @@ def effective_step_timeout(step: HarnessStepConfig, workers: int = 1) -> float:
     return float(step.timeout_sec) * (2 if workers <= 1 else 1)
 
 
+class GateResourceWait(RuntimeError):
+    """Infrastructure cannot run the gate with the currently available RAM."""
+
+
 def run_step(step: HarnessStepConfig) -> StepExecution:
     print(f"{MARKER_STEP_START} {step.name}")
     label = check_scope_label(step.cmd)
@@ -389,9 +394,10 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
     try:
         worker_count = None
         step_timeout = effective_step_timeout(step)
-        if step.name == "unit_and_integration_tests_parallel":
+        if step.name in ("unit_and_integration_tests_parallel", "smoke_tests"):
             from core.line import gate_ram
-            ready = gate_ram.wait_for_gate_ram(limit_s=0, measure=gate_ram.measure_workers)
+            scope = "full" if step.name == "unit_and_integration_tests_parallel" else "pr"
+            ready = gate_ram.wait_for_gate_ram(limit_s=0, scope=scope)
             if not ready.ok:
                 print(f"{MARKER_STEP_FAIL} {step.name} (gate_insufficient_ram)")
                 return StepExecution(step.name, 75, 0, 0, 0)
@@ -406,6 +412,8 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
             raise ValueError("empty command")
         command = strip_xdist_args_if_unavailable(command)
         command = normalize_xdist_workers(command)
+        if worker_count is not None and _xdist_available():
+            command = with_workers(command, worker_count if step.name != "smoke_tests" else 0)
         shard_spec = os.environ.get(test_shards.SHARD_ENV, "").strip()
         if shard_spec and _is_test_step(step):
             command = test_shards.command_for_shard(command, shard_spec, PROJECT_ROOT)
@@ -415,10 +423,12 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         # never re-acquires the machine-wide suite lock and deadlocks against
         # its own parent.
         child_env = dict(os.environ)
+        if step.name in ("affected_tests", "smoke_tests"):
+            child_env["DARKFAC_GATE_SCOPE"] = "pr"
         if worker_count is not None:
             child_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] = str(worker_count)
 
-        process = subprocess.run(
+        process = run_with_serial_retry(
             command,
             shell=False,
             stdout=subprocess.PIPE,
@@ -583,6 +593,8 @@ def execute(
     for step in steps:
         execution = run_step(step)
         executions.append(execution)
+        if execution.returncode == 75:
+            raise GateResourceWait("gate_insufficient_ram")
         if not execution.passed:
             break
 
@@ -1093,6 +1105,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.profile == "pr":
         args.no_cache = True
         args.local = True
+        from core.line import gate_ram
+
+        if not gate_ram.wait_for_gate_ram(scope="pr").ok:
+            print("[ERROR] gate_insufficient_ram")
+            print(MARKER_HARNESS_FAIL)
+            return 75
     if args.shard:
         try:
             test_shards.parse_shard(args.shard)
@@ -1120,6 +1138,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             local_only=args.local,
             remote_required=args.remote_required,
         ) else 1
+    except GateResourceWait as exc:
+        print(f"[ERROR] {exc}")
+        print(MARKER_HARNESS_FAIL)
+        return 75
     except (RuntimeError, ValueError) as exc:
         print(f"[ERROR] {exc}")
         print(MARKER_HARNESS_FAIL)

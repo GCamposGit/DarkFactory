@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import Any
 
 ENV_RAM_WAIT_S = "DARKFAC_GATE_RAM_WAIT_S"
-DEFAULT_RAM_WAIT_S = 1800.0
+DEFAULT_RAM_WAIT_S = 300.0
+MIN_SERIAL_AVAILABLE_GIB = 1.5
 MIN_GATE_WORKERS = 1
 POLL_INTERVAL_S = 60.0
 CAUSE_INSUFFICIENT_RAM = "gate_insufficient_ram"
@@ -45,7 +46,7 @@ def ram_wait_limit_s() -> float:
     return value if value >= 0 else DEFAULT_RAM_WAIT_S
 
 
-def measure_workers() -> RamReading:
+def measure_workers(scope: str = "full") -> RamReading:
     """Workers que o portao teria agora (mesma conta de ``tests/_worker_capacity``, sem o piso de 1)."""
     from tests import _worker_capacity as wc
 
@@ -53,6 +54,8 @@ def measure_workers() -> RamReading:
     gib = available / wc.BYTES_PER_GIB
     by_memory = max(0, available - wc.DEFAULT_SYSTEM_RESERVE_BYTES) // wc.DEFAULT_MIN_WORKER_MEMORY_BYTES
     capacity = int(min(by_memory, wc.get_physical_cpu_count(), wc.DEFAULT_HARD_CAP_WORKERS))
+    if scope != "full":
+        capacity = max(1, capacity) if gib >= MIN_SERIAL_AVAILABLE_GIB else 0
     for name in ("DARKFAC_MAX_WORKERS", "PYTEST_XDIST_AUTO_NUM_WORKERS"):
         raw = os.environ.get(name)
         if raw:
@@ -103,17 +106,19 @@ def remote_workers_configured() -> bool:
 
 def wait_for_gate_ram(
     *,
-    measure: Callable[[], RamReading] = measure_workers,
+    measure: Callable[[], RamReading] | None = None,
     sleep: Callable[[float], Any] = time.sleep,
     limit_s: float | None = None,
     poll_s: float = POLL_INTERVAL_S,
     min_workers: int = MIN_GATE_WORKERS,
     announce: Callable[[str], Any] | None = None,
+    scope: str = "full",
 ) -> RamWaitResult:
     """Block until ``min_workers`` fit in RAM or ``limit_s`` elapses (time counted by the sleeps)."""
     limit = ram_wait_limit_s() if limit_s is None else limit_s
     say = announce or (lambda msg: print(msg, file=sys.stderr))
     waited = 0.0
+    measure = measure or (lambda: measure_workers(scope))
     reading = measure()
     while reading.workers < min_workers:
         if waited >= limit:
