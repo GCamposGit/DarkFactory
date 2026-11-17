@@ -14651,8 +14651,8 @@
     "project_id": "darkfac",
     "title": "Arquivos de runtime nao rastreados impedem convergencia e pulam backup pos-deploy",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "a000b732ae5ffc6ae655ea584b1e227b3205fa77",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14675,6 +14675,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-08T23:24:31.064420Z",
-    "updated_at": "2026-11-08T23:24:31.064420Z"
+    "updated_at": "2026-11-17T04:03:30.703834Z"
   }
 ]
