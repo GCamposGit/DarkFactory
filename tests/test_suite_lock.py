@@ -173,20 +173,20 @@ def test_try_lock_file_raises_suite_lock_unwritable_on_permission_error(
 
     lock_path = tmp_path / "suite-0.lock"
     lock_path.touch()
-    real_open = Path.open
     attempts = 0
 
-    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+    def _denied_open(path: Path):
         nonlocal attempts
-        if self == lock_path and mode == "rb":
-            attempts += 1
-            raise PermissionError(13, "Permission denied")
-        return real_open(self, mode, *args, **kwargs)
+        assert path == lock_path
+        attempts += 1
+        raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(Path, "open", _denied_read)
+    monkeypatch.setattr(suite_lock, "_open_lock_file", _denied_open)
+    monkeypatch.setattr(suite_lock, "_sleep", lambda _seconds: None)
     with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
         suite_lock._try_lock_file(lock_path)
     assert excinfo.value.path == lock_path
+    # Prove the retry is applied by _try_lock_file around the open operation.
     assert attempts == suite_lock._LOCK_PERMISSION_ATTEMPTS
 
 

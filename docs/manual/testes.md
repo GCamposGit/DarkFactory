@@ -40,16 +40,18 @@ mais candidatos que não podem ser validados.
 
 ### Identidade restrita no lock da suíte (USR-463)
 
-O arquivo `suite-N.lock` existente só precisa ser aberto para leitura: o sistema
-operacional mantém a trava, sem alterar os metadados do arquivo. Isso permite
+O arquivo `suite-N.lock` existente é aberto em modo `rb`: o sistema operacional
+mantém a trava, sem alterar o conteúdo ou os metadados do arquivo. A sonda não
+chama `touch()`. Isso permite
 que uma identidade restrita -- por exemplo `CodexSandboxUsers`, cuja ACL concede
 `ReadAndExecute` sobre locks criados por outra conta -- adquira um slot canônico
-livre. Um lock ausente é criado com abertura exclusiva; se outro processo vencer
-a corrida de criação, o arquivo criado por ele é aberto para leitura. Se a
+livre. Um lock ausente é criado com `xb` exclusivo; se outro processo vencer a
+corrida de criação, o arquivo criado por ele é aberto para leitura. Se a
 identidade puder travar o lock, mas não gravar o sidecar de metadados, o runner
 libera o slot canônico e migra para o fallback por identidade antes de executar
-os testes. Falhas de permissão no acesso ao diretório, ao lock ou ao sidecar são
-tentadas um número limitado de vezes e, ao persistirem, viram
+os testes. Falhas de permissão ao abrir ou travar o lock recebem até três
+tentativas em `_try_lock_file`; a sonda de acessibilidade também usa até três
+tentativas. Se persistirem no acesso ao diretório, ao lock ou ao sidecar, viram
 `SuiteLockUnwritable` com `path` e `reason`, sem propagar um `PermissionError`
 cru. `_try_lock_file` só retorna `None` para slot efetivamente ocupado por outro
 processo. `probe_free_slot()` nunca propaga o erro estruturado: trata um slot
@@ -66,10 +68,11 @@ canônico e troca para o mesmo fallback. Se nenhum fallback puder criar ou abrir
 seu lock, a resolução levanta `SuiteLockUnwritable` estruturado:
 
 - Verifica o artefato exato que uma aquisição real usa
-  (`<diretório-canônico>/suite-0.lock`) abrindo-o para leitura. Se estiver
-  ausente, cria-o com modo exclusivo, tratando `FileExistsError` como uma
-  corrida vencida por outro processo, e então o reabre para leitura. Nunca
-  chama `touch()` nem abre um lock preexistente para escrita.
+  (`<diretório-canônico>/suite-0.lock`) abrindo um arquivo preexistente em
+  `rb`. Se estiver ausente, cria-o com `xb` exclusivo, tratando
+  `FileExistsError` como uma corrida vencida por outro processo, e então o
+  reabre para leitura. Nunca chama `touch()` nem abre um lock preexistente para
+  escrita ou altera seus metadados.
 - Com acesso de leitura: retorna o diretório canônico, `degraded=False`,
   `reason=None`.
   Nenhum diretório novo é criado além do canônico; nenhum aviso é impresso.
@@ -80,7 +83,7 @@ seu lock, a resolução levanta `SuiteLockUnwritable` estruturado:
   `tempfile.gettempdir()/darkfac-harness-<usuário>` como reserva independente.
   O diretório escolhido retorna com `degraded=True` e `reason` explicando a
   degradação.
-- A sondagem e a aquisição repetem falhas de permissão até três vezes. Se todos
+- A sondagem e `_try_lock_file` repetem falhas de permissão até três vezes. Se todos
   os candidatos forem inacessíveis, a resolução falha com
   `SuiteLockUnwritable` estruturado.
 - Se a permissão do lock canônico mudar depois da sondagem, a própria aquisição

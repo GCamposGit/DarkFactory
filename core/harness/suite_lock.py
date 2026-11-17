@@ -218,19 +218,31 @@ def _probe_lock_access(directory: Path) -> None:
     """
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = directory / "suite-0.lock"
-    handle = _open_lock_file(lock_path)
-    handle.close()
+    last_permission_error: PermissionError | None = None
+    for attempt in range(_LOCK_PERMISSION_ATTEMPTS):
+        try:
+            handle = _open_lock_file(lock_path)
+        except PermissionError as exc:
+            last_permission_error = exc
+            if attempt + 1 < _LOCK_PERMISSION_ATTEMPTS:
+                _sleep(_LOCK_PERMISSION_RETRY_SEC)
+            continue
+        handle.close()
+        return
+
+    if last_permission_error is not None:
+        raise last_permission_error
+    raise FileNotFoundError(f"lock file kept disappearing while probing: {lock_path}")
 
 
 def _open_lock_file(path: Path) -> object:
     """Open a lock file read-only, creating it exclusively only if absent.
 
-    Retrying permission failures is useful for transient Windows sharing or
-    ACL propagation errors. Existing files are never opened for writing or
-    touched, so acquiring one does not change its metadata.
+    Existing files are never opened for writing or touched, so acquiring one
+    does not change its metadata. Permission retries belong to the caller so
+    acquisition can apply its bounded retry across both opening and OS locking.
     """
 
-    last_permission_error: PermissionError | None = None
     for attempt in range(_LOCK_PERMISSION_ATTEMPTS):
         try:
             return path.open("rb")
@@ -240,19 +252,10 @@ def _open_lock_file(path: Path) -> object:
             except FileExistsError:
                 # Another process created it after our read-only open failed.
                 continue
-            except PermissionError as exc:
-                last_permission_error = exc
             else:
                 created.close()
                 # Reopen read-only for the actual OS lock.
                 continue
-        except PermissionError as exc:
-            last_permission_error = exc
-        if attempt + 1 < _LOCK_PERMISSION_ATTEMPTS:
-            _sleep(_LOCK_PERMISSION_RETRY_SEC)
-
-    if last_permission_error is not None:
-        raise last_permission_error
     raise FileNotFoundError(f"lock file kept disappearing while opening: {path}")
 
 
@@ -395,6 +398,9 @@ def _try_lock_file(path: Path) -> object | None:
         try:
             handle = _open_lock_file(path)
         except PermissionError as exc:
+            if attempt + 1 < _LOCK_PERMISSION_ATTEMPTS:
+                _sleep(_LOCK_PERMISSION_RETRY_SEC)
+                continue
             raise SuiteLockUnwritable(path, str(exc)) from exc
         try:
             if os.name == "nt":
