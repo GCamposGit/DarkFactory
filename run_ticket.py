@@ -3186,6 +3186,7 @@ def evaluate_admission(args: argparse.Namespace, ticket: UserTicket) -> admissio
         project_id=ticket.project_id,
         complexity=_routing_complexity(ticket),
         pinned_harness=pinned,
+        plan_exists=ticket_engine.reusable_plan(ticket_engine.run_workspace(ticket), ticket),
     )
 
 
@@ -3407,13 +3408,22 @@ def _stage_plan(
     if refused is not None:
         return refused
     rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
-    ticket_engine.reset(rws)
+    # A relaunch with a valid plan for this very demand keeps it (and the BUILD progress) and goes on.
+    plan_reused = ticket_engine.reusable_plan(rws, ticket)
+    if plan_reused:
+        ticket_engine.reset_keeping_plan(rws)
+    else:
+        ticket_engine.reset(rws)
     stage = Stage.INTAKE
     try:
         ticket_engine.write_demand(rws, ticket)
         require_artifact(Stage.INTAKE, rws)
         stage = Stage.PLAN
-        if route.get("ticket_size") == "small":
+        if plan_reused:
+            logger.info("estagio PLAN: plano valido de tentativa anterior reaproveitado (sem chamar o modelo)")
+            if not args.json:
+                print("\n--> Estagio PLAN: plano de tentativa anterior reaproveitado (SPEC.md + tickets.json).")
+        elif route.get("ticket_size") == "small":
             # A small fix skips only GRILL; it still leaves a (minimal) plan artifact.
             logger.info("estagio PLAN: plano minimo de correcao pequena (sem grill)")
             ticket_engine.write_minimal_plan(rws, ticket)
@@ -3761,6 +3771,34 @@ def _stage_development_route_wait(
     return EXIT_ROUTE_WAIT
 
 
+def _slices_done_before(rws: Any, plan_items: list[Any], workspace: TicketWorkspace) -> list[str]:
+    """Plan slices an earlier attempt finished (BUILD progress), only while the worktree holds work."""
+    try:
+        report = require_artifact(Stage.BUILD, rws)
+    except StageArtifactMissing:
+        return []
+    planned = {item.id for item in plan_items}
+    done = [t for t in getattr(report, "tickets_done", []) if t in planned]
+    if not done or not _implementation_diff_paths(workspace.path):
+        return []
+    return list(dict.fromkeys(done))
+
+
+def _stage_build_already_done(
+    workspace: TicketWorkspace, rws: Any, progress: ProgressPublisher, tickets_done: list[str]
+) -> dict[str, Any]:
+    """Every plan slice is already built and committed: go on to the gate without an agent call."""
+    harness = getattr(require_artifact(Stage.BUILD, rws), "harness", None) or "unknown"
+    ticket_engine.write_build(rws, harness, tickets_done)
+    logger.info("estagio BUILD: todas as fatias ja concluidas, seguindo ao portao sem chamar o agente")
+    summary = "fatias do plano ja concluidas em tentativa anterior"
+    progress.phase("agent", "succeeded", summary, harness=harness)
+    return {
+        "agent_result": AgentResult(ok=True, harness=harness, text=summary, duration_s=0.0),
+        "harness": harness, "model": None, "effort": None, "cost_record": {}, "agent_summary": summary,
+    }
+
+
 def _stage_build(
     args: argparse.Namespace,
     ticket: UserTicket,
@@ -3786,7 +3824,9 @@ def _stage_build(
     # A multi-ticket plan runs its sub-tickets sequentially inside this same ticket (USR-375 S4).
     # Every slice revalidates development before run_agent; a one-slice plan does this once (USR-428).
     sequential = len(plan_items) > 1
-    tickets_done: list[str] = []
+    tickets_done: list[str] = _slices_done_before(rws, plan_items, workspace)
+    if tickets_done and len(tickets_done) >= len(plan_items):
+        return _stage_build_already_done(workspace, rws, progress, tickets_done)
     total_duration = 0.0
     implementer = str(route.get("harness") or "")
     selected_harness = implementer
@@ -3796,6 +3836,11 @@ def _stage_build(
     report: Any = None
     preflight_harness = route.get("harness") if isinstance(route.get("harness"), str) else None
     for index, item in enumerate(plan_items, start=1):
+        if item.id in tickets_done:
+            logger.info("estagio BUILD: fatia %s ja concluida em tentativa anterior, pulada", item.id)
+            if not args.json:
+                print(f"--> Sub-ticket {index}/{len(plan_items)} do plano: {item.id} ja concluido, pulado.")
+            continue
         resolved = _resolve_development_slice(
             args, ticket, index=index, total=len(plan_items), preflight_harness=preflight_harness,
         )
@@ -3830,6 +3875,7 @@ def _stage_build(
         implementer = selected_harness
         if report.route is not None:
             implementer = report.route[0]
+        ticket_engine.write_build(rws, implementer, tickets_done)  # a relaunch resumes after this slice
 
     agent_result = report.result
     if report.route is not None:

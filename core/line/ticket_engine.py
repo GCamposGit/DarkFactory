@@ -29,6 +29,7 @@ from core.line.stages import (
     BuildReport,
     MergeReceipt,
     Stage,
+    StageArtifactMissing,
     ValidationReport,
     require_artifact,
 )
@@ -164,11 +165,45 @@ def has_any(ws: workspace.RunWorkspace) -> bool:
     return directory.is_dir() and any(directory.iterdir())
 
 
-def write_demand(ws: workspace.RunWorkspace, ticket: Any) -> None:
+def _demand_text(ticket: Any) -> str:
     lines = [f"# {ticket.id}: {ticket.title}", "", "## Problema", ticket.problem_statement or "(sem descricao)", ""]
     lines.append("## Criterios de aceite")
     lines.extend(f"- {c}" for c in ticket.acceptance_criteria or ["(nenhum registrado)"])
-    workspace.write_context(ws, DEMAND_FILE, "\n".join(lines) + "\n")
+    return "\n".join(lines) + "\n"
+
+
+def write_demand(ws: workspace.RunWorkspace, ticket: Any) -> None:
+    workspace.write_context(ws, DEMAND_FILE, _demand_text(ticket))
+
+
+# Artifacts that survive a relaunch whose plan is reused: the demand the plan answers, the plan, and
+# the BUILD progress that records which plan slices are already done.
+_PLAN_KEEP: tuple[str, ...] = (DEMAND_FILE, GRILL_FILE, SPEC_FILE, TICKETS_FILE, BUILD_FILE)
+
+
+def reusable_plan(ws: workspace.RunWorkspace, ticket: Any) -> bool:
+    """True when an earlier attempt left a valid plan for this very demand (no re-planning needed)."""
+    directory = workspace.context_dir(ws)
+    try:
+        if (directory / DEMAND_FILE).read_text(encoding="utf-8") != _demand_text(ticket):
+            return False
+        return bool(require_artifact(Stage.PLAN, ws).tickets)  # type: ignore[union-attr]
+    except (OSError, StageArtifactMissing):
+        return False
+
+
+def reset_keeping_plan(ws: workspace.RunWorkspace) -> None:
+    """Like :func:`reset`, but the demand, plan and BUILD progress stay; everything else is dropped."""
+    directory = workspace.context_dir(ws)
+    if not directory.is_dir():
+        return
+    for entry in directory.iterdir():
+        if entry.name in _PLAN_KEEP:
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
 
 
 def write_grill(ws: workspace.RunWorkspace, ticket: Any) -> None:

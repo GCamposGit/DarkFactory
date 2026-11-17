@@ -76,6 +76,16 @@ segue para a entrega sem repetir PLAN ou BUILD. Worktree suja em outro caminho,
 ausencia de commit ou artefato invalido mantem o fluxo normal de planejamento e
 implementacao.
 
+## Retomada na etapa certa (USR-447)
+
+Um ticket relancado nao refaz o que ja esta pronto. Se o diretorio de artefatos do run guarda um
+`SPEC.md` e um `tickets.json` validos e o `DEMAND.md` e igual a demanda atual, o PLAN reaproveita o
+plano: `reset_keeping_plan` apaga so os artefatos de etapas posteriores e nenhum modelo de
+planejamento e chamado; a admissao recebe `plan_exists=True` e nao exige rota de planejamento. O BUILD
+grava `progress.json` a cada fatia concluida; na retomada as fatias registradas sao puladas (so conta
+se a worktree tem diff de implementacao) e, com todas concluidas, o launcher segue ao portao sem
+chamar o agente. Plano invalido ou de outra demanda replaneja como antes, e ticket novo nao muda.
+
 ## Sequencia canonica de estagios (USR-375 S2)
 
 `core/line/stages.py` define a ordem: INTAKE, GRILL, PLAN, RESEARCH, BUILD, VALIDATE, REVIEW, MERGE, DEPLOY_SMOKE, DOCS, LEARNING.

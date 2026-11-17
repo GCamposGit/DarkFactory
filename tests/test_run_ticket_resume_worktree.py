@@ -439,3 +439,123 @@ def test_prepare_workspace_without_a_preserved_worktree_creates_a_new_one(
     assert len(_worktree_names(repo)) == 2
     assert os.path.normcase(str(workspace.path.parent)) == os.path.normcase(str(repo.local / ".worktrees"))
     assert ticket_workspace.list_worktrees(repo.local)  # sanity: still a healthy repo
+
+
+# ---------------------------------------------------------------------------
+# USR-447: a relaunch resumes at the right stage (plan and finished slices are kept)
+# ---------------------------------------------------------------------------
+
+
+def _two_slice_plan(rws: Any, ticket: Any) -> None:
+    from core.line import workspace as line_workspace
+    from core.line.stage_planning import PlanningTicket
+
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    line_workspace.write_context(rws, "SPEC.md", "# SPEC\n\nDuas fatias\n")
+    items = [PlanningTicket(id=f"{ticket.id}-S{n}", title=f"fatia {n}", goal="g") for n in (1, 2)]
+    line_workspace.write_context(
+        rws, "tickets.json", json.dumps([i.model_dump() for i in items], ensure_ascii=False)
+    )
+
+
+def _resume_setup(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *, done: list[str]
+) -> tuple[Any, Any, Any, list[str]]:
+    """Preserved worktree with a committed slice, a two-slice plan and BUILD progress `done`."""
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    monkeypatch.setattr(run_ticket, "PROJECT_ROOT", repo.local)
+    ticket = run_ticket.UserTicket(
+        id="USR-447", project_id="darkfac", title="Retomar na etapa certa", problem_statement="problema"
+    )
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    (ws.path / "impl.py").write_text("slice1 = True\n", encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "slice 1")
+    rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
+    _two_slice_plan(rws, ticket)
+    if done:
+        run_ticket.ticket_engine.write_build(rws, "grok", done)
+    ran: list[str] = []
+
+    def fake_dev_agent(args: Any, ticket: Any, workspace: Any, quotas: Any, harness: Any, model: Any,
+                       progress: Any, extra_prompt: str = "", pinned: Any = None) -> Any:
+        ran.append(extra_prompt)
+        return SimpleNamespace(
+            result=AgentResult(ok=True, harness=harness, text="ok", duration_s=1.0, model="m"),
+            route=None, total_duration_s=1.0,
+        )
+
+    monkeypatch.setattr(run_ticket, "_run_dev_agent", fake_dev_agent)
+    monkeypatch.setattr(run_ticket, "_resolve_development_slice", lambda *a, **k: ("grok", None, None, {}))
+    monkeypatch.setattr(run_ticket, "_stage_agent_early_exit", lambda *a, **k: None)
+    monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *a, **k: (True, []))
+    monkeypatch.setattr(run_ticket, "inspect_quotas", lambda: {})
+    monkeypatch.setattr(run_ticket, "record_ticket_quota_cost", lambda **k: {})
+    monkeypatch.setattr(run_ticket, "format_ticket_quota_summary", lambda _r: "")
+    monkeypatch.setattr("core.line.recovery_receipt.record_implementation", lambda *a, **k: None)
+    return ticket, ws, rws, ran
+
+
+def _args() -> SimpleNamespace:
+    return SimpleNamespace(json=True, dry_run=False)
+
+
+def _progress() -> SimpleNamespace:
+    return SimpleNamespace(phase=lambda *a, **k: None)
+
+
+def test_relaunch_with_valid_plan_does_not_call_the_planner(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.research.policy import ResearchArtifact
+
+    ticket, ws, rws, _ran = _resume_setup(repo, monkeypatch, done=[])
+    monkeypatch.setattr(run_ticket, "_refuse_plan_outside_host_contract", lambda *a, **k: None)
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", lambda *a, **k: pytest.fail("replanned"))
+
+    def research(t: Any, r: Any, _root: Any) -> Any:
+        artifact = ResearchArtifact(kind="research_skipped", ticket_id=t.id, reason="x")
+        run_ticket.ticket_engine.write_research(r, artifact)
+        return artifact
+
+    monkeypatch.setattr(run_ticket.ticket_extras, "run_research", research)
+    assert run_ticket.ticket_engine.reusable_plan(rws, ticket) is True
+    assert run_ticket._stage_plan(_args(), ticket, ws, {"ticket_size": "large"}, _progress()) is None
+    assert [i.id for i in run_ticket.ticket_engine.plan_tickets(rws)] == ["USR-447-S1", "USR-447-S2"]
+
+
+def test_plan_of_another_demand_is_not_reused(repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    ticket, _ws, rws, _ran = _resume_setup(repo, monkeypatch, done=[])
+    changed = ticket.model_copy(update={"problem_statement": "outro problema"})
+    assert run_ticket.ticket_engine.reusable_plan(rws, changed) is False
+
+
+def test_admission_does_not_require_a_planning_route_when_the_plan_exists(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ticket, _ws, _rws, _ran = _resume_setup(repo, monkeypatch, done=[])
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        run_ticket.admission, "admit", lambda **kw: seen.update(kw) or SimpleNamespace(outcome="allow")
+    )
+    run_ticket._admission_impl(SimpleNamespace(fleet=True, harness=""), ticket)
+    assert seen["plan_exists"] is True
+
+
+def test_relaunch_with_first_slice_done_runs_the_agent_only_for_the_second(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ticket, ws, rws, ran = _resume_setup(repo, monkeypatch, done=["USR-447-S1"])
+    built = run_ticket._stage_build(_args(), ticket, ws, {}, {"harness": "grok", "ticket_size": "large"}, _progress())
+    assert isinstance(built, dict)
+    assert len(ran) == 1 and "sub-ticket USR-447-S2" in ran[0]
+    assert run_ticket.require_artifact(run_ticket.Stage.BUILD, rws).tickets_done == ["USR-447-S1", "USR-447-S2"]
+
+
+def test_relaunch_with_every_slice_done_skips_the_agent_and_reaches_the_gate(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ticket, ws, _rws, ran = _resume_setup(repo, monkeypatch, done=["USR-447-S1", "USR-447-S2"])
+    built = run_ticket._stage_build(_args(), ticket, ws, {}, {"harness": "grok", "ticket_size": "large"}, _progress())
+    assert ran == []
+    assert isinstance(built, dict) and built["agent_result"].ok and built["harness"] == "grok"
