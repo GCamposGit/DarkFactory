@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import socket
@@ -73,6 +74,28 @@ if str(IMPORT_ROOT) not in sys.path:
 
 from core.harness import suite_lock as _suite_lock
 from tests import _cache_dir, _tree_hygiene, _worker_capacity
+
+
+def _file_fingerprint(path: Path) -> tuple[int, int, bytes] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_mtime_ns, stat.st_size, hashlib.sha256(path.read_bytes()).digest()
+
+
+_CHECKOUT_ENTERPRISE_POLICY = IMPORT_ROOT / ".factory" / "enterprise" / "configs.json"
+_CHECKOUT_ENTERPRISE_POLICY_BEFORE = _file_fingerprint(_CHECKOUT_ENTERPRISE_POLICY)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _checkout_enterprise_policy_is_read_only() -> Iterator[None]:
+    """Fail if the suite creates or modifies enterprise policy in its real checkout."""
+    yield
+    assert _file_fingerprint(_CHECKOUT_ENTERPRISE_POLICY) == _CHECKOUT_ENTERPRISE_POLICY_BEFORE, (
+        "tests must keep enterprise policy configs in temporary state roots; "
+        f"checkout file changed: {_CHECKOUT_ENTERPRISE_POLICY}"
+    )
 
 
 @pytest.fixture(autouse=True)
