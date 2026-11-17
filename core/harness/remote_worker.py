@@ -1883,6 +1883,45 @@ def preserve_files_unversioned_upstream(root_path: Path, subp_kwargs: Optional[D
     return notes
 
 
+def _worker_health_status(
+    job_manager: JobManager,
+    root_path: Path,
+    node_id: str,
+    identity: NodeIdentity,
+) -> WorkerHealthStatus:
+    """Build the worker health response from its resolved host identity."""
+    # Detect Docker Desktop availability on Windows / Linux
+    docker_available = False
+    try:
+        import shutil
+
+        docker_available = shutil.which("docker") is not None
+    except Exception:
+        docker_available = False
+
+    return WorkerHealthStatus(
+        status="busy" if job_manager.is_busy() else "ok",
+        node_id=node_id,
+        configured_node_id=identity.configured_node_id,
+        node_id_source=identity.source,
+        version="1.0.0",
+        docker_ready=docker_available,
+        project_root=str(root_path),
+        active_runs=1 if job_manager.is_busy() else 0,
+        available_harnesses=get_available_harnesses(),
+        platform_family=harness_cache.platform_family(),
+        python_version=harness_cache.python_version_tag(),
+        hostname=socket.gethostname(),
+        busy=job_manager.is_busy(),
+        queue_length=job_manager.queue_length(),
+        known_shas=known_validated_shas(root_path),
+        harness_version="1",
+        git_sha=current_git_sha(root_path),
+        instance_id=job_manager.instance_id,
+        started_at=job_manager.started_at,
+    )
+
+
 def create_worker_app(
     project_root: Optional[Path] = None,
     node_id: str | None = None,
@@ -1924,35 +1963,7 @@ def create_worker_app(
         core.harness.remote_dispatch) for fast probing. Always open, even
         when DARKFAC_WORKER_TOKEN is set -- a client must be able to tell a
         worker is alive before it has anything to authenticate."""
-        # Detect Docker Desktop availability on Windows / Linux
-        docker_available = False
-        try:
-            import shutil
-            docker_available = shutil.which("docker") is not None
-        except Exception:
-            docker_available = False
-
-        return WorkerHealthStatus(
-            status="busy" if job_manager.is_busy() else "ok",
-            node_id=node_id,
-            configured_node_id=identity.configured_node_id,
-            node_id_source=identity.source,
-            version="1.0.0",
-            docker_ready=docker_available,
-            project_root=str(root_path),
-            active_runs=1 if job_manager.is_busy() else 0,
-            available_harnesses=get_available_harnesses(),
-            platform_family=harness_cache.platform_family(),
-            python_version=harness_cache.python_version_tag(),
-            hostname=socket.gethostname(),
-            busy=job_manager.is_busy(),
-            queue_length=job_manager.queue_length(),
-            known_shas=known_validated_shas(root_path),
-            harness_version="1",
-            git_sha=current_git_sha(root_path),
-            instance_id=job_manager.instance_id,
-            started_at=job_manager.started_at,
-        )
+        return _worker_health_status(job_manager, root_path, node_id, identity)
 
     @worker_app.get("/metrics/hardware", response_model=HardwareMetrics)
     def get_hardware_metrics() -> HardwareMetrics:

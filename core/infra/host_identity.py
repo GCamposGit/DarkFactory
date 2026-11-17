@@ -24,7 +24,7 @@ HOST_ALIASES: dict[str, frozenset[str]] = {
         {
             "grokbox",
             "grokbox-test-worker",
-            "grok-bot-vm-418374532",
+            "grok-bot-vm-418374532",  # census: wire-id; machine hostname alias, not a model choice.
             "100.77.130.5",
         }
     ),

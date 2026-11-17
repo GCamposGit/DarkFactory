@@ -106,8 +106,9 @@ def test_remote_worker_app_health_endpoint() -> None:
     assert "project_root" in data
 
 
-def test_remote_worker_app_execute_endpoint() -> None:
+def test_remote_worker_app_execute_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test remote worker daemon /execute endpoint delegating to headless engine."""
+    monkeypatch.setattr("core.harness.remote_worker.socket.gethostname", lambda: "desktop-g45ipem")
     worker_app = create_worker_app(node_id="desktop-g45ipem")
     client = TestClient(worker_app)
 
@@ -137,7 +138,7 @@ def test_remote_worker_app_execute_endpoint() -> None:
         assert response.status_code == 200
         result = response.json()
         assert result["verdict"] == "PASSED"
-        assert result["worker_id"] == "desktop-g45ipem"
+        assert result["worker_id"] == "onprem-z97-server"
         assert result["execution_mode"] == "remote_onprem_offload"
 
 
