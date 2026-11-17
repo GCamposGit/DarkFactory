@@ -53,3 +53,4 @@ A fabrica faz push e merge com um token de curta duracao de uma GitHub App, sem 
 5. `_verify_live_completion` roda so com `is_live_deploy` (USR-420). O SHA fica fixo e `node_sync.verify` recebe esse `expected_sha`. Host `excluded` nao conta como convergido; VPS excluida deixa `ok` falso. Falha reabre o ticket e abre um defeito `planned`.
 
 Bloqueio pela politica da branch (USR-475): com a branch atras do `origin/main` a entrega roda `gh pr update-branch`, reespera o CI e tenta o merge mais uma vez; se continuar bloqueado devolve a acao `merge_blocked`.
+`check-main --open-ticket` mantém no máximo um ticket aberto com título `CI vermelho no ...`: se já existe (outro sha ou mesmo sha), ele é atualizado com o sha e os jobs atuais em vez de abrir outro; só tickets `completed` ou `cancelled` liberam um novo.

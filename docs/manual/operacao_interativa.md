@@ -167,3 +167,4 @@ permanece bloqueada. As exclusoes de rota deixam de valer quando muda o candidat
 politica de revisao.
 
 No rebase da entrega (USR-475), conflito so em `.factory/demands/demands.json`, `.factory/owner_actions/owner_actions.json` ou `docs/FASE_ATUAL.md` e resolvido com a versao do `origin/main`, e a linha do proprio ticket volta ao ledger.
+Etapa DOCS reprovada após a reinvocação única encerra com causa `docs_sync_failed` (candidato): atualize a página do manual indicada pelo docs-sync e retome.

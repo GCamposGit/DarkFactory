@@ -243,3 +243,5 @@ index 116abd3c..ff0eb23a 100644
      steps:
        - name: Aggregate result (all shards must pass)
 ```
+
+Contratos do repositório inteiro (`PR_ALWAYS_CONTRACT_TESTS` em `core/harness/affected.py`: guards marcados, censo de ids de modelo e drift de docs de modelo) rodam sempre no perfil de PR, também no fallback de fumaça. No fallback entram ainda os testes que citam, pelo caminho pontilhado ou por import direto, o módulo `.py` alterado (busca textual com cache por execução). Isso evita `main` vermelho quando o módulo é quente ou o diff é só de docs.

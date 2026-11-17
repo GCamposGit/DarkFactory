@@ -823,6 +823,51 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
 
 
 PR_SMOKE_TESTS = ("tests/test_harness_contract.py",)
+#: Contratos do repositorio inteiro (censos/ratchets que varrem docs ou a arvore):
+#: rodam SEMPRE no perfil de PR, qualquer que seja o diff, inclusive no fallback.
+PR_ALWAYS_CONTRACT_TESTS = (
+    *EMPTY_DIFF_REPOSITORY_GUARDS,
+    "tests/test_model_docs_drift_usr185.py",
+)
+_TEST_TEXT_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _test_sources(repo_root: Path) -> dict[str, str]:
+    """Texto de tests/**/test_*.py, lido uma vez por execucao (cache em memoria)."""
+    key = str(repo_root)
+    if key not in _TEST_TEXT_CACHE:
+        found: dict[str, str] = {}
+        tests_dir = repo_root / "tests"
+        for path in sorted(tests_dir.rglob("test_*.py")) if tests_dir.is_dir() else []:
+            rel = path.relative_to(repo_root).as_posix()
+            if rel in EXCLUDED_TEST_FILES:
+                continue
+            try:
+                found[rel] = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+        _TEST_TEXT_CACHE[key] = found
+    return _TEST_TEXT_CACHE[key]
+
+
+def tests_citing_modules(repo_root: Path, changed_files: Iterable[str]) -> dict[str, list[str]]:
+    """Testes cujo texto cita (core.x.y) ou importa direto um modulo .py alterado."""
+    dotted_by_path = {
+        p: dotted for p in changed_files
+        if p.endswith(".py") and (dotted := _changed_module_identity(p)[0])
+    }
+    out: dict[str, list[str]] = {}
+    for test_path, source in _test_sources(repo_root).items():
+        for changed, dotted in dotted_by_path.items():
+            parent, _, leaf = dotted.rpartition(".")
+            imports_leaf = bool(parent) and f"from {parent} import" in source and leaf in source
+            if dotted in source or imports_leaf:
+                out.setdefault(test_path, []).append(f"cites_module: {changed}")
+    return out
+
+
+def _pr_contract_tests(repo_root: Path) -> list[str]:
+    return [p for p in PR_ALWAYS_CONTRACT_TESTS if (repo_root / p).is_file()]
 PR_TIMEOUT_BASE_S = 120.0
 PR_TIMEOUT_PER_TEST_S = 20.0
 PR_TIMEOUT_MAX_S = 1800.0
@@ -840,11 +885,22 @@ def select_pr_tests(repo_root: Path, base_ref: str = "origin/main") -> Selection
                       if Path(p).name == "conftest.py" or _is_conftest_or_test_helper(p)
                       or p.startswith(("core/harness/", "core/governance/", ".github/workflows/"))
                       or p in ("AGENTS.md", "MISSION.md", "FACTORY_RULES.md")]
+    contracts = _pr_contract_tests(repo_root)
     if selection.mode == "full" or selection.uncovered or global_changes:
+        cited = tests_citing_modules(repo_root, selection.changed_files)
+        tests = sorted({*PR_SMOKE_TESTS, *contracts, *cited})
         return Selection(
-            "affected_fallback", list(PR_SMOKE_TESTS), {},
+            "affected_fallback", tests,
+            {t: sorted(set(cited.get(t, []) + (["pr_contract"] if t in contracts else []))) for t in tests if t in cited or t in contracts},
             [*selection.escalations, *(f"global_change: {p}" for p in global_changes),
              *(f"uncovered: {p}" for p in selection.uncovered)],
+            selection.changed_files, selection.uncovered,
+        )
+    missing = [t for t in contracts if t not in selection.tests]
+    if missing:
+        reasons = {**selection.reasons, **{t: ["pr_contract"] for t in missing}}
+        return Selection(
+            "subset", sorted({*selection.tests, *missing}), reasons, selection.escalations,
             selection.changed_files, selection.uncovered,
         )
     return selection

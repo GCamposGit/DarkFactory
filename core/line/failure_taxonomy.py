@@ -12,7 +12,8 @@ INFRA_CAUSES = frozenset({
 })
 CANDIDATE_CAUSES = frozenset({
     "gate_failed", "fix_agent_no_changes", "agent_no_changes", "review_changes_required",
-    "ci_red", "validate_exhausted", "agent_timeout", "rebase_conflict",
+    "ci_red", "validate_exhausted", "agent_timeout", "rebase_conflict", "docs_sync_failed",
+    "stage_artifact_missing",
 })
 OWNER_CAUSES = frozenset({"self_modification", "protected_path"})
 CAUSES = INFRA_CAUSES | CANDIDATE_CAUSES | OWNER_CAUSES
