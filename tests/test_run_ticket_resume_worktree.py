@@ -374,6 +374,12 @@ def test_built_candidate_resumes_delivery_without_plan_or_build_only_when_clean_
     assert run_ticket._can_resume_built_candidate(ticket, ws) is False
     (ws.path / "stray.txt").unlink()
 
+    # Commit do agente de conserto regrava o vinculo: o candidato reparado segue retomavel.
+    (ws.path / "impl.py").write_text("candidate = 'repaired'" + chr(10), encoding="utf-8")
+    assert run_ticket._commit_fix_agent_changes_safely(ws.path, ticket, "gate") == (True, None)
+    assert run_ticket._can_resume_built_candidate(ticket, ws) is True
+    head = _git(ws.path, "rev-parse", "HEAD").strip()
+
     monkeypatch.setattr(run_ticket, "_stage_plan", lambda *_a, **_k: pytest.fail("replanned"))
     monkeypatch.setattr(run_ticket, "_stage_build", lambda *_a, **_k: pytest.fail("rebuilt"))
     delivery_calls: list[Path] = []

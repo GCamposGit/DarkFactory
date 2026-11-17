@@ -693,6 +693,11 @@ def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
     assert e.launched == [("USR-30", "grokbox"), ("USR-11", "notebook"), ("USR-31", "desktop")]
 
 
+@pytest.fixture(autouse=True)
+def _no_preserved_worktree_lookup(monkeypatch):
+    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda _tid: None)
+
+
 def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
     calls: list[list[str]] = []
 
@@ -718,6 +723,33 @@ def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
         assert Path(cmd[1]).name == "run_ticket.py"
         assert cmd[2:] == [tid, "--fleet", "--host-id", host.id]
         assert "line-block" not in cmd
+    # candidato preservado com plano valido: retoma a entrega sem replanejar
+    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda _tid: tmp_path / "wt")
+    fd.default_launch("USR-12", host, {"id": "USR-12", "tags": []})
+    assert calls[2][2:] == ["USR-12", "--fleet", "--host-id", host.id,
+                            "--resume-delivery", "--worktree", str(tmp_path / "wt")]
+
+
+def test_resumable_delivery_worktree_needs_commits_and_plan(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.git import ticket_workspace as tw
+
+    def lookup(ahead: int, changed: tuple = ()):
+        chosen = SimpleNamespace(commits_ahead=ahead, changed_paths=changed,
+                                 workspace=SimpleNamespace(path=tmp_path))
+        monkeypatch.setattr(tw, "find_preserved_workspaces", lambda *_a, **_k: SimpleNamespace(chosen=chosen))
+
+    monkeypatch.undo()  # remove o stub autouse
+    context = tmp_path / ".darkfac" / "runs" / "USR-9"
+    context.mkdir(parents=True)
+    lookup(2)
+    assert fd.resumable_delivery_worktree("USR-9") is None  # sem plano
+    (context / "SPEC.md").write_text("x", encoding="utf-8")
+    (context / "tickets.json").write_text("[]", encoding="utf-8")
+    assert fd.resumable_delivery_worktree("USR-9") == tmp_path
+    lookup(0)
+    assert fd.resumable_delivery_worktree("USR-9") is None  # nada a frente da base
 
 
 def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str = "completed"):

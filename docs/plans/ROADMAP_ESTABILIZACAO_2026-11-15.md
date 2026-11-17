@@ -100,6 +100,7 @@ Entregue e verificado em 15/11: `/api/owner-actions` lê do Postgres (2 abertas,
 ### E5 Retomar na etapa certa (USR-447; absorve parte do USR-475)
 Problema: o despachante sempre relança `run_ticket.py <ID>` completo. `_stage_plan` chama `ticket_engine.reset`, que apaga o plano; `_can_resume_built_candidate` exige que `build_binding.json` bata com o HEAD, e qualquer commit do agente de conserto invalida o vínculo. Resultado: replanejamento com modelo de alto nível e novo build para um candidato que só precisava repetir portão ou entrega.
 Fazer: (0) `evaluate_admission` em `run_ticket.py` passa `plan_exists=True` a `admission.admit` quando a worktree preservada do ticket já tem `SPEC.md` e `tickets.json`; (1) se a worktree preservada tem commits à frente do `origin/main` e plano válido, o despachante lança `--resume-delivery --worktree <caminho>` (mesmo caminho de `pending_delivery`); (2) regravar o vínculo de build após cada commit do agente de conserto; (3) `reset` nunca apaga plano com candidato existente; (4) BUILD retoma só as fatias que faltam. Fechar o PR #845 se o trabalho for refeito.
+Entregue em 17/11 (USR-447): itens (1) e (2); o despachante lança `--resume-delivery --worktree` quando a worktree preservada tem commits à frente da base e plano válido, e o commit do agente de conserto regrava `build_binding.json`. Restam (3) e (4).
 Aceite: teste de comportamento em que falha de portão seguida de relançamento não chama planejamento nem build.
 
 ### E6 Dieta do pipeline de entrega
