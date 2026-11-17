@@ -976,6 +976,30 @@ def test_classify_checkout_compares_head_to_the_candidate_only() -> None:
     assert checked.nodes[2].state == "converged"
 
 
+def test_runtime_artifacts_do_not_hide_a_tracked_readme_change() -> None:
+    """Generated runtime artifacts are ignored, but tracked source changes still dirty the checkout."""
+    runtime_file = ".factory/runs/fleet_policy_snapshot.json"
+
+    class _TrackedAndRuntime(FakeGit):
+        def __call__(self, root: Path, args: list[str]) -> str:
+            if args == ["status", "--porcelain"]:
+                return f" M README.md\n?? {runtime_file}"
+            if args == ["diff", "--name-only"]:
+                return "README.md"
+            if args == ["ls-files", "--others", "--exclude-standard"]:
+                return runtime_file
+            if args == ["ls-files", "--others", "-i", "--exclude-standard"]:
+                return ""
+            return super().__call__(root, args)
+
+    kind, commits, dirty_files, reason = mod.classify_checkout(Path("."), _TrackedAndRuntime(), SHA)
+
+    assert kind == "dirty" and commits == []
+    assert dirty_files["tracked_modified"] == ["README.md"]
+    assert dirty_files["untracked"] == []
+    assert "README.md" in (reason or "")
+
+
 def test_cli_flag_beats_env_and_invalid_sha_exits_2(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

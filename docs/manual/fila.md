@@ -130,6 +130,11 @@ python -m core.line.stale_active --dry-run
   excluido nao esconde VPS divergente. No redeploy, a flag vence o env e vale para o alvo do
   sync e do backup; SHA explicito invalido recusa sem POST. Sem os dois, `origin/main` e
   lido uma vez. Backup so com a VPS `converged` nesse SHA. `check-main` nao troca o candidato.
+  USR-491: `classify_checkout` ignora, ao contar nao rastreados, apenas os arquivos e diretorios
+  de runtime da frota explicitamente listados em `.factory/runs` (incluindo
+  `fleet_policy_snapshot.json` e `model_audit_receipt.json`). Codigo e outros arquivos nao
+  rastreados continuam classificando o checkout como `dirty`. Quando os nos convergem no SHA
+  fixado, esses artefatos de runtime nao impedem o fluxo normal do backup pos-deploy.
   USR-515: antes da espera de tag, o pin de GHCR, compose, blue-green, `darkfac-cloud` e `/health`
   pode ser o ancestral publicado quando o alvo esta fora dos paths de `hub-image.yml` e ha runtime
   no intervalo. O sync permanece no SHA alvo. O stdout traz `published=` e `reach=`.
