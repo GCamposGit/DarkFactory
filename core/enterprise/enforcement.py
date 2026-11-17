@@ -157,7 +157,11 @@ def resolve_project_policy(
     A differing local entry keeps its historic effective behavior but emits a structured warning
     so callers can identify the machine-specific source.
     """
-    local_path = (Path(configs_file).expanduser() if configs_file is not None else _configs_file(root)).resolve()
+    local_path = (
+        Path(configs_file).expanduser()
+        if configs_file is not None
+        else (_configs_file() if root is None else _configs_file(root))
+    ).resolve()
     # An explicit legacy file remains an isolated source unless the caller supplies a reference.
     shared_path = (
         Path(shared_configs_file).expanduser().resolve()

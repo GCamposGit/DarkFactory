@@ -25,6 +25,7 @@ import logging
 import os
 import time
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Union
@@ -1206,6 +1207,83 @@ def _with_coordinator_reserve(
     return reserved
 
 
+@dataclass
+class _PolicyAudit:
+    candidates: int = 0
+    nonblocked: int = 0
+    barrier: bool = False
+    refusals: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _openrouter_fallback(
+    stage: str,
+    stage_cfg: StageRoute,
+    cfg: RoutingConfig,
+    required_mode: str,
+    excluded_harnesses: set[str],
+    no_local_available: bool,
+    all_exhausted: bool,
+    forbidden_models: set[str],
+    cooldowns: dict[str, Any],
+    spent_usd: float,
+    ticket_id: Optional[str],
+    openrouter_balance_lookup: Optional[Callable[[], Optional[float]]],
+    implementing_harness: Optional[str],
+    project_id: Optional[str],
+    policy_diagnostic: Optional[dict[str, Any]],
+    policy: _PolicyAudit,
+) -> Optional[tuple[str, Optional[str]]]:
+    """Try OpenRouter and report when data policy alone removed every usable provider."""
+    allow_openrouter = stage_cfg.openrouter_ok or all_exhausted
+    candidate = (
+        supports("openrouter", required_mode)
+        and "openrouter" not in excluded_harnesses
+        and (stage not in HIGH_TIER_ONLY_STAGES or no_local_available or is_high_tier_model(stage_cfg.openrouter_model))
+        and stage_cfg.openrouter_model
+        and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
+        and allow_openrouter
+        and not _in_cooldown("openrouter", cooldowns)
+        and max(spent_usd, _openrouter_run_spend(ticket_id)) < cfg.run_caps.openrouter_usd
+    )
+    if candidate:
+        refusal = _policy_rejection(project_id, "openrouter") if project_id else None
+        if refusal is not None:
+            # A policy denial is causal only when OpenRouter otherwise has verified credit.
+            # Without credit, the missing route has an independent budget cause.
+            if _openrouter_has_credits(openrouter_balance_lookup, cfg.run_caps.openrouter_monthly_cap_usd):
+                policy.candidates += 1
+                policy.refusals.append(refusal)
+            else:
+                policy.barrier = True
+        else:
+            if project_id:
+                policy.candidates += 1
+                policy.nonblocked += 1
+            route = _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
+            if route is not None:
+                return _independent_openrouter(route, implementing_harness) if stage == "review" else route
+
+    if (
+        policy_diagnostic is not None
+        and project_id
+        and policy.candidates > 0
+        and policy.nonblocked == 0
+        and not policy.barrier
+        and len(policy.refusals) == policy.candidates
+    ):
+        first = policy.refusals[0]
+        policy_diagnostic.update(
+            {
+                "code": "data_policy",
+                "project_id": project_id,
+                "source_file": first["source_file"],
+                "providers": sorted({item["provider"] for item in policy.refusals}),
+                "restriction": first["restriction"],
+            }
+        )
+    return None
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -1306,10 +1384,7 @@ def pick(
     extra_eligible: list[tuple[str, Optional[str], float]] = []
     preferred_unknown: list[tuple[str, Optional[str]]] = []
     unknown_quota: list[tuple[str, Optional[str]]] = []
-    policy_candidates = 0
-    policy_nonblocked = 0
-    policy_barrier = False
-    policy_refusals: list[dict[str, Any]] = []
+    policy = _PolicyAudit()
 
     for harness, model in _routable_candidates(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
@@ -1323,12 +1398,12 @@ def pick(
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
         if project_id:
-            policy_candidates += 1
+            policy.candidates += 1
             refusal = _policy_rejection(project_id, harness)
             if refusal is not None:
-                policy_refusals.append(refusal)
+                policy.refusals.append(refusal)
                 continue  # USR-174: per-project data policy refuses this harness/provider
-            policy_nonblocked += 1
+            policy.nonblocked += 1
         remaining = None if cooling else lookup(provider_id)
         if cooling:
             logger.info("pick: harness %s skipped for stage %s (in cooldown)", harness, stage)
@@ -1386,55 +1461,11 @@ def pick(
         cooling or (rem is not None and rem <= critical_threshold) for _, _, cooling, _, rem in evaluated
     )
     no_local_available = not evaluated or all_exhausted
-    allow_openrouter = stage_cfg.openrouter_ok or all_exhausted
-    openrouter_candidate = (
-        supports("openrouter", required_mode)
-        and "openrouter" not in excluded_harnesses
-        and (stage not in HIGH_TIER_ONLY_STAGES or no_local_available or is_high_tier_model(stage_cfg.openrouter_model))
-        and stage_cfg.openrouter_model
-        and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
-        and allow_openrouter
-        and not _in_cooldown("openrouter", cooldowns)
-        and max(spent_usd, _openrouter_run_spend(ticket_id)) < cfg.run_caps.openrouter_usd
+    return _openrouter_fallback(
+        stage, stage_cfg, cfg, required_mode, excluded_harnesses, no_local_available, all_exhausted,
+        forbidden_models, cooldowns, spent_usd, ticket_id, openrouter_balance_lookup,
+        implementing_harness, project_id, policy_diagnostic, policy,
     )
-    if openrouter_candidate:
-        refusal = _policy_rejection(project_id, "openrouter") if project_id else None
-        if refusal is not None:
-            # A policy denial is causal only when OpenRouter otherwise has verified credit.
-            # With no credit, the missing route has an independent budget cause.
-            if _openrouter_has_credits(openrouter_balance_lookup, cfg.run_caps.openrouter_monthly_cap_usd):
-                policy_candidates += 1
-                policy_refusals.append(refusal)
-            else:
-                policy_barrier = True
-        else:
-            if project_id:
-                policy_candidates += 1
-                policy_nonblocked += 1
-            route = _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
-            if route is not None:
-                return _independent_openrouter(route, implementing_harness) if stage == "review" else route
-
-    if (
-        policy_diagnostic is not None
-        and project_id
-        and policy_candidates > 0
-        and policy_nonblocked == 0
-        and not policy_barrier
-        and len(policy_refusals) == policy_candidates
-    ):
-        first = policy_refusals[0]
-        policy_diagnostic.update(
-            {
-                "code": "data_policy",
-                "project_id": project_id,
-                "source_file": first["source_file"],
-                "providers": sorted({item["provider"] for item in policy_refusals}),
-                "restriction": first["restriction"],
-            }
-        )
-
-    return None
 
 
 # --------------------------------------------------------------------------
