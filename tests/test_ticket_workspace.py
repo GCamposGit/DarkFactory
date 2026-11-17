@@ -461,6 +461,33 @@ def test_cleanup_skips_per_process_access_denied_metadata(repo: SimpleNamespace,
     assert result.removed and not ws.path.exists()
 
 
+def test_probe_holders_skips_the_machine_wide_scan_when_the_repo_root_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worktree with no discoverable ``.git`` ancestor must not degrade into scanning every process.
+
+    Regression for a bug where an unresolved ``repository_root`` made every process with a cwd
+    look "related", forcing ``open_files()`` (expensive, sometimes hangs on Windows) on the whole
+    machine -- exactly the "machine-wide handle scan" the function's docstring says it avoids.
+    """
+    orphan = tmp_path / "no-git-ancestor-here"
+    orphan.mkdir()
+    unrelated = SimpleNamespace(
+        cwd=lambda: str(tmp_path / "other-process-cwd"),
+        open_files=lambda: (_ for _ in ()).throw(AssertionError("unrelated process must not be scanned")),
+        info={"name": "unrelated", "pid": 4242},
+    )
+    fake_psutil = SimpleNamespace(
+        process_iter=lambda _attrs: [unrelated],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=type("AccessDenied", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    assert ticket_workspace.probe_worktree_holders(orphan) == ()
+
+
 def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(
     repo: SimpleNamespace,
 ) -> None:

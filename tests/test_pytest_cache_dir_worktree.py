@@ -25,6 +25,13 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _FOCUS_FILE = "tests/test_fleet_dispatcher.py"
 
 
+def _win_kwargs() -> dict:
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kwargs
+
+
 def _run(
     args: list[str],
     cwd: Path,
@@ -42,6 +49,7 @@ def _run(
         errors="replace",
         timeout=timeout,
         check=False,
+        **_win_kwargs(),
     )
 
 

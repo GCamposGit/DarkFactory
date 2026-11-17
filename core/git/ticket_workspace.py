@@ -1519,11 +1519,8 @@ def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
             using_path = cwd is not None and _is_within(cwd, path)
             process_cwd_is_related = (
                 cwd is not None
-                and (
-                    repository_root is None
-                    or _is_within(path, cwd)
-                    or _is_within(repository_root, cwd)
-                )
+                and repository_root is not None
+                and (_is_within(path, cwd) or _is_within(repository_root, cwd))
             )
             if not using_path and process_cwd_is_related:
                 try:

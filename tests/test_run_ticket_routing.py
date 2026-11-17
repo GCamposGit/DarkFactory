@@ -14,6 +14,7 @@ import argparse
 import contextlib
 import json
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -572,11 +573,18 @@ def test_a_blocked_delivery_is_an_error_not_a_success(
 _FAKE_SECRET = "sk-" + "ant-api03-" + "SECRETSECRETSECRET"
 
 
+def _win_kwargs() -> dict:
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kwargs
+
+
 def _git(repo: Path, *args: str) -> str:
     """Run local git against a disposable repository."""
     proc = subprocess.run(
         ["git", *args], cwd=str(repo), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", check=True,
+        encoding="utf-8", errors="replace", check=True, **_win_kwargs(),
     )
     return proc.stdout.strip()
 
