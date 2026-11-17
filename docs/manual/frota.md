@@ -178,11 +178,11 @@ Windows, `AccessDenied` em metadados de um processo isolado não bloqueia toda a
 consulta de arquivos abertos se limita a processos cujo diretório atual está na raiz do
 repositório ou em uma pasta ancestral.
 
-O argumento interno `discard_paths` só é usado para arquivos gerados que o chamador já
-identificou como descartáveis. A rotina os restaura ao `HEAD` se forem rastreados e forem as
-únicas alterações. No encerramento de uma tentativa sem implementação e na remoção do checkout
-operacional da frota, isso permite descartar o ledger temporário do ticket. Qualquer outro
-arquivo alterado continua bloqueando a limpeza.
+O argumento interno `discard_path_hashes` identifica arquivos gerados pelo próprio chamador.
+A rotina restaura um arquivo ao `HEAD` apenas se ele for rastreado, for a única alteração e
+seu SHA-256 ainda corresponder ao conteúdo registrado na geração. Se o conteúdo mudou, a
+worktree é preservada. No encerramento de uma tentativa sem implementação, isso permite
+descartar o ledger temporário criado pelo runner sem perder edições posteriores.
 
 `CleanupResult.outcome` registra `removed`, `blocked_changes`, `blocked_process` ou `error`;
 `reason` identifica a causa e `method` informa como a remoção foi concluída. Os chamadores
@@ -196,12 +196,14 @@ O dispatcher de frota, iniciado pela tarefa persistente `DarkFac-Fleet-Dispatche
 checkout principal, chama `scripts/cleanup_orphan_worktrees.py` pelo seu gancho de manutenção.
 Uma trava de estado em `.factory/runs/orphan_worktree_cleanup.json` limita a execução a uma
 tentativa por dia, inclusive após reinício do processo. A rotina considera uma
-worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets e não há
-processo, alteração, lock ou commit detached sem referência segura. O limite é 48 horas;
-worktrees com idade igual ou inferior ao limite não são enviadas para remoção.
+worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não existe
+registro `cleanup_pending` e não há processo, alteração, lock ou commit detached sem
+referência segura. O limite é 48 horas; worktrees com idade igual ou inferior ao limite e
+worktrees já registradas como `cleanup_pending` não são enviadas para remoção.
 
 Cada remoção é delegada a `ticket_workspace.cleanup`, que revalida alterações e processos
-logo antes de remover. O resumo JSON registra contagens agregadas de `removed`, `preserved`
+logo antes de remover. Registros `cleanup_pending` permanecem para observabilidade e não são
+retentados pela varredura diária. O resumo JSON registra contagens agregadas de `removed`, `preserved`
 e `failures`, além de `blocked`, `ignored` e `errors`, com o motivo por caminho. Falha de
 leitura ou de limpeza de uma worktree é registrada e a análise continua nas demais. Para
 executar manualmente, use

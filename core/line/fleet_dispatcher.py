@@ -52,6 +52,7 @@ Uso::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 import json
 import logging
@@ -74,6 +75,7 @@ from core.infra.git_sha import current_git_sha, normalize_sha
 from core.paths import state_root
 
 logger = logging.getLogger("darkfac.line.fleet_dispatcher")
+_OPERATIONAL_CHECKOUT_LEDGER_HASHES: dict[str, str] = {}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATE_PATH = state_root() / "runs" / "fleet_dispatcher_state.json"
@@ -384,7 +386,10 @@ def _create_operational_checkout(ticket_id: str, host_id: str, demand: Mapping[s
         ticket = UserTicket.model_validate(dict(demand))
         if ticket.id != ticket_id:
             raise ValueError(f"registro selecionado tem id {ticket.id}, esperado {ticket_id}")
-        DemandsStore(path / ".factory" / "demands" / "demands.json").save_ticket(ticket)
+        ledger_path = path / ticket_workspace.TICKET_LEDGER_RELATIVE
+        DemandsStore(ledger_path).save_ticket(ticket)
+        ledger_hash = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
+        _OPERATIONAL_CHECKOUT_LEDGER_HASHES[os.path.normcase(os.path.realpath(path))] = ledger_hash
         status = _git_checked(["status", "--porcelain=v1", "--untracked-files=all"], path).stdout.strip()
         changed = [line[2:].strip() for line in status.splitlines() if len(line) >= 4]
         if changed and changed != [".factory/demands/demands.json"]:
@@ -402,11 +407,18 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
         from core.git import ticket_workspace
 
         root = main_root or ticket_workspace.main_checkout_root(PROJECT_ROOT)
+        key = os.path.normcase(os.path.realpath(path))
+        ledger_hash = _OPERATIONAL_CHECKOUT_LEDGER_HASHES.get(key)
+        discard_path_hashes = (
+            {ticket_workspace.TICKET_LEDGER_RELATIVE: ledger_hash} if ledger_hash is not None else {}
+        )
         result = ticket_workspace.cleanup(
             path,
             root,
-            discard_paths=(ticket_workspace.TICKET_LEDGER_RELATIVE,),
+            discard_path_hashes=discard_path_hashes,
         )
+        if result.removed:
+            _OPERATIONAL_CHECKOUT_LEDGER_HASHES.pop(key, None)
         if result.method == "preserved":
             logger.warning(
                 "checkout operacional preservado: path=%s outcome=%s reason=%s detalhe=%s; "

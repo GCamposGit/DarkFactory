@@ -29,7 +29,15 @@ _LOCK_WAIT_S = 2.0
 
 _BLOCKED_REASONS = frozenset({"dirty", "holder", "locked", "index_lock", "detached_outside_base"})
 _ERROR_REASONS = frozenset(
-    {"psutil_unavailable", "git_unreadable", "status_unreadable", "ticket_status_unknown", "age_unknown", "unregistered"}
+    {
+        "psutil_unavailable",
+        "git_unreadable",
+        "status_unreadable",
+        "ticket_status_unknown",
+        "age_unknown",
+        "unregistered",
+        "cleanup_pending_inventory_error",
+    }
 )
 _CLEANUP_RETRY_REASONS = frozenset(
     {"dirty", "holder", "locked", "index_lock", "psutil_unavailable", "git_unreadable", "status_unreadable"}
@@ -89,24 +97,12 @@ def sweep_orphan_worktrees(
         return summary
 
     try:
-        pending_paths = {
-            ticket_workspace._norm(record["path"])
-            for record in ticket_workspace.list_cleanup_pending(main_root)
-            if isinstance(record.get("path"), str)
-        }
+        pending_paths = ticket_workspace.cleanup_pending_worktree_paths(main_root)
     except Exception as exc:  # noqa: BLE001 - missing pending state must fail closed
         summary.record("errors", main_root, "cleanup_pending_inventory_error", f"{type(exc).__name__}: {exc}")
         return summary
 
-    ordinary_entries: list[tuple[int, Mapping[str, str]]] = []
-    pending_entries: list[tuple[int, Mapping[str, str]]] = []
-    for index, entry in enumerate(entries):
-        raw_path = entry.get("worktree", "")
-        path = Path(raw_path) if raw_path else main_root
-        target = pending_entries if ticket_workspace._norm(path) in pending_paths else ordinary_entries
-        target.append((index, entry))
-
-    def process_entry(index: int, entry: Mapping[str, str], *, pending_retry: bool) -> None:
+    def process_entry(index: int, entry: Mapping[str, str]) -> None:
         raw_path = entry.get("worktree", "")
         path = Path(raw_path) if raw_path else main_root
         try:
@@ -120,6 +116,7 @@ def sweep_orphan_worktrees(
                 holder_probe=holder_probe,
                 queue_lookup=queue_lookup,
                 statuses=statuses,
+                pending_paths=pending_paths,
             )
         except Exception as exc:  # noqa: BLE001 - isolate malformed worktree state
             summary.record("errors", path, "classification_error", f"{type(exc).__name__}: {exc}")
@@ -155,7 +152,7 @@ def sweep_orphan_worktrees(
             return
 
         if result.removed:
-            summary.record("removed", path, "cleanup_pending_retry" if pending_retry else result.outcome, result.detail)
+            summary.record("removed", path, result.outcome, result.detail)
         elif result.outcome in {"blocked_changes", "blocked_process"}:
             summary.record("blocked", path, result.reason or result.outcome, result.detail)
             logger.warning(
@@ -173,13 +170,10 @@ def sweep_orphan_worktrees(
                 result.detail or "; ".join(result.errors),
             )
 
-    # Pending worktrees have their own retry lane. They are not discovered or
-    # reported as new old orphans; ownership and age are revalidated before each
-    # retry, and cleanup performs the final dirty/process checks.
-    for index, entry in ordinary_entries:
-        process_entry(index, entry, pending_retry=False)
-    for index, entry in pending_entries:
-        process_entry(index, entry, pending_retry=True)
+    # Pending worktrees remain excluded from orphan discovery and are only
+    # reported for observability; cleanup records do not authorize a retry here.
+    for index, entry in enumerate(entries):
+        process_entry(index, entry)
 
     logger.info(
         "orphan worktree sweep: removed=%d preserved=%d failures=%d (blocked=%d ignored=%d)",

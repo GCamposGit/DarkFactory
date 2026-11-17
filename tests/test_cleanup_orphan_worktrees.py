@@ -156,7 +156,7 @@ def test_dirty_and_held_worktrees_are_reported_pending_without_removal(
     assert (dirty / "keep.txt").is_file() and held.is_dir()
 
 
-def test_pending_worktree_is_retried_only_after_owner_and_age_checks(
+def test_pending_worktree_is_not_reclassified_as_an_old_orphan(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _workspace(repo.local, "USR-608")
@@ -180,10 +180,12 @@ def test_pending_worktree_is_retried_only_after_owner_and_age_checks(
         statuses={"USR-608": "completed"},
     )
 
-    assert calls == [path]
-    assert retried.removed == 1 and not path.exists()
-    assert ticket_workspace.list_cleanup_pending(repo.local) == []
-    assert any(item["path"] == str(path) and item["reason"] == "cleanup_pending_retry" for item in retried.details)
+    assert calls == []
+    assert retried.removed == 0 and retried.errors == retried.blocked == 0
+    assert retried.ignored == 2
+    assert any(item["path"] == str(path) and item["reason"] == "cleanup_pending" for item in retried.details)
+    assert len(ticket_workspace.list_cleanup_pending(repo.local)) == 1
+    assert path.exists()
 
 
 def test_dirty_worktree_for_an_active_ticket_is_not_sent_to_cleanup(

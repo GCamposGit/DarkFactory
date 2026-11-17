@@ -177,6 +177,7 @@ def test_ticket_id_comes_from_the_branch_or_the_directory_stamp() -> None:
     ("overrides", "reason"),
     [
         ({"is_main": True}, "main_checkout"),
+        ({"cleanup_pending": True}, "cleanup_pending"),
         ({"holders": None}, "psutil_unavailable"),
         ({"holders": ("python (pid 7)",)}, "holder"),
         ({"locked": True}, "locked"),
@@ -265,6 +266,26 @@ def test_reader_age_boundary_follows_the_stamp_not_mtime(repo: SimpleNamespace, 
     assert over.reason == "ownerless" and over.eligible
     assert path.exists()
     assert "ticket/usr-500" in _git(repo.local, "branch", "--list", "ticket/usr-500")
+
+
+def test_reader_preserves_worktree_registered_as_cleanup_pending(repo: SimpleNamespace) -> None:
+    path = _old_worktree(repo.local)
+    pending_dir = repo.local / ticket_workspace.CLEANUP_PENDING_RELATIVE
+    pending_dir.mkdir(parents=True)
+    (pending_dir / "pending.json").write_text(
+        json.dumps({"path": str(path.resolve())}), encoding="utf-8"
+    )
+
+    verdict = classify_ownerless_worktree(
+        path,
+        now=BORN + timedelta(hours=49),
+        statuses={"USR-500": "completed"},
+        holder_probe=_idle,
+        run_git=_forbid_removal,
+    )
+
+    assert verdict.reason == "cleanup_pending" and not verdict.eligible
+    assert path.exists()
 
 
 def _fail_cleanup(*_args: object, **_kwargs: object) -> None:

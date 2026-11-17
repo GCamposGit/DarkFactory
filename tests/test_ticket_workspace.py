@@ -10,6 +10,7 @@ the suite, and nothing here ever sweeps the real ``.worktrees`` directories.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -281,6 +282,18 @@ def test_cleanup_falls_back_to_rmtree_and_clears_read_only_files(repo: SimpleNam
     assert os.path.normcase(os.path.realpath(ws.path)) not in _registered(repo.local)  # pruned
 
 
+def test_rmtree_retry_continues_when_chmod_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    attempts: list[str] = []
+
+    def fail_chmod(_target: str, _mode: int) -> None:
+        raise PermissionError("read-only file")
+
+    monkeypatch.setattr(ticket_workspace.os, "chmod", fail_chmod)
+    ticket_workspace._chmod_and_retry(attempts.append, str(tmp_path / "locked.txt"), PermissionError("remove"))
+
+    assert attempts == [str(tmp_path / "locked.txt")]
+
+
 def test_cleanup_moves_an_undeletable_worktree_to_the_recoverable_trash(repo: SimpleNamespace) -> None:
     ws = create_workspace("USR-212", cwd=repo.local)
     (ws.path / "precious.txt").write_text("keep me\n", encoding="utf-8")
@@ -354,7 +367,7 @@ def test_cleanup_preserves_worktrees_with_any_git_changes(
     assert os.path.normcase(os.path.realpath(ws.path)) in _registered(repo.local)
 
 
-def test_cleanup_discards_only_explicit_tracked_generated_paths(repo: SimpleNamespace) -> None:
+def test_cleanup_discards_only_hash_verified_tracked_generated_paths(repo: SimpleNamespace) -> None:
     ledger = repo.local / ticket_workspace.TICKET_LEDGER_RELATIVE
     ledger.parent.mkdir(parents=True)
     ledger.write_text("[]\n", encoding="utf-8")
@@ -363,14 +376,16 @@ def test_cleanup_discards_only_explicit_tracked_generated_paths(repo: SimpleName
     _git(repo.local, "push", "--quiet", "origin", "main")
     ws = create_workspace("USR-500-ledger-cleanup", cwd=repo.local)
     workspace_ledger = ws.path / ticket_workspace.TICKET_LEDGER_RELATIVE
-    workspace_ledger.write_text('[{"id":"USR-500"}]\n', encoding="utf-8")
+    generated_content = '[{"id":"USR-500"}]\n'
+    workspace_ledger.write_text(generated_content, encoding="utf-8")
+    generated_hash = hashlib.sha256(workspace_ledger.read_bytes()).hexdigest()
     unexpected = ws.path / "precious.txt"
     unexpected.write_text("keep me\n", encoding="utf-8")
 
     blocked = cleanup(
         ws.path,
         ws.main_root,
-        discard_paths=(ticket_workspace.TICKET_LEDGER_RELATIVE,),
+        discard_path_hashes={ticket_workspace.TICKET_LEDGER_RELATIVE: generated_hash},
         holder_probe=lambda _path: (),
     )
 
@@ -382,12 +397,71 @@ def test_cleanup_discards_only_explicit_tracked_generated_paths(repo: SimpleName
     removed = cleanup(
         ws.path,
         ws.main_root,
-        discard_paths=(ticket_workspace.TICKET_LEDGER_RELATIVE,),
+        discard_path_hashes={ticket_workspace.TICKET_LEDGER_RELATIVE: generated_hash},
         holder_probe=lambda _path: (),
     )
 
     assert removed.removed and not ws.path.exists()
     assert ticket_workspace.list_cleanup_pending(ws.main_root) == []
+
+
+def test_cleanup_preserves_generated_path_changed_after_its_hash_was_recorded(repo: SimpleNamespace) -> None:
+    ledger = repo.local / ticket_workspace.TICKET_LEDGER_RELATIVE
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(repo.local, "add", ticket_workspace.TICKET_LEDGER_RELATIVE)
+    _git(repo.local, "commit", "--quiet", "-m", "seed ticket ledger")
+    _git(repo.local, "push", "--quiet", "origin", "main")
+    ws = create_workspace("USR-500-ledger-edited", cwd=repo.local)
+    workspace_ledger = ws.path / ticket_workspace.TICKET_LEDGER_RELATIVE
+    generated_content = '[{"id":"USR-500-ledger-edited"}]\n'
+    workspace_ledger.write_text(generated_content, encoding="utf-8")
+    generated_hash = hashlib.sha256(workspace_ledger.read_bytes()).hexdigest()
+    edited_content = '[{"id":"USR-500-ledger-edited"},{"id":"USR-999","status":"planned"}]\n'
+    workspace_ledger.write_text(edited_content, encoding="utf-8")
+
+    result = cleanup(
+        ws.path,
+        ws.main_root,
+        discard_path_hashes={ticket_workspace.TICKET_LEDGER_RELATIVE: generated_hash},
+        holder_probe=lambda _path: (),
+    )
+
+    assert not result.removed and result.outcome == "blocked_changes"
+    assert result.reason == "discard_path_changed"
+    assert workspace_ledger.read_text(encoding="utf-8") == edited_content
+    assert ws.path.exists()
+
+
+def test_cleanup_preserves_staged_generated_path_even_when_worktree_bytes_match_hash(repo: SimpleNamespace) -> None:
+    ledger = repo.local / ticket_workspace.TICKET_LEDGER_RELATIVE
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(repo.local, "add", ticket_workspace.TICKET_LEDGER_RELATIVE)
+    _git(repo.local, "commit", "--quiet", "-m", "seed ticket ledger")
+    _git(repo.local, "push", "--quiet", "origin", "main")
+    ws = create_workspace("USR-500-ledger-staged", cwd=repo.local)
+    workspace_ledger = ws.path / ticket_workspace.TICKET_LEDGER_RELATIVE
+    generated_content = '[{"id":"USR-500-ledger-staged"}]\n'
+    workspace_ledger.write_text(generated_content, encoding="utf-8")
+    generated_hash = hashlib.sha256(workspace_ledger.read_bytes()).hexdigest()
+    staged_content = '[{"id":"USR-500-ledger-staged","status":"completed"}]\n'
+    workspace_ledger.write_text(staged_content, encoding="utf-8")
+    _git(ws.path, "add", ticket_workspace.TICKET_LEDGER_RELATIVE)
+    workspace_ledger.write_text(generated_content, encoding="utf-8")
+
+    result = cleanup(
+        ws.path,
+        ws.main_root,
+        discard_path_hashes={ticket_workspace.TICKET_LEDGER_RELATIVE: generated_hash},
+        holder_probe=lambda _path: (),
+    )
+
+    assert not result.removed and result.outcome == "blocked_changes"
+    assert result.reason == "discard_path_staged"
+    assert workspace_ledger.read_text(encoding="utf-8") == generated_content
+    assert _git(ws.path, "show", f":{ticket_workspace.TICKET_LEDGER_RELATIVE}") == staged_content.strip()
+    assert ws.path.exists()
 
 
 def test_cleanup_preserves_a_worktree_with_a_live_process(repo: SimpleNamespace) -> None:

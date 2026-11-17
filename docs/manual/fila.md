@@ -95,8 +95,8 @@ marcar o ticket como `completed` ou `cancelled`, tenta remover sua worktree mais
 por `core.git.ticket_workspace.cleanup`. Uma worktree com alteracoes, lock, processo em
 execucao ou estado de processo desconhecido e preservada; a falha de limpeza nao desfaz
 nem bloqueia o status terminal. Tentativas que nao removeram o diretorio ficam registradas
-em `.factory/runs/cleanup_pending/` para nova classificacao pela varredura diaria de
-worktrees.
+em `.factory/runs/cleanup_pending/` para observabilidade e ficam fora da classificacao de
+orfaos pela varredura diaria.
 
 ## Reconciliação no ciclo do despachante (USR-498)
 

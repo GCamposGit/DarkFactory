@@ -1653,7 +1653,7 @@ def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(t
     calls = []
 
     def protected_cleanup(path, main_root, **kwargs):
-        calls.append((path, main_root, kwargs.get("discard_paths")))
+        calls.append((path, main_root, kwargs.get("discard_path_hashes")))
         return CleanupResult(
             path=path, removed=False, method="preserved",
             detail=f"{path} is in use; preserved because processes have cwd inside it: {holder}",
@@ -1662,10 +1662,17 @@ def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(t
     monkeypatch.setattr("core.git.ticket_workspace.cleanup", protected_cleanup)
     monkeypatch.setattr(fd, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr("core.git.ticket_workspace.main_checkout_root", lambda _path: tmp_path)
+    monkeypatch.setitem(
+        fd._OPERATIONAL_CHECKOUT_LEDGER_HASHES,
+        os.path.normcase(os.path.realpath(checkout)),
+        "a" * 64,
+    )
 
     fd._remove_operational_checkout(checkout)
 
-    assert calls == [(checkout, tmp_path, (".factory/demands/demands.json",))]
+    assert calls == [
+        (checkout, tmp_path, {".factory/demands/demands.json": "a" * 64})
+    ]
     assert "checkout operacional preservado" in caplog.text
     assert str(checkout) in caplog.text and holder in caplog.text
     assert "recuperacao possivel" in caplog.text

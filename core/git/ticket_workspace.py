@@ -156,6 +156,7 @@ class TicketWorkspace:
     main_root: Path
     base_ref: str
     base_sha: str
+    discard_path_hashes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -497,7 +498,7 @@ def cleanup(
     path: Path,
     main_root: Path,
     *,
-    discard_paths: Sequence[str] = (),
+    discard_path_hashes: Optional[Mapping[str, str]] = None,
     sleep_fn: Optional[SleepFn] = None,
     retries: int = DEFAULT_CLEANUP_RETRIES,
     backoff_s: Sequence[float] = DEFAULT_BACKOFF_S,
@@ -515,11 +516,11 @@ def cleanup(
        data, never leave a half-registered worktree) and ``git worktree prune``.
 
     Each destructive operation rechecks that ``path`` is a registered, unlocked,
-    clean worktree and that no process is using it. Callers may name tracked,
-    generated input paths in ``discard_paths``; those paths are restored to HEAD
-    only when they are the sole changes. Unknown Git or process state preserves
-    the worktree. This process cwd is moved out of ``path`` before those final
-    checks (:func:`_outside_dir`).
+    clean worktree and that no process is using it. Callers may provide SHA-256
+    hashes for tracked generated inputs; a path is restored to HEAD only while its
+    current bytes still match the caller's expected content. Unknown Git or process
+    state preserves the worktree. This process cwd is moved out of ``path`` before
+    those final checks (:func:`_outside_dir`).
     Never raises; ``CleanupResult.outcome`` records removal, dirty/process blocks,
     or an error. The Git remove is intentionally non-forced so a change created
     between inspection and removal is still rejected by Git.
@@ -529,7 +530,7 @@ def cleanup(
             result = _cleanup_outside(
                 path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
                 run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn, holder_probe=holder_probe,
-                discard_paths=discard_paths,
+                discard_path_hashes=discard_path_hashes or {},
             )
     except Exception as exc:  # noqa: BLE001 -- cleanup reports failures instead of leaking them
         detail = f"cleanup failed for {path}: {exc}"
@@ -606,6 +607,15 @@ def list_cleanup_pending(main_root: Path) -> list[dict[str, Any]]:
     return records
 
 
+def cleanup_pending_worktree_paths(main_root: Path) -> frozenset[str]:
+    """Normalized paths with a durable cleanup record that must stay out of orphan sweeps."""
+    return frozenset(
+        _norm(record["path"])
+        for record in list_cleanup_pending(main_root)
+        if isinstance(record.get("path"), str)
+    )
+
+
 @dataclass(frozen=True)
 class _CleanupSafetyIssue:
     outcome: CleanupOutcome
@@ -618,7 +628,7 @@ def _cleanup_safety_issue(
     main_root: Path,
     runner: GitRunner,
     holder_probe: HolderProbe,
-    discard_paths: frozenset[str] = frozenset(),
+    discard_path_hashes: Mapping[str, str] | frozenset[str] = frozenset(),
 ) -> Optional[_CleanupSafetyIssue]:
     """Return why removal is unsafe, failing closed when ownership cannot be proved."""
     try:
@@ -649,7 +659,7 @@ def _cleanup_safety_issue(
         return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
     changes = _status_paths(status.stdout or "")
     discardable = {change.replace("\\", "/") for change in changes}
-    if changes and not discardable.issubset(discard_paths):
+    if changes and not discardable.issubset(discard_path_hashes):
         return _CleanupSafetyIssue(
             "blocked_changes",
             "worktree_dirty",
@@ -673,10 +683,10 @@ def _cleanup_safety_issue(
     return None
 
 
-def _validated_discard_paths(paths: Sequence[str]) -> frozenset[str]:
-    """Normalize explicit generated paths and reject absolute or traversal paths."""
-    normalized: set[str] = set()
-    for raw_path in paths:
+def _validated_discard_path_hashes(path_hashes: Mapping[str, str]) -> dict[str, str]:
+    """Normalize generated paths and validate their expected SHA-256 content hashes."""
+    normalized: dict[str, str] = {}
+    for raw_path, expected_hash in path_hashes.items():
         value = str(raw_path).replace("\\", "/")
         parts = value.split("/")
         if (
@@ -687,17 +697,20 @@ def _validated_discard_paths(paths: Sequence[str]) -> frozenset[str]:
             or any(part in {"", ".", ".."} for part in parts)
         ):
             raise ValueError(f"discard path must be a literal repository-relative path: {raw_path!r}")
-        normalized.add(value)
-    return frozenset(normalized)
+        digest = str(expected_hash).casefold()
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError(f"discard path requires an expected SHA-256 hash: {raw_path!r}")
+        normalized[value] = digest
+    return normalized
 
 
 def _restore_discard_paths(
     path: Path,
-    discard_paths: frozenset[str],
+    discard_path_hashes: Mapping[str, str],
     runner: GitRunner,
 ) -> Optional[_CleanupSafetyIssue]:
-    """Restore only explicitly discardable, tracked changes before normal removal."""
-    if not discard_paths:
+    """Restore generated files only while their bytes match the recorded hash."""
+    if not discard_path_hashes:
         return None
     status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
     if status.returncode != 0:
@@ -706,7 +719,7 @@ def _restore_discard_paths(
     changed = [item.replace("\\", "/") for item in _status_paths(status.stdout or "")]
     if not changed:
         return None
-    if not set(changed).issubset(discard_paths):
+    if not set(changed).issubset(discard_path_hashes):
         return _CleanupSafetyIssue(
             "blocked_changes",
             "worktree_dirty",
@@ -721,6 +734,36 @@ def _restore_discard_paths(
             "discard_path_untracked",
             "preserved because an explicitly discardable path is not tracked: " + ", ".join(changed[:5]),
         )
+    staged = runner(["diff", "--cached", "--quiet", "--", *literal_paths], path)
+    if staged.returncode == 1:
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "discard_path_staged",
+            "preserved because generated paths contain staged changes: " + ", ".join(changed[:5]),
+        )
+    if staged.returncode != 0:
+        detail = (staged.stderr or staged.stdout or "could not inspect staged paths").strip()
+        return _CleanupSafetyIssue(
+            "error", "discard_path_index_error", f"could not inspect staged generated paths; preserved: {detail}"
+        )
+    for relative in changed:
+        candidate = path / Path(relative)
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                raise OSError("not a regular file")
+            actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        except OSError as exc:
+            return _CleanupSafetyIssue(
+                "blocked_changes",
+                "discard_path_unverified",
+                f"preserved because generated path {relative} could not be verified: {exc}",
+            )
+        if actual_hash != discard_path_hashes[relative]:
+            return _CleanupSafetyIssue(
+                "blocked_changes",
+                "discard_path_changed",
+                f"preserved because generated path {relative} no longer matches its recorded content",
+            )
     restored = runner(
         ["restore", "--source=HEAD", "--staged", "--worktree", "--", *literal_paths], path
     )
@@ -749,14 +792,14 @@ def _cleanup_outside(
     rmtree_fn: Optional[RmtreeFn],
     now_fn: Optional[NowFn],
     holder_probe: Optional[HolderProbe],
-    discard_paths: Sequence[str],
+    discard_path_hashes: Mapping[str, str],
 ) -> CleanupResult:
     runner = run_git or _git
     sleeper = sleep_fn or time.sleep
     remove_tree = rmtree_fn or robust_rmtree
     inspect_holders = holder_probe if holder_probe is not None else _find_holders
     try:
-        discardable = _validated_discard_paths(discard_paths)
+        discardable = _validated_discard_path_hashes(discard_path_hashes)
     except ValueError as exc:
         return CleanupResult(
             path=path,
@@ -1314,6 +1357,7 @@ class OwnerlessFacts:
     ticket_status_known: bool = True
     holders: Optional[tuple[str, ...]] = ()
     age_s: Optional[float] = None
+    cleanup_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -1446,6 +1490,8 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
     commits outside the base are always preserved.
     """
     path = facts.path
+    if facts.cleanup_pending:
+        return _preserved(path, "cleanup_pending", "registered as pending cleanup")
     if facts.is_main:
         return _preserved(path, "main_checkout", "primary checkout")
     if not facts.ticket_status_known:
@@ -1653,6 +1699,7 @@ def classify_ownerless_worktree(
     ledger_path: Optional[Path] = None,
     queue_lookup: Optional[Callable[[str], Optional[str]]] = None,
     holder_probe: Optional[Callable[[Path], Optional[tuple[str, ...]]]] = None,
+    pending_paths: Optional[Iterable[str]] = None,
 ) -> OwnerlessVerdict:
     """Read one worktree and classify it. Does not call :func:`cleanup` or change git state.
 
@@ -1669,6 +1716,13 @@ def classify_ownerless_worktree(
             root = main_checkout_root(cwd or path, runner)
         except WorkspaceError as exc:
             return _preserved(path, "git_unreadable", str(exc))
+    if pending_paths is None:
+        try:
+            pending_paths = cleanup_pending_worktree_paths(root)
+        except Exception as exc:  # noqa: BLE001 -- unknown pending inventory must not authorize removal
+            return _preserved(path, "cleanup_pending_inventory_error", str(exc))
+    pending = {_norm(candidate) for candidate in pending_paths}
+    cleanup_pending = _norm(path) in pending
     age = worktree_age_s(path, now=moment)
     if is_main is None:
         entries = list_worktrees(root, runner)
@@ -1679,7 +1733,9 @@ def classify_ownerless_worktree(
             target = _norm(path)
             entry = next((item for item in entries if _norm(item.get("worktree", "")) == target), None)
     if is_main:
-        return classify_ownerless(OwnerlessFacts(path=path, is_main=True, age_s=age))
+        return classify_ownerless(
+            OwnerlessFacts(path=path, is_main=True, cleanup_pending=cleanup_pending, age_s=age)
+        )
     if entry is None:
         return _preserved(path, "unregistered", "path is not a registered worktree")
     locked = "locked" in entry
@@ -1711,6 +1767,7 @@ def classify_ownerless_worktree(
         OwnerlessFacts(
             path=path,
             is_main=False,
+            cleanup_pending=cleanup_pending,
             locked=locked,
             index_locked=index_locked,
             git_readable=git_readable,
@@ -1750,6 +1807,13 @@ def classify_ownerless_worktrees(
     entries = list_worktrees(root, runner)
     if not entries:
         return [_preserved(cwd, "git_unreadable", "git worktree list failed")]
+    try:
+        pending_paths = cleanup_pending_worktree_paths(root)
+    except Exception as exc:  # noqa: BLE001 -- preserve all candidates if the inventory is uncertain
+        return [
+            _preserved(Path(item["worktree"]), "cleanup_pending_inventory_error", str(exc))
+            for item in entries
+        ]
     verdicts: list[OwnerlessVerdict] = []
     for index, item in enumerate(entries):
         verdicts.append(
@@ -1766,6 +1830,7 @@ def classify_ownerless_worktrees(
                 ledger_path=ledger_path,
                 queue_lookup=queue_lookup,
                 holder_probe=holder_probe,
+                pending_paths=pending_paths,
             )
         )
     return verdicts

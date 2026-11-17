@@ -48,8 +48,8 @@ quando `merge=True`. `DeliveryReport.worktree_cleanup_attempted` informa se essa
 ocorreu; `cleaned` informa se a limpeza da entrega terminou com sucesso. Em `complete_ticket`,
 os caminhos de conclusao que ainda nao tentaram a remocao chamam
 `cleanup_terminal_ticket_worktree` depois das provas de entrega. Bloqueios preservam a
-worktree e geram registro em `.factory/runs/cleanup_pending/`, que a varredura diaria tenta
-novamente sem repetir a tentativa imediatamente no mesmo fluxo.
+worktree e geram registro em `.factory/runs/cleanup_pending/`; esses registros ficam fora
+da classificação de órfãos e não são retentados pela varredura diária.
 
 ## Ledger de acoes do owner
 
