@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 import pytest
@@ -19,7 +21,7 @@ from core.line.admission import (
 )
 
 NOW = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
-_FIELDS = {"outcome", "code", "stage", "resource", "observed_at", "evidence_ref", "not_before"}
+_FIELDS = {"outcome", "code", "stage", "resource", "observed_at", "evidence_ref", "not_before", "cause"}
 
 
 def test_decision_fields_are_allow_or_wait_with_the_audit_set() -> None:
@@ -28,6 +30,7 @@ def test_decision_fields_are_allow_or_wait_with_the_audit_set() -> None:
     assert set(allowed.public_dict()) == _FIELDS
     assert allowed.outcome == "allow" and allowed.not_before is None
     assert allowed.public_dict()["not_before"] is None
+    assert allowed.public_dict()["cause"] is None
     assert allowed.public_dict()["observed_at"].endswith("+00:00")
     with pytest.raises(ValidationError):
         AdmissionDecision(
@@ -103,6 +106,99 @@ def test_missing_routes_wait_with_the_nearest_reset_capped_at_thirty_minutes() -
     earlier, _seen, calls = _admit(routes, earliest_at=NOW - timedelta(hours=1))
     assert earlier.not_before == NOW + timedelta(seconds=routing.MIN_ROUTE_WAIT_SECONDS)
     assert calls == ["planning"]
+
+
+def _routing_admission_for_test(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    remaining: float,
+    openrouter_credit: float,
+    project_id: str = "darkfac",
+):
+    from core.enterprise import enforcement
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(
+        enforcement,
+        "_shared_configs_file",
+        lambda: tmp_path / "shared" / "data_policies.json",
+    )
+
+    def pick_route(stage: str, caps: list[str], **kwargs: Any):
+        return routing.pick(
+            stage,
+            caps,
+            quota_lookup=lambda _provider: remaining,
+            openrouter_balance_lookup=lambda: openrouter_credit,
+            cooldown_path=tmp_path / "cooldowns.json",
+            **kwargs,
+        )
+
+    all_caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
+    return admit(
+        build_caps=all_caps,
+        read_caps=all_caps,
+        execution_context="headless",
+        project_id=project_id,
+        pick_route=pick_route,
+        earliest=lambda *_args, **_kwargs: NOW,
+        clock=lambda: NOW,
+    )
+
+
+def test_no_planning_route_reports_residual_policy_and_source_file(tmp_path, monkeypatch):
+    from tests.conftest import _directory_fingerprint
+
+    checkout_enterprise = Path(__file__).resolve().parents[2] / ".factory" / "enterprise"
+    enterprise_before = _directory_fingerprint(checkout_enterprise)
+    policy_file = tmp_path / "state" / "enterprise" / "configs.json"
+    policy_file.parent.mkdir(parents=True)
+    policy_file.write_text(
+        json.dumps([
+            {
+                "project_id": "darkfac",
+                "enabled": True,
+                "residency_mode": "local_only",
+                "allowed_providers": ["ollama_local"],
+                "metadata": {"private_note": "must not be returned"},
+            }
+        ]),
+        encoding="utf-8",
+    )
+
+    decision = _routing_admission_for_test(
+        tmp_path, monkeypatch, remaining=90.0, openrouter_credit=5.0,
+    )
+
+    cause = decision.public_dict()["cause"]
+    assert decision.code == CODE_NO_PLANNING_ROUTE
+    assert cause["code"] == "data_policy"
+    assert cause["project_id"] == "darkfac"
+    assert cause["source_file"] == str(policy_file.resolve())
+    assert cause["providers"] == ["claude", "codex", "grok", "openrouter"]
+    assert cause["restriction"] == {
+        "residency_mode": "local_only",
+        "allowed_providers": ["ollama_local"],
+    }
+    assert cause["host_diagnostics"] == [{
+        "code": "data_policy_host_divergence",
+        "project_id": "darkfac",
+        "shared_source_path": str((tmp_path / "shared" / "data_policies.json").resolve()),
+        "local_source_path": str(policy_file.resolve()),
+        "effective_source_path": str(policy_file.resolve()),
+    }]
+    assert "must not be returned" not in json.dumps(cause)
+    assert _directory_fingerprint(checkout_enterprise) == enterprise_before
+
+
+def test_no_planning_route_does_not_blame_policy_when_routes_fail_for_quota(tmp_path, monkeypatch):
+    decision = _routing_admission_for_test(
+        tmp_path, monkeypatch, remaining=5.0, openrouter_credit=0.0,
+    )
+
+    assert decision.code == CODE_NO_PLANNING_ROUTE
+    assert decision.public_dict()["cause"] is None
 
 
 def test_unknown_execution_context_is_rejected() -> None:

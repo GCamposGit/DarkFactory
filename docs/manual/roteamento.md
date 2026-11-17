@@ -25,6 +25,22 @@ retomar automaticamente. Um `not_before` no log, sozinho, não é um agendamento
 
 O probe de cota tem cache negativo de 10 min (`probe_negative.json` ao lado dos snapshots): probe que expira ou volta sem leitura utilizavel nao e repetido por 10 min. O probe do Google tenta no maximo 2 portas por fase, com timeout de 1 s (USR-404).
 
+## Política de dados por projeto e divergência entre hosts (USR-487)
+
+`.factory/config/data_policies.json` é a referência compartilhada e versionada. O arquivo legado
+`.factory/enterprise/configs.json` fica no estado local do host e continua efetivo por compatibilidade
+quando sua configuração difere; essa divergência gera o aviso estruturado `data_policy_host_divergence`.
+Uma política local que bloqueia todas as rotas elegíveis aparece como causa `data_policy` na admissão,
+com projeto, provedores, restrição e caminho do arquivo que decidiu a rota. Quando houver divergência,
+`policy_cause.host_diagnostics` inclui `data_policy_host_divergence` e os caminhos compartilhado,
+local e efetivo. O JSON do launcher mantém
+`cause: "route_wait"` para a fila e expõe o diagnóstico em `policy_cause`, sem incluir metadados
+privados da configuração.
+
+Para diagnosticar uma espera, confira `policy_cause.source_file` e compare o arquivo local com a
+referência compartilhada. Testes devem gravar configurações em `tmp_path`/`DARKFAC_STATE_ROOT` temporário;
+a sentinela da suíte compara toda a árvore `.factory/enterprise` do checkout antes e depois dos testes.
+
 ## Cota do Claude Code
 
 A fonte de quota do Claude e o payload `rate_limits` fornecido pelo statusLine de uma sessão

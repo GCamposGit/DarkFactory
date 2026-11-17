@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.line import routing
 from core.line.review_cascade import valid_contingency
@@ -80,6 +80,7 @@ class AdmissionDecision(BaseModel):
     observed_at: datetime
     evidence_ref: str
     not_before: Optional[datetime] = None
+    cause: Optional["DataPolicyCause"] = None
 
     @field_validator("outcome")
     @classmethod
@@ -111,7 +112,7 @@ class AdmissionDecision(BaseModel):
         return self
 
     def public_dict(self) -> dict[str, Any]:
-        """JSON-ready view. ``not_before`` is null on allow."""
+        """JSON-ready view. ``not_before`` is null on allow; cause is structured when present."""
         return {
             "outcome": self.outcome,
             "code": self.code,
@@ -120,7 +121,21 @@ class AdmissionDecision(BaseModel):
             "observed_at": self.observed_at.isoformat(),
             "evidence_ref": self.evidence_ref,
             "not_before": None if self.not_before is None else self.not_before.isoformat(),
+            "cause": None if self.cause is None else self.cause.model_dump(mode="json"),
         }
+
+
+class DataPolicyCause(BaseModel):
+    """Sanitized explanation for a route removed by the effective project data policy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    code: str
+    project_id: str
+    source_file: str
+    providers: list[str]
+    restriction: dict[str, Any]
+    host_diagnostics: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RouteHit(BaseModel):
@@ -132,6 +147,7 @@ class RouteHit(BaseModel):
     harness: Optional[str] = None
     model: Optional[str] = None
     evidence_ref: str
+    cause: Optional[DataPolicyCause] = None
 
 
 def allow_decision(observed_at: datetime, evidence_ref: str = "admission://allow") -> AdmissionDecision:
@@ -161,6 +177,7 @@ def _wait(
     observed_at: datetime,
     evidence_ref: str,
     not_before: datetime,
+    cause: Optional[DataPolicyCause] = None,
 ) -> AdmissionDecision:
     return AdmissionDecision(
         outcome="wait",
@@ -170,6 +187,7 @@ def _wait(
         observed_at=_as_utc(observed_at),
         evidence_ref=evidence_ref,
         not_before=_as_utc(not_before),
+        cause=cause,
     )
 
 
@@ -192,6 +210,7 @@ def decide(
             observed_at=observed,
             evidence_ref=hit.evidence_ref,
             not_before=_backoff(observed, nearest),
+            cause=hit.cause,
         )
 
     if planning is not None and not planning.harness:
@@ -208,15 +227,25 @@ def _select_route(
     caps: Iterable[str],
     *,
     decision_stage: str,
+    policy_diagnostic: Optional[dict[str, Any]] = None,
     **kwargs: Any,
 ) -> RouteHit:
-    chosen = pick_route(routing_stage, list(caps), reserve_quota=False, **kwargs)
+    chosen = pick_route(
+        routing_stage, list(caps), reserve_quota=False,
+        policy_diagnostic=policy_diagnostic, **kwargs,
+    )
     if not chosen or not chosen[0]:
+        cause = (
+            DataPolicyCause.model_validate(policy_diagnostic)
+            if policy_diagnostic and policy_diagnostic.get("code") == "data_policy"
+            else None
+        )
         return RouteHit(
             stage=decision_stage,
             harness=None,
             model=None,
             evidence_ref=f"routing://{routing_stage}/none",
+            cause=cause,
         )
     harness = str(chosen[0])
     model = chosen[1] if len(chosen) > 1 else None
@@ -259,8 +288,10 @@ def admit(
         "execution_context": execution_context,
         "config": config,
     }
+    planning_diagnostic: dict[str, Any] = {}
     planning = None if plan_exists else _select_route(
-        pick_route, "planning", read_caps, decision_stage=STAGE_PLANNING, mode="read", **common,
+        pick_route, "planning", read_caps, decision_stage=STAGE_PLANNING,
+        policy_diagnostic=planning_diagnostic, mode="read", **common,
     )
     build = _select_route(
         pick_route,

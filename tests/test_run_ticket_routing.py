@@ -630,6 +630,7 @@ def test_ok_agent_without_implementation_is_rejected_before_delivery(
             duration_s=1.0,
         )
 
+    monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *_args, **_kwargs: (True, []))
     monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
     delivery = MagicMock(side_effect=AssertionError("delivery must not run"))
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", delivery)
@@ -814,7 +815,7 @@ def test_retry_report_flags_advance_only_when_timeout_left_changes() -> None:
     assert run(False).advance_to_validation is False
 
 
-def _wait_decision() -> admission.AdmissionDecision:
+def _wait_decision(*, cause: admission.DataPolicyCause | None = None) -> admission.AdmissionDecision:
     return admission.AdmissionDecision(
         outcome="wait",
         code="no_build_route",
@@ -823,6 +824,7 @@ def _wait_decision() -> admission.AdmissionDecision:
         observed_at=datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc),
         evidence_ref="routing://development/none",
         not_before=datetime(2026, 11, 6, 15, 1, tzinfo=timezone.utc),
+        cause=cause,
     )
 
 
@@ -854,6 +856,7 @@ def test_admission_wait_exits_75_before_the_worktree(
     payload = json.loads(next(line for line in captured.out.splitlines() if line.startswith("{")))
     assert payload["ok"] is False
     assert payload["cause"] == "route_wait"
+    assert payload["policy_cause"] is None
     assert payload["error"] == decision.code
     assert payload["ticket_id"] == "USR-99"
     assert payload["exit_code"] == 75
@@ -862,6 +865,36 @@ def test_admission_wait_exits_75_before_the_worktree(
     assert "[AGUARDANDO]" in captured.err
     assert run_ticket.ROUTE_WAIT_MARKER in captured.err
     assert "[DRY RUN]" not in captured.out
+
+
+def test_admission_wait_keeps_route_cause_and_exposes_policy_diagnostic(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+) -> None:
+    source_file = tmp_path / "state" / "enterprise" / "configs.json"
+    decision = _wait_decision(cause=admission.DataPolicyCause(
+        code="data_policy",
+        project_id="darkfac",
+        source_file=str(source_file),
+        providers=["claude", "openrouter"],
+        restriction={"residency_mode": "local_only", "allowed_providers": ["ollama_local"]},
+        host_diagnostics=[{
+            "code": "data_policy_host_divergence",
+            "project_id": "darkfac",
+            "shared_source_path": str(tmp_path / "shared" / "data_policies.json"),
+            "local_source_path": str(source_file),
+            "effective_source_path": str(source_file),
+        }],
+    ))
+    monkeypatch.setattr(run_ticket, "evaluate_admission", lambda _args, _ticket: decision)
+
+    assert main(["USR-99", "--json"]) == run_ticket.EXIT_ROUTE_WAIT
+
+    payload = json.loads(next(line for line in capsys.readouterr().out.splitlines() if line.startswith("{")))
+    assert payload["cause"] == "route_wait"
+    assert payload["policy_cause"] == decision.public_dict()["cause"]
+    assert payload["policy_cause"]["source_file"] == str(source_file)
+    assert payload["policy_cause"]["host_diagnostics"][0]["code"] == "data_policy_host_divergence"
+    assert payload["policy_cause"]["host_diagnostics"][0]["shared_source_path"].endswith("data_policies.json")
 
 
 def test_admission_wait_requeues_an_implementing_ticket(

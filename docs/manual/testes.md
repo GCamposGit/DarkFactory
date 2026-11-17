@@ -179,6 +179,14 @@ evitando corridas entre testes paralelos que reutilizam o mesmo `ticket_id` e pr
 `tickets.json` ou `progress.json`. Um teste que precise validar heranca desses marcadores deve configura-los
 explicitamente no subprocesso ou com `monkeypatch` no proprio teste.
 
+O estado de política empresarial também é isolado: testes escrevem `enterprise/configs.json` sob uma
+raiz temporária e podem injetar uma referência compartilhada temporária. A fixture de sessão registra
+uma impressão digital de toda a árvore `.factory/enterprise` do checkout e reprova se um teste criar,
+remover ou alterar qualquer arquivo ali. Isso evita que uma configuração residual de um teste limite
+as rotas de outros testes ou seja confundida com a política efetiva de outro host. O cenário residual
+do USR-487 também compara essa impressão digital imediatamente antes e depois da admissão que retorna
+`no_planning_route`, além de confirmar os caminhos no diagnóstico de divergência.
+
 ## Cache do pytest em worktrees Windows (USR-421)
 
 `tests/_cache_dir.py` mantém o cache por worktree sob `DarkFac/pytest-cache` no diretório
