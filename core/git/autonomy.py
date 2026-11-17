@@ -90,7 +90,8 @@ class DeliveryReport(BaseModel):
             "merged, conflict, awaiting_commercial_acceptance, no_changes, staged_inspect_failed "
             "(the index could not be read for the secret scan; resumable), ci_pending "
             "(checks still pending after the wait), ci_failed (a check is red), base_red "
-            "(every red check is already red on the base branch) or error; ci_pending, "
+            "(every red check is already red on the base branch), merge_blocked (the base branch policy "
+            "still refused the merge after update-branch and a CI re-gate) or error; ci_pending, "
             "ci_failed and base_red never merge and leave the PR and branch open"
         )
     )
@@ -1352,6 +1353,10 @@ class GitAutonomyManager:
             if _POLICY_BLOCK_MARKER in err:
                 # The ruleset on the base branch still lacks its required checks:
                 # re-run the gate once (it waits for them) and try the merge again.
+                # A branch behind the base is brought up to date first (USR-475).
+                _run_git(["fetch", "origin"], cwd=cwd)
+                if _run_git(["merge-base", "--is-ancestor", remote_ref, "HEAD"], cwd=cwd).returncode != 0:
+                    runner(["pr", "update-branch", str(number)], cwd)
                 blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
                 if blocked is not None:
                     return blocked
@@ -1360,7 +1365,7 @@ class GitAutonomyManager:
                 if state != "MERGED" and merge_res.returncode != 0:
                     pending = pending_check_labels(number, cwd, runner)
                     return DeliveryReport(
-                        ok=False, action="error", pr_url=pr_url, branch=branch,
+                        ok=False, action="merge_blocked", pr_url=pr_url, branch=branch,
                         message=(
                             "gh pr merge failed: the base branch policy still prohibits the merge after "
                             f"re-running the CI gate ({gate_note}); pending required checks: "

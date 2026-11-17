@@ -317,6 +317,12 @@ continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_i
 `rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket permanece em `validating`, com evidencia de falha tecnica, e o run sai com rc 1
 (causa `rebase_conflict`), sem rc 2 e sem redespacho do despachante.
 
+Desde o USR-475, `docs/FASE_ATUAL.md` tambem fica com a versao de origin/main, e no ledger `demands.json` a linha do proprio
+ticket e reaplicada por `DemandsStore.save_ticket` depois de tomar a versao de origin/main. `rebase_conflict` e causa de candidato
+na taxonomia (nao mais `unknown`). Quando `gh pr merge` recusa por politica da branch, a entrega roda `gh pr update-branch` se a
+branch estiver atras do main, espera as verificacoes e tenta o merge uma vez; persistindo, devolve `merge_blocked`, causa de infra
+(exit 75, espera com backoff e nao gasta tentativa).
+
 ## Harness de Operacao Interativo e Restricao Headless (USR-433)
 
 `run_ticket.py` detecta o harness de operacao ativo (`DARKFAC_OPERATING_HARNESS` ou contexto do terminal). Se for passado `--fleet` com `--harness antigravity`, a execucao e recusada na inicializacao (`_stage_check_harness`) antes de qualquer efeito colateral (`[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.`). O briefing agnostico de sessao `python -m core.ops.briefing` e o handoff versionado `docs/operacao/HANDOFF.md` sincronizam o estado entre sessoes.

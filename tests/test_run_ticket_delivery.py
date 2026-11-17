@@ -437,15 +437,51 @@ def _rebase_in_progress(repo: Path) -> bool:
 
 def test_ledger_only_rebase_conflict_takes_origin_main_without_agent(tmp_path: Path) -> None:
     ledger = ".factory/demands/demands.json"
-    repo = _conflict_repo(tmp_path, {ledger: ("branch\n", "main\n")})
+    repo = _conflict_repo(tmp_path, {ledger: ("[]\n", '{"demands": []}\n')})
     ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
     assert ok is False and files == [ledger]
     with patch.object(run_ticket, "_invoke_fix_agent") as agent:
         ok, files, _ = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
     assert ok is True and files == []
     agent.assert_not_called()
-    assert (repo / ledger).read_text(encoding="utf-8").strip() == "main"
+    assert [t["id"] for t in json.loads((repo / ledger).read_text(encoding="utf-8")) if isinstance(t, dict)] == ["USR-412"]
     assert not _rebase_in_progress(repo)
+
+
+def test_ledger_and_fase_atual_conflict_keeps_main_and_reapplies_own_row(tmp_path: Path) -> None:
+    ledger = ".factory/demands/demands.json"
+    fase = "docs/FASE_ATUAL.md"
+    other = {"id": "USR-1", "project_id": "darkfac", "title": "Outro", "problem_statement": "p", "status": "planned"}
+    own = _TICKET_412.model_dump(mode="json")
+    repo = _conflict_repo(tmp_path, {
+        ledger: (json.dumps([own]), json.dumps([other])),
+        fase: ("branch\n", "main\n"),
+    })
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and set(files) == {ledger, fase}
+    with patch.object(run_ticket, "_invoke_fix_agent") as agent:
+        ok, files, _ = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert ok is True and files == []
+    agent.assert_not_called()
+    assert (repo / fase).read_text(encoding="utf-8").strip() == "main"
+    ids = {t["id"] for t in json.loads((repo / ledger).read_text(encoding="utf-8"))}
+    assert ids == {"USR-1", "USR-412"}
+    assert not _rebase_in_progress(repo)
+
+
+def test_merge_blocked_and_rebase_conflict_are_named_causes_not_unknown() -> None:
+    from core.line.failure_taxonomy import canonical_cause, classify
+
+    assert (canonical_cause("rebase_conflict"), classify("rebase_conflict")) == ("rebase_conflict", "candidate")
+    assert (canonical_cause("merge_blocked"), classify("merge_blocked")) == ("merge_blocked", "infra")
+    for action, cause in (("merge_blocked", "merge_blocked"), ("conflict", "rebase_conflict")):
+        progress = MagicMock()
+        report = DeliveryReport(ok=False, action=action, message="x")
+        payload = run_ticket.ticket_stages.delivery_failure_result(
+            _TICKET_412, report, True, Path("."), "b", "sha", "cmd", progress, False, True,
+        )
+        assert payload["cause"] == cause
+        progress.set_outcome.assert_called_once_with("x", cause)
 
 
 def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(tmp_path: Path) -> None:
