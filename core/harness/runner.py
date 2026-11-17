@@ -778,11 +778,16 @@ class RunTimings:
 
 
 def _append_run_timing(record: dict) -> None:
-    # USR-463: use the directory SuiteLock.acquire() itself would resolve to
-    # (canonical, or a writable per-identity fallback under a restricted ACL)
-    # instead of the strict canonical-only accessor, so telemetry for a
-    # degraded run actually lands somewhere writable instead of being dropped.
-    path = harness_suite_lock.resolve_state_dir().path / RUN_TIMINGS_LOG_NAME
+    # USR-463: keep telemetry beside the lock actually used by this run. The
+    # canonical lock can be readable while metadata writes are denied, causing
+    # SuiteLock.acquire() to switch to a per-identity fallback after probing.
+    recorded_dir = record.get("lock_state_dir")
+    directory = (
+        Path(recorded_dir)
+        if isinstance(recorded_dir, str) and recorded_dir
+        else harness_suite_lock.resolve_state_dir().path
+    )
+    path = directory / RUN_TIMINGS_LOG_NAME
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     if path.stat().st_size > RUN_TIMINGS_LOG_MAX_BYTES:
@@ -839,7 +844,7 @@ def _timed_suite_lock(timings: RunTimings):
         if acquired:
             raise
         timings.lock_wait_sec += time.perf_counter() - started
-        print(f"[SUITE_LOCK] {exc}")
+        print(exc)
         raise
 
 

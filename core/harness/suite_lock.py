@@ -40,13 +40,15 @@ A restricted identity (e.g. a sandboxed process group such as
 to its pre-existing lock files -- their ACL grants write only to the account
 that created them. The lock file is opened read-only, so this identity can
 still acquire a free canonical lock without changing its metadata.
-``resolve_state_dir()`` uses a writable per-identity fallback only when the
-canonical lock cannot be read or created. ``SuiteLock.acquire()`` uses that
-fallback when degraded, after waiting (best effort, respecting the overall timeout)
-for any *live* canonical holder to release first -- a dead or absent
-canonical holder never blocks it. Exclusion between different identities'
-fallback directories is best effort, not guaranteed: two different accounts
-each in their own degraded fallback do not see each other's locks.
+``resolve_state_dir()`` uses a writable per-identity fallback when the
+canonical lock cannot be read or created. If the lock is readable but the
+canonical sidecar cannot be written, ``SuiteLock.acquire()`` releases that
+slot and switches to the same fallback. Degraded acquisition waits (best
+effort, respecting the overall timeout) for any *live* canonical holder to
+release first -- a dead or absent canonical holder never blocks it. Exclusion
+between different identities' fallback directories is best effort, not
+guaranteed: two different accounts each in their own degraded fallback do not
+see each other's locks.
 """
 
 from __future__ import annotations
@@ -91,14 +93,14 @@ class SuiteLockTimeout(RuntimeError):
 
 
 class SuiteLockUnwritable(RuntimeError):
-    """Raised when lock state cannot be created or opened, not when it is busy.
+    """Raised when lock state or its sidecar cannot be accessed, not when busy.
 
     This happens when the identity running the process has a restrictive ACL
     on the machine-global state directory (USR-463), e.g. a sandboxed process
     group (CodexSandboxUsers) granted only read/execute on files created by a
     different account. ``probe_free_slot`` treats it as "no slot observed
-    free"; callers of ``acquire()``/``suite_lock()`` see degraded mode
-    (``resolve_state_dir()``) instead of this exception bubbling up raw.
+    free"; callers of ``acquire()``/``suite_lock()`` see degraded mode when a
+    writable fallback exists instead of a raw ``PermissionError``.
     """
 
     def __init__(self, path, reason: str) -> None:
@@ -724,19 +726,34 @@ class SuiteLock:
                 backoff = min(backoff * 1.5, _POLL_MAX_SEC)
             backoff = _POLL_MIN_SEC
         while True:
+            switched_to_fallback = False
             for slot in range(self._slots):
                 lock_path = directory / f"suite-{slot}.lock"
+                handle = None
                 try:
                     handle = _try_lock_file(lock_path)
+                    if handle is not None:
+                        try:
+                            _write_sidecar(lock_path)
+                        except OSError as exc:
+                            # The lock itself may be readable and lockable
+                            # while the canonical state directory still denies
+                            # metadata writes to this identity. Release the
+                            # canonical slot before switching to the same
+                            # per-identity fallback used for an unreadable lock.
+                            _unlock_file(handle)
+                            handle = None
+                            sidecar_tmp = _sidecar_path(lock_path).with_suffix(".tmp")
+                            raise SuiteLockUnwritable(sidecar_tmp, str(exc)) from exc
                 except SuiteLockUnwritable as exc:
                     # The canonical ACL can change between the initial probe
-                    # and acquisition. Degrade here as well, rather than leaking
-                    # the structured error out of a gate that could use its
-                    # per-identity lock directory.
+                    # and acquisition, or can deny sidecar writes even though
+                    # the lock is readable. Degrade here rather than leaking a
+                    # structured error when a fallback remains usable.
                     if resolution.degraded:
                         raise
                     canonical = _canonical_state_dir_path()
-                    reason = f"sem acesso a {lock_path}: {exc.reason}"
+                    reason = f"sem acesso a {exc.path}: {exc.reason}"
                     resolution = _resolve_fallback_state_dir(canonical, reason)
                     fallback = resolution.path
                     self.degraded = True
@@ -760,9 +777,9 @@ class SuiteLock:
                         _sleep(backoff)
                         backoff = min(backoff * 1.5, _POLL_MAX_SEC)
                     backoff = _POLL_MIN_SEC
+                    switched_to_fallback = True
                     break
                 if handle is not None:
-                    _write_sidecar(lock_path)
                     self._handle = _LockHandle(file=handle, path=lock_path, slot=slot)
                     self.waited_sec = time.monotonic() - wait_started
                     if printed_wait:
@@ -771,6 +788,8 @@ class SuiteLock:
                             "(queue time is not counted against any step timeout)"
                         )
                     return
+            if switched_to_fallback:
+                continue
             if time.monotonic() >= deadline:
                 timeout_error = SuiteLockTimeout(
                     f"[SUITE_LOCK] timed out after {self._timeout_sec:.0f}s waiting for a free "

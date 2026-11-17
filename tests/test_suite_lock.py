@@ -425,7 +425,7 @@ def test_acquire_stays_on_canonical_dir_with_no_warning_when_writable(
     assert not list(tmp_path.glob("darkfac-harness-*"))
 
 
-def test_acquire_uses_degraded_fallback_when_canonical_lock_unwritable(
+def test_acquire_uses_degraded_fallback_when_canonical_sidecar_is_unwritable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """USR-463: a restricted identity must still be able to acquire the lock,
@@ -435,15 +435,16 @@ def test_acquire_uses_degraded_fallback_when_canonical_lock_unwritable(
     canonical.mkdir(parents=True)
     canonical_lock = canonical / "suite-0.lock"
     canonical_lock.touch()
+    canonical_sidecar_tmp = canonical / "suite-0.tmp"
 
     real_open = Path.open
 
-    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
-        if self == canonical_lock and mode == "rb":
+    def _denied_sidecar_write(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == canonical_sidecar_tmp and mode == "w":
             raise PermissionError(13, "Permission denied")
         return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "open", _denied_read)
+    monkeypatch.setattr(Path, "open", _denied_sidecar_write)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
 
     lock = suite_lock.SuiteLock(timeout_sec=5)

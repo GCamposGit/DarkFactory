@@ -45,20 +45,25 @@ operacional mantém a trava, sem alterar os metadados do arquivo. Isso permite
 que uma identidade restrita -- por exemplo `CodexSandboxUsers`, cuja ACL concede
 `ReadAndExecute` sobre locks criados por outra conta -- adquira um slot canônico
 livre. Um lock ausente é criado com abertura exclusiva; se outro processo vencer
-a corrida de criação, o arquivo criado por ele é aberto para leitura. Falhas de
-permissão no acesso ao diretório ou ao lock são tentadas um número limitado de
-vezes e, ao persistirem, viram `SuiteLockUnwritable` com `path` e `reason`, sem
-propagar um `PermissionError` cru. `_try_lock_file` só retorna `None` para slot
-efetivamente ocupado por outro processo. `probe_free_slot()` nunca propaga o erro
-estruturado: trata um slot inacessível como "nenhum slot livre observado" e
-segue para o próximo, sem derrubar o chamador com traceback.
+a corrida de criação, o arquivo criado por ele é aberto para leitura. Se a
+identidade puder travar o lock, mas não gravar o sidecar de metadados, o runner
+libera o slot canônico e migra para o fallback por identidade antes de executar
+os testes. Falhas de permissão no acesso ao diretório, ao lock ou ao sidecar são
+tentadas um número limitado de vezes e, ao persistirem, viram
+`SuiteLockUnwritable` com `path` e `reason`, sem propagar um `PermissionError`
+cru. `_try_lock_file` só retorna `None` para slot efetivamente ocupado por outro
+processo. `probe_free_slot()` nunca propaga o erro estruturado: trata um slot
+inacessível como "nenhum slot livre observado" e segue para o próximo, sem
+derrubar o chamador com traceback.
 
 #### Modo degradado: estado por identidade (USR-463 T2)
 
 `resolve_state_dir()` é o contrato que `SuiteLock.acquire()` usa para escolher
 onde manter o lock. Uma falha de permissão no diretório canônico ou na leitura
-do lock leva ao fallback por identidade; se o fallback também não puder criar
-ou abrir seu lock, a função levanta `SuiteLockUnwritable` estruturado:
+do lock leva ao fallback por identidade. Se a leitura passar mas a gravação do
+sidecar falhar durante a aquisição, `SuiteLock.acquire()` libera o lock
+canônico e troca para o mesmo fallback. Se nenhum fallback puder criar ou abrir
+seu lock, a resolução levanta `SuiteLockUnwritable` estruturado:
 
 - Verifica o artefato exato que uma aquisição real usa
   (`<diretório-canônico>/suite-0.lock`) abrindo-o para leitura. Se estiver
@@ -106,11 +111,11 @@ ou abrir seu lock, a função levanta `SuiteLockUnwritable` estruturado:
 acima de ponta a ponta, sem propagar `PermissionError`/`SuiteLockUnwritable`
 cru nem perder a telemetria do run:
 
-- `_append_run_timing()` grava `run_timings.jsonl` no diretório que
-  `suite_lock.resolve_state_dir()` resolve -- canônico quando o lock está acessível, ou o
-  fallback por identidade quando não -- em vez do acessor estrito
-  `suite_lock.state_dir()`, que levantaria `SuiteLockUnwritable` exatamente
-  neste caso. `_finish_run_timing()` continua envolvendo a gravação em
+- `_append_run_timing()` grava `run_timings.jsonl` no diretório registrado pela
+  aquisição do lock -- canônico ou fallback por identidade -- para que a
+  telemetria acompanhe o lock efetivamente usado. Quando a execução termina
+  antes de adquirir um lock, consulta `resolve_state_dir()` como fallback.
+  `_finish_run_timing()` continua envolvendo a gravação em
   `contextlib.suppress(Exception)`, então uma falha residual aqui (ex.: disco
   cheio) nunca muda o veredito, mas agora a gravação em si tem onde funcionar
   sob identidade restrita.
