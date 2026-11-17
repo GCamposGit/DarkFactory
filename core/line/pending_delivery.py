@@ -33,6 +33,9 @@ _PERMANENT_BLOCK_CAUSES = frozenset({
 # Preserved exit of the USR-467 review crash. Not a general launcher failure.
 _LEGACY_REVIEW_EXIT = "launcher_exit:1"
 _RESUMABLE_REVIEW_MARKERS = ("no_route_available", "review_agent_exhausted", "route_wait")
+# A blocked evidence wait of a ticket closed this long ago is obsolete (USR-490).
+_OBSOLETE_EVIDENCE_CAUSES = frozenset({"deploy_evidence_missing", "deploy_evidence_mismatch"})
+OBSOLETE_WAIT_SECONDS = 6 * 3600
 _children: dict[int, subprocess.Popen] = {}
 
 
@@ -252,6 +255,39 @@ def _legacy_review_exit_ready(row: PendingDelivery) -> bool:
     return _review_still_absent(context, digest)
 
 
+def _closed_since(ticket: dict, path: Path) -> float | None:
+    """Epoch of the ticket's last update, or the wait file mtime when it is unknown."""
+    try:
+        stamp = datetime.fromisoformat(str(ticket.get("updated_at")).replace("Z", "+00:00"))
+        return (stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)).timestamp()
+    except ValueError:
+        pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _archive_obsolete_wait(path: Path, row: PendingDelivery, now: float) -> dict | None:
+    """Move a blocked evidence wait of a long-closed ticket to ``archive/`` (never deleted)."""
+    from core.demands.queue_store import control_store
+    store = control_store()
+    if getattr(store, "mock_mode", False):
+        return None
+    ticket = next((t for t in store.list_tickets() if t.get("id") == row.ticket_id), None)
+    if ticket is None or ticket.get("status") not in {"completed", "cancelled", "canceled"}:
+        return None
+    closed = _closed_since(ticket, path)
+    if closed is None or now - closed <= OBSOLETE_WAIT_SECONDS:
+        return None
+    target = path.parent / "archive"
+    target.mkdir(parents=True, exist_ok=True)
+    os.replace(path, target / path.name)
+    logger.info("archived obsolete pending delivery %s cause=%s ticket_status=%s",
+                row.ticket_id, row.cause, ticket.get("status"))
+    return {"ticket": row.ticket_id, "status": "archived", "cause": row.cause}
+
+
 def _pid_running(row: PendingDelivery) -> bool:
     try:
         process = psutil.Process(row.pid)
@@ -297,6 +333,10 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         row.next_check = float(admission.budget(row.project_id, row.ticket_id)["next_attempt_at"])
         _save(path, row)
         return {"ticket": row.ticket_id, "status": row.status, "cause": reason, "next_check": row.next_check}
+    if row.status == "blocked" and row.cause in _OBSOLETE_EVIDENCE_CAUSES:
+        archived = _archive_obsolete_wait(path, row, now)
+        if archived:
+            return archived
     reopen = _blocked_review_reopen(row)
     if (row.status == "blocked" and not reopen) or row.next_check > now or is_locked():
         return {"ticket": row.ticket_id, "status": row.status, "next_check": row.next_check}

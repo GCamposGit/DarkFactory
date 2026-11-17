@@ -2551,6 +2551,66 @@ def _reach_of(text: str) -> list[str]:
     return [] if raw == "-" else raw.split(",")
 
 
+class _Ticker:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        self.now += 100.0
+        return self.now
+
+
+def test_no_image_change_with_vps_on_published_image_exits_ok_and_runs_backup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-490: tests/docs-only interval; VPS serves the live image, not the candidate SHA."""
+    from core.infra import node_sync
+
+    _install_line(monkeypatch, (
+        deploy_classifier.CommitTouch(_LIVE, ()),
+        deploy_classifier.CommitTouch(_TARGET, ("tests/x.py",)),
+    ))
+    reports = {
+        "Notebook": node_sync.NodeStatus(name="Notebook", state="converged", git_sha=_TARGET),
+        "Desktop": node_sync.NodeStatus(name="Desktop", state="converged", git_sha=_TARGET),
+        "VPS": node_sync.NodeStatus(name="VPS", state="divergent", git_sha=_LIVE, reason="sha mismatch"),
+    }
+    monkeypatch.setattr(
+        node_sync, "sync", lambda **kw: node_sync.SyncReport(expected_sha=_TARGET, nodes=list(reports.values())),
+    )
+    backups: List[str] = []
+    monkeypatch.setattr(mod, "default_backup_runner", lambda project_id="darkfac": backups.append(project_id) or {})
+    monkeypatch.setattr(mod, "_publish_convergence_best_effort", lambda env, err: None)
+    monkeypatch.setattr(mod, "get_origin_main_compose", lambda sha: (mod.REPO_ROOT / "deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8"))
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--only", "darkfac-cloud"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"}, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport, ghcr_probe=lambda repo, tag: 200,
+        health_client=lambda: {"git_sha": _LIVE}, stdout=out, stderr=err, sleep_fn=lambda _s: None,
+        clock_fn=_Ticker(),
+    )
+    assert "no image change" in out.getvalue()
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert backups == ["darkfac"]
+
+    # A VPS on any other SHA is still a real divergence.
+    reports["VPS"] = node_sync.NodeStatus(name="VPS", state="divergent", git_sha="9" * 40, reason="sha mismatch")
+    backups.clear()
+    transport = _usr515_transport()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--only", "darkfac-cloud"],
+        env={**_ENV, "DARKHUB_IMAGE_SOURCE": "ghcr"}, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport, ghcr_probe=lambda repo, tag: 200,
+        health_client=lambda: {"git_sha": _LIVE}, stdout=out, stderr=err, sleep_fn=lambda _s: None,
+        clock_fn=_Ticker(),
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert backups == []
+
+
 def test_resolve_image_lag_pins_ancestor_and_skips_clean_interval(monkeypatch: pytest.MonkeyPatch) -> None:
     pending = (
         deploy_classifier.CommitTouch(_LIVE, ()),

@@ -1532,6 +1532,8 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
 class ClaudeCodeAccountAdapter(AccountUsageAdapter):
     SNAPSHOT_FRESHNESS_TTL_SECONDS = 900.0
+    # Subscription can renew before the recorded resets_at; one probe per this age catches it.
+    BELOW_FLOOR_PROBE_MIN_AGE_SECONDS = 2 * 3600.0
 
     def __init__(self, spec: ProviderSpec, snapshot_dir: Path) -> None:
         super().__init__(spec, snapshot_dir)
@@ -1597,9 +1599,15 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 return False
             return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)) <= now
 
-        return all(
+        if all(
             w.remaining_percent is None or w.remaining_percent > 15.0 or already_reset(w.resets_at)
             for w in usage.windows
+        ):
+            return True
+        # Below the floor with the reset still ahead: the plan may have been renewed early (USR-490).
+        # An old enough snapshot allows a single minimal probe; the age limit prevents repetition.
+        return not self._is_snapshot_fresh(snapshot, self.BELOW_FLOOR_PROBE_MIN_AGE_SECONDS) and bool(
+            snapshot.get("checked_at")
         )
 
     @staticmethod

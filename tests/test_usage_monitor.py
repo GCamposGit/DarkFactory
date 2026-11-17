@@ -456,16 +456,16 @@ def test_claude_adapter_prefers_fresh_statusline_snapshot_without_cli_quota(
     assert [window.used_percent for window in result.windows] == [24.0, 70.0]
 
 
-@pytest.mark.parametrize("used,reset_in_min,paid_calls", [(84, 60, 1), (85, 60, 0), (100, 60, 0), (100, -1, 1)])
+@pytest.mark.parametrize("used,reset_in_min,paid_calls,age_min", [(84, 60, 1, 16), (85, 60, 0, 16), (100, 60, 0, 16), (100, -1, 1, 16), (86, 60, 1, 180)])
 def test_claude_paid_probe_only_when_stale_and_above_floor_or_window_reset(
-    tmp_path, monkeypatch, used, reset_in_min, paid_calls,
+    tmp_path, monkeypatch, used, reset_in_min, paid_calls, age_min,
 ):
     from datetime import datetime, timedelta, timezone
     from core.usage.adapters import ClaudeCodeAccountAdapter
     from scripts.claude_statusline import snapshot_from_payload
 
     snapshot = snapshot_from_payload({"rate_limits": {"five_hour": {"used_percentage": used}}})
-    snapshot["checked_at"] = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
+    snapshot["checked_at"] = (datetime.now(timezone.utc) - timedelta(minutes=age_min)).isoformat()
     snapshot["windows"][0]["resets_at"] = (datetime.now(timezone.utc) + timedelta(minutes=reset_in_min)).isoformat()
     (tmp_path / "anthropic.json").write_text(json.dumps(snapshot), encoding="utf-8")
     spec = ProviderSpec("anthropic", "Claude", ProviderFamily.FRONTIER, "https://example.test")
