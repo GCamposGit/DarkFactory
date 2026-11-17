@@ -841,6 +841,37 @@ def test_completed_ticket_with_another_cause_stays_blocked_without_deploy_proof(
     assert saved.cause == "deploy_evidence_missing"
 
 
+@pytest.mark.parametrize("cause", ["deploy_evidence_missing", "deploy_evidence_mismatch"])
+@pytest.mark.parametrize("status,age_h,archived", [
+    ("completed", 7, True), ("cancelled", 7, True), ("completed", 1, False), ("planned", 7, False),
+])
+def test_blocked_evidence_wait_of_closed_ticket_is_archived_after_six_hours(
+    tmp_path: Path, monkeypatch, cause: str, status: str, age_h: int, archived: bool,
+):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause=cause, status=status,
+    )
+    row.status = "blocked"
+    pd._save(directory / "USR-99.json", row)
+    updated = (datetime.now(timezone.utc) - timedelta(hours=age_h)).isoformat()
+    monkeypatch.setattr(
+        "core.demands.queue_store.control_store",
+        lambda: SimpleNamespace(
+            mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": status, "updated_at": updated}],
+        ),
+    )
+
+    result = pd.tick(tmp_path, directory=directory, now=datetime.now(timezone.utc).timestamp())
+
+    assert calls == []
+    assert (directory / "archive" / "USR-99.json").is_file() is archived
+    assert (directory / "USR-99.json").exists() is not archived
+    assert (result[0]["status"] == "archived") is archived
+
+
 def test_admission_store_failure_is_structured_and_fails_closed(tmp_path: Path):
     class UnavailableStore:
         def retry_reason(self, *_args, **_kwargs):

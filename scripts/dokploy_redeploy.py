@@ -1823,6 +1823,18 @@ def _run_main(
         if not args.dry_run:
             _publish_convergence_best_effort(env, err)
         for node in sync_report.nodes:
+            if (
+                image_lag_action == deploy_classifier.ACTION_SKIP
+                and node.name == "VPS"
+                and node.state == "divergent"
+                and image_sha
+                and (node.git_sha or "").lower() == image_sha.lower()
+            ):
+                # USR-490: only tests/docs changed, so the VPS correctly keeps serving the live
+                # published image; the candidate SHA never reaches it and that is not a divergence.
+                node.state = "converged"
+                node.reason = None
+                print(f"[NODE SYNC] VPS: serves published image sha={image_sha} (no image change)", file=out, flush=True)
             if node.state == "converged":
                 continue
             if node.state == "excluded":

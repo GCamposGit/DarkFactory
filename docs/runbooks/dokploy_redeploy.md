@@ -165,6 +165,7 @@ O pin pode ser o ancestral publicado: o ultimo SHA que esse workflow publica, de
 - Alvo que toca os paths do workflow: a espera e a tag do proprio alvo.
 - Alvo fora desses paths, com runtime no intervalo: implanta o SHA publicado. Nao espera a tag do alvo.
 - Alvo fora desses paths, sem runtime no intervalo: saida 0, sem consulta de tag e sem POST. O stdout traz o SHA live em `published=` e o alcance em `reach=`, sem path do workflow.
+  Nesse caso a VPS segue no SHA live publicado: o sync a aceita como convergida (nao e divergencia), o backup pos-deploy roda e o script sai com 0 (USR-490). Falha de publicacao do snapshot de convergencia e so aviso.
 - Live desconhecido e alvo fora dos paths: sem espera da tag ausente, sem POST, saida diferente de zero, nomeando o SHA alvo.
 - `--force` implanta o SHA explicito e nao troca o pin por um ancestral.
 - O pin nunca e um SHA anterior ao que ja esta em producao.

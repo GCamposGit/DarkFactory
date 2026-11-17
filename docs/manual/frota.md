@@ -23,7 +23,8 @@ Processo vivo não é duplicado, ticket terminal sai da fila e falha diferente d
 seguinte (USR-512 T3). Com rota compatível, o dispatcher lança
 `run_ticket.py --resume-delivery <ticket> --worktree <a mesma>`, sem PLAN e sem BUILD.
 `deploy_evidence_missing`, `deploy_evidence_mismatch` e `implementing_family_unknown`
-continuam bloqueadas. O `launcher_exit:1` deixado por USR-467 só reabre depois de
+continuam bloqueadas, mas as duas de evidencia de ticket `completed` ou `cancelled` ha mais de 6 h
+(`updated_at`, ou a idade do arquivo) sao movidas para `.factory/pending_delivery/archive/` e registradas em log (USR-490). O `launcher_exit:1` deixado por USR-467 só reabre depois de
 confirmar candidato, gate vigente e revisão ainda ausente; os outros `launcher_exit`
 não usam essa reabertura. Decisão material `waiting_human`
 continua dependendo do owner. Nenhuma espera compra créditos nem aumenta o teto.
