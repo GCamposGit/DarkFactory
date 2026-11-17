@@ -267,23 +267,23 @@ KNOWN_EPHEMERAL_PATTERNS = (
     "ticket_quota_usage.jsonl",
 )
 
-# Fleet runtime state can be untracked on nodes that have not yet received the
-# matching .gitignore entries. These generated files must not prevent checkout
-# convergence; source files elsewhere in the tree remain dirty as usual.
+# These explicit generated fleet artifacts can be untracked on nodes that do
+# not yet have the matching .gitignore entries. Keep source files dirty and do
+# not ignore .factory/runs as a whole.
 FLEET_RUNTIME_UNTRACKED_FILES = frozenset(
     {
-        ".factory/runs/fleet_dispatcher_state.json",
-        ".factory/runs/sentinel_state.json",
-        ".factory/runs/fleet_policy_snapshot.json",
-        ".factory/runs/model_audit_receipt.json",
-        ".factory/runs/recovery_list_state.json",
+        ".factory/runs/fleet_dispatcher_state.json",  # Dispatcher checkpoint for queued fleet work.
+        ".factory/runs/sentinel_state.json",  # Sentinel's persisted runtime state.
+        ".factory/runs/fleet_policy_snapshot.json",  # Generated snapshot consumed by fleet policy routing.
+        ".factory/runs/model_audit_receipt.json",  # Generated receipt from model and quota auditing.
+        ".factory/runs/recovery_list_state.json",  # Checkpoint for the recovery-list worker.
     }
 )
 FLEET_RUNTIME_UNTRACKED_DIRECTORIES = (
-    ".factory/runs/fleet_dispatcher_logs",
-    ".factory/runs/outcomes",
-    ".factory/runs/ci_recovery",
-    ".factory/runs/node_sync_conflicts",
+    ".factory/runs/fleet_dispatcher_logs",  # Dispatcher execution logs, not inputs to the checkout.
+    ".factory/runs/outcomes",  # Results emitted by fleet runs.
+    ".factory/runs/ci_recovery",  # Persisted CI recovery queue and execution state.
+    ".factory/runs/node_sync_conflicts",  # Local copies preserved when runtime state conflicts upstream.
 )
 
 

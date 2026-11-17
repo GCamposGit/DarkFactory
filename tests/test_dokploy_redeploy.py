@@ -1814,6 +1814,53 @@ def test_fleet_runtime_untracked_notebook_convergence_runs_post_deploy_backup(
     assert "[PENDING] Notebook divergent" not in err
 
 
+def test_untracked_notebook_code_is_dirty_and_skips_post_deploy_backup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    from core.infra import node_sync
+
+    source_file = "core/x.py"
+
+    def fake_git(_root: Any, args: List[str]) -> str:
+        if args == ["status", "--porcelain"]:
+            return f"?? {source_file}"
+        if args == ["diff", "--name-only"]:
+            return ""
+        if args == ["ls-files", "--others", "--exclude-standard"]:
+            return source_file
+        if args == ["ls-files", "--others", "-i", "--exclude-standard"]:
+            return ""
+        if args in (["rev-list", f"{'a' * 40}..HEAD"], ["rev-list", f"HEAD..{'a' * 40}"]):
+            return ""
+        raise AssertionError(args)
+
+    classification, local_commits, dirty_files, reason = node_sync.classify_checkout(
+        tmp_path, fake_git, "a" * 40
+    )
+    assert classification == "dirty"
+    assert dirty_files["untracked"] == [source_file]
+    notebook = node_sync.NodeStatus(
+        name="Notebook", state="divergent", target_sha="a" * 40,
+        sync_classification=classification, local_commits=local_commits,
+        dirty_files=dirty_files, reason=reason,
+    )
+    report = _report_with(
+        node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40),
+        notebook=notebook,
+    )
+    assert report.nodes[0].state == "divergent"
+    assert report.nodes[0].sync_classification == "dirty"
+    assert report.nodes[0].dirty_files["untracked"] == [source_file]
+
+    code, out, err, backups = _run_with_sync_report(monkeypatch, report)
+
+    assert code == mod.EXIT_NODE_DIRTY
+    assert backups == []
+    assert "[BACKUP] skipped" in out
+    assert "[NODE SYNC] Notebook: divergent" in err
+    assert source_file in err
+
+
 def _refuse_origin(*_a: object, **_k: object) -> str:
     raise AssertionError("explicit candidate must not read origin/main")
 
