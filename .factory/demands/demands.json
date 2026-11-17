@@ -14682,8 +14682,8 @@
     "project_id": "darkfac",
     "title": "Worker do Notebook responde node_id do Desktop",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c429f3b8fd0443381d57fb67cec7c2c312d681ca",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14706,6 +14706,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-08T14:21:37.271357Z",
-    "updated_at": "2026-11-08T14:21:37.271357Z"
+    "updated_at": "2026-11-17T10:19:00.232122Z"
   }
 ]
