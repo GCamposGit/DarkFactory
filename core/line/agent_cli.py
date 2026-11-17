@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 from urllib.parse import urlparse
 
+from core.common.tempdirs import probe_sandbox
 from core.line import cancellation
 from core.models.registry import resolve as resolve_model
 from core.paths import project_root, state_root
@@ -1657,8 +1658,8 @@ def _run_grok(req: AgentRequest) -> AgentResult:
     try:
         try:
             # Windows limits argv length; keep private prompt contents off process listings.
-            with tempfile.TemporaryDirectory(prefix="grok_read_prompt_") as directory:
-                prompt_file = Path(directory) / "prompt.txt"
+            with probe_sandbox(prefix="grok_read_prompt_") as directory:
+                prompt_file = directory / "prompt.txt"
                 prompt_file.write_bytes(req.prompt.encode("utf-8"))
                 res = _run_bounded(
                     [*argv, "--prompt-file", str(prompt_file)],

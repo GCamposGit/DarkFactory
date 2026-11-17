@@ -33,6 +33,22 @@ snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
 
 `ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova). O alias permitido `haiku` e resolvido pelo registro de modelos, mas a chamada usa o ID explicito configurado em `claude_cli_model_id`; hoje ele precisa coincidir com o ID do alias `haiku` no registro. As janelas de cota sao da conta: se a CLI avisar que nao reconhece o modelo, ou responder com outro modelo, a leitura vale mesmo assim (16/11/2026: recusar essa leitura deixou o Claude desconhecido e a linha sem rota de planejamento). A coleta so aceita a leitura se a CLI informar exatamente esse ID, mantendo modelo solicitado, modelo efetivo e identidade de custo alinhados. Se a CLI rejeitar o modelo ou informar outro ID, nenhum snapshot novo e gravado.
 
+## Contrato do sandbox de sonda (USR-457)
+
+Toda sonda que sobe subprocesso (`_probe_claude_headless` aqui; `probe_claude` em
+`core/line/auth_bootstrap.py`; a leitura de Grok em modo `read` de `core/line/agent_cli.py`) abre
+seu diretorio de trabalho com `core.common.tempdirs.probe_sandbox`, nunca com
+`tempfile.TemporaryDirectory` cru. A diferenca importa: `TemporaryDirectory` remove o diretorio
+num callback `weakref.finalize`, que roda no encerramento do interpretador e, se a remocao falhar
+(caso real: `PermissionError [WinError 5]` ao limpar `darkfac-quota-probe` com ACL restrita no
+sandbox Windows), imprime um traceback "Exception ignored in" sem jeito de capturar. `probe_sandbox`
+remove o diretorio de forma sincrona, dentro do `with`, e uma falha de remocao e so logada
+(`darkfac.common.tempdirs`, com `winerror` quando disponivel) e devolvida como
+`SandboxCleanup(ok=False, ...)` -- nunca propaga. O diretorio e sempre criado dentro de
+`tempfile.gettempdir()`; `remove_sandbox_dir` recusa remover qualquer caminho fora dali. Falha de
+limpeza nunca altera o veredito de cota: o resultado da sonda (janela lida ou `None`/fail-closed)
+depende só da saída do subprocesso, nunca do sucesso da remoção do diretório.
+
 ## Medidor Antigravity RPC (USR-433)
 
 `GeminiAccountAdapter` coleta quotas locais via Language Server local (`antigravity_rpc`). Quando a coleta remota ou as credenciais falham, o adaptador persiste um `ProbeFailure` estruturado com categoria (`unavailable`, `invalid_response`, `protocol`, etc.) e código do erro, mantendo o estado rastreável no relatório sem expor segredos.

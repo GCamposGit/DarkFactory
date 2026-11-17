@@ -16,8 +16,8 @@ import queue
 import re
 import shutil
 import ssl
+import signal
 import subprocess
-import tempfile
 import threading
 import time
 import urllib.error
@@ -30,6 +30,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.common.tempdirs import ProbeSandbox, SandboxCleanup, probe_sandbox
 from core.models.registry import id_of, resolve_claude_probe_model, resolve_known
 from core.usage.models import (
     AccountConnectionStatus,
@@ -44,6 +45,56 @@ logger = logging.getLogger(__name__)
 # USR-185: Antigravity quota model name comes from the model registry (alias "flash").
 _ANTIGRAVITY_MODEL = resolve_known("flash")
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _run_probe_command(
+    command: List[str], cwd: Path, sandbox: ProbeSandbox, *, timeout: int = 40
+) -> "subprocess.CompletedProcess[str]":
+    """Run the quota probe CLI in its own process group, owned by ``sandbox``.
+
+    The sandbox stops the whole process tree before it removes its directory.
+    """
+    creationflags = _CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8", errors="replace", cwd=cwd,
+        stdin=subprocess.DEVNULL, creationflags=creationflags,
+        start_new_session=os.name != "nt",
+    )
+    sandbox.register_process(process, _terminate_probe_process_tree)
+    stdout, stderr = process.communicate(timeout=timeout)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _terminate_probe_process_tree(process: subprocess.Popen[str]) -> None:
+    """Stop and reap the quota CLI and descendants before its sandbox is removed."""
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True, check=False, timeout=10,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            if process.poll() is None:
+                process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        # Do not infer that the tree exited just because its leader did. Give
+        # descendants a short graceful window, then force-stop the whole group.
+        time.sleep(0.2)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
 
 
 @dataclass(frozen=True)
@@ -1482,6 +1533,12 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 class ClaudeCodeAccountAdapter(AccountUsageAdapter):
     SNAPSHOT_FRESHNESS_TTL_SECONDS = 900.0
 
+    def __init__(self, spec: ProviderSpec, snapshot_dir: Path) -> None:
+        super().__init__(spec, snapshot_dir)
+        # Cleanup diagnostics are separate from quota fields: a cleanup error must
+        # never manufacture a reading or replace a fail-closed ``None`` result.
+        self.last_probe_cleanup: Optional[SandboxCleanup] = None
+
     def inspect(self, force: bool = False) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
         if snapshot and self._is_snapshot_fresh(snapshot):
@@ -1698,18 +1755,20 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if not self._paid_probe_allowed():
             return None
         selection = resolve_claude_probe_model("haiku")
+        sandbox: ProbeSandbox = probe_sandbox(prefix="darkfac-quota-probe-")
         try:
-            with tempfile.TemporaryDirectory(prefix="darkfac-quota-probe-") as neutral:
-                result = subprocess.run(
+            with sandbox as neutral:
+                result = _run_probe_command(
                     [executable, "-p", "ok", "--output-format", "stream-json", "--verbose",
                      "--model", selection.cli_model_id, "--max-turns", "1"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    timeout=40, check=False, cwd=neutral, stdin=subprocess.DEVNULL,
-                    creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    neutral,
+                    sandbox,
                 )
         except (OSError, subprocess.TimeoutExpired) as exc:
+            self._record_probe_cleanup(sandbox)
             logger.debug("Claude headless quota probe failed: %s", type(exc).__name__)
             return None
+        self._record_probe_cleanup(sandbox)
         stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else (result.stdout or "")
         stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
         if "unrecognized_model" in f"{stdout}\n{stderr}".casefold():
@@ -1794,6 +1853,18 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         # applied here because it can replace a real current-window value with an older one.
         self._save_snapshot(usage)
         return usage
+
+    def _record_probe_cleanup(self, sandbox: ProbeSandbox) -> None:
+        """Expose explicit cleanup outcome without changing the quota verdict."""
+        self.last_probe_cleanup = sandbox.cleanup_result
+        cleanup = sandbox.cleanup_result
+        if cleanup is not None and not cleanup.ok:
+            logger.warning(
+                "Claude quota probe sandbox cleanup outcome: error_kind=%s winerror=%s detail=%s",
+                cleanup.error_kind,
+                cleanup.winerror,
+                cleanup.detail,
+            )
 
     @staticmethod
     def _claude_probe_model_matches(expected_model_id: str, model: str) -> bool:

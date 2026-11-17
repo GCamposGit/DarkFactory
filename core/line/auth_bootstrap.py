@@ -35,7 +35,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -43,6 +42,7 @@ from typing import Callable, Iterable, Optional
 
 from pydantic import BaseModel
 
+from core.common.tempdirs import probe_sandbox
 from core.harness.remote_worker import find_codex_binary
 from core.line.agent_cli import AgentRequest, redact_secrets, run_agent
 
@@ -94,11 +94,11 @@ def probe_claude(timeout_s: int = 120) -> HarnessProbeResult:
     is `<error_kind>: <first ~300 chars>` (redacted), e.g. `timeout: timed out
     after 120s: ...`, so a dropped capability is diagnosable from the logs.
     """
-    with tempfile.TemporaryDirectory(prefix="darkfac-claude-probe-") as neutral_dir:
+    with probe_sandbox(prefix="darkfac-claude-probe-") as neutral_dir:
         result = run_agent(
             AgentRequest(
                 prompt=CLAUDE_PROBE_PROMPT,
-                cwd=Path(neutral_dir),
+                cwd=neutral_dir,
                 mode="read",
                 harness="claude",
                 timeout_s=timeout_s,
