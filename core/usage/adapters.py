@@ -1713,10 +1713,10 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else (result.stdout or "")
         stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
         if "unrecognized_model" in f"{stdout}\n{stderr}".casefold():
-            # Structured JSON errors and plain diagnostics are equally fatal, even when
-            # the CLI also emitted quota events before rejecting the requested model.
-            logger.warning("Claude quota probe rejected the explicitly selected model")
-            return None
+            # The quota windows belong to the account, not to the model. The CLI prints this
+            # diagnostic and still answers with real rate-limit events, so the reading stands:
+            # refusing it left Claude "unknown" and the whole line without a planning route.
+            logger.warning("Claude quota probe: CLI did not recognize the pinned model id; reading kept")
         if result.returncode != 0:
             logger.debug("Claude headless quota probe exited with status %s", result.returncode)
             return None
@@ -1763,8 +1763,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if set(limits) != {"five_hour", "seven_day"} or not effective_models:
             return None
         if any(not self._claude_probe_model_matches(selection.cost_model_id, model) for model in effective_models):
-            logger.warning("Claude quota probe reported an effective model outside the pinned registry model")
-            return None
+            logger.warning("Claude quota probe ran on a model other than the pinned one; reading kept")
         windows = self._claude_cli_rate_limit_windows(limits, preserve_percentages=True)
         if {window.quota_id for window in windows} != {"claude:5h", "claude:weekly"}:
             return None
