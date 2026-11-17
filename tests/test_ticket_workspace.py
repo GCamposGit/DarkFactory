@@ -317,13 +317,17 @@ def test_cleanup_reports_failure_when_even_the_rename_fails(
     assert ws.path.exists() and "rename blocked" in "; ".join(result.errors)  # nothing was lost
 
 
-@pytest.mark.parametrize("change_kind", ["tracked", "untracked", "staged"])
+@pytest.mark.parametrize("change_kind", ["tracked", "untracked", "staged", "ledger"])
 def test_cleanup_preserves_worktrees_with_any_git_changes(
     repo: SimpleNamespace, change_kind: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     ws = create_workspace(f"USR-217-{change_kind}", cwd=repo.local)
     if change_kind == "tracked":
         (ws.path / "README.md").write_text("changed\n", encoding="utf-8")
+    elif change_kind == "ledger":
+        added = ws.path / ".factory" / "demands" / "demands.json"
+        added.parent.mkdir(parents=True)
+        added.write_text("[]\n", encoding="utf-8")
     else:
         added = ws.path / "precious.txt"
         added.write_text("keep me\n", encoding="utf-8")
@@ -336,9 +340,15 @@ def test_cleanup_preserves_worktrees_with_any_git_changes(
     assert result.reason == "worktree_dirty"
     assert "changes" in result.detail
     assert any("preserved because the worktree has" in record.getMessage() for record in caplog.records)
+    pending = ticket_workspace.list_cleanup_pending(ws.main_root)
+    assert len(pending) == 1
+    assert pending[0]["path"] == str(ws.path.resolve())
+    assert pending[0]["outcome"] == "blocked_changes"
     assert ws.path.exists()
     if change_kind == "tracked":
         assert (ws.path / "README.md").read_text(encoding="utf-8") == "changed\n"
+    elif change_kind == "ledger":
+        assert (ws.path / ".factory" / "demands" / "demands.json").read_text(encoding="utf-8") == "[]\n"
     else:
         assert (ws.path / "precious.txt").exists()
     assert os.path.normcase(os.path.realpath(ws.path)) in _registered(repo.local)
@@ -353,6 +363,58 @@ def test_cleanup_preserves_a_worktree_with_a_live_process(repo: SimpleNamespace)
     assert result.reason == "live_process"
     assert "python (pid 42)" in result.detail
     assert ws.path.exists()
+    pending = ticket_workspace.list_cleanup_pending(ws.main_root)
+    assert len(pending) == 1 and pending[0]["reason"] == "live_process"
+
+
+def test_cleanup_preserves_when_a_process_cannot_be_inspected(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = create_workspace("USR-218-access-denied", cwd=repo.local)
+
+    class AccessDenied(Exception):
+        pass
+
+    process = SimpleNamespace(
+        cwd=lambda: (_ for _ in ()).throw(AccessDenied()),
+        open_files=lambda: [],
+        info={"name": "protected", "pid": 2718},
+    )
+    fake_psutil = SimpleNamespace(
+        process_iter=lambda _attrs: [process],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=AccessDenied,
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    result = cleanup(ws.path, ws.main_root)
+
+    assert not result.removed and result.method == "preserved" and result.outcome == "error"
+    assert result.reason == "process_state_unknown"
+    assert ws.path.exists()
+    assert len(ticket_workspace.list_cleanup_pending(ws.main_root)) == 1
+
+
+def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(
+    repo: SimpleNamespace,
+) -> None:
+    ws = create_workspace("USR-218-pending-retry", cwd=repo.local)
+    dirty = ws.path / "keep.txt"
+    dirty.write_text("work in progress\n", encoding="utf-8")
+
+    first = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ())
+    second = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ())
+
+    assert first.outcome == second.outcome == "blocked_changes"
+    assert len(ticket_workspace.list_cleanup_pending(ws.main_root)) == 1
+
+    dirty.unlink()
+    removed = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ())
+    repeated = cleanup(ws.path, ws.main_root, holder_probe=lambda _path: ())
+
+    assert removed.removed and repeated.removed and repeated.method == "absent"
+    assert ticket_workspace.list_cleanup_pending(ws.main_root) == []
 
 
 def test_cleanup_preserves_a_worktree_opened_by_a_process_with_an_external_cwd(

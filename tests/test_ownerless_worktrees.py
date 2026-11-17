@@ -220,6 +220,13 @@ def test_psutil_failure_wins_over_a_dirty_tree() -> None:
     assert verdict.reason == "psutil_unavailable" and not verdict.eligible
 
 
+def test_active_ticket_is_preserved_before_reporting_retryable_dirty_state() -> None:
+    verdict = classify_ownerless(
+        _facts(ticket_status="implementing", changed_paths=("keep.txt",), holders=("python (pid 7)",))
+    )
+    assert verdict.reason == "open_ticket" and not verdict.eligible
+
+
 def test_resolve_ticket_status_prefers_a_terminal_ledger_row() -> None:
     assert resolve_ticket_status("completed", "implementing", file_readable=True) == "completed"
     assert resolve_ticket_status("planned", "completed", file_readable=True) == "completed"

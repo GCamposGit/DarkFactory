@@ -31,6 +31,9 @@ _BLOCKED_REASONS = frozenset({"dirty", "holder", "locked", "index_lock", "detach
 _ERROR_REASONS = frozenset(
     {"psutil_unavailable", "git_unreadable", "status_unreadable", "ticket_status_unknown", "age_unknown", "unregistered"}
 )
+_CLEANUP_RETRY_REASONS = frozenset(
+    {"dirty", "holder", "locked", "index_lock", "psutil_unavailable", "git_unreadable", "status_unreadable"}
+)
 
 
 @dataclass
@@ -85,7 +88,25 @@ def sweep_orphan_worktrees(
         summary.record("errors", main_root, "worktree_inventory_empty", "Git returned no registered worktrees")
         return summary
 
+    try:
+        pending_paths = {
+            ticket_workspace._norm(record["path"])
+            for record in ticket_workspace.list_cleanup_pending(main_root)
+            if isinstance(record.get("path"), str)
+        }
+    except Exception as exc:  # noqa: BLE001 - missing pending state must fail closed
+        summary.record("errors", main_root, "cleanup_pending_inventory_error", f"{type(exc).__name__}: {exc}")
+        return summary
+
+    ordinary_entries: list[tuple[int, Mapping[str, str]]] = []
+    pending_entries: list[tuple[int, Mapping[str, str]]] = []
     for index, entry in enumerate(entries):
+        raw_path = entry.get("worktree", "")
+        path = Path(raw_path) if raw_path else main_root
+        target = pending_entries if ticket_workspace._norm(path) in pending_paths else ordinary_entries
+        target.append((index, entry))
+
+    def process_entry(index: int, entry: Mapping[str, str], *, pending_retry: bool) -> None:
         raw_path = entry.get("worktree", "")
         path = Path(raw_path) if raw_path else main_root
         try:
@@ -103,9 +124,10 @@ def sweep_orphan_worktrees(
         except Exception as exc:  # noqa: BLE001 - isolate malformed worktree state
             summary.record("errors", path, "classification_error", f"{type(exc).__name__}: {exc}")
             logger.exception("could not classify worktree %s; continuing sweep", path)
-            continue
+            return
 
-        if not verdict.eligible:
+        should_cleanup = verdict.eligible or verdict.reason in _CLEANUP_RETRY_REASONS
+        if not should_cleanup:
             category = "blocked" if verdict.reason in _BLOCKED_REASONS else (
                 "errors" if verdict.reason in _ERROR_REASONS else "ignored"
             )
@@ -117,7 +139,7 @@ def sweep_orphan_worktrees(
                     verdict.reason,
                     verdict.detail,
                 )
-            continue
+            return
 
         try:
             result = ticket_workspace.cleanup(
@@ -130,10 +152,10 @@ def sweep_orphan_worktrees(
         except Exception as exc:  # noqa: BLE001 - cleanup normally returns a result; isolate broken adapters too
             summary.record("errors", path, "cleanup_exception", f"{type(exc).__name__}: {exc}")
             logger.exception("cleanup raised for worktree %s; continuing sweep", path)
-            continue
+            return
 
         if result.removed:
-            summary.record("removed", path, result.outcome, result.detail)
+            summary.record("removed", path, "cleanup_pending_retry" if pending_retry else result.outcome, result.detail)
         elif result.outcome in {"blocked_changes", "blocked_process"}:
             summary.record("blocked", path, result.reason or result.outcome, result.detail)
             logger.warning(
@@ -150,6 +172,14 @@ def sweep_orphan_worktrees(
                 result.reason or result.outcome,
                 result.detail or "; ".join(result.errors),
             )
+
+    # Pending worktrees have their own retry lane. They are not discovered or
+    # reported as new old orphans; ownership and age are revalidated before each
+    # retry, and cleanup performs the final dirty/process checks.
+    for index, entry in ordinary_entries:
+        process_entry(index, entry, pending_retry=False)
+    for index, entry in pending_entries:
+        process_entry(index, entry, pending_retry=True)
 
     logger.info(
         "orphan worktree sweep: removed=%d preserved=%d failures=%d (blocked=%d ignored=%d)",

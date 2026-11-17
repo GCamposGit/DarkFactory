@@ -98,6 +98,7 @@ class DeliveryReport(BaseModel):
     pr_url: Optional[str] = None
     merge_sha: Optional[str] = None
     cleaned: bool = False
+    worktree_cleanup_attempted: bool = False
     branch: Optional[str] = None
     conflict_files: list[str] = Field(default_factory=list)
     message: str = ""
@@ -1198,9 +1199,13 @@ class GitAutonomyManager:
 
         ahead = self._git_out(["rev-list", "--count", f"{remote_ref}..HEAD"], cwd)
         if ahead == "0":
-            cleaned = self._cleanup(branch, base, cwd) if merge else False
+            cleaned = False
+            worktree_cleanup_attempted = False
+            if merge:
+                cleaned, worktree_cleanup_attempted = self._cleanup(branch, base, cwd)
             return DeliveryReport(
                 ok=True, action="no_changes", branch=branch, cleaned=cleaned,
+                worktree_cleanup_attempted=worktree_cleanup_attempted,
                 message="Branch has no commits beyond base.",
             )
         if kind == "implementation" and is_ledger_only(self._changed_files(base, cwd)):
@@ -1431,9 +1436,10 @@ class GitAutonomyManager:
         self._phase("merge", "succeeded", f"merge {merge_sha}")
 
         # (h) cleanup
-        cleaned = self._cleanup(branch, base, cwd)
+        cleaned, worktree_cleanup_attempted = self._cleanup(branch, base, cwd)
         return DeliveryReport(
-            ok=True, action="merged", pr_url=pr_url, merge_sha=merge_sha, cleaned=cleaned, branch=branch,
+            ok=True, action="merged", pr_url=pr_url, merge_sha=merge_sha, cleaned=cleaned,
+            worktree_cleanup_attempted=worktree_cleanup_attempted, branch=branch,
             message=f"PR {pr_url} merged into {base}. {gate_note}",
         )
 
@@ -1459,7 +1465,7 @@ class GitAutonomyManager:
         except Exception as exc:  # noqa: BLE001 - advisory only
             logger.warning("catalog registration failed for %s: %s", ticket_id, exc)
 
-    def _cleanup(self, branch: str, base: str, cwd: Path) -> bool:
+    def _cleanup(self, branch: str, base: str, cwd: Path) -> tuple[bool, bool]:
         """Prune, fast-forward the main checkout, delete local branch, remove secondary worktree."""
         main_root, is_secondary = self._main_root(cwd)
         _run_git(["fetch", "--prune", "origin"], cwd=main_root)
@@ -1482,7 +1488,7 @@ class GitAutonomyManager:
             co = _run_git(["checkout", base], cwd=main_root)
             if co.returncode != 0:
                 logger.warning("checkout %s failed: %s", base, co.stderr.strip())
-                return False
+                return False, False
         if self._current_branch(main_root) == base and not self.is_dirty(cwd=main_root):
             ff = _run_git(["merge", "--ff-only", f"origin/{base}"], cwd=main_root)
             if ff.returncode != 0:
@@ -1493,7 +1499,7 @@ class GitAutonomyManager:
             if db.returncode != 0:
                 logger.warning("branch -D failed: %s", db.stderr.strip())
                 ok = False
-        return ok
+        return ok, is_secondary
 
     def sweep_stale(
         self, base: str = "main", gh_runner: Optional[GhRunner] = None, cwd: Optional[Path] = None
@@ -1672,17 +1678,19 @@ class GitAutonomyManager:
         if proof_error:
             return proof_error
 
-        # A successful merge may already have removed its linked worktree. This
-        # idempotent terminal cleanup also covers direct completion paths and leaves
-        # any remaining worktree intact when cleanup's safety checks refuse removal.
-        from core.git.ticket_lifecycle import cleanup_terminal_ticket_worktree
+        # Delivery can already have attempted cleanup on this exact secondary worktree.
+        # Do not retry a blocked attempt in the same finalization flow; its durable
+        # cleanup_pending record is for a later sweep. Other completion paths still
+        # clean the ticket's linked worktree here.
+        if not (delivery and delivery.worktree_cleanup_attempted):
+            from core.git.ticket_lifecycle import cleanup_terminal_ticket_worktree
 
-        cleanup_terminal_ticket_worktree(
-            ticket.id,
-            root=target_dir,
-            sleep_fn=self.cleanup_sleep_fn,
-            now_fn=self.now_fn,
-        )
+            cleanup_terminal_ticket_worktree(
+                ticket.id,
+                root=target_dir,
+                sleep_fn=self.cleanup_sleep_fn,
+                now_fn=self.now_fn,
+            )
 
         return TicketCompletionReport(
             ok=True,

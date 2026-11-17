@@ -11,7 +11,7 @@ import pytest
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.git import ticket_workspace
-from core.git.autonomy import GitAutonomyManager
+from core.git.autonomy import DeliveryReport, GitAutonomyManager
 from core.roadmap.models import DeliveryStatus
 
 
@@ -48,6 +48,14 @@ def _ticket(ticket_id: str, status: DeliveryStatus = DeliveryStatus.PLANNED) -> 
 def test_terminal_status_cleans_its_clean_worktree(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
     monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: [])
+    calls: list[tuple[Path, Path]] = []
+    real_cleanup = ticket_workspace.cleanup
+
+    def tracked_cleanup(path: Path, main_root: Path, **kwargs: object) -> ticket_workspace.CleanupResult:
+        calls.append((path.resolve(), main_root.resolve()))
+        return real_cleanup(path, main_root, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
     store = DemandsStore(checkout / ".factory" / "demands" / "demands.json")
     store.save_ticket(_ticket("USR-500-T2"))
 
@@ -55,6 +63,7 @@ def test_terminal_status_cleans_its_clean_worktree(checkout: Path, monkeypatch: 
 
     assert closed.status == DeliveryStatus.CANCELLED
     assert not workspace.path.exists()
+    assert calls == [(workspace.path.resolve(), checkout.resolve())]
 
 
 def test_blocked_cleanup_preserves_worktree_and_records_reason(
@@ -72,6 +81,10 @@ def test_blocked_cleanup_preserves_worktree_and_records_reason(
     assert workspace.path.is_dir()
     assert "live_process" in caplog.text
     assert "python (pid 42)" in caplog.text
+    pending = ticket_workspace.list_cleanup_pending(checkout)
+    assert len(pending) == 1
+    assert Path(pending[0]["path"]) == workspace.path.resolve()
+    assert pending[0]["reason"] == "live_process"
 
 
 def test_dirty_worktree_is_preserved_when_ticket_closes(
@@ -106,7 +119,11 @@ def test_repeated_terminal_event_is_idempotent(checkout: Path, monkeypatch: pyte
     assert store.get_ticket("USR-500-T2").status == DeliveryStatus.CANCELLED
 
 
-def test_terminal_status_without_worktree_is_ok(checkout: Path) -> None:
+def test_terminal_status_without_worktree_is_ok(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden_cleanup(*_args: object, **_kwargs: object) -> ticket_workspace.CleanupResult:
+        raise AssertionError("a ticket without a worktree must not attempt removal")
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", forbidden_cleanup)
     store = DemandsStore(checkout / ".factory" / "demands" / "demands.json")
     store.save_ticket(_ticket("USR-500-T2"))
 
@@ -126,15 +143,20 @@ def test_unexpected_cleanup_error_does_not_prevent_terminal_status(
     def fail_cleanup(*_args: object, **_kwargs: object) -> ticket_workspace.CleanupResult:
         raise RuntimeError("cleanup failure")
 
-    monkeypatch.setattr(ticket_workspace, "cleanup", fail_cleanup)
+    monkeypatch.setattr(ticket_workspace, "_cleanup_outside", fail_cleanup)
 
     closed = store.update_status("USR-500-T2", DeliveryStatus.CANCELLED)
 
     assert closed.status == DeliveryStatus.CANCELLED
     assert store.get_ticket("USR-500-T2").status == DeliveryStatus.CANCELLED
     assert workspace.path.is_dir()
-    assert "cleanup failed unexpectedly" in caplog.text
+    assert "cleanup failed for" in caplog.text
     assert "cleanup failure" in caplog.text
+    pending = ticket_workspace.list_cleanup_pending(checkout)
+    assert len(pending) == 1
+    assert Path(pending[0]["path"]) == workspace.path.resolve()
+    assert pending[0]["outcome"] == "error"
+    assert pending[0]["reason"] == "cleanup_exception"
 
 
 def test_complete_ticket_cleans_worktree_when_delivery_is_not_requested(
@@ -142,6 +164,14 @@ def test_complete_ticket_cleans_worktree_when_delivery_is_not_requested(
 ) -> None:
     workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
     monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: [])
+    calls: list[tuple[Path, Path]] = []
+    real_cleanup = ticket_workspace.cleanup
+
+    def tracked_cleanup(path: Path, main_root: Path, **kwargs: object) -> ticket_workspace.CleanupResult:
+        calls.append((path.resolve(), main_root.resolve()))
+        return real_cleanup(path, main_root, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
     store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     store.save_ticket(_ticket("USR-500-T2"))
     (workspace.path / "implementation.py").write_text("value = 1\n", encoding="utf-8")
@@ -151,7 +181,56 @@ def test_complete_ticket_cleans_worktree_when_delivery_is_not_requested(
 
     assert report.ok, report.message
     assert not workspace.path.exists()
+    assert calls == [(workspace.path.resolve(), checkout.resolve())]
     committed_ledger = json.loads(
         _git(checkout, "show", f"{workspace.branch}:.factory/demands/demands.json")
     )
     assert committed_ledger[0]["status"] == DeliveryStatus.COMPLETED.value
+
+
+def test_complete_ticket_does_not_repeat_a_blocked_delivery_cleanup(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
+    store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
+    store.save_ticket(_ticket("USR-500-T2"))
+    _git(workspace.path, "add", ".factory/demands/demands.json")
+    _git(workspace.path, "commit", "--quiet", "-m", "chore: record terminal ticket")
+    manager = GitAutonomyManager(checkout)
+    calls: list[tuple[Path, Path]] = []
+    real_cleanup = ticket_workspace.cleanup
+
+    def tracked_cleanup(path: Path, main_root: Path, **kwargs: object) -> ticket_workspace.CleanupResult:
+        calls.append((path.resolve(), main_root.resolve()))
+        kwargs["holder_probe"] = lambda _path: ("python (pid 42)",)
+        return real_cleanup(path, main_root, **kwargs)  # type: ignore[arg-type]
+
+    def deliver_with_blocked_cleanup(
+        _ticket_id: str,
+        _title: str,
+        _project_id: str,
+        target_dir: Path,
+        _gh_runner: object,
+        _commit_sha: str | None,
+    ) -> tuple[None, DeliveryReport, None]:
+        ticket_workspace.cleanup(target_dir, checkout)
+        return None, DeliveryReport(
+            ok=True,
+            action="merged",
+            cleaned=False,
+            worktree_cleanup_attempted=True,
+            branch=workspace.branch,
+        ), None
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
+    monkeypatch.setattr(manager, "_inspect_completion_changes", lambda *_args: None)
+    monkeypatch.setattr(manager, "_commit_completion", lambda *_args: ("abc123", None))
+    monkeypatch.setattr(manager, "_deliver_completion", deliver_with_blocked_cleanup)
+    monkeypatch.setattr(manager, "_verify_live_completion", lambda *_args: None)
+
+    report = manager.complete_ticket("USR-500-T2", cwd=workspace.path, auto_push=True)
+
+    assert report.ok, report.message
+    assert calls == [(workspace.path.resolve(), checkout.resolve())]
+    assert workspace.path.is_dir()
+    assert ticket_workspace.list_cleanup_pending(checkout)[0]["reason"] == "live_process"

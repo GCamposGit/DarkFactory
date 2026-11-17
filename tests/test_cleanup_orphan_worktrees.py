@@ -114,7 +114,7 @@ def test_sweep_does_not_send_worktrees_at_or_under_48_hours_to_cleanup(
     assert path.exists()
 
 
-def test_dirty_and_held_worktrees_are_reported_blocked_without_cleanup(
+def test_dirty_and_held_worktrees_are_reported_pending_without_removal(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     dirty = _workspace(repo.local, "USR-602")
@@ -125,10 +125,14 @@ def test_dirty_and_held_worktrees_are_reported_blocked_without_cleanup(
     def holder_probe(path: Path) -> tuple[str, ...]:
         return ("python (pid 42)",) if path == held else ()
 
-    def forbidden_cleanup(*_args: object, **_kwargs: object) -> CleanupResult:
-        raise AssertionError("blocked worktrees must not reach cleanup")
+    real_cleanup = ticket_workspace.cleanup
+    calls: list[Path] = []
 
-    monkeypatch.setattr(ticket_workspace, "cleanup", forbidden_cleanup)
+    def tracked_cleanup(candidate: Path, root: Path, **kwargs: object) -> CleanupResult:
+        calls.append(candidate)
+        return real_cleanup(candidate, root, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
     summary = sweep.sweep_orphan_worktrees(
         repo.local,
         now=now,
@@ -137,16 +141,72 @@ def test_dirty_and_held_worktrees_are_reported_blocked_without_cleanup(
     )
 
     assert summary.blocked == 2 and summary.removed == 0 and summary.errors == 0
-    assert {item["reason"] for item in summary.details if item["reason"] in {"dirty", "holder"}} == {
-        "dirty",
-        "holder",
+    assert {item["reason"] for item in summary.details if item["path"] in {str(dirty), str(held)}} == {
+        "worktree_dirty",
+        "live_process",
     }
     assert summary.to_dict()["preserved"] == summary.blocked + summary.ignored == 3
     assert summary.to_dict()["failures"] == 0
+    assert calls == [dirty, held]
+    pending = ticket_workspace.list_cleanup_pending(repo.local)
+    assert {item["path"] for item in pending} == {str(dirty.resolve()), str(held.resolve())}
     messages = [record.getMessage() for record in caplog.records]
-    assert any(f"path={dirty} reason=dirty" in message for message in messages)
-    assert any(f"path={held} reason=holder" in message for message in messages)
+    assert any(f"path={dirty} reason=worktree_dirty" in message for message in messages)
+    assert any(f"path={held} reason=live_process" in message for message in messages)
     assert (dirty / "keep.txt").is_file() and held.is_dir()
+
+
+def test_pending_worktree_is_retried_only_after_owner_and_age_checks(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _workspace(repo.local, "USR-608")
+    (path / "keep.txt").write_text("working copy\n", encoding="utf-8")
+    real_cleanup = ticket_workspace.cleanup
+    first = real_cleanup(path, repo.local, holder_probe=_idle, now_fn=lambda: BORN + timedelta(hours=50))
+    assert not first.removed and len(ticket_workspace.list_cleanup_pending(repo.local)) == 1
+    (path / "keep.txt").unlink()
+
+    calls: list[Path] = []
+
+    def tracked_cleanup(candidate: Path, root: Path, **kwargs: object) -> CleanupResult:
+        calls.append(candidate)
+        return real_cleanup(candidate, root, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
+    retried = sweep.sweep_orphan_worktrees(
+        repo.local,
+        now=BORN + timedelta(hours=51),
+        holder_probe=_idle,
+        statuses={"USR-608": "completed"},
+    )
+
+    assert calls == [path]
+    assert retried.removed == 1 and not path.exists()
+    assert ticket_workspace.list_cleanup_pending(repo.local) == []
+    assert any(item["path"] == str(path) and item["reason"] == "cleanup_pending_retry" for item in retried.details)
+
+
+def test_dirty_worktree_for_an_active_ticket_is_not_sent_to_cleanup(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _workspace(repo.local, "USR-609")
+    (path / "keep.txt").write_text("working copy\n", encoding="utf-8")
+
+    def forbidden_cleanup(*_args: object, **_kwargs: object) -> CleanupResult:
+        raise AssertionError("an active ticket must not reach cleanup")
+
+    monkeypatch.setattr(ticket_workspace, "cleanup", forbidden_cleanup)
+    summary = sweep.sweep_orphan_worktrees(
+        repo.local,
+        now=BORN + timedelta(hours=50),
+        holder_probe=_idle,
+        statuses={"USR-609": "implementing"},
+    )
+
+    assert summary.ignored == 2
+    assert any(item["path"] == str(path) and item["reason"] == "open_ticket" for item in summary.details)
+    assert ticket_workspace.list_cleanup_pending(repo.local) == []
+    assert (path / "keep.txt").is_file()
 
 
 def test_active_ticket_from_demands_ledger_is_ignored(repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:

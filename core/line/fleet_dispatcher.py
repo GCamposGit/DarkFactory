@@ -403,7 +403,7 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
 
         root = main_root or ticket_workspace.main_checkout_root(PROJECT_ROOT)
         result = ticket_workspace.cleanup(path, root)
-        if result.outcome in {"blocked_changes", "blocked_process"}:
+        if result.method == "preserved":
             logger.warning(
                 "checkout operacional preservado: path=%s outcome=%s reason=%s detalhe=%s; "
                 "recuperacao possivel repetindo cleanup pelo despachante",

@@ -31,6 +31,7 @@ Stdlib-only (it must not import ``core.git.autonomy``, which imports it).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -56,6 +57,7 @@ WORKTREES_DIRNAME = ".worktrees"
 # Roots swept for dead directories, relative to the main checkout.
 WORKTREE_ROOTS: tuple[Path, ...] = (Path(WORKTREES_DIRNAME), Path(".claude") / "worktrees")
 TRASH_RELATIVE = Path(".factory") / "backups" / "trash"
+CLEANUP_PENDING_RELATIVE = Path(".factory") / "runs" / "cleanup_pending"
 TRASH_RETENTION_DAYS = 7
 # Machine-state directories that live next to worktrees and must never be
 # treated as dead worktrees (e.g. a DARKFAC_HARNESS_STATE_DIR pointed there).
@@ -504,7 +506,7 @@ def cleanup(
 ) -> CleanupResult:
     """Remove a worktree directory as reliably as the platform allows.
 
-    1. ``git worktree remove --force`` up to ``retries`` times, sleeping
+    1. non-forced ``git worktree remove`` up to ``retries`` times, sleeping
        ``backoff_s[i]`` between attempts (a transient Windows lock usually clears);
     2. a robust ``rmtree`` of whatever git left behind;
     3. when the directory is still there: RENAME it into the trash (never lose
@@ -520,14 +522,14 @@ def cleanup(
     """
     try:
         with _outside_dir(path, main_root):
-            return _cleanup_outside(
+            result = _cleanup_outside(
                 path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
                 run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn, holder_probe=holder_probe,
             )
     except Exception as exc:  # noqa: BLE001 -- cleanup reports failures instead of leaking them
         detail = f"cleanup failed for {path}: {exc}"
         logger.exception(detail)
-        return CleanupResult(
+        result = CleanupResult(
             path=path,
             removed=False,
             method="failed",
@@ -536,6 +538,67 @@ def cleanup(
             outcome="error",
             reason="cleanup_exception",
         )
+    _sync_cleanup_pending(result, main_root)
+    return result
+
+
+def _cleanup_pending_record_path(path: Path, main_root: Path) -> Path:
+    """Stable per-worktree record path; separate files avoid lost updates across cleanups."""
+    key = hashlib.sha256(_norm(path).encode("utf-8", errors="surrogatepass")).hexdigest()
+    return main_root / CLEANUP_PENDING_RELATIVE / f"{key}.json"
+
+
+def _sync_cleanup_pending(result: CleanupResult, main_root: Path) -> None:
+    """Persist every surviving cleanup attempt, or clear its record after removal."""
+    record_path = _cleanup_pending_record_path(result.path, main_root)
+    try:
+        if result.removed or not result.path.exists():
+            record_path.unlink(missing_ok=True)
+            return
+
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "path": str(result.path.resolve()),
+            "main_root": str(main_root.resolve()),
+            "outcome": result.outcome,
+            "reason": result.reason,
+            "detail": result.detail,
+            "updated_at": utc_now().isoformat(),
+        }
+        temporary = record_path.with_name(
+            f"{record_path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+        )
+        try:
+            temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, record_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 -- reporting cleanup must not introduce a new failure
+        logger.error("Could not update pending cleanup record for %s: %s", result.path, exc)
+        result.errors.append(f"cleanup_pending: {exc}")
+        if result.detail:
+            result.detail += f"; pending cleanup record failed: {exc}"
+        else:
+            result.detail = f"pending cleanup record failed: {exc}"
+
+
+def list_cleanup_pending(main_root: Path) -> list[dict[str, Any]]:
+    """Read the durable records for worktrees whose removal still needs attention."""
+    records: list[dict[str, Any]] = []
+    directory = main_root / CLEANUP_PENDING_RELATIVE
+    if not directory.is_dir():
+        return records
+    for record_path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read pending cleanup record %s: %s", record_path, exc)
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("path"), str):
+            records.append(payload)
+        else:
+            logger.warning("Ignoring malformed pending cleanup record %s", record_path)
+    return records
 
 
 @dataclass(frozen=True)
@@ -572,18 +635,20 @@ def _cleanup_safety_issue(
         return _CleanupSafetyIssue("error", "locked", "preserved because the worktree is locked")
 
     try:
-        status = runner(["status", "--porcelain=v1", "--untracked-files=all"], path)
+        status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
     except Exception as exc:  # noqa: BLE001 -- unknown worktree state must be preserved
         return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes: {exc}")
     if status.returncode != 0:
         detail = (status.stderr or status.stdout or "git status failed").strip()
         return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
-    if status.stdout:
-        changes = " ".join(status.stdout.split())
+    # Cleanup is stricter than ownerless-worktree classification: every path Git
+    # reports is local work that must survive, including scratch and ledger edits.
+    changes = _status_paths(status.stdout or "")
+    if changes:
         return _CleanupSafetyIssue(
             "blocked_changes",
             "worktree_dirty",
-            f"preserved because the worktree has staged, tracked, or untracked changes: {changes}",
+            "preserved because the worktree has staged, tracked, or untracked changes: " + ", ".join(changes[:5]),
         )
 
     # Process inspection is the final check immediately before each destructive
@@ -1278,14 +1343,26 @@ def resolve_ticket_status(
 def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
     """Preserve or mark eligible. Does not touch the disk, git, or :func:`cleanup`.
 
-    The first matching reason wins: main checkout, ``psutil`` unavailable, live
-    holder, git lock, ``index.lock``, unreadable git, unreadable status, product
-    changes, detached HEAD outside the base, unknown ticket status, open ticket,
-    unknown age, age ``<=`` :data:`OWNERLESS_MAX_AGE_S`. Anything else is eligible.
+    Ownership and age are established before reporting retryable local safety
+    blockers. This lets the scheduled sweep send only ownerless, old worktrees
+    to :func:`cleanup`, which records blocked attempts in ``cleanup_pending``.
+    The main checkout, unknown/open tickets, young worktrees, and detached
+    commits outside the base are always preserved.
     """
     path = facts.path
     if facts.is_main:
         return _preserved(path, "main_checkout", "primary checkout")
+    if not facts.ticket_status_known:
+        return _preserved(path, "ticket_status_unknown", "ticket status unreadable")
+    status = _normalize_ticket_status(facts.ticket_status)
+    if status is not None and status not in _TERMINAL_TICKET_STATUSES:
+        return _preserved(path, "open_ticket", status)
+    if facts.age_s is None:
+        return _preserved(path, "age_unknown", "no stamp and no directory mtime")
+    if facts.age_s <= OWNERLESS_MAX_AGE_S:
+        return _preserved(path, "too_young", f"age {facts.age_s:.0f}s <= {OWNERLESS_MAX_AGE_S}s")
+    if facts.detached and facts.head_outside_base:
+        return _preserved(path, "detached_outside_base", "detached HEAD is not the base commit")
     if facts.holders is None:
         return _preserved(path, "psutil_unavailable", "psutil ImportError; cannot prove the worktree is idle")
     if facts.holders:
@@ -1301,26 +1378,16 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
     changes = substantive_worktree_changes(facts.changed_paths)
     if changes:
         return _preserved(path, "dirty", ", ".join(changes[:5]))
-    if facts.detached and facts.head_outside_base:
-        return _preserved(path, "detached_outside_base", "detached HEAD is not the base commit")
-    if not facts.ticket_status_known:
-        return _preserved(path, "ticket_status_unknown", "ticket status unreadable")
-    status = _normalize_ticket_status(facts.ticket_status)
-    if status is not None and status not in _TERMINAL_TICKET_STATUSES:
-        return _preserved(path, "open_ticket", status)
-    if facts.age_s is None:
-        return _preserved(path, "age_unknown", "no stamp and no directory mtime")
-    if facts.age_s <= OWNERLESS_MAX_AGE_S:
-        return _preserved(path, "too_young", f"age {facts.age_s:.0f}s <= {OWNERLESS_MAX_AGE_S}s")
     return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
 
 
 def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
     """``name (pid)`` of processes using ``path`` as cwd or through an open file.
 
-    ``None`` when ``psutil`` cannot be imported or process inspection fails.
-    Callers must preserve the worktree in that case. An empty tuple means no
-    holder was found. This does not remove anything.
+    ``None`` when ``psutil`` is unavailable or any process cannot be inspected;
+    callers must preserve the worktree because its state is unknown. An empty
+    tuple means no holder was found among every process that could be inspected.
+    This does not remove anything.
     """
     try:
         import psutil  # optional
@@ -1337,9 +1404,9 @@ def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
             except psutil.AccessDenied:
-                logger.warning("Could not inspect process paths for %s; preserving it", path)
+                logger.warning("Could not inspect a process using paths near %s; preserving it", path)
                 return None
-            except Exception:  # noqa: BLE001 -- cannot prove the worktree is idle
+            except Exception:  # noqa: BLE001 -- an unexpected per-process error must not look like "no holder"
                 logger.warning("Could not inspect process paths for %s; preserving it", path)
                 return None
             if using_path:
