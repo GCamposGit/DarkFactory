@@ -52,9 +52,24 @@ def offline_mcp_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_check_optional_mcp_servers_no_config(tmp_path: Path):
+def test_check_optional_mcp_servers_no_config_or_accessible_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     non_existent = tmp_path / "non_existent.json"
     healthy, reasons = check_optional_mcp_servers(config_path=non_existent)
+    assert healthy is True
+    assert reasons == []
+
+    restricted = tmp_path / "restricted.json"
+    real_is_file = Path.is_file
+
+    def _deny_stat(self: Path) -> bool:
+        if self == restricted:
+            raise PermissionError(13, "Permission denied")
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _deny_stat)
+    healthy, reasons = check_optional_mcp_servers(config_path=restricted)
     assert healthy is True
     assert reasons == []
 

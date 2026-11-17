@@ -22,6 +22,10 @@ O orçamento dos afetados usa a coleta real (inclusive parametrizações):
 `min(1800, 120 + 20 * testes_coletados)` segundos. A coleta tem limite de 120s
 e o passo externo tem teto de 1800s, incluindo seleção, coleta e eventual retry.
 O launcher mantém seu envelope externo para os demais contratos e fila do lock.
+Se a ACL negar o lock canônico, `SuiteLock` tenta um diretório por identidade
+junto ao estado configurado e depois um fallback em `%TEMP%`. O registro
+`[RUN_TIMING]` inclui `lock_degraded` e `lock_state_dir`; no modo degradado, a
+coordenação entre identidades distintas permanece best-effort.
 
 Com pelo menos `MIN_SERIAL_AVAILABLE_GIB = 1.5` GiB livres o escopo PR degrada
 para execução serial. Até um worker usa `-n 0`, sem subprocesso xdist/gateway.

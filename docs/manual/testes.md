@@ -69,17 +69,17 @@ for gravável, a função levanta `SuiteLockUnwritable` estruturado:
 - Com escrita: retorna o diretório canônico, `degraded=False`, `reason=None`.
   Nenhum diretório novo é criado além do canônico; nenhum aviso é impresso.
   Esse caminho é idêntico ao comportamento anterior ao modo degradado.
-- Sem escrita: retorna um diretório por identidade --
+- Sem escrita: tenta primeiro o diretório por identidade --
   `DARKFAC_HARNESS_STATE_DIR/darkfac-harness-<usuário>` quando essa variável
-  está configurada (mantém o fallback no mesmo volume configurado, onde um
-  subdiretório novo por identidade costuma ser criável mesmo quando arquivos
-  irmãos preexistentes não são), senão
-  `tempfile.gettempdir()/darkfac-harness-<usuário>` -- com `degraded=True` e
-  `reason` explicando o motivo da degradação.
-- O fallback também é sondado tocando e abrindo `suite-0.lock` em `r+b`. Se ele
-  já contiver um arquivo sem escrita para esta identidade, a resolução falha com
-  `SuiteLockUnwritable` apontando esse arquivo; não deixa um `PermissionError`
-  cru escapar na tentativa posterior de abrir o lock.
+  está configurada, senão `tempfile.gettempdir()/darkfac-harness-<usuário>`.
+  Se a árvore configurada também negar a criação ou escrita do lock, tenta
+  `tempfile.gettempdir()/darkfac-harness-<usuário>` como reserva independente.
+  O diretório escolhido retorna com `degraded=True` e `reason` explicando a
+  degradação.
+- Cada candidato é sondado tocando e abrindo `suite-0.lock` em `r+b`. Se todos
+  forem inacessíveis, a resolução falha com `SuiteLockUnwritable` estruturado,
+  sem deixar um `PermissionError` cru escapar na tentativa posterior de abrir
+  o lock.
 - Se a permissão do lock canônico mudar depois da sondagem, a própria aquisição
   também troca para o fallback por identidade e espera um eventual dono
   canônico confirmado antes de adquirir o slot.

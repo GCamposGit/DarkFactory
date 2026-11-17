@@ -322,21 +322,22 @@ def test_resolve_state_dir_fallback_rooted_at_configured_state_dir(
     assert resolution.path.parent == canonical
 
 
-def test_resolve_state_dir_reports_unwritable_fallback_as_structured_error(
+def test_resolve_state_dir_uses_temp_fallback_when_configured_state_tree_is_unwritable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A fallback lock file can also carry a restrictive per-file ACL.
+    """A configured state root may deny writes to the fallback subdirectory too.
 
-    Resolution must fail with the lock API's structured exception instead of
-    allowing the later ``_try_lock_file`` call to leak ``PermissionError``.
+    Resolution keeps the same-volume fallback as its first choice, then uses
+    the process temp directory if that whole tree is restricted.
     """
 
     canonical = tmp_path / "state"
     fallback = canonical / "darkfac-harness-sandboxed-user"
+    temp_root = tmp_path / "system-temp"
     canonical.mkdir(parents=True)
-    fallback.mkdir()
     monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(canonical))
     monkeypatch.setenv("USERNAME", "sandboxed-user")
+    monkeypatch.setattr(suite_lock.tempfile, "gettempdir", lambda: str(temp_root))
 
     real_touch = Path.touch
 
@@ -347,10 +348,21 @@ def test_resolve_state_dir_reports_unwritable_fallback_as_structured_error(
 
     monkeypatch.setattr(Path, "touch", _deny_state_lock_touch)
 
+    resolution = suite_lock.resolve_state_dir()
+
+    assert resolution.degraded is True
+    assert resolution.path == temp_root / "darkfac-harness-sandboxed-user"
+    assert (resolution.path / "suite-0.lock").exists()
+
+    def _deny_all_state_lock_touches(self: Path, *args: object, **kwargs: object) -> None:
+        if self.name == "suite-0.lock":
+            raise PermissionError(13, "Permission denied")
+        return real_touch(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", _deny_all_state_lock_touches)
     with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
         suite_lock.resolve_state_dir()
-
-    assert excinfo.value.path == fallback / "suite-0.lock"
+    assert excinfo.value.path == resolution.path / "suite-0.lock"
 
 
 def test_acquire_stays_on_canonical_dir_with_no_warning_when_writable(

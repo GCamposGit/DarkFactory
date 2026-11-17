@@ -169,6 +169,41 @@ def _fallback_state_dir() -> Path:
     return base / f"darkfac-harness-{_identity_name()}"
 
 
+def _fallback_state_dir_candidates() -> tuple[Path, ...]:
+    """Preferred per-identity fallback, followed by a writable temp location.
+
+    A configured canonical directory may be readable but grant no permission
+    to create children. In that case, putting its fallback underneath the same
+    directory repeats the original ACL failure; the process temp directory is
+    the independent last-resort location.
+    """
+
+    preferred = _fallback_state_dir()
+    temporary = Path(tempfile.gettempdir()) / f"darkfac-harness-{_identity_name()}"
+    return tuple(dict.fromkeys((preferred, temporary)))
+
+
+def _resolve_fallback_state_dir(canonical: Path, reason: str) -> StateDirResolution:
+    """Find a writable per-identity fallback or raise a structured error."""
+
+    failures: list[str] = []
+    candidates = _fallback_state_dir_candidates()
+    for fallback in candidates:
+        try:
+            _probe_writable(fallback)
+        except PermissionError as exc:
+            failures.append(f"{fallback / 'suite-0.lock'}: {exc}")
+            continue
+        return StateDirResolution(path=fallback, degraded=True, reason=reason)
+
+    last_fallback = candidates[-1]
+    detail = "; ".join(failures)
+    raise SuiteLockUnwritable(
+        last_fallback / "suite-0.lock",
+        f"fallbacks for {canonical / 'suite-0.lock'} are also unwritable: {detail}",
+    )
+
+
 def _probe_writable(directory: Path) -> None:
     """Raise ``PermissionError`` when this identity cannot write the lock file
     a real acquisition would touch first (USR-463).
@@ -222,19 +257,8 @@ def resolve_state_dir() -> StateDirResolution:
     try:
         _probe_writable(canonical)
     except PermissionError as exc:
-        fallback = _fallback_state_dir()
         reason = f"sem permissao de escrita em {canonical / 'suite-0.lock'}: {exc}"
-        try:
-            # Probe the actual artifact used by acquisition. Creating the
-            # fallback directory alone is insufficient when a previous run
-            # left a lock file with a restrictive per-file ACL.
-            _probe_writable(fallback)
-        except PermissionError as fallback_exc:
-            raise SuiteLockUnwritable(
-                fallback / "suite-0.lock",
-                f"fallback for {canonical / 'suite-0.lock'} is also unwritable: {fallback_exc}",
-            ) from fallback_exc
-        return StateDirResolution(path=fallback, degraded=True, reason=reason)
+        return _resolve_fallback_state_dir(canonical, reason)
     return StateDirResolution(path=canonical, degraded=False, reason=None)
 
 
@@ -678,18 +702,11 @@ class SuiteLock:
                     if resolution.degraded:
                         raise
                     canonical = _canonical_state_dir_path()
-                    fallback = _fallback_state_dir()
                     reason = (
                         f"sem permissao de escrita em {lock_path}: {exc.reason}"
                     )
-                    try:
-                        _probe_writable(fallback)
-                    except PermissionError as fallback_exc:
-                        raise SuiteLockUnwritable(
-                            fallback / "suite-0.lock",
-                            f"fallback for {lock_path} is also unwritable: {fallback_exc}",
-                        ) from fallback_exc
-                    resolution = StateDirResolution(fallback, True, reason)
+                    resolution = _resolve_fallback_state_dir(canonical, reason)
+                    fallback = resolution.path
                     self.degraded = True
                     self.state_dir_used = fallback
                     self.degradation_reason = reason

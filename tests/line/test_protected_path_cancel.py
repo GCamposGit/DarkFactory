@@ -8,7 +8,6 @@ The fake Grok CLI prints ``stopReason=cancelled`` after ``search_replace`` on
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import uuid
@@ -93,10 +92,11 @@ def _short_cwd() -> Path:
     """A cwd whose ``quote(cwd)`` fits in one Windows path component (255).
 
     Pytest's ``tmp_path`` is already long. Grok names the session folder with
-    that quoted cwd, so a deep temp path makes the folder name illegal.
+    that quoted cwd, so use a short scratch path under the checked-out project
+    instead of assuming the global TEMP directory grants this identity writes.
     """
 
-    base = Path(os.environ.get("TEMP") or os.environ.get("TMP") or "C:/Temp") / "df205"
+    base = Path(__file__).resolve().parents[2] / ".tmp" / "usr-205"
     base.mkdir(parents=True, exist_ok=True)
     path = base / uuid.uuid4().hex[:8]
     path.mkdir()
