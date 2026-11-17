@@ -516,3 +516,5 @@ Saida com codigo 75 (route_wait, no_build_route) e espera estruturada: aplica ba
 A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: aplica backoff infra sem consumir candidato nem acender a recuperacao global. O mesmo vale para a recusa `ja possui PR ativo` (ticket com PR aberto, codigo 2).
 
 O laço do despachante publica as cotas no Hub a cada 5 minutos por `core.usage.sync_task.publish_once()`, sem sonda paga. Falha de publicação fica só no log e não interrompe o ciclo.
+
+Causas de entrega (USR-475): `rebase_conflict` e falha do candidato; `merge_blocked` e infra e espera com backoff sem gastar tentativa.
