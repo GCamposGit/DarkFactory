@@ -101,6 +101,38 @@ def test_classify_checkout_dirty_classes_no_content_leak(tmp_path: Path) -> None
     assert "12345" not in (reason or "")
 
 
+def test_classify_checkout_ignores_fleet_runtime_untracked_but_not_code(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    expected_sha = node_sync.run_git(repo, ["rev-parse", "HEAD"])
+
+    runtime_dir = repo / ".factory" / "runs"
+    runtime_dir.mkdir(parents=True)
+    runtime_files = (
+        runtime_dir / "fleet_policy_snapshot.json",
+        runtime_dir / "model_audit_receipt.json",
+    )
+    for path in runtime_files:
+        path.write_text("{}", encoding="utf-8")
+
+    classification, _, dirty_files, reason = node_sync.classify_checkout(
+        repo, node_sync.run_git, expected_sha
+    )
+    assert classification == "converged"
+    assert dirty_files["untracked"] == []
+    assert reason is None
+
+    code_file = repo / "core" / "untracked_feature.py"
+    code_file.parent.mkdir()
+    code_file.write_text("def feature(): return True\n", encoding="utf-8")
+    classification, _, dirty_files, reason = node_sync.classify_checkout(
+        repo, node_sync.run_git, expected_sha
+    )
+    assert classification == "dirty"
+    assert dirty_files["untracked"] == ["core/untracked_feature.py"]
+    assert "untracked_feature.py" in (reason or "")
+
+
 def test_remediate_dirty_checkout_ephemeral_vs_unknown(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo)
