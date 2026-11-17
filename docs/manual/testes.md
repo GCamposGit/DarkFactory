@@ -38,48 +38,46 @@ precisa adquirir `suite_lock`, pois outro processo pode ocupar o slot depois da
 sonda. Worker ocupado gera espera de admissão, sem iniciar PLAN/BUILD para produzir
 mais candidatos que não podem ser validados.
 
-### Identidade restrita sem permissão de escrita no lock (USR-463)
+### Identidade restrita no lock da suíte (USR-463)
 
-Quando o diretório de estado global (`state_dir()`) ou um arquivo `suite-N.lock`
-não é gravável pela identidade do processo chamador -- por exemplo um grupo
-sandboxed (`CodexSandboxUsers`) cuja ACL só concede `ReadAndExecute` sobre
-arquivos criados por outra conta -- `suite_lock.py` levanta `SuiteLockUnwritable`
-(com `path` e `reason`) em vez de propagar um `PermissionError` cru. `_try_lock_file`
-só retorna `None` para slot efetivamente ocupado por outro processo; falha de
-permissão é um erro estruturado distinto. `probe_free_slot()` nunca propaga essa
-exceção: trata o diretório ou slot sem permissão de escrita como "nenhum slot
-livre observado" e segue para o próximo slot, sem derrubar o chamador com
-traceback.
+O arquivo `suite-N.lock` existente só precisa ser aberto para leitura: o sistema
+operacional mantém a trava, sem alterar os metadados do arquivo. Isso permite
+que uma identidade restrita -- por exemplo `CodexSandboxUsers`, cuja ACL concede
+`ReadAndExecute` sobre locks criados por outra conta -- adquira um slot canônico
+livre. Um lock ausente é criado com abertura exclusiva; se outro processo vencer
+a corrida de criação, o arquivo criado por ele é aberto para leitura. Falhas de
+permissão no acesso ao diretório ou ao lock são tentadas um número limitado de
+vezes e, ao persistirem, viram `SuiteLockUnwritable` com `path` e `reason`, sem
+propagar um `PermissionError` cru. `_try_lock_file` só retorna `None` para slot
+efetivamente ocupado por outro processo. `probe_free_slot()` nunca propaga o erro
+estruturado: trata um slot inacessível como "nenhum slot livre observado" e
+segue para o próximo, sem derrubar o chamador com traceback.
 
-#### Modo degradado: estado gravável por identidade (USR-463 T2)
+#### Modo degradado: estado por identidade (USR-463 T2)
 
 `resolve_state_dir()` é o contrato que `SuiteLock.acquire()` usa para escolher
-onde gravar o lock. Uma falha de permissão no diretório canônico leva ao
-fallback por identidade; se o próprio arquivo de lock do fallback também não
-for gravável, a função levanta `SuiteLockUnwritable` estruturado:
+onde manter o lock. Uma falha de permissão no diretório canônico ou na leitura
+do lock leva ao fallback por identidade; se o fallback também não puder criar
+ou abrir seu lock, a função levanta `SuiteLockUnwritable` estruturado:
 
 - Verifica o artefato exato que uma aquisição real usa
-  (`<diretório-canônico>/suite-0.lock`): além de tocar o arquivo, abre-o em
-  `r+b`, o mesmo modo de escrita usado pelo lock. `Path.mkdir(exist_ok=True)`
-  num diretório já existente é um no-op silencioso que não prova nada sobre a
-  gravação de arquivos preexistentes nele, já que a ACL do Windows é por
-  arquivo: um `suite-0.lock`
-  criado por outra conta pode continuar sem escrita para a identidade atual
-  mesmo que novos arquivos possam ser criados no mesmo diretório.
-- Com escrita: retorna o diretório canônico, `degraded=False`, `reason=None`.
+  (`<diretório-canônico>/suite-0.lock`) abrindo-o para leitura. Se estiver
+  ausente, cria-o com modo exclusivo, tratando `FileExistsError` como uma
+  corrida vencida por outro processo, e então o reabre para leitura. Nunca
+  chama `touch()` nem abre um lock preexistente para escrita.
+- Com acesso de leitura: retorna o diretório canônico, `degraded=False`,
+  `reason=None`.
   Nenhum diretório novo é criado além do canônico; nenhum aviso é impresso.
-  Esse caminho é idêntico ao comportamento anterior ao modo degradado.
-- Sem escrita: tenta primeiro o diretório por identidade --
+- Sem acesso ou sem capacidade para criar um lock ausente: tenta primeiro o diretório por identidade --
   `DARKFAC_HARNESS_STATE_DIR/darkfac-harness-<usuário>` quando essa variável
   está configurada, senão `tempfile.gettempdir()/darkfac-harness-<usuário>`.
-  Se a árvore configurada também negar a criação ou escrita do lock, tenta
+  Se a árvore configurada também negar a criação ou leitura do lock, tenta
   `tempfile.gettempdir()/darkfac-harness-<usuário>` como reserva independente.
   O diretório escolhido retorna com `degraded=True` e `reason` explicando a
   degradação.
-- Cada candidato é sondado tocando e abrindo `suite-0.lock` em `r+b`. Se todos
-  forem inacessíveis, a resolução falha com `SuiteLockUnwritable` estruturado,
-  sem deixar um `PermissionError` cru escapar na tentativa posterior de abrir
-  o lock.
+- A sondagem e a aquisição repetem falhas de permissão até três vezes. Se todos
+  os candidatos forem inacessíveis, a resolução falha com
+  `SuiteLockUnwritable` estruturado.
 - Se a permissão do lock canônico mudar depois da sondagem, a própria aquisição
   também troca para o fallback por identidade e espera um eventual dono
   canônico confirmado antes de adquirir o slot.
@@ -99,7 +97,7 @@ for gravável, a função levanta `SuiteLockUnwritable` estruturado:
   respeita o `timeout_sec` já configurado da instância; se o prazo estourar
   antes do dono canônico liberar, `acquire()` levanta `SuiteLockTimeout` com
   `waited_sec` preenchido, exatamente como o timeout normal de slot ocupado.
-- Caso gravável (identidade normal) continua idêntico ao comportamento prévio:
+- Caso canônico acessível continua sem aviso e sem criar diretório de fallback:
   nenhum aviso novo impresso, nenhum diretório de fallback criado.
 
 #### Portão oficial reporta o modo degradado sem quebrar (USR-463 T3)
@@ -109,7 +107,7 @@ acima de ponta a ponta, sem propagar `PermissionError`/`SuiteLockUnwritable`
 cru nem perder a telemetria do run:
 
 - `_append_run_timing()` grava `run_timings.jsonl` no diretório que
-  `suite_lock.resolve_state_dir()` resolve -- canônico quando gravável, ou o
+  `suite_lock.resolve_state_dir()` resolve -- canônico quando o lock está acessível, ou o
   fallback por identidade quando não -- em vez do acessor estrito
   `suite_lock.state_dir()`, que levantaria `SuiteLockUnwritable` exatamente
   neste caso. `_finish_run_timing()` continua envolvendo a gravação em
@@ -128,7 +126,7 @@ cru nem perder a telemetria do run:
   relança o mesmo tipo (subclasse de `RuntimeError`), que o `main()` do
   runner já converte em `[ERROR]`/`[HARNESS_FAIL]` com código de saída 2 --
   nunca um traceback cru. Isso cobre o caso residual em que até o diretório de
-  fallback por identidade está sem escrita (o caso comum, fallback gravável,
+  fallback por identidade está inacessível (o caso comum, fallback gravável,
   já é tratado por `resolve_state_dir()` sem levantar nada).
 - Resultado de ponta a ponta: um gate rodando sob identidade restrita
   (ex.: grupo sandboxed `CodexSandboxUsers`, que só tem `ReadAndExecute` nos

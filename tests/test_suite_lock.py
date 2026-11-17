@@ -65,11 +65,27 @@ def test_suite_lock_context_manager_held_by_ancestor_is_a_noop() -> None:
         assert lock is None
 
 
-def test_acquire_and_release_creates_and_removes_sidecar(tmp_path: Path) -> None:
+def test_acquire_and_release_handles_race_creating_lock_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "state" / "suite-0.lock"
+    real_open = Path.open
+    raced = False
+
+    def _race_exclusive_create(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        nonlocal raced
+        if self == lock_path and mode == "xb" and not raced:
+            raced = True
+            real_open(self, mode, *args, **kwargs).close()
+            raise FileExistsError(self)
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _race_exclusive_create)
     lock = suite_lock.SuiteLock(timeout_sec=5)
     lock.acquire()
     try:
         directory = tmp_path / "state"
+        assert raced is True
         assert (directory / "suite-0.lock").exists()
         assert (directory / "suite-0.json").exists()
     finally:
@@ -156,14 +172,22 @@ def test_try_lock_file_raises_suite_lock_unwritable_on_permission_error(
     ``PermissionError`` traceback that kills the whole gate run."""
 
     lock_path = tmp_path / "suite-0.lock"
+    lock_path.touch()
+    real_open = Path.open
+    attempts = 0
 
-    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        raise PermissionError(13, "Permission denied")
+    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        nonlocal attempts
+        if self == lock_path and mode == "rb":
+            attempts += 1
+            raise PermissionError(13, "Permission denied")
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setattr(Path, "open", _denied_read)
     with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
         suite_lock._try_lock_file(lock_path)
     assert excinfo.value.path == lock_path
+    assert attempts == suite_lock._LOCK_PERMISSION_ATTEMPTS
 
 
 def test_try_lock_file_still_returns_none_when_slot_is_busy(tmp_path: Path) -> None:
@@ -212,26 +236,25 @@ def test_resolve_state_dir_returns_canonical_when_writable(tmp_path: Path) -> No
     assert resolution.path.is_dir()
 
 
-def test_resolve_state_dir_falls_back_per_identity_when_canonical_lock_unwritable(
+def test_resolve_state_dir_falls_back_per_identity_when_canonical_lock_is_unreadable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """USR-463: probing write access via the exact artifact a real acquisition
-    touches (``suite-0.lock``) must detect a restricted identity even though
-    the directory itself already exists and ``mkdir(exist_ok=True)`` is a
-    silent no-op that proves nothing."""
+    """USR-463: probing read access to the exact lock must detect a restricted
+    identity even though the directory itself already exists and
+    ``mkdir(exist_ok=True)`` is a silent no-op that proves nothing."""
 
     canonical = tmp_path / "state"
     canonical.mkdir(parents=True)
     (canonical / "suite-0.lock").touch()
 
-    real_touch = Path.touch
+    real_open = Path.open
 
-    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock" and self.parent == canonical:
+    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == canonical / "suite-0.lock" and mode == "rb":
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setattr(Path, "open", _denied_read)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
     resolution = suite_lock.resolve_state_dir()
     assert resolution.degraded is True
@@ -242,27 +265,42 @@ def test_resolve_state_dir_falls_back_per_identity_when_canonical_lock_unwritabl
     assert resolution.path.is_dir()
 
 
-def test_resolve_state_dir_checks_write_open_not_only_touch(
+def test_acquire_existing_lock_read_only_without_changing_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A read-only ACL may allow touch but reject the ``r+b`` open used to lock."""
+    """A pre-existing lock remains usable without writing or changing its mtime."""
 
     canonical = tmp_path / "state"
     canonical.mkdir(parents=True)
-    real_open = open
+    lock_path = canonical / "suite-0.lock"
+    lock_path.write_bytes(b"")
+    before = lock_path.stat().st_mtime_ns
+    real_open = Path.open
+    opened_modes: list[str] = []
 
-    def _deny_write_open(file: object, mode: str = "r", *args: object, **kwargs: object):
-        if Path(file) == canonical / "suite-0.lock" and mode == "r+b":
-            raise PermissionError(13, "write data denied")
-        return real_open(file, mode, *args, **kwargs)
+    def _observe_open(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == lock_path:
+            opened_modes.append(mode)
+            assert mode == "rb"
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr("builtins.open", _deny_write_open)
-    monkeypatch.setenv("USERNAME", "sandboxed-user")
+    def _deny_touch(self: Path, *args: object, **kwargs: object) -> None:
+        if self == lock_path:
+            raise AssertionError("an existing lock must not be touched")
+        raise AssertionError("the state directory already exists")
 
-    resolution = suite_lock.resolve_state_dir()
+    monkeypatch.setattr(Path, "open", _observe_open)
+    monkeypatch.setattr(Path, "touch", _deny_touch)
+    lock = suite_lock.SuiteLock(timeout_sec=5)
+    lock.acquire()
+    try:
+        assert lock.degraded is False
+        assert lock.state_dir_used == canonical
+    finally:
+        lock.release()
 
-    assert resolution.degraded is True
-    assert resolution.path == canonical / "darkfac-harness-sandboxed-user"
+    assert opened_modes == ["rb", "rb"]
+    assert lock_path.stat().st_mtime_ns == before
 
 
 def test_acquire_degrades_if_canonical_lock_becomes_unwritable_after_probe(
@@ -271,17 +309,17 @@ def test_acquire_degrades_if_canonical_lock_becomes_unwritable_after_probe(
     """A permission change after resolution must still switch acquisition to fallback."""
 
     canonical = tmp_path / "state"
-    real_touch = Path.touch
+    real_try_lock_file = suite_lock._try_lock_file
     denied = False
 
-    def _deny_acquisition_touch(self: Path, *args: object, **kwargs: object) -> None:
+    def _deny_acquisition_open(path: Path):
         nonlocal denied
-        if self == canonical / "suite-0.lock" and not denied:
+        if path == canonical / "suite-0.lock" and not denied:
             denied = True
-            raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+            raise suite_lock.SuiteLockUnwritable(path, "permission changed after probe")
+        return real_try_lock_file(path)
 
-    monkeypatch.setattr(Path, "touch", _deny_acquisition_touch)
+    monkeypatch.setattr(suite_lock, "_try_lock_file", _deny_acquisition_open)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
 
     lock = suite_lock.SuiteLock(timeout_sec=5)
@@ -308,14 +346,14 @@ def test_resolve_state_dir_fallback_rooted_at_configured_state_dir(
     canonical = tmp_path / "state"
     canonical.mkdir(parents=True)
 
-    real_touch = Path.touch
+    real_open = Path.open
 
-    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock" and self.parent == canonical:
+    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == canonical / "suite-0.lock" and mode == "rb":
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setattr(Path, "open", _denied_read)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
     resolution = suite_lock.resolve_state_dir()
     assert resolution.degraded is True
@@ -335,18 +373,21 @@ def test_resolve_state_dir_uses_temp_fallback_when_configured_state_tree_is_unwr
     fallback = canonical / "darkfac-harness-sandboxed-user"
     temp_root = tmp_path / "system-temp"
     canonical.mkdir(parents=True)
+    fallback.mkdir(parents=True)
+    (canonical / "suite-0.lock").touch()
+    (fallback / "suite-0.lock").touch()
     monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(canonical))
     monkeypatch.setenv("USERNAME", "sandboxed-user")
     monkeypatch.setattr(suite_lock.tempfile, "gettempdir", lambda: str(temp_root))
 
-    real_touch = Path.touch
+    real_open = Path.open
 
-    def _deny_state_lock_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock" and self.parent in (canonical, fallback):
+    def _deny_state_lock_open(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self in (canonical / "suite-0.lock", fallback / "suite-0.lock") and mode in ("rb", "xb"):
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _deny_state_lock_touch)
+    monkeypatch.setattr(Path, "open", _deny_state_lock_open)
 
     resolution = suite_lock.resolve_state_dir()
 
@@ -354,12 +395,12 @@ def test_resolve_state_dir_uses_temp_fallback_when_configured_state_tree_is_unwr
     assert resolution.path == temp_root / "darkfac-harness-sandboxed-user"
     assert (resolution.path / "suite-0.lock").exists()
 
-    def _deny_all_state_lock_touches(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock":
+    def _deny_all_state_lock_open(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self.name == "suite-0.lock" and mode in ("rb", "xb"):
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _deny_all_state_lock_touches)
+    monkeypatch.setattr(Path, "open", _deny_all_state_lock_open)
     with pytest.raises(suite_lock.SuiteLockUnwritable) as excinfo:
         suite_lock.resolve_state_dir()
     assert excinfo.value.path == resolution.path / "suite-0.lock"
@@ -392,15 +433,17 @@ def test_acquire_uses_degraded_fallback_when_canonical_lock_unwritable(
 
     canonical = tmp_path / "state"
     canonical.mkdir(parents=True)
+    canonical_lock = canonical / "suite-0.lock"
+    canonical_lock.touch()
 
-    real_touch = Path.touch
+    real_open = Path.open
 
-    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock" and self.parent == canonical:
+    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == canonical_lock and mode == "rb":
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setattr(Path, "open", _denied_read)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
 
     lock = suite_lock.SuiteLock(timeout_sec=5)
@@ -441,14 +484,14 @@ def test_acquire_degraded_does_not_wait_for_dead_canonical_owner(
         encoding="utf-8",
     )
 
-    real_touch = Path.touch
+    real_open = Path.open
 
-    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock" and self.parent == canonical:
+    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == canonical_lock and mode == "rb":
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setattr(Path, "open", _denied_read)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
 
     lock = suite_lock.SuiteLock(timeout_sec=5)
@@ -484,14 +527,14 @@ def test_acquire_degraded_waits_for_live_canonical_owner_then_times_out(
         encoding="utf-8",
     )
 
-    real_touch = Path.touch
+    real_open = Path.open
 
-    def _denied_touch(self: Path, *args: object, **kwargs: object) -> None:
-        if self.name == "suite-0.lock" and self.parent == canonical:
+    def _denied_read(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == canonical_lock and mode == "rb":
             raise PermissionError(13, "Permission denied")
-        return real_touch(self, *args, **kwargs)
+        return real_open(self, mode, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "touch", _denied_touch)
+    monkeypatch.setattr(Path, "open", _denied_read)
     monkeypatch.setenv("USERNAME", "sandboxed-user")
     monkeypatch.setattr(suite_lock, "_sleep", lambda _s: None)
 

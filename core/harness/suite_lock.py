@@ -38,11 +38,11 @@ Degraded mode (USR-463)
 A restricted identity (e.g. a sandboxed process group such as
 ``CodexSandboxUsers``) can read the canonical state directory but not write
 to its pre-existing lock files -- their ACL grants write only to the account
-that created them. ``resolve_state_dir()`` detects this (by probing the exact
-artifact a real acquisition touches, ``suite-0.lock``) and, instead of
-raising, returns a writable per-identity fallback directory so that identity
-can still produce a usable lock. ``SuiteLock.acquire()`` uses that fallback
-when degraded, after waiting (best effort, respecting the overall timeout)
+that created them. The lock file is opened read-only, so this identity can
+still acquire a free canonical lock without changing its metadata.
+``resolve_state_dir()`` uses a writable per-identity fallback only when the
+canonical lock cannot be read or created. ``SuiteLock.acquire()`` uses that
+fallback when degraded, after waiting (best effort, respecting the overall timeout)
 for any *live* canonical holder to release first -- a dead or absent
 canonical holder never blocks it. Exclusion between different identities'
 fallback directories is best effort, not guaranteed: two different accounts
@@ -52,6 +52,7 @@ each in their own degraded fallback do not see each other's locks.
 from __future__ import annotations
 
 import contextlib
+import errno
 import getpass
 import json
 import math
@@ -70,6 +71,8 @@ _DEFAULT_SLOTS = 1
 _DEFAULT_TIMEOUT_SEC = 3600
 _POLL_MIN_SEC = 0.5
 _POLL_MAX_SEC = 5.0
+_LOCK_PERMISSION_ATTEMPTS = 3
+_LOCK_PERMISSION_RETRY_SEC = 0.05
 _DEFAULT_STALL_AFTER_SEC = 600.0
 _DEFAULT_STALL_WINDOW_SEC = 10.0
 #: CPU seconds (whole holder process tree, over the sampling window) at or
@@ -88,8 +91,7 @@ class SuiteLockTimeout(RuntimeError):
 
 
 class SuiteLockUnwritable(RuntimeError):
-    """Raised when the lock state cannot be created or opened for *write*
-    access, as opposed to a slot being legitimately held by another process.
+    """Raised when lock state cannot be created or opened, not when it is busy.
 
     This happens when the identity running the process has a restrictive ACL
     on the machine-global state directory (USR-463), e.g. a sandboxed process
@@ -102,7 +104,7 @@ class SuiteLockUnwritable(RuntimeError):
     def __init__(self, path, reason: str) -> None:
         self.path = path
         self.reason = reason
-        super().__init__(f"[SUITE_LOCK] cannot write lock state at {path}: {reason}")
+        super().__init__(f"[SUITE_LOCK] cannot access lock state at {path}: {reason}")
 
 
 def _env_flag_off(name: str) -> bool:
@@ -190,7 +192,7 @@ def _resolve_fallback_state_dir(canonical: Path, reason: str) -> StateDirResolut
     candidates = _fallback_state_dir_candidates()
     for fallback in candidates:
         try:
-            _probe_writable(fallback)
+            _probe_lock_access(fallback)
         except PermissionError as exc:
             failures.append(f"{fallback / 'suite-0.lock'}: {exc}")
             continue
@@ -200,31 +202,69 @@ def _resolve_fallback_state_dir(canonical: Path, reason: str) -> StateDirResolut
     detail = "; ".join(failures)
     raise SuiteLockUnwritable(
         last_fallback / "suite-0.lock",
-        f"fallbacks for {canonical / 'suite-0.lock'} are also unwritable: {detail}",
+        f"fallbacks for {canonical / 'suite-0.lock'} are also inaccessible: {detail}",
     )
 
 
-def _probe_writable(directory: Path) -> None:
-    """Raise ``PermissionError`` when this identity cannot write the lock file
-    a real acquisition would touch first (USR-463).
+def _probe_lock_access(directory: Path) -> None:
+    """Ensure the first lock can be opened without changing an existing file.
 
-    ``Path.mkdir(exist_ok=True)`` on an already-existing directory is a silent
-    no-op that proves nothing about write access to its *contents* -- Windows
-    ACLs are set per-file, so a pre-existing ``suite-0.lock`` created by a
-    different account can stay unwritable even though new files can still be
-    created in the same directory. Probing that exact file reproduces the
-    real failure mode instead of a directory-level approximation of it.
+    A lock is an OS-level byte/file lock, so an existing lock file only needs
+    read access. Creating a missing file is atomic; if another process wins
+    that race, the exclusive create is discarded and the existing file is
+    opened read-only.
     """
-
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = directory / "suite-0.lock"
-    lock_path.touch(exist_ok=True)
-    # ``touch`` only proves that the file can be created or its timestamp
-    # changed. Windows ACLs can grant that access while denying the write-data
-    # access required by the real ``r+b`` lock-file open below. Probe the same
-    # open mode so the resolver catches that restricted-identity case too.
-    with open(lock_path, "r+b"):
-        pass
+    handle = _open_lock_file(lock_path)
+    handle.close()
+
+
+def _open_lock_file(path: Path) -> object:
+    """Open a lock file read-only, creating it exclusively only if absent.
+
+    Retrying permission failures is useful for transient Windows sharing or
+    ACL propagation errors. Existing files are never opened for writing or
+    touched, so acquiring one does not change its metadata.
+    """
+
+    last_permission_error: PermissionError | None = None
+    for attempt in range(_LOCK_PERMISSION_ATTEMPTS):
+        try:
+            return path.open("rb")
+        except FileNotFoundError:
+            try:
+                created = path.open("xb")
+            except FileExistsError:
+                # Another process created it after our read-only open failed.
+                continue
+            except PermissionError as exc:
+                last_permission_error = exc
+            else:
+                created.close()
+                # Reopen read-only for the actual OS lock.
+                continue
+        except PermissionError as exc:
+            last_permission_error = exc
+        if attempt + 1 < _LOCK_PERMISSION_ATTEMPTS:
+            _sleep(_LOCK_PERMISSION_RETRY_SEC)
+
+    if last_permission_error is not None:
+        raise last_permission_error
+    raise FileNotFoundError(f"lock file kept disappearing while opening: {path}")
+
+
+def _lock_is_contended(error: OSError) -> bool:
+    """Recognize platform lock conflicts without hiding unrelated ACL errors."""
+
+    if os.name == "nt":
+        winerror = getattr(error, "winerror", None)
+        if winerror in (32, 33):  # sharing violation / lock violation
+            return True
+        if winerror == 5:  # access denied, not a lock conflict
+            return False
+        return error.errno == errno.EACCES  # MS CRT uses EACCES for a busy range
+    return error.errno in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK)
 
 
 @dataclass(frozen=True)
@@ -232,10 +272,9 @@ class StateDirResolution:
     """Result of :func:`resolve_state_dir` (USR-463).
 
     ``degraded`` is ``False`` and ``reason`` is ``None`` when the canonical
-    machine-global directory is writable by this identity -- the common case,
-    unchanged from before degraded mode existed. When the canonical directory
-    is not writable, ``path`` is a per-identity fallback directory instead,
-    ``degraded`` is ``True``, and ``reason`` explains why.
+    machine-global lock is accessible to this identity -- the common case.
+    When the canonical lock is not accessible, ``path`` is a per-identity
+    fallback, ``degraded`` is ``True``, and ``reason`` explains why.
     """
 
     path: Path
@@ -244,20 +283,20 @@ class StateDirResolution:
 
 
 def resolve_state_dir() -> StateDirResolution:
-    """Canonical state directory, or a writable per-identity fallback (USR-463).
+    """Canonical state directory, or a per-identity fallback (USR-463).
 
-    Always creates and returns a directory this identity can write to.
-    A permission problem in the canonical directory switches to a per-identity
-    fallback. If that fallback is also unwritable, raise
+    Creates a missing directory or lock file. Existing lock files are only
+    opened for reading. A permission problem in the canonical path switches to
+    a per-identity fallback. If that fallback is also inaccessible, raise
     ``SuiteLockUnwritable`` rather than leaking a raw ``PermissionError`` from
     the later lock-file open.
     """
 
     canonical = _canonical_state_dir_path()
     try:
-        _probe_writable(canonical)
+        _probe_lock_access(canonical)
     except PermissionError as exc:
-        reason = f"sem permissao de escrita em {canonical / 'suite-0.lock'}: {exc}"
+        reason = f"sem acesso a {canonical / 'suite-0.lock'}: {exc}"
         return _resolve_fallback_state_dir(canonical, reason)
     return StateDirResolution(path=canonical, degraded=False, reason=None)
 
@@ -344,45 +383,41 @@ class _LockHandle:
 def _try_lock_file(path: Path) -> object | None:
     """Attempt a non-blocking exclusive lock on ``path``; ``None`` if busy.
 
-    Raises ``SuiteLockUnwritable`` when the file cannot even be created or
-    opened for write access because the running identity lacks permission
+    Raises ``SuiteLockUnwritable`` when the file cannot be created or opened
+    for read access because the running identity lacks permission
     (USR-463) -- a distinct condition from the lock being legitimately held
     by another process, which is reported by returning ``None``.
     """
 
-    try:
-        path.touch(exist_ok=True)
-    except PermissionError as exc:
-        # The lock file may already exist but be unwritable to this identity
-        # (USR-463): a pre-existing file's per-file ACL can deny write access
-        # even though the directory itself is otherwise usable. Report it as
-        # a structured error so callers degrade instead of crashing.
-        raise SuiteLockUnwritable(path, str(exc)) from exc
-    try:
-        handle = open(path, "r+b")
-    except PermissionError as exc:
-        raise SuiteLockUnwritable(path, str(exc)) from exc
-    try:
-        if os.name == "nt":
-            import msvcrt
+    for attempt in range(_LOCK_PERMISSION_ATTEMPTS):
+        try:
+            handle = _open_lock_file(path)
+        except PermissionError as exc:
+            raise SuiteLockUnwritable(path, str(exc)) from exc
+        try:
+            if os.name == "nt":
+                import msvcrt
 
-            try:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError:
-                handle.close()
-                return None
-        else:
-            import fcntl
+            else:
+                import fcntl
 
-            try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                handle.close()
+            return handle
+        except OSError as exc:
+            handle.close()
+            if _lock_is_contended(exc):
                 return None
-        return handle
-    except Exception:
-        handle.close()
-        raise
+            if isinstance(exc, PermissionError):
+                if attempt + 1 < _LOCK_PERMISSION_ATTEMPTS:
+                    _sleep(_LOCK_PERMISSION_RETRY_SEC)
+                    continue
+                raise SuiteLockUnwritable(path, str(exc)) from exc
+            return None
+        except Exception:
+            handle.close()
+            raise
+    raise SuiteLockUnwritable(path, "permission denied while acquiring the OS lock")
 
 
 def _unlock_file(handle: object) -> None:
@@ -640,7 +675,7 @@ class SuiteLock:
         #: per-run timing record, separate from the suite execution time.
         self.waited_sec: float | None = None
         #: USR-463: ``True`` once ``acquire()`` had to fall back to a
-        #: per-identity directory because the canonical one was unwritable.
+        #: per-identity directory because the canonical lock was inaccessible.
         self.degraded: bool = False
         #: USR-463: the directory the held lock actually lives in -- the
         #: canonical one, or the degraded fallback.
@@ -695,16 +730,13 @@ class SuiteLock:
                     handle = _try_lock_file(lock_path)
                 except SuiteLockUnwritable as exc:
                     # The canonical ACL can change between the initial probe
-                    # and acquisition (or deny the exact open despite touch
-                    # succeeding). Degrade here as well, rather than leaking
+                    # and acquisition. Degrade here as well, rather than leaking
                     # the structured error out of a gate that could use its
                     # per-identity lock directory.
                     if resolution.degraded:
                         raise
                     canonical = _canonical_state_dir_path()
-                    reason = (
-                        f"sem permissao de escrita em {lock_path}: {exc.reason}"
-                    )
+                    reason = f"sem acesso a {lock_path}: {exc.reason}"
                     resolution = _resolve_fallback_state_dir(canonical, reason)
                     fallback = resolution.path
                     self.degraded = True
@@ -787,8 +819,8 @@ def probe_free_slot(*, slots: int | None = None) -> bool:
     for their actual work, so the result can become stale immediately.
 
     Never raises for a permission problem (USR-463): a state directory or
-    lock file that this identity cannot write to is treated the same as "no
-    slot observed free" rather than crashing the caller.
+    lock file that this identity cannot access is treated the same as "no slot
+    observed free" rather than crashing the caller.
     """
     if is_disabled():
         return True
