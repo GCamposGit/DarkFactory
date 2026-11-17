@@ -503,7 +503,11 @@ def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
     # The ledger row of a ticket created by this very run is the only change the harness itself makes.
     if [p for p in mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE]:
         return False
-    if not cleanup(workspace.path, workspace.main_root).removed:
+    if not cleanup(
+        workspace.path,
+        workspace.main_root,
+        discard_paths=(LEDGER_RELATIVE,),
+    ).removed:
         return False
     _run_git(["branch", "-D", workspace.branch], cwd=workspace.main_root)
     return True

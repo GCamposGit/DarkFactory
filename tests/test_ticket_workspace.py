@@ -354,6 +354,42 @@ def test_cleanup_preserves_worktrees_with_any_git_changes(
     assert os.path.normcase(os.path.realpath(ws.path)) in _registered(repo.local)
 
 
+def test_cleanup_discards_only_explicit_tracked_generated_paths(repo: SimpleNamespace) -> None:
+    ledger = repo.local / ticket_workspace.TICKET_LEDGER_RELATIVE
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(repo.local, "add", ticket_workspace.TICKET_LEDGER_RELATIVE)
+    _git(repo.local, "commit", "--quiet", "-m", "seed ticket ledger")
+    _git(repo.local, "push", "--quiet", "origin", "main")
+    ws = create_workspace("USR-500-ledger-cleanup", cwd=repo.local)
+    workspace_ledger = ws.path / ticket_workspace.TICKET_LEDGER_RELATIVE
+    workspace_ledger.write_text('[{"id":"USR-500"}]\n', encoding="utf-8")
+    unexpected = ws.path / "precious.txt"
+    unexpected.write_text("keep me\n", encoding="utf-8")
+
+    blocked = cleanup(
+        ws.path,
+        ws.main_root,
+        discard_paths=(ticket_workspace.TICKET_LEDGER_RELATIVE,),
+        holder_probe=lambda _path: (),
+    )
+
+    assert not blocked.removed and blocked.outcome == "blocked_changes"
+    assert workspace_ledger.read_text(encoding="utf-8") == '[{"id":"USR-500"}]\n'
+    assert unexpected.read_text(encoding="utf-8") == "keep me\n"
+
+    unexpected.unlink()
+    removed = cleanup(
+        ws.path,
+        ws.main_root,
+        discard_paths=(ticket_workspace.TICKET_LEDGER_RELATIVE,),
+        holder_probe=lambda _path: (),
+    )
+
+    assert removed.removed and not ws.path.exists()
+    assert ticket_workspace.list_cleanup_pending(ws.main_root) == []
+
+
 def test_cleanup_preserves_a_worktree_with_a_live_process(repo: SimpleNamespace) -> None:
     ws = create_workspace("USR-218", cwd=repo.local)
 
@@ -375,13 +411,8 @@ def test_cleanup_preserves_when_a_process_cannot_be_inspected(
     class AccessDenied(Exception):
         pass
 
-    process = SimpleNamespace(
-        cwd=lambda: (_ for _ in ()).throw(AccessDenied()),
-        open_files=lambda: [],
-        info={"name": "protected", "pid": 2718},
-    )
     fake_psutil = SimpleNamespace(
-        process_iter=lambda _attrs: [process],
+        process_iter=lambda _attrs: (_ for _ in ()).throw(AccessDenied()),
         NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
         ZombieProcess=type("ZombieProcess", (Exception,), {}),
         AccessDenied=AccessDenied,
@@ -394,6 +425,40 @@ def test_cleanup_preserves_when_a_process_cannot_be_inspected(
     assert result.reason == "process_state_unknown"
     assert ws.path.exists()
     assert len(ticket_workspace.list_cleanup_pending(ws.main_root)) == 1
+
+
+def test_cleanup_skips_per_process_access_denied_metadata(repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = create_workspace("USR-218-access-denied-process", cwd=repo.local)
+
+    class AccessDenied(Exception):
+        pass
+
+    inaccessible_cwd = SimpleNamespace(
+        cwd=lambda: (_ for _ in ()).throw(AccessDenied()),
+        open_files=lambda: [],
+        info={"name": "protected", "pid": 2718},
+    )
+    inaccessible_files = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(AccessDenied()),
+        info={"name": "another-process", "pid": 2719},
+    )
+    unrelated = SimpleNamespace(
+        cwd=lambda: str(repo.tmp / "other-checkout"),
+        open_files=lambda: (_ for _ in ()).throw(AssertionError("unrelated process must not be scanned")),
+        info={"name": "unrelated", "pid": 2720},
+    )
+    fake_psutil = SimpleNamespace(
+        process_iter=lambda _attrs: [inaccessible_cwd, inaccessible_files, unrelated],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=AccessDenied,
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    result = cleanup(ws.path, ws.main_root)
+
+    assert result.removed and not ws.path.exists()
 
 
 def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(

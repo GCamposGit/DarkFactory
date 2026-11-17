@@ -171,9 +171,18 @@ Ao encerrar um job, ou desfazer um checkout criado parcialmente, o despachante u
 `core.git.ticket_workspace.cleanup`. Antes de remover, a rotina confirma que o caminho é uma
 worktree secundária registrada e desbloqueada, verifica `git status` (incluindo arquivos
 rastreados, staged e não rastreados) e procura processos com o diretório atual dentro do
-checkout. Alteração ou processo vivo preserva os arquivos e o registro Git. O comando Git de
-remoção não usa `--force`, então uma alteração criada depois da inspeção também faz o Git
-recusar a remoção. Inspeção inconclusiva ou outra falha preserva o checkout e retorna erro.
+checkout. Alteração inesperada ou processo encontrado preserva os arquivos e o registro Git.
+O comando Git de remoção não usa `--force`, então uma alteração criada depois da inspeção
+também faz o Git recusar a remoção. Uma falha global de inspeção preserva o checkout. No
+Windows, `AccessDenied` em metadados de um processo isolado não bloqueia toda a busca; a
+consulta de arquivos abertos se limita a processos cujo diretório atual está na raiz do
+repositório ou em uma pasta ancestral.
+
+O argumento interno `discard_paths` só é usado para arquivos gerados que o chamador já
+identificou como descartáveis. A rotina os restaura ao `HEAD` se forem rastreados e forem as
+únicas alterações. No encerramento de uma tentativa sem implementação e na remoção do checkout
+operacional da frota, isso permite descartar o ledger temporário do ticket. Qualquer outro
+arquivo alterado continua bloqueando a limpeza.
 
 `CleanupResult.outcome` registra `removed`, `blocked_changes`, `blocked_process` ou `error`;
 `reason` identifica a causa e `method` informa como a remoção foi concluída. Os chamadores

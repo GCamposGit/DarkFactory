@@ -402,7 +402,11 @@ def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Pa
         from core.git import ticket_workspace
 
         root = main_root or ticket_workspace.main_checkout_root(PROJECT_ROOT)
-        result = ticket_workspace.cleanup(path, root)
+        result = ticket_workspace.cleanup(
+            path,
+            root,
+            discard_paths=(ticket_workspace.TICKET_LEDGER_RELATIVE,),
+        )
         if result.method == "preserved":
             logger.warning(
                 "checkout operacional preservado: path=%s outcome=%s reason=%s detalhe=%s; "

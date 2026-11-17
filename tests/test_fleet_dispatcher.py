@@ -1652,8 +1652,8 @@ def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(t
     holder = "python (pid 17192)"
     calls = []
 
-    def protected_cleanup(path, main_root):
-        calls.append((path, main_root))
+    def protected_cleanup(path, main_root, **kwargs):
+        calls.append((path, main_root, kwargs.get("discard_paths")))
         return CleanupResult(
             path=path, removed=False, method="preserved",
             detail=f"{path} is in use; preserved because processes have cwd inside it: {holder}",
@@ -1665,7 +1665,7 @@ def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(t
 
     fd._remove_operational_checkout(checkout)
 
-    assert calls == [(checkout, tmp_path)]
+    assert calls == [(checkout, tmp_path, (".factory/demands/demands.json",))]
     assert "checkout operacional preservado" in caplog.text
     assert str(checkout) in caplog.text and holder in caplog.text
     assert "recuperacao possivel" in caplog.text

@@ -58,6 +58,7 @@ WORKTREES_DIRNAME = ".worktrees"
 WORKTREE_ROOTS: tuple[Path, ...] = (Path(WORKTREES_DIRNAME), Path(".claude") / "worktrees")
 TRASH_RELATIVE = Path(".factory") / "backups" / "trash"
 CLEANUP_PENDING_RELATIVE = Path(".factory") / "runs" / "cleanup_pending"
+TICKET_LEDGER_RELATIVE = ".factory/demands/demands.json"
 TRASH_RETENTION_DAYS = 7
 # Machine-state directories that live next to worktrees and must never be
 # treated as dead worktrees (e.g. a DARKFAC_HARNESS_STATE_DIR pointed there).
@@ -496,6 +497,7 @@ def cleanup(
     path: Path,
     main_root: Path,
     *,
+    discard_paths: Sequence[str] = (),
     sleep_fn: Optional[SleepFn] = None,
     retries: int = DEFAULT_CLEANUP_RETRIES,
     backoff_s: Sequence[float] = DEFAULT_BACKOFF_S,
@@ -513,9 +515,11 @@ def cleanup(
        data, never leave a half-registered worktree) and ``git worktree prune``.
 
     Each destructive operation rechecks that ``path`` is a registered, unlocked,
-    clean worktree and that no process is using it. Unknown Git or process
-    state preserves the worktree. This process cwd is moved out of ``path`` before
-    those final checks (:func:`_outside_dir`).
+    clean worktree and that no process is using it. Callers may name tracked,
+    generated input paths in ``discard_paths``; those paths are restored to HEAD
+    only when they are the sole changes. Unknown Git or process state preserves
+    the worktree. This process cwd is moved out of ``path`` before those final
+    checks (:func:`_outside_dir`).
     Never raises; ``CleanupResult.outcome`` records removal, dirty/process blocks,
     or an error. The Git remove is intentionally non-forced so a change created
     between inspection and removal is still rejected by Git.
@@ -525,6 +529,7 @@ def cleanup(
             result = _cleanup_outside(
                 path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
                 run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn, holder_probe=holder_probe,
+                discard_paths=discard_paths,
             )
     except Exception as exc:  # noqa: BLE001 -- cleanup reports failures instead of leaking them
         detail = f"cleanup failed for {path}: {exc}"
@@ -613,6 +618,7 @@ def _cleanup_safety_issue(
     main_root: Path,
     runner: GitRunner,
     holder_probe: HolderProbe,
+    discard_paths: frozenset[str] = frozenset(),
 ) -> Optional[_CleanupSafetyIssue]:
     """Return why removal is unsafe, failing closed when ownership cannot be proved."""
     try:
@@ -641,10 +647,9 @@ def _cleanup_safety_issue(
     if status.returncode != 0:
         detail = (status.stderr or status.stdout or "git status failed").strip()
         return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
-    # Cleanup is stricter than ownerless-worktree classification: every path Git
-    # reports is local work that must survive, including scratch and ledger edits.
     changes = _status_paths(status.stdout or "")
-    if changes:
+    discardable = {change.replace("\\", "/") for change in changes}
+    if changes and not discardable.issubset(discard_paths):
         return _CleanupSafetyIssue(
             "blocked_changes",
             "worktree_dirty",
@@ -668,6 +673,71 @@ def _cleanup_safety_issue(
     return None
 
 
+def _validated_discard_paths(paths: Sequence[str]) -> frozenset[str]:
+    """Normalize explicit generated paths and reject absolute or traversal paths."""
+    normalized: set[str] = set()
+    for raw_path in paths:
+        value = str(raw_path).replace("\\", "/")
+        parts = value.split("/")
+        if (
+            not value
+            or value.startswith("/")
+            or (len(value) >= 2 and value[1] == ":")
+            or value.startswith(":(")
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise ValueError(f"discard path must be a literal repository-relative path: {raw_path!r}")
+        normalized.add(value)
+    return frozenset(normalized)
+
+
+def _restore_discard_paths(
+    path: Path,
+    discard_paths: frozenset[str],
+    runner: GitRunner,
+) -> Optional[_CleanupSafetyIssue]:
+    """Restore only explicitly discardable, tracked changes before normal removal."""
+    if not discard_paths:
+        return None
+    status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+    if status.returncode != 0:
+        detail = (status.stderr or status.stdout or "git status failed").strip()
+        return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
+    changed = [item.replace("\\", "/") for item in _status_paths(status.stdout or "")]
+    if not changed:
+        return None
+    if not set(changed).issubset(discard_paths):
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "worktree_dirty",
+            "preserved because the worktree has staged, tracked, or untracked changes: " + ", ".join(changed[:5]),
+        )
+
+    literal_paths = [f":(literal){item}" for item in changed]
+    tracked = runner(["ls-files", "--error-unmatch", "--", *literal_paths], path)
+    if tracked.returncode != 0:
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "discard_path_untracked",
+            "preserved because an explicitly discardable path is not tracked: " + ", ".join(changed[:5]),
+        )
+    restored = runner(
+        ["restore", "--source=HEAD", "--staged", "--worktree", "--", *literal_paths], path
+    )
+    if restored.returncode != 0:
+        detail = (restored.stderr or restored.stdout or "git restore failed").strip()
+        return _CleanupSafetyIssue(
+            "error", "discard_path_restore_failed", f"could not restore generated paths; preserved: {detail}"
+        )
+    status_after = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+    if status_after.returncode != 0 or status_after.stdout.strip():
+        detail = (status_after.stderr or status_after.stdout or "worktree changed during cleanup").strip()
+        return _CleanupSafetyIssue(
+            "blocked_changes", "worktree_changed_during_cleanup", f"preserved because worktree changed: {detail}"
+        )
+    return None
+
+
 def _cleanup_outside(
     path: Path,
     main_root: Path,
@@ -679,11 +749,23 @@ def _cleanup_outside(
     rmtree_fn: Optional[RmtreeFn],
     now_fn: Optional[NowFn],
     holder_probe: Optional[HolderProbe],
+    discard_paths: Sequence[str],
 ) -> CleanupResult:
     runner = run_git or _git
     sleeper = sleep_fn or time.sleep
     remove_tree = rmtree_fn or robust_rmtree
     inspect_holders = holder_probe if holder_probe is not None else _find_holders
+    try:
+        discardable = _validated_discard_paths(discard_paths)
+    except ValueError as exc:
+        return CleanupResult(
+            path=path,
+            removed=False,
+            method="preserved",
+            detail=str(exc),
+            outcome="error",
+            reason="invalid_discard_path",
+        )
     result = CleanupResult(path=path, removed=False, method="failed")
 
     if not path.exists():
@@ -693,6 +775,20 @@ def _cleanup_outside(
 
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
+        issue = _cleanup_safety_issue(path, main_root, runner, inspect_holders, discardable)
+        if issue:
+            result.removed, result.method, result.attempts = False, "preserved", attempt - 1
+            result.outcome, result.reason = issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
+        issue = _restore_discard_paths(path, discardable, runner)
+        if issue:
+            result.removed, result.method, result.attempts = False, "preserved", attempt - 1
+            result.outcome, result.reason = issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
         issue = _cleanup_safety_issue(path, main_root, runner, inspect_holders)
         if issue:
             result.removed, result.method, result.attempts = False, "preserved", attempt - 1
@@ -1384,31 +1480,61 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
 def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
     """``name (pid)`` of processes using ``path`` as cwd or through an open file.
 
-    ``None`` when ``psutil`` is unavailable or any process cannot be inspected;
-    callers must preserve the worktree because its state is unknown. An empty
-    tuple means no holder was found among every process that could be inspected.
-    This does not remove anything.
+    ``None`` when ``psutil`` is unavailable or process enumeration fails;
+    callers must preserve the worktree because its state is unknown. Windows
+    commonly denies metadata access to unrelated protected processes, so an
+    ``AccessDenied`` for an individual property is skipped. Open-file paths are
+    inspected for processes whose cwd is the repository root or one of its
+    parents; unrelated processes are excluded to avoid a machine-wide handle
+    scan. Non-forced Git and filesystem removal still refuse a blocking open
+    handle. An empty tuple means no holder was found among the relevant
+    accessible process data. This does not remove anything.
     """
     try:
         import psutil  # optional
     except ImportError:
         logger.debug("psutil unavailable; preserving worktree %s", path)
         return None
+    repository_root: Optional[Path] = None
+    try:
+        resolved_path = path.resolve()
+        for candidate in (resolved_path, *resolved_path.parents):
+            if (candidate / ".git").is_dir():
+                repository_root = candidate
+                break
+    except OSError as exc:
+        logger.debug("Could not resolve worktree path %s while inspecting process holders: %s", path, exc)
     found: list[str] = []
     try:
         for proc in psutil.process_iter(["pid", "name"]):
             try:
-                using_path = _is_within(proc.cwd(), path)
-                if not using_path:
-                    using_path = any(_is_within(open_file.path, path) for open_file in proc.open_files())
+                cwd = proc.cwd()
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
             except psutil.AccessDenied:
-                logger.warning("Could not inspect a process using paths near %s; preserving it", path)
-                return None
+                cwd = None
             except Exception:  # noqa: BLE001 -- an unexpected per-process error must not look like "no holder"
                 logger.warning("Could not inspect process paths for %s; preserving it", path)
                 return None
+            using_path = cwd is not None and _is_within(cwd, path)
+            process_cwd_is_related = (
+                cwd is not None
+                and (
+                    repository_root is None
+                    or _is_within(path, cwd)
+                    or _is_within(repository_root, cwd)
+                )
+            )
+            if not using_path and process_cwd_is_related:
+                try:
+                    using_path = any(_is_within(open_file.path, path) for open_file in proc.open_files())
+                except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                    continue
+                except psutil.AccessDenied:
+                    continue
+                except Exception:  # noqa: BLE001 -- unexpected errors must not look like "no holder"
+                    logger.warning("Could not inspect process paths for %s; preserving it", path)
+                    return None
             if using_path:
                 found.append(f"{proc.info.get('name')} (pid {proc.info.get('pid')})")
     except Exception:  # noqa: BLE001 -- cannot prove the worktree is idle
