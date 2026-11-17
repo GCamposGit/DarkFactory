@@ -737,19 +737,34 @@ def test_resumable_delivery_worktree_needs_commits_and_plan(tmp_path: Path, monk
 
     def lookup(ahead: int, changed: tuple = ()):
         chosen = SimpleNamespace(commits_ahead=ahead, changed_paths=changed,
-                                 workspace=SimpleNamespace(path=tmp_path))
+                                 workspace=SimpleNamespace(path=wt_path))
         monkeypatch.setattr(tw, "find_preserved_workspaces", lambda *_a, **_k: SimpleNamespace(chosen=chosen))
 
     monkeypatch.undo()  # remove o stub autouse
-    context = tmp_path / ".darkfac" / "runs" / "USR-9"
+    wt_path = tmp_path / "wt"
+    wt_path.mkdir()
+    state_dir = tmp_path / "state"
+    monkeypatch.setattr(fd, "state_root", lambda: state_dir)
+
+    context = wt_path / ".darkfac" / "runs" / "USR-9"
     context.mkdir(parents=True)
     lookup(2)
     assert fd.resumable_delivery_worktree("USR-9") is None  # sem plano
     (context / "SPEC.md").write_text("x", encoding="utf-8")
     (context / "tickets.json").write_text("[]", encoding="utf-8")
-    assert fd.resumable_delivery_worktree("USR-9") == tmp_path
+    assert fd.resumable_delivery_worktree("USR-9") == wt_path
     lookup(0)
     assert fd.resumable_delivery_worktree("USR-9") is None  # nada a frente da base
+
+    # Plano gravado fora da worktree (em state_root()/artifacts/ticket_runs/<id>) tambem conta (USR-447).
+    (context / "SPEC.md").unlink()
+    (context / "tickets.json").unlink()
+    ext_context = state_dir / "artifacts" / "ticket_runs" / "USR-9" / ".darkfac" / "runs" / "USR-9"
+    ext_context.mkdir(parents=True)
+    (ext_context / "SPEC.md").write_text("x", encoding="utf-8")
+    (ext_context / "tickets.json").write_text("[]", encoding="utf-8")
+    lookup(2)
+    assert fd.resumable_delivery_worktree("USR-9") == wt_path
 
 
 def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str = "completed"):

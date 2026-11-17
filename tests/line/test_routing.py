@@ -19,6 +19,7 @@ from core.line.routing import (
     load_routing_config,
     pick,
     record_result,
+    touch_coordinator_heartbeat,
     validate_routing_config,
 )
 
@@ -871,18 +872,35 @@ def test_pick_development_elects_antigravity_when_operating_interactively_withou
 
 
 def test_headless_fleet_keeps_coordinator_reserve_on_claude_but_interactive_does_not(tmp_path: Path):
-    """USR-490: below coordinator_reserve_pct (35) only the fleet skips claude; planning still uses it interactively."""
+    """USR-490 / USR-528: reserve below coordinator_reserve_pct (35) only holds when interactive session is active."""
     caps = ["harness:claude", "harness:codex"]
-    lookup = lambda p: 30.0 if p == "anthropic" else 60.0
+    lookup = lambda p: 30.0 if p == "anthropic" else 20.0
+    hb_path = tmp_path / "coordinator_heartbeat.json"
 
+    # Without an active interactive coordinator heartbeat, claude remains eligible above the 15% floor.
+    no_session = pick("development", caps, quota_lookup=lookup, execution_context="headless",
+                      cooldown_path=tmp_path / "a.json")
+    assert no_session is not None and no_session[0] == "claude"
+
+    # With a fresh interactive heartbeat, headless development reserves claude and falls back to codex.
+    touch_coordinator_heartbeat(hb_path, harness="claude")
     fleet = pick("development", caps, quota_lookup=lookup, execution_context="headless",
                  cooldown_path=tmp_path / "a.json")
-    assert fleet is not None and fleet[0] != "claude"
+    assert fleet is not None and fleet[0] == "codex"
     chat = pick("planning", ["harness:claude"], quota_lookup=lookup, execution_context="interactive",
                 cooldown_path=tmp_path / "b.json")
     assert chat is not None and chat[0] == "claude"
+
+    # An expired heartbeat (> 30 min TTL) releases the reserve back to the fleet.
+    touch_coordinator_heartbeat(hb_path, harness="claude", now=datetime.now(timezone.utc) - timedelta(minutes=45))
+    expired = pick("development", caps, quota_lookup=lookup, execution_context="headless",
+                   cooldown_path=tmp_path / "a.json")
+    assert expired is not None and expired[0] == "claude"
+
+    # Above coordinator_reserve_pct (80 > 35), claude is elected even with an active heartbeat.
+    touch_coordinator_heartbeat(hb_path, harness="claude")
     healthy = pick("development", caps, quota_lookup=lambda p: 80.0 if p == "anthropic" else 50.0,
-                   execution_context="headless", cooldown_path=tmp_path / "c.json")
+                   execution_context="headless", cooldown_path=tmp_path / "a.json")
     assert healthy is not None and healthy[0] == "claude"
 
 
