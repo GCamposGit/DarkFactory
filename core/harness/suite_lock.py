@@ -428,6 +428,14 @@ def _sidecar_owner_pid_if_live(lock_path: Path) -> int | None:
     Used to decide whether a degraded acquisition must wait for the canonical
     holder: only a *confirmed-live* holder blocks it, matching the rule that a
     dead or absent canonical lock never blocks the fallback.
+
+    Without ``start_ticks`` (Windows/macOS), liveness falls back to comparing
+    the live process' ``create_time()`` against the sidecar's ``started_at``
+    with ``only_younger=True`` -- the same rule ``_sample_holder_tree`` uses --
+    rather than the symmetric default tolerance: ``started_at`` is the moment
+    the holder *acquired the lock*, which can be arbitrarily later than its own
+    process start (e.g. a slow startup before reaching the lock), so only a pid
+    created AFTER that moment indicates a reused pid.
     """
 
     info = _read_sidecar(lock_path)
@@ -446,7 +454,7 @@ def _sidecar_owner_pid_if_live(lock_path: Path) -> int | None:
         proc = psutil.Process(pid)
     except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
         return None
-    if same_process(proc, info.get("started_at"), info.get("start_ticks")):
+    if same_process(proc, info.get("started_at"), info.get("start_ticks"), only_younger=True):
         return pid
     return None
 
