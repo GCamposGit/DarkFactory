@@ -78,6 +78,7 @@ from core.harness.markers import (
     sanitize_child_output,
 )
 from core.harness.models import HarnessResult, HarnessStepConfig
+from core.infra.host_identity import HOST_ALIASES, logical_host
 
 # --- env vars / constants ---------------------------------------------------
 
@@ -109,9 +110,7 @@ ENV_FLEET_DISABLED_HOSTS = "DARKFAC_FLEET_DISABLED_HOSTS"
 
 #: USR-430: Known host identifiers and IPs to exclude workers when a host is disabled.
 KNOWN_HOST_IDENTIFIERS: dict[str, frozenset[str]] = {
-    "desktop": frozenset({"desktop", "desktop-g45ipem", "100.78.181.90"}),
-    "grokbox": frozenset({"grokbox", "grok-bot-vm-418374532", "100.77.130.5"}),  # census: wire-id
-    "notebook": frozenset({"notebook", "ai-notebook", "ai_notebook", "100.81.84.124"}),
+    host: aliases for host, aliases in HOST_ALIASES.items()
 }
 
 #: grokbox (Linux, Tailscale 100.77.130.5) first: it runs the official gate in ~143 s
@@ -246,16 +245,7 @@ def is_worker_disabled(url: str, disabled: set[str] | None = None) -> bool:
         hostname = ""
     if not hostname:
         hostname = url.strip().casefold()
-
-    for d in disabled:
-        if hostname == d:
-            return True
-        aliases = KNOWN_HOST_IDENTIFIERS.get(d, frozenset())
-        if hostname in aliases:
-            return True
-        if d in hostname:
-            return True
-    return False
+    return _identifier_is_disabled(hostname, disabled)
 
 
 def is_worker_node_disabled(node_id: str | None, hostname: str | None, disabled: set[str] | None = None) -> bool:
@@ -264,12 +254,27 @@ def is_worker_node_disabled(node_id: str | None, hostname: str | None, disabled:
         disabled = disabled_hosts()
     if not disabled:
         return False
-    candidates = {s.strip().casefold() for s in (node_id or "", hostname or "") if s.strip()}
-    for cand in candidates:
-        for d in disabled:
-            if cand == d or cand in KNOWN_HOST_IDENTIFIERS.get(d, frozenset()) or d in cand:
-                return True
+    candidates = (node_id or "", hostname or "")
+    if any(_identifier_is_disabled(candidate, disabled) for candidate in candidates):
+        return True
     return False
+
+
+def _identifier_is_disabled(identifier: str, disabled: set[str]) -> bool:
+    """Compare known identifiers by logical host before using legacy substrings."""
+    candidate = identifier.strip().casefold()
+    if not candidate:
+        return False
+
+    candidate_host = logical_host(candidate)
+    disabled_logical_hosts = {host for item in disabled if (host := logical_host(item)) is not None}
+    if candidate_host is not None:
+        # A known identity is authoritative: do not let a substring from a
+        # different host label turn (for example) a Notebook into a Desktop.
+        return candidate_host in disabled_logical_hosts
+
+    normalized_disabled = {item.strip().casefold() for item in disabled if item.strip()}
+    return any(candidate == item or item in candidate for item in normalized_disabled)
 
 
 def worker_urls(disabled: set[str] | None = None) -> list[str]:

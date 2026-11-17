@@ -4,10 +4,9 @@
     (core/harness/remote_worker.py) as an always-on Windows Scheduled Task.
 
 .DESCRIPTION
-    HF-27-11: the Desktop (darkfac-desktop, Tailscale 100.78.181.90) is the
-    owner-decided ALWAYS-primary test worker for the validation harness's
-    remote dispatch (core/harness/remote_dispatch.py), so the Notebook stays
-    free for interactive dev. This script:
+    HF-27-11: installs the local machine as a test worker for the validation
+    harness's remote dispatch (core/harness/remote_dispatch.py). By default,
+    the worker resolves its node_id from the host that runs it. This script:
 
       1. Verifies Python 3.12+ and git are on PATH.
       2. Ensures the repo exists at -RepoPath (clones it if missing, else
@@ -15,8 +14,9 @@
       3. Installs/updates Python dependencies (`pip install -r
          requirements.txt`).
       4. Registers (or replaces) a Scheduled Task "DarkFac Test Worker" that
-         runs `python core/harness/remote_worker.py --host 0.0.0.0 --port
-         8080 --node-id darkfac-desktop` at logon AND at system startup,
+         runs `python core/harness/remote_worker.py --host 0.0.0.0 --port 8080`
+         at logon AND at system startup (or passes -NodeId as an explicit
+         configured identity override),
          hidden (no console window), auto-restarting on failure.
       5. Adds an inbound firewall rule for TCP 8080 restricted to the
          Tailscale CGNAT range (100.64.0.0/10) -- the only step that needs
@@ -43,6 +43,10 @@
 .PARAMETER Port
     TCP port for the worker daemon and its firewall rule. Default: 8080.
 
+.PARAMETER NodeId
+    Optional explicit node identity passed to the worker. By default the
+    worker resolves node_id from the local hostname.
+
 .EXAMPLE
     # Normal use (from an elevated PowerShell window so the firewall rule
     # step succeeds in the same run):
@@ -51,18 +55,27 @@
 .EXAMPLE
     # With an auth token, non-default repo path:
     .\install_test_worker.ps1 -RepoPath D:\DarkFac -Token "a-long-random-string"
+
+.EXAMPLE
+    # Only when an explicit configured identity is needed:
+    .\install_test_worker.ps1 -NodeId onprem-z97-server
 #>
 
 [CmdletBinding()]
 param (
     [string]$RepoPath = "C:\dev\DarkFac",
     [string]$Token = "",
-    [int]$Port = 8080
+    [int]$Port = 8080,
+    [string]$NodeId = ""
 )
 
 $ErrorActionPreference = "Stop"
 $TaskName = "DarkFac Test Worker"
-$NodeId = "darkfac-desktop"
+$NodeId = $NodeId.Trim()
+if ($NodeId -and $NodeId -notmatch '^[A-Za-z0-9._:-]+$') {
+    Write-Error "-NodeId must be a hostname or node identifier containing only letters, digits, '.', '_', ':', or '-'."
+    exit 1
+}
 $OriginUrl = "https://github.com/GCamposGit/DarkFactory.git"
 $TailscaleCidr = "100.64.0.0/10"
 
@@ -105,9 +118,10 @@ if (-not (Test-IsAdministrator)) {
 }
 
 Write-Output "======================================================================"
-Write-Output " DarkFac Primary Test Worker Installer (HF-27-11)"
+Write-Output " DarkFac Test Worker Installer (HF-27-11)"
 Write-Output " Repo path : $RepoPath"
-Write-Output " Node id   : $NodeId"
+$nodeIdDescription = if ($NodeId) { "$NodeId (explicit override)" } else { "resolved from local hostname" }
+Write-Output " Node id   : $nodeIdDescription"
 Write-Output " Port      : $Port"
 Write-Output "======================================================================"
 
@@ -243,7 +257,10 @@ Write-Section "Step 4/7: registering the Scheduled Task '$TaskName'"
 # %LOCALAPPDATA%\DarkFac\worker\daemon.log (see ensure_console_streams).
 $venvPythonw = Join-Path $VenvPath "Scripts\pythonw.exe"
 $launchExe = if (Test-Path -LiteralPath $venvPythonw) { $venvPythonw } else { $venvPython }
-$launchArgs = "core\harness\remote_worker.py --host 0.0.0.0 --port $Port --node-id $NodeId"
+$launchArgs = "core\harness\remote_worker.py --host 0.0.0.0 --port $Port"
+if ($NodeId) {
+    $launchArgs += " --node-id $NodeId"
+}
 
 $action = New-ScheduledTaskAction `
     -Execute $launchExe `
@@ -392,7 +409,7 @@ Write-Output " Tailnet URL      : http://100.78.181.90:$Port/health  (from anoth
 Write-Output " Firewall rule    : $(if (Test-IsAdministrator) { 'created (TCP ' + $Port + ' from ' + $TailscaleCidr + ')' } else { 'NOT created -- see Step 5 above' })"
 Write-Output " Auth token       : $(if ($Token) { 'set' } else { 'not set (open on tailnet)' })"
 if ($overallOk) {
-    Write-Output " Result           : OK -- the Desktop is ready as the primary test worker."
+    Write-Output " Result           : OK -- the local host is ready as a test worker."
 } else {
     Write-Output " Result           : COMPLETED WITH WARNINGS -- see the [WARN]/[SKIPPED]/[FAIL] lines above."
 }

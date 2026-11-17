@@ -1,8 +1,8 @@
 # Runbook — Worker primario de testes no Desktop (HF-27-11)
 
 Este runbook e para o Owner (voce), rodando UMA VEZ no Desktop
-(`darkfac-desktop`, Tailscale `100.78.181.90`) para transformar essa
-maquina no worker primario de testes da fabrica: a partir de agora, quando
+(`desktop-g45ipem`, Tailscale `100.78.181.90`) para instalar essa maquina
+como worker de testes da fabrica: a partir de agora, quando
 qualquer harness (Claude Code, Codex, Grok, Antigravity) em qualquer
 maquina (VPS, Notebook) rodar `python core/harness/runner.py --quick`, a
 suite inteira e despachada para rodar AQUI, liberando as outras maquinas.
@@ -98,6 +98,15 @@ passo 1b. Se voce vai acessar remotamente, siga o passo 1a primeiro.
      powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\install_test_worker.ps1 -Token "SUBSTITUA_POR_UM_TEXTO_LONGO_E_ALEATORIO"
      ```
 
+   Por default, o instalador nao passa `--node-id`: o worker resolve o id
+   pelo hostname da maquina. Neste Desktop, o id canonico esperado e
+   `onprem-z97-server`. Se precisar definir uma identidade explicitamente,
+   passe `-NodeId <id>` ao instalador; por exemplo, `-NodeId onprem-z97-server`.
+   O `/health` continua sendo a verificacao final: mostra `node_id`,
+   `hostname` e `node_id_source`. Se o id configurado apontar para outro host
+   conhecido e o hostname local identificar esta maquina, o worker reporta o
+   host local resolvido.
+
 3. O script vai imprimir varias linhas comecando com `[OK]`, `[INFO]`,
    `[WARN]` ou `[FAIL]`, uma para cada uma das 7 etapas (verificar
    Python/git, baixar/atualizar o codigo, instalar dependencias, registrar
@@ -117,7 +126,7 @@ variar):
 ======================================================================
  Repo path        : C:\dev\DarkFac
  Scheduled Task   : DarkFac Test Worker (Task Scheduler Library root, triggers: at logon + at startup)
- Worker command   : C:\...\pythonw.exe core\harness\remote_worker.py --host 0.0.0.0 --port 8080 --node-id darkfac-desktop
+ Worker command   : C:\...\pythonw.exe core\harness\remote_worker.py --host 0.0.0.0 --port 8080
  Local health URL : http://127.0.0.1:8080/health
  Tailnet URL      : http://100.78.181.90:8080/health  (from another tailnet host)
  Firewall rule    : created (TCP 8080 from 100.64.0.0/10)
@@ -164,9 +173,17 @@ Invoke-RestMethod -Uri "http://100.78.181.90:8080/health"
 
 (ou, se for Linux/macOS: `curl http://100.78.181.90:8080/health`)
 
-Se aparecer um bloco de texto com `status`, `node_id: darkfac-desktop`,
-`platform_family: windows`, etc., o worker esta acessivel pela rede
-Tailscale e pronto para receber jobs de qualquer host.
+Se aparecer um bloco de texto com `status`, `node_id: onprem-z97-server`,
+`hostname: desktop-g45ipem`, `node_id_source: hostname` e
+`platform_family: windows`, o worker esta acessivel pela rede Tailscale e
+pronto para receber jobs de qualquer host. O hostname e a fonte podem variar
+se o Windows tiver outro nome ou se um override explicito tiver sido passado.
+
+O filtro de `DARKFAC_FLEET_DISABLED_HOSTS` usa o host logico, nao apenas o
+texto do `node_id`: com `DARKFAC_FLEET_DISABLED_HOSTS=desktop`, os ids
+`onprem-z97-server` e `darkfac-desktop` sao excluidos. Um worker do Notebook
+que reporta `predator-neo-16` ou `AI_Notebook` nao e excluido por essa
+configuracao.
 
 ## 6. Solucao de problemas
 
@@ -238,8 +255,12 @@ Para ver o erro direto na tela, rode o worker manualmente:
 
 ```powershell
 cd C:\dev\DarkFac
-& "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts\python.exe" core\harness\remote_worker.py --host 127.0.0.1 --port 8080 --node-id darkfac-desktop
+& "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts\python.exe" core\harness\remote_worker.py --host 127.0.0.1 --port 8080
 ```
+
+Esse comando tambem resolve o `node_id` pelo hostname. Acrescente `--node-id
+<id>` somente para configurar um override explicitamente; confira o resultado
+em `/health` junto com `hostname` e `node_id_source`.
 
 **Avisos do pip sobre open-webui, pdfplumber ou Pillow**
 Versoes antigas deste instalador colocavam as dependencias da DarkFac no
