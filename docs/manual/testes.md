@@ -183,7 +183,9 @@ O estado de política empresarial também é isolado: testes escrevem `enterpris
 raiz temporária e podem injetar uma referência compartilhada temporária. A fixture de sessão registra
 uma impressão digital de toda a árvore `.factory/enterprise` do checkout e reprova se um teste criar,
 remover ou alterar qualquer arquivo ali. Isso evita que uma configuração residual de um teste limite
-as rotas de outros testes ou seja confundida com a política efetiva de outro host.
+as rotas de outros testes ou seja confundida com a política efetiva de outro host. O cenário residual
+do USR-487 também compara essa impressão digital imediatamente antes e depois da admissão que retorna
+`no_planning_route`, além de confirmar os caminhos no diagnóstico de divergência.
 
 ## Cache do pytest em worktrees Windows (USR-421)
 

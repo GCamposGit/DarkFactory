@@ -630,6 +630,7 @@ def test_ok_agent_without_implementation_is_rejected_before_delivery(
             duration_s=1.0,
         )
 
+    monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *_args, **_kwargs: (True, []))
     monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
     delivery = MagicMock(side_effect=AssertionError("delivery must not run"))
     monkeypatch.setattr(GitAutonomyManager, "complete_ticket", delivery)
@@ -876,6 +877,13 @@ def test_admission_wait_keeps_route_cause_and_exposes_policy_diagnostic(
         source_file=str(source_file),
         providers=["claude", "openrouter"],
         restriction={"residency_mode": "local_only", "allowed_providers": ["ollama_local"]},
+        host_diagnostics=[{
+            "code": "data_policy_host_divergence",
+            "project_id": "darkfac",
+            "shared_source_path": str(tmp_path / "shared" / "data_policies.json"),
+            "local_source_path": str(source_file),
+            "effective_source_path": str(source_file),
+        }],
     ))
     monkeypatch.setattr(run_ticket, "evaluate_admission", lambda _args, _ticket: decision)
 
@@ -885,6 +893,8 @@ def test_admission_wait_keeps_route_cause_and_exposes_policy_diagnostic(
     assert payload["cause"] == "route_wait"
     assert payload["policy_cause"] == decision.public_dict()["cause"]
     assert payload["policy_cause"]["source_file"] == str(source_file)
+    assert payload["policy_cause"]["host_diagnostics"][0]["code"] == "data_policy_host_divergence"
+    assert payload["policy_cause"]["host_diagnostics"][0]["shared_source_path"].endswith("data_policies.json")
 
 
 def test_admission_wait_requeues_an_implementing_ticket(

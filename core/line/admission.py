@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.line import routing
 from core.line.review_cascade import valid_contingency
@@ -135,6 +135,7 @@ class DataPolicyCause(BaseModel):
     source_file: str
     providers: list[str]
     restriction: dict[str, Any]
+    host_diagnostics: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RouteHit(BaseModel):

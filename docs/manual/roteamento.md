@@ -31,7 +31,9 @@ O probe de cota tem cache negativo de 10 min (`probe_negative.json` ao lado dos 
 `.factory/enterprise/configs.json` fica no estado local do host e continua efetivo por compatibilidade
 quando sua configuração difere; essa divergência gera o aviso estruturado `data_policy_host_divergence`.
 Uma política local que bloqueia todas as rotas elegíveis aparece como causa `data_policy` na admissão,
-com projeto, provedores, restrição e caminho do arquivo que decidiu a rota. O JSON do launcher mantém
+com projeto, provedores, restrição e caminho do arquivo que decidiu a rota. Quando houver divergência,
+`policy_cause.host_diagnostics` inclui `data_policy_host_divergence` e os caminhos compartilhado,
+local e efetivo. O JSON do launcher mantém
 `cause: "route_wait"` para a fila e expõe o diagnóstico em `policy_cause`, sem incluir metadados
 privados da configuração.
 

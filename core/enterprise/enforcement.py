@@ -314,7 +314,7 @@ def provider_policy_rejection(
         )
     except DataPolicyError as exc:
         logger.info("data policy refuses provider %s: %s", provider, exc.code)
-        return {
+        refusal = {
             "project_id": project_id,
             "provider": provider,
             "source_file": str(resolution.source_path or resolution.local_source_path),
@@ -324,4 +324,9 @@ def provider_policy_rejection(
                 "allowed_providers": sorted({item.strip().lower() for item in cfg.allowed_providers}),
             },
         }
+        if resolution.diagnostics:
+            refusal["host_diagnostics"] = [
+                diagnostic.model_dump(mode="json") for diagnostic in resolution.diagnostics
+            ]
+        return refusal
     return None

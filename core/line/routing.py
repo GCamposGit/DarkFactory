@@ -1214,6 +1214,44 @@ class _PolicyAudit:
     barrier: bool = False
     refusals: list[dict[str, Any]] = field(default_factory=list)
 
+    def record_candidate(self, refusal: Optional[dict[str, Any]] = None) -> None:
+        """Count a route candidate and whether the data policy refused it."""
+        self.candidates += 1
+        if refusal is None:
+            self.nonblocked += 1
+        else:
+            self.refusals.append(refusal)
+
+    def record_independent_barrier(self) -> None:
+        """Prevent a policy refusal from masking an independent route failure."""
+        self.barrier = True
+
+    def data_policy_cause(self, project_id: str) -> Optional[dict[str, Any]]:
+        """Return a cause only when policy refusals explain every evaluated route candidate."""
+        if not self.candidates or self.nonblocked or self.barrier or not self.refusals:
+            return None
+
+        first = self.refusals[0]
+        host_diagnostics: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for refusal in self.refusals:
+            for diagnostic in refusal.get("host_diagnostics", []):
+                key = (
+                    diagnostic.get("code"),
+                    diagnostic.get("project_id"),
+                    diagnostic.get("shared_source_path"),
+                    diagnostic.get("local_source_path"),
+                    diagnostic.get("effective_source_path"),
+                )
+                host_diagnostics[key] = diagnostic
+        return {
+            "code": "data_policy",
+            "project_id": project_id,
+            "source_file": first["source_file"],
+            "providers": sorted({item["provider"] for item in self.refusals}),
+            "restriction": first["restriction"],
+            "host_diagnostics": list(host_diagnostics.values()),
+        }
+
 
 def _openrouter_fallback(
     stage: str,
@@ -1251,36 +1289,20 @@ def _openrouter_fallback(
             # A policy denial is causal only when OpenRouter otherwise has verified credit.
             # Without credit, the missing route has an independent budget cause.
             if _openrouter_has_credits(openrouter_balance_lookup, cfg.run_caps.openrouter_monthly_cap_usd):
-                policy.candidates += 1
-                policy.refusals.append(refusal)
+                policy.record_candidate(refusal)
             else:
-                policy.barrier = True
+                policy.record_independent_barrier()
         else:
             if project_id:
-                policy.candidates += 1
-                policy.nonblocked += 1
+                policy.record_candidate()
             route = _elect_openrouter(stage, stage_cfg, cfg, openrouter_balance_lookup)
             if route is not None:
                 return _independent_openrouter(route, implementing_harness) if stage == "review" else route
 
-    if (
-        policy_diagnostic is not None
-        and project_id
-        and policy.candidates > 0
-        and policy.nonblocked == 0
-        and not policy.barrier
-        and len(policy.refusals) == policy.candidates
-    ):
-        first = policy.refusals[0]
-        policy_diagnostic.update(
-            {
-                "code": "data_policy",
-                "project_id": project_id,
-                "source_file": first["source_file"],
-                "providers": sorted({item["provider"] for item in policy.refusals}),
-                "restriction": first["restriction"],
-            }
-        )
+    if policy_diagnostic is not None and project_id:
+        cause = policy.data_policy_cause(project_id)
+        if cause is not None:
+            policy_diagnostic.update(cause)
     return None
 
 
@@ -1398,12 +1420,10 @@ def pick(
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
         if project_id:
-            policy.candidates += 1
             refusal = _policy_rejection(project_id, harness)
+            policy.record_candidate(refusal)
             if refusal is not None:
-                policy.refusals.append(refusal)
                 continue  # USR-174: per-project data policy refuses this harness/provider
-            policy.nonblocked += 1
         remaining = None if cooling else lookup(provider_id)
         if cooling:
             logger.info("pick: harness %s skipped for stage %s (in cooldown)", harness, stage)

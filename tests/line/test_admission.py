@@ -148,6 +148,10 @@ def _routing_admission_for_test(
 
 
 def test_no_planning_route_reports_residual_policy_and_source_file(tmp_path, monkeypatch):
+    from tests.conftest import _directory_fingerprint
+
+    checkout_enterprise = Path(__file__).resolve().parents[2] / ".factory" / "enterprise"
+    enterprise_before = _directory_fingerprint(checkout_enterprise)
     policy_file = tmp_path / "state" / "enterprise" / "configs.json"
     policy_file.parent.mkdir(parents=True)
     policy_file.write_text(
@@ -177,7 +181,15 @@ def test_no_planning_route_reports_residual_policy_and_source_file(tmp_path, mon
         "residency_mode": "local_only",
         "allowed_providers": ["ollama_local"],
     }
+    assert cause["host_diagnostics"] == [{
+        "code": "data_policy_host_divergence",
+        "project_id": "darkfac",
+        "shared_source_path": str((tmp_path / "shared" / "data_policies.json").resolve()),
+        "local_source_path": str(policy_file.resolve()),
+        "effective_source_path": str(policy_file.resolve()),
+    }]
     assert "must not be returned" not in json.dumps(cause)
+    assert _directory_fingerprint(checkout_enterprise) == enterprise_before
 
 
 def test_no_planning_route_does_not_blame_policy_when_routes_fail_for_quota(tmp_path, monkeypatch):

@@ -45,7 +45,7 @@ Depois da worktree e antes de PLAN, o mesmo launcher recusa o interpretador fora
 
 Antes dessa worktree e do PLAN, a admissao (`core.line.admission`) confirma rota de planning, de development e de review em outra familia, alem de um worker de gate com capacidade explicita (`workers` inteiro maior que zero, `busy` false e leitura com menos de 90 segundos). Falta de rota, capacidade zero, worker ocupado, leitura stale, colecao vazia ou health generico (`status=ok` sem esses campos) encerra com exit 75, JSON `route_wait` e o ticket em `planned`, sem criar worktree. Um `allow` nao substitui o `pick` de cada estagio. Com `--fleet`, a admissao de build tambem e headless e deixa Antigravity fora das caps de escrita.
 
-Se a política de dados do host remover as rotas, `cause` continua sendo `route_wait` e `policy_cause` informa `data_policy`, os provedores bloqueados e `source_file`. Compare a fonte efetiva com `.factory/config/data_policies.json`; um arquivo legado divergente em `.factory/enterprise/configs.json` permanece ativo com aviso estruturado `data_policy_host_divergence`.
+Se a política de dados do host remover as rotas, `cause` continua sendo `route_wait` e `policy_cause` informa `data_policy`, os provedores bloqueados e `source_file`. Quando o host divergir, `policy_cause.host_diagnostics` mostra `data_policy_host_divergence` e os caminhos compartilhado e local. Compare a fonte efetiva com `.factory/config/data_policies.json`; um arquivo legado divergente em `.factory/enterprise/configs.json` permanece ativo.
 
 ### Wake do grokbox e comunicacao externa (USR-456)
 
