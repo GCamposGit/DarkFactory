@@ -53,7 +53,7 @@ Abertos, em ordem de impacto (cada um cabe em um PR pequeno):
 
 1. **Resto do E5:** o despachante ainda relança o ticket inteiro em vez de `--resume-delivery` quando a worktree preservada já tem candidato validado; o vínculo do build não é regravado depois de commit de reparo. A retomada por fatia confia em `progress.json` mais diff não vazio, sem conferir o conteúdo de cada fatia.
 2. **Renovação de cota fora da data:** se a assinatura renova antes do `resets_at` gravado, o snapshot abaixo do piso segue valendo e a sonda paga continua proibida. Contorno usado em 17/11: mover `.factory/usage/providers/anthropic.json`. Solução: permitir uma sonda a cada N horas mesmo abaixo do piso.
-3. **Reserva de cota do coordenador:** a frota não deve levar o plano Claude abaixo de uma reserva configurável enquanto houver sessão interativa. Contorno manual: entrada `claude` com `reason: coordinator_reserve` em `.factory/usage/cooldowns.json`.
+3. ~~**Reserva de cota do coordenador**~~ (USR-490, entregue): `coordinator_reserve_pct` (35) em `line_routing.json`; a frota (`execution_context=headless`) não elege `claude` abaixo da reserva. O contorno manual em `cooldowns.json` não é mais necessário.
 4. **Gasto por execução da rota agente-OpenRouter** não entra no teto por execução (`run_caps.openrouter_usd`), só no mensal. Somar o custo a partir do uso em tokens devolvido pelo Codex CLI.
 5. **Esperas de entrega obsoletas:** `.factory/pending_delivery/<ticket>.json` de ticket já concluído fica `blocked` (`deploy_evidence_missing`) para sempre e polui o estado. Remover ao concluir o ticket e ao detectar `completed` no control store.
 6. **Limite da API do GitHub (5.000/h) estourou** em 16/11 à tarde. Medir quem chama `gh` no ciclo do despachante e na espera de entrega.

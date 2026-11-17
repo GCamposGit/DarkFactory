@@ -147,6 +147,9 @@ class RoutingConfig(BaseModel):
     # (`harness_infra_error`, USR-188) — not a quota/login problem — sits out briefly, so the next
     # stage or job does not pick it again straight away.
     crash_cooldown_minutes: int = 10
+    # USR-490: headless (fleet) routing never elects `claude` while its known remaining quota is at or
+    # below this percent, keeping the coordinator's interactive chat alive. 0 disables the reserve.
+    coordinator_reserve_pct: float = 35.0
     forbidden_autonomous_models: list[str] = Field(
         default_factory=lambda: list(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS)
     )
@@ -1108,6 +1111,23 @@ def _pick_winner(
     return None
 
 
+def _with_coordinator_reserve(
+    lookup: Callable[[str], Optional[float]], cfg: RoutingConfig, execution_context: str
+) -> Callable[[str], Optional[float]]:
+    """USR-490: for the fleet, `claude` at or below `coordinator_reserve_pct` reads as exhausted (0.0)."""
+    if execution_context != "headless" or cfg.coordinator_reserve_pct <= 0:
+        return lookup
+
+    def reserved(provider_id: str) -> Optional[float]:
+        remaining = lookup(provider_id)
+        if provider_id == _HARNESS_TO_PROVIDER.get("claude") and remaining is not None and remaining <= cfg.coordinator_reserve_pct:
+            logger.info("pick: claude held back for the coordinator reserve (remaining=%s)", remaining)
+            return 0.0
+        return remaining
+
+    return reserved
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -1175,7 +1195,7 @@ def pick(
     caps = set(host_caps)
     excluded_harnesses, excluded_pairs = _split_exclude(exclude)
     cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
-    lookup = quota_lookup or _default_quota_headroom
+    lookup = _with_coordinator_reserve(quota_lookup or _default_quota_headroom, cfg, execution_context)
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 

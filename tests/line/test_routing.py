@@ -870,6 +870,22 @@ def test_pick_development_elects_antigravity_when_operating_interactively_withou
     assert cascade_winner != ("antigravity", None)
 
 
+def test_headless_fleet_keeps_coordinator_reserve_on_claude_but_interactive_does_not(tmp_path: Path):
+    """USR-490: below coordinator_reserve_pct (35) only the fleet skips claude; planning still uses it interactively."""
+    caps = ["harness:claude", "harness:codex"]
+    lookup = lambda p: 30.0 if p == "anthropic" else 60.0
+
+    fleet = pick("development", caps, quota_lookup=lookup, execution_context="headless",
+                 cooldown_path=tmp_path / "a.json")
+    assert fleet is not None and fleet[0] != "claude"
+    chat = pick("planning", ["harness:claude"], quota_lookup=lookup, execution_context="interactive",
+                cooldown_path=tmp_path / "b.json")
+    assert chat is not None and chat[0] == "claude"
+    healthy = pick("development", caps, quota_lookup=lambda p: 80.0 if p == "anthropic" else 50.0,
+                   execution_context="headless", cooldown_path=tmp_path / "c.json")
+    assert healthy is not None and healthy[0] == "claude"
+
+
 def test_stale_reading_is_held_with_a_margin_for_every_provider_until_reset_or_six_hours(tmp_path: Path) -> None:
     from core.line.routing import _stale_until_reset_headroom
 

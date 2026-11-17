@@ -60,6 +60,8 @@ O snapshot `anthropic` so e gravado pelo statusline enquanto ha sessao do Claude
 
 ## Operador Interativo Antigravity (USR-433 / USR-436)
 
+**Reserva do coordenador (USR-490):** em contexto `headless` (frota, despachante, launcher), `pick()` não elege `claude` quando a cota restante conhecida é `<=` `coordinator_reserve_pct` (padrão 35, em `.factory/config/line_routing.json`; `0` desliga), preservando o plano Claude para o chat interativo do operador. Contexto `interactive` não é afetado. Substitui a entrada manual `reason: coordinator_reserve` em `cooldowns.json`.
+
 O Antigravity é elegível para o estágio `development` **exclusivamente** quando atua como harness de operação interativo (`DARKFAC_OPERATING_HARNESS=antigravity` ou autodetectado). Em modo headless ou na frota (`--fleet`, `fleet_dispatcher`), Antigravity é estritamente somente-leitura e nunca é selecionado para escrita. Se sua quota for desconhecida ou `STALE`, permanece elegível na interface de chat interativa em modo degradado com aviso explícito e causa estruturada, respeitando o piso de 15% para cotas conhecidas. A capacidade de escrita (`write`) é declarada dinamicamente via `agent_cli.supports()` quando `operating_harness == 'antigravity'` em contexto interativo (fora do modo headless), viabilizando sua eleição direta antes do ranking de folga.
 
 ## Fallback e Otimizacao OpenRouter (USR-440 / USR-444)
