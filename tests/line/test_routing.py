@@ -752,10 +752,14 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     assert (tmp_path / "anthropic.json").is_file()
 
 
-@pytest.mark.parametrize("reported_model", ["haiku", "claude-haiku-4-5", "anthropic/claude-haiku-5-5"])
-def test_claude_headless_probe_rejects_model_that_is_not_the_pinned_registry_id(
-    tmp_path, monkeypatch, reported_model: str
+@pytest.mark.parametrize(
+    "reported_model,diagnostic",
+    [("claude-haiku-4-5", ""), ("claude-haiku-5-5", "[claude-code:unrecognized_model] {}")],
+)
+def test_claude_headless_probe_keeps_account_quota_whatever_the_model(
+    tmp_path, monkeypatch, reported_model: str, diagnostic: str
 ):
+    """As janelas sao da conta. Aviso de modelo ou modelo efetivo diferente nao anulam a leitura."""
     import subprocess
 
     from core.usage import adapters as adapters_mod
@@ -771,61 +775,17 @@ def test_claude_headless_probe_rejects_model_that_is_not_the_pinned_registry_id(
             "five_hour": {"utilization": 0.2, "resetsAt": reset},
             "seven_day": {"utilization": 0.4, "resetsAt": reset + 86400}}}},
     ]
-    output = "\n".join(json.dumps(event) for event in events)
+    output = "\n".join([*(json.dumps(event) for event in events), diagnostic]).strip()
     monkeypatch.setattr(
-        adapters_mod.subprocess,
-        "run",
-        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
+        adapters_mod.subprocess, "run", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
     )
     adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
 
     usage = adapter.inspect(force=True)
 
-    assert not usage.quota_supported
-    assert usage.windows == []
-    assert not (tmp_path / "anthropic.json").exists()
+    assert usage.quota_supported is True
+    assert {w.quota_id: w.used_percent for w in usage.windows} == {"claude:5h": 20.0, "claude:weekly": 40.0}
 
-
-@pytest.mark.parametrize(
-    "error_stdout,error_stderr",
-    [
-        ('{"type":"error","error":{"type":"unrecognized_model"}}', ""),
-        ("", "Error: unrecognized_model for requested model"),
-    ],
-)
-def test_claude_headless_probe_rejects_model_error_even_with_real_quota_events(
-    tmp_path, monkeypatch, error_stdout: str, error_stderr: str
-):
-    import subprocess
-
-    from core.usage import adapters as adapters_mod
-    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
-
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
-    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
-    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
-    valid_events = [
-        {"type": "system", "subtype": "init", "model": "claude-haiku-5-5"},
-        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "unifiedWindows": {
-            "five_hour": {"utilization": 0.2, "resetsAt": reset},
-            "seven_day": {"utilization": 0.4, "resetsAt": reset + 86400}}}},
-    ]
-    stdout = "\n".join([*(json.dumps(event) for event in valid_events), error_stdout]).strip()
-    calls = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout, error_stderr)
-
-    monkeypatch.setattr(adapters_mod.subprocess, "run", fake_run)
-    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
-    usage = adapter.inspect(force=True)
-
-    assert len(calls) == 1
-    assert not usage.quota_supported
-    assert usage.windows == []
-    assert not (tmp_path / "anthropic.json").exists()
 
 
 def test_claude_headless_probe_requires_both_windows_and_reported_effective_model(tmp_path, monkeypatch):
