@@ -76,7 +76,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _VirtualClock:
 @pytest.fixture
 def cancelled(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(remote_dispatch, "_cancel_job", lambda base, job: calls.append((base, job)))
+    monkeypatch.setattr(remote_dispatch, "_cancel_job", lambda base, job, **kwargs: calls.append((base, job)))
     return calls
 
 

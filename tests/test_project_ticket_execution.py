@@ -175,7 +175,10 @@ def test_external_delivery_opens_pr_from_project_worktree_against_registered_bas
     ticket_engine.write_demand(rws, ticket)
     ticket_engine.write_minimal_plan(rws, ticket)
     ticket_engine.write_research(rws, ticket_extras.legacy_research(ticket.id))
-    ticket_engine.write_build(rws, "codex", [ticket.id])
+    ticket_engine.write_build(
+        rws, "codex", [ticket.id], plan_digest=ticket_engine.plan_digest(rws),
+        candidate_digest="candidate-before-delivery", worktree=str(worktree),
+    )
 
     result = run_ticket._deliver_worktree(
         manager, ticket, worktree, "ticket/usr-259", "resume", False, False, False,

@@ -3,13 +3,17 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
+from core.line import failure_alerts as failure_alerts_mod
 from core.line import fleet_dispatcher as fd
 from core.line.admission_store import AdmissionStore
+
+_REAL_DETERMINISTIC_ALERT = failure_alerts_mod.notify_deterministic_failure
 
 HOSTS = [fd.HostSpec("notebook", 1, None), fd.HostSpec("grokbox", 2, "http://g"), fd.HostSpec("desktop", 3, "http://d")]
 
@@ -973,7 +977,8 @@ def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str 
         ),
     )
     monkeypatch.setattr(
-        "core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}],
+        "core.git.ticket_workspace.list_worktrees",
+        lambda _root: [{"worktree": str(candidate), "branch": "ticket/usr-99"}],
     )
     monkeypatch.setattr(pd, "_route", lambda _row: ("grok", "grok"))
     monkeypatch.setattr(pd.run_outcome, "main_sha", lambda _repo: "")
@@ -1098,6 +1103,438 @@ def test_blocked_evidence_wait_of_closed_ticket_is_archived_after_six_hours(
     assert (directory / "archive" / "USR-99.json").is_file() is archived
     assert (directory / "USR-99.json").exists() is not archived
     assert (result[0]["status"] == "archived") is archived
+
+
+@pytest.mark.parametrize("status", ["cancelled", "canceled"])
+def test_cancelled_wait_is_removed_before_block_and_backoff(tmp_path: Path, monkeypatch, status: str):
+    pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1", status=status,
+    )
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "blocked"
+    saved.next_check = row.next_check + 10_000
+    pd._save(directory / "USR-99.json", saved)
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check)
+
+    assert result[0]["status"] == "terminal"
+    assert result[0]["proof"] == status
+    assert calls == []
+    assert not (directory / "USR-99.json").exists()
+    import json
+
+    ledger = json.loads((directory / "reconciliations" / "USR-99.json").read_text(encoding="utf-8"))
+    assert ledger["events"][-1]["to_status"] == "terminal"
+    assert ledger["events"][-1]["reason"] == "ticket cancellation is durable"
+    assert ledger["events"][-1]["evidence"] == f"ticket_status:{status}"
+
+
+def test_completed_without_deploy_proof_is_reconciled_during_backoff(tmp_path: Path, monkeypatch):
+    pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1",
+    )
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "blocked"
+    saved.cause = "launcher_exit:1"
+    saved.next_check = row.next_check + 10_000
+    pd._save(directory / "USR-99.json", saved)
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check)
+
+    assert result[0]["status"] == "blocked"
+    assert result[0]["cause"] == "deploy_evidence_missing"
+    assert calls == []
+    kept = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    assert kept.status == "blocked"
+    assert kept.cause == "deploy_evidence_missing"
+    import json
+
+    ledger_path = directory / "reconciliations" / "USR-99.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert ledger["events"][-1]["from_cause"] == "launcher_exit:1"
+    assert ledger["events"][-1]["to_cause"] == "deploy_evidence_missing"
+    assert ledger["events"][-1]["evidence"] == "release_missing"
+
+    ledger_bytes = ledger_path.read_bytes()
+    pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+    assert ledger_path.read_bytes() == ledger_bytes
+
+
+def test_conflicting_legacy_ticket_status_fails_closed_with_a_durable_reason(tmp_path: Path, monkeypatch):
+    import json
+
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pd
+
+    pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1",
+    )
+    monkeypatch.setattr(
+        "core.demands.queue_store.control_store",
+        lambda: SimpleNamespace(
+            mock_mode=False,
+            list_tickets=lambda: [
+                {"id": "USR-99", "status": "completed"},
+                {"id": "USR-99", "status": "cancelled"},
+            ],
+        ),
+    )
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "blocked"
+    assert result[0]["cause"] == "ticket_status_conflict"
+    assert calls == []
+    assert (directory / "USR-99.json").is_file()
+    event = json.loads((directory / "reconciliations" / "USR-99.json").read_text(encoding="utf-8"))["events"][-1]
+    assert event["reason"] == "terminal evidence is missing or contradictory"
+    assert event["evidence"] == "ticket_statuses:cancelled,completed"
+
+    dispatcher = Env(tmp_path / "fleet", [_d("USR-99"), _d("USR-100")], free=("grokbox",))
+    dispatcher.d._resumptions = lambda: result
+    cycle = dispatcher.d.run_cycle()
+    assert dispatcher.launched == [("USR-100", "grokbox")]
+    assert cycle["skipped"]["USR-99"].startswith("pending_delivery:")
+    assert "USR-100" not in cycle["skipped"]
+
+
+def test_completed_wait_is_removed_only_with_coherent_deploy_proof(tmp_path: Path, monkeypatch):
+    import json
+
+    pd, directory, context, _candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1",
+    )
+    _coherent_release(context, merge_sha="b" * 40, report_sha="a" * 40)
+    report = json.loads((context / "deploy_report.json").read_text(encoding="utf-8"))
+    report["deployed"] = True
+    (context / "deploy_report.json").write_text(json.dumps(report), encoding="utf-8")
+    saved = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    saved.status = "blocked"
+    saved.next_check = row.next_check + 10_000
+    pd._save(directory / "USR-99.json", saved)
+
+    mismatch = pd.tick(tmp_path, directory=directory, now=row.next_check)
+    assert mismatch[0]["cause"] == "deploy_evidence_mismatch"
+    assert (directory / "USR-99.json").is_file()
+    assert calls == []
+
+    _coherent_release(context, merge_sha="a" * 40, report_sha="a" * 40)
+    report["sha"] = "a" * 40
+    (context / "deploy_report.json").write_text(json.dumps(report), encoding="utf-8")
+    removed = pd.tick(tmp_path, directory=directory, now=row.next_check)
+    assert removed[0]["status"] == "terminal"
+    assert removed[0]["proof"] == "deployed"
+    assert not (directory / "USR-99.json").exists()
+
+
+def test_missing_deploy_proof_alerts_once_until_the_evidence_changes(tmp_path: Path, monkeypatch):
+    pd, directory, context, _candidate, row, _calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1",
+    )
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "alerts"))
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        failure_alerts_mod, "_emit_failure_alert", lambda **kwargs: sent.append(kwargs) or True,
+    )
+    monkeypatch.setattr(failure_alerts_mod, "notify_deterministic_failure", _REAL_DETERMINISTIC_ALERT)
+
+    pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+    pd.tick(tmp_path, directory=directory, now=row.next_check + 2)
+    assert len(sent) == 1
+    assert sent[0]["cause"] == "deploy_evidence_missing"
+    assert sent[0]["evidence"] == "release_missing"
+
+    (context / "deploy_report.json").write_text('{"deployed": false}', encoding="utf-8")
+    pd.tick(tmp_path, directory=directory, now=row.next_check + 3)
+    pd.tick(tmp_path, directory=directory, now=row.next_check + 4)
+    assert len(sent) == 2
+    assert sent[1]["evidence"] == "sha_missing"
+    assert sent[1]["cause"] == "deploy_evidence_missing"
+
+
+def test_blocked_wait_does_not_make_an_independent_ticket_ineligible(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+    e.d.last_cycle = {
+        "blocked_cycles": 41,
+        "blocked_causes": {"delivery_failure": 1},
+        "blocked_ticket_reasons": {"USR-01": "pending_delivery:launcher_exit:1"},
+    }
+    e.d._resumptions = lambda: [{
+        "ticket": "USR-01", "status": "blocked", "cause": "launcher_exit:1", "stage": "development",
+    }]
+    cycle = e.d.run_cycle()
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cycle["skipped"]["USR-01"].startswith("pending_delivery:")
+    assert "USR-02" not in cycle["skipped"]
+    assert cycle["activity"] == "running"
+    assert cycle["blocked_cycles"] == 0
+    assert cycle["blocked_causes"] == {}
+
+
+def test_exhausted_technical_ticket_stays_isolated_after_restart(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+    for index in range(3):
+        e.d.admission_store.record_attempt(
+            "darkfac", "USR-01", "gate_failed", run_id=f"failed-{index}",
+            main_sha="a" * 40, detail="assertion failed", phase="development",
+        )
+    e.d._resumptions = lambda: [{
+        "ticket": "USR-01", "status": "blocked", "cause": "gate_failed", "stage": "development",
+    }]
+    restarted = fd.FleetDispatcher(
+        e.d.config, demands_loader=lambda: [_d("USR-01"), _d("USR-02")],
+        probe=lambda _host: fd.HostProbe(True, "ready"), launch=e._launch,
+        clock=lambda: e.now, admission_store=AdmissionStore(
+            tmp_path / "admission.sqlite3",
+            clock=lambda: datetime.fromtimestamp(e.now, timezone.utc),
+        ),
+    )
+    restarted._resumptions = e.d._resumptions
+
+    cycle = restarted.run_cycle()
+
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cycle["skipped"]["USR-01"] == "ticket_hold:gate_failed"
+    assert cycle["activity"] == "running"
+
+
+def test_legacy_blocked_dispatcher_state_restarts_its_counter_from_ticket_evidence(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e.d.last_cycle = {"blocked_cycles": 99, "blocked_causes": {"delivery_failure": 1}}
+    e.d._resumptions = lambda: [{
+        "ticket": "USR-01", "status": "blocked", "cause": "launcher_exit:1", "stage": "planning",
+    }]
+
+    first = e.d.run_cycle()
+    restarted = fd.FleetDispatcher(
+        e.d.config,
+        demands_loader=lambda: [_d("USR-01")],
+        probe=lambda _host: fd.HostProbe(True, "ready"),
+        launch=e._launch,
+        clock=lambda: e.now,
+        admission_store=e.d.admission_store,
+    )
+    restarted._resumptions = e.d._resumptions
+    second = restarted.run_cycle()
+
+    assert first["blocked_cycles"] == 1
+    assert second["blocked_cycles"] == 2
+    assert second["blocked_causes"] == {"delivery_failure": 1}
+    assert second["blocked_ticket_reasons"] == {"USR-01": "pending_delivery:launcher_exit:1"}
+
+
+def test_non_mapping_legacy_dispatcher_state_does_not_block_independent_tickets(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+    e.d.config.state_path.write_text("[]", encoding="utf-8")
+    restarted = fd.FleetDispatcher(
+        e.d.config,
+        demands_loader=lambda: [_d("USR-01"), _d("USR-02")],
+        probe=lambda _host: fd.HostProbe(True, "ready"),
+        launch=e._launch,
+        clock=lambda: e.now,
+        admission_store=e.d.admission_store,
+    )
+    restarted._resumptions = lambda: [{
+        "ticket": "USR-01", "status": "blocked", "cause": "launcher_exit:1", "stage": "planning",
+    }]
+
+    cycle = restarted.run_cycle()
+
+    assert restarted.last_cycle["activity"] == "running"
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cycle["blocked_cycles"] == 0
+
+
+def test_launch_failure_does_not_skip_the_next_planned_ticket(tmp_path: Path):
+    e = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+
+    def flaky(tid, host, **kwargs):
+        if tid == "USR-01":
+            raise RuntimeError("checkout recusado")
+        return e._launch(tid, host, **kwargs)
+
+    e.d.launch = flaky
+    cycle = e.d.run_cycle()
+    assert e.launched == [("USR-02", "grokbox")]
+    assert cycle["skipped"]["USR-01"].startswith("lancamento_falhou:")
+    assert "USR-02" not in cycle["skipped"]
+
+
+def test_live_dispatcher_without_progress_is_idle_or_blocked(tmp_path: Path):
+    idle = Env(tmp_path / "idle", [], free=("grokbox",))
+    idle_cycle = idle.d.run_cycle()
+    assert idle_cycle["activity"] == "idle"
+    assert idle_cycle["dispatched"] == []
+    assert idle_cycle["in_flight"] == {}
+
+    blocked = Env(tmp_path / "blocked", [], free=("grokbox",))
+    blocked.d._resumptions = lambda: [{
+        "ticket": "USR-01", "status": "blocked", "cause": "launcher_exit:1", "stage": "planning",
+    }]
+    blocked_cycle = blocked.d.run_cycle()
+    assert blocked_cycle["activity"] == "blocked"
+    assert blocked_cycle["dispatched"] == []
+    assert "USR-01" not in blocked_cycle["in_flight"].values()
+
+    running = Env(tmp_path / "running", [], free=("grokbox",))
+    running.d._resumptions = lambda: [{
+        "ticket": "USR-09", "status": "running", "pid": 42, "stage": "development",
+        "started_at": running.now, "heartbeat_epoch": running.now,
+    }]
+    assert running.d.run_cycle()["activity"] == "running"
+
+
+def test_stage_change_is_progress_and_the_same_stage_is_not(tmp_path: Path):
+    e = Env(tmp_path, [], free=("grokbox",))
+    stage = {"value": "planning"}
+    e.d._resumptions = lambda: [{
+        "ticket": "USR-09", "status": "waiting", "cause": "route_wait", "stage": stage["value"],
+    }]
+    assert e.d.run_cycle()["activity"] == "idle"
+    stage["value"] = "development"
+    changed = e.d.run_cycle()
+    assert changed["activity"] == "running"
+    assert changed["last_progress_epoch"] == e.now
+    assert e.d.run_cycle()["activity"] == "running"
+    e.now += e.d.config.progress_window_sec + 1
+    expired = e.d.run_cycle()
+    assert expired["activity"] == "idle"
+    assert expired["last_progress_epoch"] == e.now - e.d.config.progress_window_sec - 1
+
+
+def test_stale_live_child_is_idle_after_restart_and_recent_log_heartbeat_is_running(tmp_path: Path):
+    e = Env(tmp_path, [], free=("grokbox",))
+    e.d.config.progress_window_sec = 30
+    e.d.in_flight["grokbox"] = fd.InFlight(
+        "USR-09", "grokbox", Handle(), started_at=e.now - 60,
+    )
+    stale = e.d.run_cycle()
+    assert stale["activity"] == "idle"
+    assert stale["heartbeat_epoch"] == e.now
+    assert stale["last_progress_epoch"] == e.now - 60
+
+    restarted = fd.FleetDispatcher(
+        e.d.config, demands_loader=lambda: [], probe=lambda _host: fd.HostProbe(True, "ready"),
+        launch=e._launch, clock=lambda: e.now, admission_store=e.d.admission_store,
+    )
+    assert restarted.run_cycle()["activity"] == "idle"
+
+    running = Env(tmp_path / "heartbeat", [], free=("grokbox",))
+    running.d.config.progress_window_sec = 30
+    running.d._resumptions = lambda: [{
+        "ticket": "USR-09", "status": "running", "pid": 42, "stage": "development",
+        "started_at": running.now - 600, "heartbeat_epoch": running.now,
+    }]
+    assert running.d.run_cycle()["activity"] == "running"
+    running.now += 31
+    running.d._resumptions = lambda: [{
+        "ticket": "USR-09", "status": "running", "pid": 42, "stage": "development",
+        "started_at": running.now - 631, "heartbeat_epoch": running.now - 31,
+    }]
+    assert running.d.run_cycle()["activity"] == "idle"
+
+
+def test_deterministic_delivery_failure_alerts_once_per_fingerprint(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "alerts"))
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        failure_alerts_mod, "_emit_failure_alert", lambda **kwargs: sent.append(kwargs) or True,
+    )
+    monkeypatch.setattr(failure_alerts_mod, "notify_deterministic_failure", _REAL_DETERMINISTIC_ALERT)
+    e = Env(tmp_path, [], free=("grokbox",))
+    same = "[ERRO NA ENTREGA] causa: gate_failed; erro: assertion failed"
+    for index in range(2):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), run_id=f"run-{index}")
+        e.d._record_failure(job, 1, "failure", same)
+    assert len(sent) == 1
+    assert sent[0]["cause"] == "gate_failed"
+    assert "assertion failed" in sent[0]["evidence"]
+
+    changed = "[ERRO NA ENTREGA] causa: gate_failed; erro: different assertion"
+    e.d._record_failure(fd.InFlight("USR-01", "grokbox", Handle(), run_id="run-2"), 1, "failure", changed)
+    assert len(sent) == 2
+    e.d._record_failure(
+        fd.InFlight("USR-01", "grokbox", Handle(), run_id="run-3"), 1, "failure",
+        "[ERRO NA ENTREGA] causa: ci_red; erro: different assertion",
+    )
+    assert len(sent) == 3
+    assert sent[2]["cause"] == "ci_red"
+    before = len(sent)
+    e.d._record_failure(
+        fd.InFlight("USR-01", "grokbox", Handle(), run_id="run-infra"), 75, "infra",
+        "[ERRO NA ENTREGA] causa: gate_timeout; erro: worker timed out",
+    )
+    assert len(sent) == before
+
+
+def test_actionable_failure_and_notification_transition_survive_restart(tmp_path: Path, monkeypatch):
+    import importlib
+    import json
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "failure-state"))
+    module = failure_alerts_mod
+    sent: list[dict] = []
+    monkeypatch.setattr(module, "_emit_failure_alert", lambda **kwargs: sent.append(kwargs) or True)
+    monkeypatch.setattr(module, "notify_deterministic_failure", _REAL_DETERMINISTIC_ALERT)
+    first = module.notify_deterministic_failure(
+        "USR-90", "gate_failed", "assertion failed", "run.log", phase="development",
+        attempts=1, next_step="Inspect assertion evidence and fix the candidate.", transition="retrying",
+    )
+    repeated = module.notify_deterministic_failure(
+        "USR-90", "gate_failed", "assertion failed", "run.log", phase="development",
+        attempts=2, next_step="Inspect assertion evidence and fix the candidate.", transition="retrying",
+    )
+    blocked = module.notify_deterministic_failure(
+        "USR-90", "gate_failed", "assertion failed", "run.log", phase="development",
+        attempts=3, next_step="Correct the evidence and release the ticket hold.", transition="blocked",
+    )
+    assert first and not repeated and blocked
+    assert len(sent) == 2
+    assert sent[0]["phase"] == "development" and sent[0]["attempts"] == 1
+    assert sent[1]["transition"] == "blocked" and sent[1]["attempts"] == 3
+
+    restarted = importlib.reload(module)
+    monkeypatch.setattr(restarted, "_emit_failure_alert", lambda **kwargs: sent.append(kwargs) or True)
+    assert not restarted.notify_deterministic_failure(
+        "USR-90", "gate_failed", "assertion failed", "run.log", phase="development",
+        attempts=3, next_step="Correct the evidence and release the ticket hold.", transition="blocked",
+    )
+    actionable = json.loads((tmp_path / "failure-state" / "actionable_failures.json").read_text(encoding="utf-8"))
+    record = actionable["tickets"]["USR-90"]
+    assert record["phase"] == "development"
+    assert record["fingerprint"] == module.failure_fingerprint("USR-90", "gate_failed", "assertion failed")
+    assert record["attempts"] == 3
+    assert record["last_evidence"] == "assertion failed"
+    assert record["next_step"] == "Correct the evidence and release the ticket hold."
+    assert len(sent) == 2
+
+
+def test_concurrent_identical_failure_notifications_are_deduplicated(tmp_path: Path, monkeypatch):
+    import time
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "concurrent-failure-state"))
+    sent: list[dict] = []
+
+    def emit(**kwargs):
+        time.sleep(0.01)
+        sent.append(kwargs)
+        return True
+
+    monkeypatch.setattr(failure_alerts_mod, "_emit_failure_alert", emit)
+    monkeypatch.setattr(failure_alerts_mod, "notify_deterministic_failure", _REAL_DETERMINISTIC_ALERT)
+
+    def notify(_index: int) -> bool:
+        return failure_alerts_mod.notify_deterministic_failure(
+            "USR-91", "ci_red", "CI failed on candidate abc", "run.log",
+            phase="ci", attempts=2, next_step="Repair CI and resume delivery.", transition="retrying",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(notify, range(8)))
+
+    assert sum(results) == 1
+    assert len(sent) == 1
 
 
 def test_admission_store_failure_is_structured_and_fails_closed(tmp_path: Path):
@@ -2056,6 +2493,266 @@ def _plant_wait(directory: Path, *, status: str = "running", pid: int | None = 4
     return pending, path
 
 
+def test_failed_delivery_child_is_saved_before_retry_and_retry_keeps_delivery_mode(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pending
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    worktree = repo_root / "ticket-worktree"
+    worktree.mkdir()
+    directory = tmp_path / "pending"
+    directory.mkdir()
+    path = directory / "USR-447.json"
+    evidence_log = path.with_suffix(".log")
+    evidence_log.write_text("CI failed on candidate\n", encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    outcome_path = pending.run_outcome.outcome_path("USR-447")
+    outcome_path.parent.mkdir(parents=True, exist_ok=True)
+    outcome_path.write_text("{}", encoding="utf-8")
+    previous_failure = pending.PendingChildFailure(
+        run_id="older-delivery", attempt=3, exit_code=1, cause="ci_red", cause_class="candidate",
+        stage="review", detail="older CI failure", log_path=str(evidence_log),
+        outcome_path=str(outcome_path), recorded_at="2026-11-05T00:00:00+00:00",
+    )
+    row = pending.PendingDelivery(
+        ticket_id="USR-447", worktree=str(worktree), stage="development", resume_delivery=False,
+        run_id="child-delivery-1", status="running", pid=4242, started_at=10.0,
+        child_failures=[previous_failure],
+    )
+    pending._save(path, row)
+    outcome = SimpleNamespace(
+        exit_code=1, cause="ci_red", cause_class=SimpleNamespace(value="candidate"),
+        stage="gate", detail="CI failed on candidate",
+    )
+    monkeypatch.setattr(pending.run_outcome, "read_outcome", lambda *_args: outcome)
+    monkeypatch.setattr(pending.run_outcome, "main_sha", lambda *_args: "a" * 40)
+    observed: dict[str, object] = {}
+
+    class _Budget:
+        def record_attempt(self, *_args, **_kwargs):
+            saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+            assert saved.child_failures[-1].run_id == "child-delivery-1"
+            assert saved.child_failures[-1].attempt == 4
+            assert saved.child_failures[-1].log_path == str(evidence_log.resolve())
+            assert saved.child_failures[-1].outcome_path == str(outcome_path.resolve())
+            assert saved.resume_delivery is True
+            observed["persisted_before_accounting"] = True
+            return {"next_attempt_at": 2000.0}
+
+        def ticket_hold(self, **_kwargs):
+            return False
+
+        def budget(self, *_args, **_kwargs):
+            return {"main_sha": "", "infra_streak": 0}
+
+        def retry_reason(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(pending, "_budget_store", lambda _now: _Budget())
+    routed: list[tuple[str, bool]] = []
+
+    def route(row):
+        routed.append((row.stage, row.resume_delivery))
+        return ("grok", "model")
+
+    monkeypatch.setattr(pending, "_route", route)
+    monkeypatch.setattr(pending, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(pending, "_ticket_status", lambda _ticket: "completed")
+    import core.line.ticket_engine as ticket_engine
+    monkeypatch.setattr(ticket_engine, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(pending.run_outcome, "main_sha", lambda *_args: "")
+
+    class _ControlStore:
+        mock_mode = False
+
+        def list_tickets(self):
+            return [{"id": "USR-447", "status": "completed"}]
+
+    import core.demands.queue_store as queue_store
+    import core.git.ticket_workspace as ticket_workspace
+    import core.line.line_lock as line_lock
+
+    monkeypatch.setattr(queue_store, "control_store", lambda: _ControlStore())
+    monkeypatch.setattr(ticket_workspace, "list_worktrees", lambda _root: [
+        {"worktree": str(worktree), "branch": "ticket/usr-447"},
+    ])
+    monkeypatch.setattr(line_lock, "is_locked", lambda: False)
+    launched: dict[str, object] = {}
+
+    class _Child:
+        pid = 9898
+
+    def fake_popen(command, **kwargs):
+        launched["command"] = command
+        return _Child()
+
+    monkeypatch.setattr(pending.subprocess, "Popen", fake_popen)
+    result = pending._child_finished(path, row, 1, repo_root, 1000.0)
+    assert result["status"] == "waiting"
+    assert observed["persisted_before_accounting"] is True
+    saved = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert saved.child_failures[-1].cause == "ci_red"
+    assert saved.child_failures[-1].stage == "gate"
+    assert saved.child_failures[-1].detail == "CI failed on candidate"
+    assert saved.child_failures[-1].attempt == 4
+    assert saved.child_failures[-1].log_path == str(evidence_log.resolve())
+    assert saved.child_failures[-1].outcome_path == str(outcome_path.resolve())
+    assert saved.resume_delivery is True
+    assert saved.stage == "review"
+
+    # A fresh dispatcher process reads only the persisted row; the completed build stays intact.
+    implementation = worktree / "implementation.py"
+    implementation.write_text("preserved = True\n", encoding="utf-8")
+    implementation_before = implementation.read_bytes()
+    saved.next_check = 0
+    pending._save(path, saved)
+    pending._tick_row(path, repo_root, 1001.0)
+    restored = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert restored.stage == "review"
+    assert restored.resume_delivery is True
+    assert restored.child_failures[-1].attempt == 4
+    assert routed == [("review", True)]
+    assert implementation.read_bytes() == implementation_before
+    command = launched["command"]
+    assert command[-4:] == ["--resume-delivery", "USR-447", "--worktree", str(worktree)]
+
+
+def test_failed_delivery_child_is_not_retried_when_failure_checkpoint_cannot_be_published(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery as pending
+
+    path = tmp_path / "pending" / "USR-447.json"
+    row = pending.PendingDelivery(
+        ticket_id="USR-447", worktree=str(tmp_path / "worktree"), stage="review",
+        run_id="delivery-attempt-1", status="running", pid=42,
+    )
+    pending._save(path, row)
+    previous = path.read_bytes()
+    monkeypatch.setattr(
+        pending.run_outcome, "read_outcome",
+        lambda *_args: SimpleNamespace(
+            exit_code=1, cause="ci_red", cause_class=SimpleNamespace(value="candidate"),
+            stage="gate", detail="CI failed",
+        ),
+    )
+    accounting_calls: list[object] = []
+    monkeypatch.setattr(pending, "_budget_store", lambda _now: accounting_calls.append(True))
+
+    def fail_replace(*_args):
+        raise OSError("simulated interrupted checkpoint publication")
+
+    monkeypatch.setattr(pending.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="simulated interrupted checkpoint publication"):
+        pending._child_finished(path, row, 1, tmp_path, 1000.0)
+
+    assert path.read_bytes() == previous
+    assert accounting_calls == []
+    assert pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8")).child_failures == []
+
+
+def test_pending_delivery_blocks_a_registered_worktree_from_another_ticket(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    directory = tmp_path / "pending"
+    directory.mkdir()
+    worktree = tmp_path / "registered-worktree"
+    worktree.mkdir()
+    path = directory / "USR-449.json"
+    pending._save(path, pending.PendingDelivery(
+        ticket_id="USR-449", worktree=str(worktree), stage="review", resume_delivery=True,
+    ))
+
+    class _Budget:
+        def budget(self, *_args, **_kwargs):
+            return {"main_sha": "", "infra_streak": 0}
+
+        def retry_reason(self, *_args, **_kwargs):
+            return None
+
+    class _ControlStore:
+        mock_mode = False
+
+        def list_tickets(self):
+            return [{"id": "USR-449", "status": "planned"}]
+
+    monkeypatch.setattr(pending, "_budget_store", lambda _now: _Budget())
+    monkeypatch.setattr(pending.run_outcome, "main_sha", lambda _repo: "")
+    monkeypatch.setattr(pending, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: _ControlStore())
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr("core.git.ticket_workspace.list_worktrees", lambda _root: [
+        {"worktree": str(worktree), "branch": "ticket/usr-448"},
+    ])
+    monkeypatch.setattr(pending, "_route", lambda _row: ("grok", "model"))
+
+    result = pending._tick_row(path, tmp_path / "repo", 1000.0)
+
+    assert result["status"] == "blocked"
+    assert result["cause"] == "pending_worktree_mismatch"
+    restored = pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+    assert restored.status == "blocked"
+    assert restored.cause == "pending_worktree_mismatch"
+
+
+def test_schedule_migration_keeps_structured_child_failures(tmp_path: Path, monkeypatch) -> None:
+    from core.line import pending_delivery as pending
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    directory = tmp_path / "pending"
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    directory.mkdir()
+    failure = pending.PendingChildFailure(
+        run_id="delivery-1", attempt=2, exit_code=1, cause="launcher_exit:1", cause_class="infra",
+        stage="review", detail="deploy child failed", log_path="/tmp/delivery.log",
+        outcome_path="/tmp/outcome.json", recorded_at="2026-11-06T00:00:00+00:00",
+    )
+    path = directory / "USR-447.json"
+    pending._save(path, pending.PendingDelivery(
+        ticket_id="USR-447", worktree=str(worktree), stage="review", resume_delivery=True,
+        child_failures=[failure],
+    ))
+
+    resumed = pending.schedule(
+        "USR-447", worktree, "review", resume_delivery=True,
+        cause="route_wait", directory=directory,
+    )
+
+    assert resumed.child_failures == [failure]
+    assert pending.PendingDelivery.model_validate_json(path.read_text(encoding="utf-8")).child_failures == [failure]
+
+
+def test_legacy_pending_delivery_defaults_child_failures_without_rewriting_state(tmp_path: Path) -> None:
+    from core.line.pending_delivery import PendingDelivery
+
+    path = tmp_path / "USR-448.json"
+    path.write_text(
+        '{"ticket_id":"USR-448","worktree":"/wt/usr-448","stage":"review",'
+        '"resume_delivery":true,"next_check":0}',
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    restored = PendingDelivery.model_validate_json(path.read_text(encoding="utf-8"))
+
+    assert restored.ticket_id == "USR-448"
+    assert restored.child_failures == []
+    assert restored.status == "waiting"
+    assert path.read_bytes() == before
+
+
 def _raise_from_tick(monkeypatch, directory: Path, exc: BaseException, *, mutate: bool):
     pending, path = _plant_wait(directory)
     before = path.read_bytes()
@@ -2391,6 +3088,7 @@ def test_main_forwards_original_argv_and_once_skips_the_loop(monkeypatch) -> Non
 @pytest.fixture(autouse=True)
 def _isolate_budget_notifications(monkeypatch):
     monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: None)
+    monkeypatch.setattr("core.line.failure_alerts.notify_deterministic_failure", lambda *args, **kwargs: False)
 
 
 def _bind_review_tick(monkeypatch, tmp_path: Path, worktree: Path, ticket_id: str):

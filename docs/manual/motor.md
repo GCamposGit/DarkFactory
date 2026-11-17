@@ -1,4 +1,4 @@
-<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py -->
+<!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py, core/line/rebase_recovery.py -->
 # Motor da esteira
 
 Tickets validam pelo perfil `pr` local: afetados contra o merge-base de
@@ -92,6 +92,16 @@ grava `progress.json` a cada fatia concluida; na retomada as fatias registradas 
 se a worktree tem diff de implementacao) e, com todas concluidas, o launcher segue ao portao sem
 chamar o agente. Plano invalido ou de outra demanda replaneja como antes, e ticket novo nao muda.
 
+## Checkpoint duravel de BUILD (USR-475 T1)
+
+`progress.json` e gravado antes da primeira fatia e substituido atomicamente quando cada fatia termina. O checkpoint liga o prefixo ordenado de `tickets_done` ao digest de `SPEC.md` + `tickets.json`, ao candidato (HEAD, diff rastreado e conteudo de arquivos untracked nao ignorados) e ao caminho da worktree. A proxima fatia so comeca depois da gravacao.
+
+Na retomada, PLAN, RESEARCH, candidato e worktree precisam continuar iguais. A lista concluida precisa ser um prefixo exato do plano; a esteira pula esse prefixo e executa so as fatias restantes na mesma worktree. Alteracao local depois do ultimo checkpoint, plano trocado, arquivo de progresso ilegivel ou identificadores fora de ordem falham com `build_evidence_mismatch` e preservam os artefatos para diagnostico.
+
+Checkpoint legado so migra automaticamente se comprovar que todas as fatias do plano atual ja estao concluidas, na mesma ordem. Plano legado valido sem progresso pode ser adotado se a worktree nao tiver alteracao de implementacao. Estado parcial sem prova nao e resetado.
+
+Se `SPEC.md`, `tickets.json` ou `progress.json` estiverem ausentes e a worktree tiver diff fora do ledger ou commits alem da base, a retomada falha fechada antes de `reset` ou novo PLAN. Sem prova de candidato e plano, os arquivos e commits preservados nao viram uma tentativa nova.
+
 ## Sequencia canonica de estagios (USR-375 S2)
 
 `core/line/stages.py` define a ordem: INTAKE, GRILL, PLAN, RESEARCH, BUILD, VALIDATE, REVIEW, MERGE, DEPLOY_SMOKE, DOCS, LEARNING.
@@ -128,7 +138,7 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    inventa fontes. A politica (R1..R7) dispensa correcoes, docs e mudancas pequenas. Sem `research.json`
    valido o ticket nao chega ao BUILD nem a entrega (`_require_plan_and_build` exige PLAN, RESEARCH e BUILD).
 4. **BUILD** roda o agente de desenvolvimento uma vez por sub-ticket do plano, em sequencia, na mesma
-   worktree, e grava `progress.json` (`harness` = familia do implementador).
+   worktree, e grava `progress.json` (`harness` = familia do implementador) antes da proxima fatia.
    Antes de cada fatia, o launcher relê a cota e chama `pick` de novo (`development`, modo `write`),
    sem override e sem a tupla do preflight (USR-428). Um plano de uma fatia, inclusive o plano mínimo
    de correção pequena, faz esse pick uma vez. Um plano de várias fatias repete esse pick antes do
@@ -325,13 +335,15 @@ tentativa. Assim, o PR continua protegendo o ticket mesmo depois que o processo 
 O fluxo que chama `pick`, `inspect_quotas`, `_run_bounded` etc. fica em `run_ticket.py` para que os
 `monkeypatch` existentes continuem valendo. Refatoracao pura: CLI, codigos de saida e mensagens inalterados.
 
-## Conflito de rebase na entrega (USR-412)
+## Conflito de rebase na entrega (USR-412, USR-475)
 
-Em `_deliver_sync` o rebase em origin/main deixa o conflito em andamento (`keep_conflict=True`) e `resolve_rebase_conflict`
-o trata: conflito so em ledger (`demands.json`, `owner_actions.json`) fica com a versao de origin/main e o rebase
-continua; qualquer outro arquivo volta UMA vez ao agente de desenvolvimento (`_invoke_fix_agent`, estagio
-`rebase-conflito`). Se seguir em conflito, o rebase e abortado, o ticket permanece em `validating`, com evidencia de falha tecnica, e o run sai com rc 1
-(causa `rebase_conflict`), sem rc 2 e sem redespacho do despachante.
+Em `_deliver_sync` o rebase em origin/main deixa o conflito em andamento (`keep_conflict=True`). `resolve_rebase_conflict` classifica e recupera na worktree preservada:
+
+- Ledger (`.factory/demands/demands.json`, `.factory/owner_actions/owner_actions.json`) fica com a copia de origin/main (`--ours` durante o rebase).
+- Arquivo tecnico com base comum, fora da lista protegida, e reparado sem modelo quando cada hunk e uma insercao compativel dos dois lados, um lado igual a base, ou um lado contem o outro em linhas completas. As duas alteracoes compativeis permanecem e o rebase segue. Caminho protegido nao e reescrito nem enviado ao agente.
+- A tentativa deterministica e reservada antes de comecar. Um conflito ainda aberto chama o agente no estagio `rebase-conflito` no maximo uma vez por fingerprint, somente com rota elegivel de `development`, e a inferencia e reservada antes da chamada. Sem rota, registra `route_wait` e nao gasta inferencia. Um reinicio reconhece um rebase ainda em andamento; se a reserva ficou sem resultado, registra interrupcao tecnica e nao repete o reparo ou a inferencia.
+- O fingerprint liga projeto/ticket e prompt, caminho da worktree, branch, HEAD, candidato (`orig-head`), upstream, arquivos e estagios Git em conflito e evidencias informadas. A mesma entrada nao repete recuperacao. Mudanca verificavel nesses dados cria outra tentativa controlada. O resultado (`resolved`, `route_wait`, `interrupted` ou `technical_hold`) fica em `rebase_recovery` em `admission.sqlite3`.
+- Se o conflito continua depois do limite, o rebase e abortado, o candidato e a worktree ficam, e o hold guarda a causa `rebase_conflict` e o comando `--resume-delivery`. A classe em `core.line.failure_taxonomy` e `candidate`, nao `owner`. O ticket permanece em `validating`, com evidencia `technical_hold`; a falha e acionavel e nao pede uma decisao do owner. Merge comprovado apaga essas linhas junto com o orcamento do ticket.
 
 Desde o USR-475, `docs/FASE_ATUAL.md` tambem fica com a versao de origin/main, e no ledger `demands.json` a linha do proprio
 ticket e reaplicada por `DemandsStore.save_ticket` depois de tomar a versao de origin/main. `rebase_conflict` e causa de candidato
@@ -431,6 +443,23 @@ USR-477: quando o revisor pago configurado pertence a uma familia que escreveu
 o candidato, a rota tenta o alias distill.openrouter ja registrado e exige
 independencia novamente. Se nenhuma familia independente estiver disponivel,
 a revisao continua fechada, sem autorizar merge.
+
+## Deploy limitado e cancelamento remoto durável (USR-475 T5)
+
+`default_deploy` (`core/line/fleet_dispatcher.py`) espera `scripts/dokploy_redeploy.py`
+com um teto configuravel (`DARKFAC_DEPLOY_TIMEOUT_SEC`, padrao 3600 s). Estourado o
+prazo, a subarvore inteira do processo e encerrada (`core.execution.sandbox.kill_process_tree`)
+e a chamada devolve o codigo convencional de timeout (124); `_maybe_deploy` trata isso
+como qualquer outra falha de deploy, reenfileirando para a proxima janela de silencio.
+
+O cancelamento de um job remoto do gate de validacao (`core.harness.remote_dispatch`)
+e durável: `durable_cancel_job` grava a intencao (job, worker, motivo, chave de
+idempotencia) em `<harness state>/cancel_intents/` antes do `DELETE` autenticado.
+Uma resposta 404 (worker sem registro do job) conta como cancelamento ja confirmado;
+um job ja confirmado nunca dispara um segundo `DELETE`. `resume_pending_cancellations`,
+chamada no inicio de `maybe_dispatch_remote`, tenta de novo qualquer intencao deixada
+sem confirmacao por um reinicio ou queda. Nem o token do worker nem o corpo bruto de um
+erro HTTP chegam ao registro persistido ou a linha `[REMOTE_JOB_CANCELLED]`.
 
 ## Encerramento sem entrega e recuperacao de CI (USR-479)
 

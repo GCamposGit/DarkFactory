@@ -40,6 +40,7 @@ from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.line import agent_retry, cancellation, line_lock, local_cancel, run_outcome
 from core.line.failure_taxonomy import classify, canonical_cause
+from core.line.rebase_recovery import LEDGER_CONFLICT_FILES as _LEDGER_CONFLICT_FILES
 from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
 from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
@@ -413,13 +414,40 @@ def _resume_preserved_workspace(ticket: UserTicket, *, as_json: bool) -> Optiona
     """Worktree an interrupted earlier attempt of this ticket left behind, or None (USR-225).
 
     A run that timed out keeps its worktree (and the agent's partial work); a second `run_ticket <ID>`
-    must continue there instead of starting from scratch in a new worktree. The most recent preserved
-    worktree with work is reused; the others are only listed. Lookup failures never block a fresh start.
+    must continue there instead of starting from scratch in a new worktree. A classified BUILD
+    checkpoint's exact eligible worktree takes precedence; otherwise the most recent preserved
+    worktree with work is reused. The others are only listed. Lookup failures never block a fresh start.
     """
     from core.git.ticket_workspace import find_preserved_workspaces
 
+    preferred_build_path: Optional[Path] = None
     try:
-        lookup = find_preserved_workspaces(ticket.id, cwd=PROJECT_ROOT, ignore_paths=(LEDGER_RELATIVE,))
+        from core.line.stages import BUILD_FILE, BuildReport
+
+        artifact_ws = ticket_engine.run_workspace(ticket)
+        checkpoint_path = ticket_engine.workspace.context_dir(artifact_ws) / BUILD_FILE
+        raw_checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        checkpoint = BuildReport.model_validate(raw_checkpoint)
+        # A classified BUILD checkpoint names the only worktree whose candidate digest it proves.
+        # Prefer that exact registered worktree even if another attempt is newer, or if the first
+        # slice has not written files yet and the worktree is otherwise clean.
+        if (
+            checkpoint.ticket_id in ("", ticket.id)
+            and checkpoint.plan_digest
+            and checkpoint.candidate_digest
+            and checkpoint.worktree
+        ):
+            preferred_build_path = Path(checkpoint.worktree)
+    except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        # The stage validator below reports malformed evidence with the canonical cause. Workspace
+        # discovery must still be able to preserve any independently useful in-flight worktree.
+        logger.debug("BUILD checkpoint cannot select a worktree for %s: %s", ticket.id, exc)
+
+    try:
+        lookup = find_preserved_workspaces(
+            ticket.id, cwd=PROJECT_ROOT, ignore_paths=(LEDGER_RELATIVE,),
+            preferred_path=preferred_build_path,
+        )
     except Exception as exc:  # noqa: BLE001 - a lookup problem falls back to a new worktree
         logger.warning("Could not look for a preserved worktree of %s: %s", ticket.id, exc)
         return None
@@ -543,6 +571,10 @@ def rebase_on_origin_main(cwd: Path, keep_conflict: bool = False) -> tuple[bool,
     """
     from core.git.autonomy import _run_git
 
+    if _rebase_in_progress(cwd):
+        conflicts = _unmerged_files(cwd)
+        return False, conflicts, "rebase already in progress; continuing preserved worktree state"
+
     _run_git(["fetch", "origin", "main"], cwd=cwd)
     remote_ref = "origin/main"
     if _run_git(["rev-parse", "--verify", remote_ref], cwd=cwd).returncode != 0:
@@ -571,6 +603,10 @@ def rebase_on_project_base(cwd: Path, base: str, keep_conflict: bool = False) ->
     """Synchronize a client ticket branch with the project's registered default branch."""
     from core.git.autonomy import _run_git
 
+    if _rebase_in_progress(cwd):
+        conflicts = _unmerged_files(cwd)
+        return False, conflicts, "rebase already in progress; continuing preserved worktree state"
+
     _run_git(["fetch", "origin", base], cwd=cwd)
     remote_ref = f"origin/{base}"
     if _run_git(["rev-parse", "--verify", remote_ref], cwd=cwd).returncode != 0:
@@ -593,6 +629,25 @@ _LEDGER_CONFLICT_FILES = frozenset({
 })
 
 
+def _rebase_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Git for an in-progress rebase. ``GIT_EDITOR`` from the parent must not block ``--continue``."""
+    from core.git.autonomy import _win_kwargs
+
+    env = os.environ.copy()
+    env["GIT_EDITOR"] = "true"
+    env["GIT_SEQUENCE_EDITOR"] = "true"
+    return subprocess.run(
+        ["git", "-c", "core.editor=true", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        **_win_kwargs(),
+    )
+
+
 def _unmerged_files(cwd: Path) -> list[str]:
     from core.git.autonomy import _run_git
 
@@ -606,6 +661,15 @@ def _reapply_ticket_row(ledger: Path, ticket: UserTicket) -> None:
         DemandsStore(ledger).save_ticket(ticket)
     except (OSError, ValueError) as exc:
         logger.warning("Linha de %s nao reaplicada no ledger: %s", ticket.id, exc)
+
+
+def _rebase_in_progress(cwd: Path) -> bool:
+    """True when a prior process left the worktree inside a rebase."""
+    from core.git.autonomy import _run_git
+
+    git_dir = Path(_run_git(["rev-parse", "--git-dir"], cwd=cwd).stdout.strip())
+    git_dir = git_dir if git_dir.is_absolute() else cwd / git_dir
+    return (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists()
 
 
 def _continue_rebase_taking_ledgers(cwd: Path, ticket: Optional[UserTicket] = None) -> list[str]:
@@ -630,38 +694,290 @@ def _continue_rebase_taking_ledgers(cwd: Path, ticket: Optional[UserTicket] = No
         remaining = [f for f in conflicts if f not in _LEDGER_CONFLICT_FILES]
         if remaining:
             return remaining
-        cont = _run_git(["-c", "core.editor=true", "rebase", "--continue"], cwd=cwd)
+        cont = _rebase_git(cwd, "rebase", "--continue")
         if cont.returncode != 0 and not _unmerged_files(cwd):
-            # e.g. the commit became empty after taking origin/main's ledger
-            if _run_git(["rebase", "--skip"], cwd=cwd).returncode != 0:
+            # Skip only an empty replay (ledger taken from origin/main). A non-empty
+            # resolution must stay; skipping it would drop the candidate commit.
+            if _run_git(["diff", "--cached", "--quiet"], cwd=cwd).returncode != 0:
+                logger.warning("rebase --continue falhou com resolucao nao vazia: %s", cont.stderr.strip())
+                return ["<rebase nao concluiu>"]
+            if _rebase_git(cwd, "rebase", "--skip").returncode != 0:
                 return ["<rebase nao concluiu>"]
     return ["<rebase nao concluiu>"]
 
 
-def resolve_rebase_conflict(
-    ticket: UserTicket, cwd: Path, conflict_files: list[str], msg: str
-) -> tuple[bool, list[str], str]:
-    """Settle a rebase left in progress by `rebase_on_*(keep_conflict=True)` (USR-412).
-
-    Ledger-only conflicts take origin/main's copy; anything else goes to the development agent once;
-    if the rebase is still conflicted afterwards it is aborted and the delivery fails.
-    """
+def _abort_rebase(cwd: Path) -> None:
     from core.git.autonomy import _run_git
 
-    remaining = _continue_rebase_taking_ledgers(cwd, ticket)
-    if remaining:
-        _invoke_fix_agent(
-            cwd, ticket, "rebase-conflito",
-            "O rebase da branch em origin/main parou com conflito (rebase em andamento nesta worktree). "
-            "Arquivos em conflito:\n" + "\n".join(f"- {f}" for f in remaining)
-            + "\nResolva os marcadores, `git add` cada arquivo e conclua com `git rebase --continue` "
-            "ate o rebase terminar (nao use --abort).",
+    _run_git(["rebase", "--abort"], cwd=cwd)
+
+
+def _default_rebase_resume(ticket: UserTicket, cwd: Path) -> str:
+    return (
+        f"python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery {ticket.id} "
+        f"--worktree {cwd}"
+    )
+
+
+def _registered_ticket_rebase_worktree(ticket: UserTicket, cwd: Path) -> bool:
+    """Require the recorded ticket branch in Git's worktree registry before recovery."""
+    from core.git.ticket_workspace import list_worktrees, main_checkout_root
+
+    slug = str(ticket.id).strip().lower()
+    expected = f"ticket/{slug}"
+    try:
+        entries = list_worktrees(main_checkout_root(cwd))
+        target = cwd.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    registered = False
+    branch = ""
+    for entry in entries:
+        path = entry.get("worktree", "")
+        if not path:
+            continue
+        try:
+            if Path(path).resolve() == target:
+                registered = True
+                branch = entry.get("branch", "").removeprefix("refs/heads/").lower()
+                break
+        except OSError:
+            continue
+    if not registered:
+        return False
+    if not branch:
+        # Git detaches HEAD while replaying commits. The worktree's own rebase
+        # metadata still names the registered ticket branch during that interval.
+        from core.git.autonomy import _run_git
+
+        git_dir = Path(_run_git(["rev-parse", "--git-dir"], cwd=cwd).stdout.strip())
+        if not git_dir.is_absolute():
+            git_dir = cwd / git_dir
+        rebase_dir = git_dir / "rebase-merge"
+        if not rebase_dir.is_dir():
+            rebase_dir = git_dir / "rebase-apply"
+        head_name = rebase_dir / "head-name"
+        try:
+            branch = head_name.read_text(encoding="utf-8").strip().removeprefix("refs/heads/").lower()
+        except OSError:
+            return False
+    return branch == expected or branch.startswith(expected + "-")
+
+
+def resolve_rebase_conflict(
+    ticket: UserTicket,
+    cwd: Path,
+    conflict_files: list[str],
+    msg: str,
+    resume_command: str = "",
+    *,
+    _recovery_steps: int = 0,
+) -> tuple[bool, list[str], str]:
+    """Settle a rebase left in progress (USR-412, USR-475).
+
+    Ledgers take origin/main. Compatible technical hunks keep both sides with no model
+    call. Anything still open gets at most one inference for that fingerprint, and only
+    when a development route exists. The rebase is then aborted, the candidate stays,
+    and a technical hold is recorded. This never marks ``waiting_human``.
+    """
+    global _rebase_fix_skipped_no_route
+
+    from core.line.rebase_recovery import (
+        conflict_fingerprint,
+        conflict_marker_baseline,
+        recovery_store,
+        repair_compatible_conflicts,
+        unresolved_conflict_markers,
+    )
+
+    remaining = _unmerged_files(cwd) or list(conflict_files)
+    if _rebase_in_progress(cwd) or any(f in _LEDGER_CONFLICT_FILES for f in remaining):
+        resolved_remaining = _continue_rebase_taking_ledgers(cwd, ticket)
+        if not resolved_remaining:
+            return True, [], "rebased successfully"
+        remaining = resolved_remaining
+
+    try:
+        fingerprint = conflict_fingerprint(
+            ticket,
+            cwd,
+            remaining,
+            evidence={"reported_conflicts": sorted(set(conflict_files))},
         )
-        remaining = _continue_rebase_taking_ledgers(cwd, ticket)
-    if remaining:
-        _run_git(["rebase", "--abort"], cwd=cwd)
+        store = recovery_store()
+        state = store.rebase_recovery_state(fingerprint)
+    except Exception as exc:  # noqa: BLE001 - a dark store must not launch an unbounded repair
+        logger.warning("rebase recovery unavailable for %s: %s", ticket.id, exc)
+        _abort_rebase(cwd)
         return False, remaining, msg
-    return True, [], "rebased successfully"
+
+    def technical_failure(reason: str) -> tuple[bool, list[str], str]:
+        _abort_rebase(cwd)
+        resume = resume_command or _default_rebase_resume(ticket, cwd)
+        persisted: dict[str, Any] = {}
+        try:
+            persisted = store.record_rebase_technical_hold(
+                fingerprint,
+                cause="rebase_conflict",
+                resume_command=resume,
+            )
+        except Exception as exc:  # noqa: BLE001 - preserve worktree even if the state store is unavailable
+            logger.warning("could not record rebase technical hold for %s: %s", ticket.id, exc)
+        try:
+            from core.line.failure_alerts import notify_deterministic_failure
+
+            files = ", ".join(sorted(remaining)[:8]) or "rebase state"
+            notify_deterministic_failure(
+                ticket.id,
+                "rebase_conflict",
+                f"fingerprint:{fingerprint.sha256}",
+                phase="delivery",
+                attempts=int((persisted or state or {}).get("inferred") or 0),
+                next_step=(
+                    f"Recovery stopped ({reason[:180]}). Inspect {files} in {cwd} and resume with: {resume}"
+                ),
+                transition="technical_hold",
+            )
+        except Exception as exc:  # noqa: BLE001 - notification failure must not mask the technical hold
+            logger.warning("could not notify technical rebase hold for %s: %s", ticket.id, exc)
+        return False, remaining, reason
+
+    if not _registered_ticket_rebase_worktree(ticket, cwd):
+        return technical_failure("rebase_worktree_unregistered_or_ticket_branch_mismatch")
+
+    if _recovery_steps >= 8:
+        return technical_failure("rebase_conflict_recovery_attempt_limit:8")
+
+    result = str((state or {}).get("recovery_result") or "")
+    if result in {"technical_hold", "interrupted"}:
+        return technical_failure(
+            f"rebase_conflict_recovery_exhausted:{fingerprint.sha256[:16]}"
+        )
+    if result == "resolved":
+        remaining = _continue_rebase_taking_ledgers(cwd, ticket)
+        if not remaining:
+            return True, [], "rebased successfully"
+        return technical_failure(
+            f"rebase_conflict_recovery_incomplete:{fingerprint.sha256[:16]}"
+        )
+    if state and not result:
+        # A restart found a reservation without an outcome. Retrying this exact input
+        # could repeat deterministic work or another harness call, so fail closed.
+        return technical_failure(
+            f"rebase_conflict_recovery_interrupted:{fingerprint.sha256[:16]}"
+        )
+
+    if not state:
+        try:
+            claimed = store.begin_rebase_recovery(fingerprint)
+            if not claimed:
+                state = store.rebase_recovery_state(fingerprint)
+        except Exception as exc:  # noqa: BLE001 - no recovery without a durable attempt cap
+            logger.warning("rebase recovery attempt could not be reserved for %s: %s", ticket.id, exc)
+            return technical_failure(f"rebase_recovery_store_unavailable:{type(exc).__name__}")
+        if not claimed:
+            # A concurrent process or a restart saw the same fingerprint first. Do not race it.
+            return technical_failure(f"rebase_recovery_already_claimed:{fingerprint.sha256[:16]}")
+        try:
+            repair_compatible_conflicts(cwd)
+            remaining = _continue_rebase_taking_ledgers(cwd, ticket)
+        except Exception as exc:  # noqa: BLE001 - recovery failure stays technical and bounded
+            logger.warning("deterministic rebase repair failed for %s: %s", ticket.id, exc)
+            remaining = _unmerged_files(cwd) or remaining
+        if not remaining:
+            try:
+                store.record_rebase_recovery_result(fingerprint, result="resolved")
+            except Exception as exc:  # noqa: BLE001 - a finished rebase stays finished
+                logger.warning("could not persist deterministic rebase result for %s: %s", ticket.id, exc)
+            return True, [], "rebased successfully"
+        next_fingerprint = conflict_fingerprint(
+            ticket, cwd, remaining, evidence={"reported_conflicts": sorted(set(remaining))},
+        )
+        if next_fingerprint.sha256 != fingerprint.sha256:
+            try:
+                store.record_rebase_recovery_result(fingerprint, result="resolved")
+            except Exception as exc:  # noqa: BLE001 - do not repeat the previous conflict's repair
+                logger.warning("could not persist resolved rebase step for %s: %s", ticket.id, exc)
+                return technical_failure("rebase_recovery_store_unavailable:result_write")
+            return resolve_rebase_conflict(
+                ticket, cwd, remaining, msg, resume_command, _recovery_steps=_recovery_steps + 1,
+            )
+
+    # Protected files can only be changed through the signed owner authorization flow.
+    # Never include them in a development harness prompt.
+    from core.orchestrator.guard import audit_paths
+
+    protected = [path for path in remaining if audit_paths([path])]
+    if protected:
+        return technical_failure("protected_path_conflict:" + ",".join(sorted(protected)))
+
+    route = _rebase_development_route(ticket)
+    if route is None:
+        _rebase_fix_skipped_no_route = True
+        try:
+            store.record_rebase_recovery_result(fingerprint, result="route_wait")
+        except Exception as exc:  # noqa: BLE001 - retain the same fingerprint for the next eligible route
+            logger.warning("could not persist rebase route wait for %s: %s", ticket.id, exc)
+        _abort_rebase(cwd)
+        return False, remaining, f"rebase_conflict_route_wait:{fingerprint.sha256[:16]}"
+
+    try:
+        reserved = store.reserve_rebase_inference(fingerprint)
+    except Exception as exc:  # noqa: BLE001 - never launch an untracked model attempt
+        logger.warning("rebase inference reservation failed for %s: %s", ticket.id, exc)
+        return technical_failure(f"rebase_recovery_store_unavailable:{type(exc).__name__}")
+    if not reserved:
+        return technical_failure(f"rebase_conflict_inference_already_spent:{fingerprint.sha256[:16]}")
+
+    try:
+        marker_baseline = conflict_marker_baseline(cwd, remaining)
+    except Exception as exc:  # noqa: BLE001 - do not ask a harness to work without validation inputs
+        return technical_failure(f"rebase_conflict_validation_unavailable:{type(exc).__name__}")
+    _rebase_fix_skipped_no_route = False
+    _invoke_fix_agent(
+        cwd, ticket, "rebase-conflito",
+        "O rebase da branch em origin/main parou com conflito (rebase em andamento nesta worktree). "
+        "Arquivos em conflito:\n" + "\n".join(f"- {f}" for f in remaining)
+        + "\nMantenha as duas alteracoes quando forem adicoes compativeis. "
+        "Resolva os marcadores e execute `git add` em cada arquivo resolvido. "
+        "Nao execute `git rebase --continue` nem `git rebase --abort`; o controlador valida "
+        "os arquivos resolvidos antes de continuar o rebase.",
+        route=route,
+    )
+    still_unmerged = set(_unmerged_files(cwd))
+    resolved_paths = [path for path in remaining if path not in still_unmerged]
+    marker_paths = unresolved_conflict_markers(cwd, resolved_paths, marker_baseline)
+    if marker_paths:
+        return technical_failure(
+            "rebase_conflict_unresolved_markers:" + ",".join(sorted(marker_paths))
+        )
+    try:
+        remaining = _continue_rebase_taking_ledgers(cwd, ticket)
+    except Exception as exc:  # noqa: BLE001 - keep any post-agent failure bounded and actionable
+        logger.warning("rebase continuation failed for %s: %s", ticket.id, exc)
+        return technical_failure(f"rebase_conflict_continue_failed:{type(exc).__name__}")
+    if not remaining:
+        try:
+            store.record_rebase_recovery_result(fingerprint, result="resolved")
+        except Exception as exc:  # noqa: BLE001 - the rebase itself is already safely complete
+            logger.warning("could not record resolved rebase recovery for %s: %s", ticket.id, exc)
+        return True, [], "rebased successfully"
+
+    next_fingerprint = conflict_fingerprint(
+        ticket, cwd, remaining, evidence={"reported_conflicts": sorted(set(remaining))},
+    )
+    if next_fingerprint.sha256 != fingerprint.sha256:
+        try:
+            store.record_rebase_recovery_result(fingerprint, result="resolved")
+        except Exception as exc:  # noqa: BLE001 - do not rerun a completed conflict repair
+            logger.warning("could not persist resolved rebase step for %s: %s", ticket.id, exc)
+            return technical_failure("rebase_recovery_store_unavailable:result_write")
+        return resolve_rebase_conflict(
+            ticket, cwd, remaining, msg, resume_command, _recovery_steps=_recovery_steps + 1,
+        )
+
+    # The exact inputs remain unresolved after the one eligible inference.
+    return technical_failure(f"rebase_conflict_recovery_exhausted:{fingerprint.sha256[:16]}")
 
 
 def repair_owner_action_duplicates_before_gate(git_mgr: Any, ticket_id: str, cwd: Path) -> list[str]:
@@ -730,20 +1046,40 @@ def _build_gate_fix_prompt(ticket: UserTicket, stage_label: str, feedback: str) 
     )
 
 
+# Set only for a rebase repair that found no development route, so that attempt is not spent.
+_rebase_fix_skipped_no_route = False
+
+
+def _rebase_development_route(ticket: UserTicket) -> Optional[tuple[str, str]]:
+    """Choose a write-capable headless harness once, before reserving recovery."""
+    return pick(
+        "development", [cap for cap in _DEV_HOST_CAPS if cap != "harness:antigravity"],
+        mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
+        complexity=_routing_complexity(ticket), execution_context="headless",
+    )
+
+
 def _invoke_fix_agent(
-    target_worktree: Path, ticket: UserTicket, stage_label: str, feedback: str
+    target_worktree: Path,
+    ticket: UserTicket,
+    stage_label: str,
+    feedback: str,
+    *,
+    route: Optional[tuple[str, str]] = None,
 ) -> Optional[AgentResult]:
     """Reinvoke the development agent in-place with the distilled failure, for self-correction (USR-245).
 
     Best-effort: if no route is available or the call itself fails, the next focal/gate attempt simply
     fails again for the same reason, which the caller already treats as an (eventually final) failure.
+    A rebase repair with no route sets ``_rebase_fix_skipped_no_route`` and does not count as inference.
     """
-    route = pick(
-        "development", [cap for cap in _DEV_HOST_CAPS if cap != "harness:antigravity"],
-        mode=DEVELOPMENT_MODE, project_id=ticket.project_id,
-        complexity=_routing_complexity(ticket), execution_context="headless",
-    )
+    global _rebase_fix_skipped_no_route
+    if stage_label == "rebase-conflito":
+        _rebase_fix_skipped_no_route = False
+    route = route or _rebase_development_route(ticket)
     if route is None:
+        if stage_label == "rebase-conflito":
+            _rebase_fix_skipped_no_route = True
         logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
         return None
     harness, model = route
@@ -2008,7 +2344,9 @@ def _deliver_sync(
     else:
         ok, conflict_files, msg = rebase_on_origin_main(target_worktree, keep_conflict=True)
     if not ok:
-        ok, conflict_files, msg = resolve_rebase_conflict(ticket, target_worktree, conflict_files, msg)
+        ok, conflict_files, msg = resolve_rebase_conflict(
+            ticket, target_worktree, conflict_files, msg, resume_command=resume_cmd,
+        )
     if not ok:
         _park_waiting_human(ticket, f"rebase_conflict: {', '.join(conflict_files) or msg}")
         return True, ticket_stages.rebase_conflict_result(
@@ -2102,7 +2440,7 @@ def _deliver_worktree(
         )
 
     try:
-        _require_plan_and_build(ticket, rws, standalone)
+        _require_plan_and_build(ticket, rws, standalone, target_worktree)
     except StageArtifactMissing as exc:
         return refused(exc.stage, exc.reason)
     ticket_engine.clear_delivery(rws, keep_validation=True)
@@ -2347,10 +2685,10 @@ def _reopen_after_ci_budget(ticket: UserTicket, target_worktree: Path, reason: s
 
 
 def _park_waiting_human(ticket: UserTicket, evidence: str) -> None:
-    """Keep non-budget CI repair failures visible without claiming the budget was exhausted."""
+    """Record a technical rebase failure. Never sets ``waiting_human`` and never asks the owner."""
     try:
         DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json").update_status(
-            ticket.id, DeliveryStatus.VALIDATING, delivery_evidence=f"technical_failed: {evidence}"
+            ticket.id, DeliveryStatus.VALIDATING, delivery_evidence=f"technical_hold: {evidence}"
         )
     except Exception as exc:  # noqa: BLE001 - failure recording must not mask the CI failure
         logger.warning("Could not record CI failure for %s (%s): %s", ticket.id, evidence[:80], exc)
@@ -2383,7 +2721,7 @@ def _ci_red_twice_result(
     return payload if return_result else 1
 
 
-def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> None:
+def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool, worktree: Path) -> None:
     """Delivery never starts without PLAN and BUILD artifacts (raises `StageArtifactMissing`).
 
     Exception: an operator's standalone `--resume-delivery` of a worktree cut before USR-375 S4 (no
@@ -2395,7 +2733,12 @@ def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool) -> N
         ticket_engine.write_demand(rws, ticket)
         ticket_engine.write_minimal_plan(rws, ticket)
         ticket_engine.write_research(rws, ticket_extras.legacy_research(ticket.id))
-        ticket_engine.write_build(rws, None, [ticket.id])
+        ticket_engine.write_build(
+            rws, None, [ticket.id],
+            plan_digest=ticket_engine.plan_digest(rws),
+            candidate_digest=_build_candidate_digest(ticket.id, worktree),
+            worktree=str(worktree),
+        )
     require_artifact(Stage.PLAN, rws)
     require_artifact(Stage.RESEARCH, rws)
     require_artifact(Stage.BUILD, rws)
@@ -3419,6 +3762,97 @@ def _refuse_plan_outside_host_contract(
     return 2
 
 
+def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
+    """Identity of registered candidate plus this worktree's exact local BUILD contents.
+
+    BUILD does not commit between slices, so HEAD alone cannot detect an interrupted in-flight
+    slice or a manual edit after the last completed slice. Include the tracked diff and hashes of
+    non-ignored untracked files. The digest stores no source text.
+    """
+    import hashlib
+
+    from core.git.autonomy import _run_git
+    from core.line.admission_store import safe_digest
+    from core.line.fleet_dispatcher import ticket_candidate_digest
+
+    root = worktree.resolve()
+    head = _run_git(["rev-parse", "HEAD"], cwd=root)
+    tracked = _run_git(["diff", "--binary", "HEAD", "--"], cwd=root)
+    untracked = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=root)
+    if head.returncode or tracked.returncode or untracked.returncode:
+        raise ticket_engine.BuildEvidenceMismatch(
+            "nao foi possivel ler HEAD/diff do candidato "
+            f"(rev-parse={head.returncode}, diff={tracked.returncode}, untracked={untracked.returncode}) "
+            f"na worktree {root}"
+        )
+    untracked_rows: list[tuple[str, str]] = []
+    for relative in (untracked.stdout or "").split("\0"):
+        if not relative:
+            continue
+        source_path = root / relative
+        resolved_path = source_path.resolve()
+        if not resolved_path.is_relative_to(root):
+            raise ticket_engine.BuildEvidenceMismatch(
+                f"caminho untracked escapou da worktree durante checkpoint: {relative!r}"
+            )
+        try:
+            if source_path.is_symlink():
+                content_digest = hashlib.sha256(os.readlink(source_path).encode("utf-8", errors="replace")).hexdigest()
+            else:
+                content_digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise ticket_engine.BuildEvidenceMismatch(
+                f"nao foi possivel ler evidencia untracked {relative!r} ({type(exc).__name__})"
+            ) from exc
+        untracked_rows.append((relative.replace("\\", "/"), content_digest))
+    try:
+        registered_candidates = ticket_candidate_digest(ticket_id)
+    except Exception as exc:  # noqa: BLE001 - unavailable candidate identity must fail closed
+        raise ticket_engine.BuildEvidenceMismatch(
+            f"nao foi possivel ler candidatos registrados ({type(exc).__name__})"
+        ) from exc
+    return safe_digest({
+        "ticket": ticket_id,
+        "registered_candidates": registered_candidates,
+        "worktree": str(root),
+        "head": (head.stdout or "").strip(),
+        "tracked_diff": hashlib.sha256((tracked.stdout or "").encode("utf-8")).hexdigest(),
+        "untracked": sorted(untracked_rows),
+    })
+
+
+def _stage_build_evidence_mismatch(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    progress: ProgressPublisher,
+    detail: str,
+) -> int:
+    """A preserved BUILD artifact no longer matches the plan/candidate/worktree (USR-475 T1).
+
+    Fails closed without touching anything: the worktree, the PLAN artifact and the BUILD
+    progress already on disk are left exactly as found, so an operator (or a later, correct
+    resume) can still inspect or reuse them. Never `waiting_human`: this is a technical
+    divergence, not a decision for the owner.
+    """
+    message = f"BUILD preservado diverge do plano/candidato atual: {detail}"
+    progress.phase("agent", "failed", message, cause="build_evidence_mismatch")
+    progress.set_outcome(message, "build_evidence_mismatch")
+    print(f"[ERRO] {message}. Worktree preservada: {workspace.path}", file=sys.stderr)
+    try:
+        from core.line.failure_alerts import notify_deterministic_failure
+
+        notify_deterministic_failure(ticket.id, "build_evidence_mismatch", detail, str(workspace.path))
+    except Exception:
+        logger.exception("build_evidence_mismatch alert failed for %s", ticket.id)
+    if args.json:
+        print(json.dumps({
+            "ok": False, "cause": "build_evidence_mismatch", "error": detail,
+            "ticket_id": ticket.id, "workspace": str(workspace.path),
+        }, indent=2, ensure_ascii=False))
+    return 1
+
+
 def _stage_plan(
     args: argparse.Namespace,
     ticket: UserTicket,
@@ -3426,16 +3860,114 @@ def _stage_plan(
     route: dict[str, Any],
     progress: ProgressPublisher,
 ) -> Optional[int]:
-    """INTAKE, GRILL (skipped for a small fix) and PLAN, each validated before the next; None to proceed."""
+    """INTAKE, GRILL (skipped for a small fix) and PLAN, each validated before the next; None to proceed.
+
+    A preserved BUILD artifact that still matches this plan, candidate and worktree (USR-475 T1)
+    skips INTAKE/GRILL/PLAN/RESEARCH entirely instead of resetting them: `_stage_build` picks up
+    only the slices `tickets_done` does not already cover. A preserved artifact that no longer
+    matches ends the attempt with `build_evidence_mismatch` instead of silently discarding it.
+    """
     refused = _refuse_plan_outside_host_contract(args, ticket, workspace, progress)
     if refused is not None:
         return refused
     rws = ticket_engine.run_workspace(ticket, workspace.branch, workspace.base_sha)
-    # A relaunch with a valid plan for this very demand keeps it (and the BUILD progress) and goes on.
-    plan_reused = ticket_engine.reusable_plan(rws, ticket)
-    if plan_reused:
-        ticket_engine.reset_keeping_plan(rws)
-    else:
+    plan_reused = False
+    try:
+        resumed = ticket_engine.resumable_build(
+            rws, _build_candidate_digest(ticket.id, workspace.path), str(workspace.path)
+        )
+    except ticket_engine.BuildEvidenceMismatch as exc:
+        return _stage_build_evidence_mismatch(args, ticket, workspace, progress, str(exc))
+    if resumed is not None:
+        try:
+            for stage in (Stage.INTAKE, Stage.PLAN, Stage.RESEARCH):
+                require_artifact(stage, rws)
+            planned = ticket_engine.plan_tickets(rws)
+        except StageArtifactMissing as exc:
+            return _stage_refused(args, ticket, workspace, progress, exc.stage, exc.reason)
+        if not args.json:
+            print(
+                f"[+] Plano preservado reaproveitado: {len(planned)} sub-ticket(s), "
+                f"{len(resumed.tickets_done)} ja concluido(s)."
+            )
+        return None
+    if ticket_engine.has_any(rws):
+        # Older attempts could leave a valid PLAN without `progress.json` (for example, a
+        # restart after PLAN before RESEARCH or BUILD). Reuse it only if the worktree has no
+        # uncheckpointed implementation; otherwise there is no proof which slices produced the diff.
+        try:
+            from core.git.autonomy import GitAutonomyManager
+
+            changed = [p for p in GitAutonomyManager(workspace.main_root).changed_paths(workspace.path)
+                       if p != LEDGER_RELATIVE]
+        except Exception as exc:  # noqa: BLE001 - never erase an incomplete legacy attempt
+            return _stage_build_evidence_mismatch(
+                args, ticket, workspace, progress,
+                f"nao foi possivel verificar worktree com artefatos existentes ({type(exc).__name__}); "
+                f"preservados em {ticket_engine.workspace.context_dir(rws)}",
+            )
+        if not changed and ticket_engine.reusable_plan(rws, ticket):
+            try:
+                for stage in (Stage.INTAKE, Stage.PLAN, Stage.RESEARCH):
+                    require_artifact(stage, rws)
+                planned = ticket_engine.plan_tickets(rws)
+                ticket_engine.write_build(
+                    rws, route.get("harness"), [],
+                    plan_digest=ticket_engine.plan_digest(rws),
+                    candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+                    worktree=str(workspace.path),
+                )
+                if not args.json:
+                    print(f"[+] Plano legado preservado: {len(planned)} sub-ticket(s); BUILD ainda nao iniciou.")
+                return None
+            except StageArtifactMissing as exc:
+                if exc.stage == Stage.RESEARCH:
+                    ticket_engine.reset_keeping_plan(rws)
+                    plan_reused = True
+                else:
+                    return _stage_build_evidence_mismatch(
+                        args, ticket, workspace, progress,
+                        f"artefatos existentes sem checkpoint valido ({type(exc).__name__}); "
+                        f"preservados em {ticket_engine.workspace.context_dir(rws)}",
+                    )
+        else:
+            if changed:
+                return _stage_build_evidence_mismatch(
+                    args, ticket, workspace, progress,
+                    "worktree tem alteracoes de implementacao sem checkpoint BUILD "
+                    f"(arquivos: {', '.join(changed[:12])}); plano e worktree preservados",
+                )
+            return _stage_build_evidence_mismatch(
+                args, ticket, workspace, progress,
+                f"artefatos existentes sem checkpoint valido; preservados em {ticket_engine.workspace.context_dir(rws)}",
+            )
+    if not plan_reused:
+        # Empty canonical artifacts do not prove that a reused worktree is untouched. A prior
+        # attempt may have lost or replaced its PLAN/BUILD files after writing implementation code
+        # or committing it. Refuse before reset/PLAN so those candidate changes cannot be silently
+        # detached from their evidence and overwritten by a fresh run.
+        from core.git.autonomy import _run_git
+        from core.git.ticket_workspace import _status_paths
+
+        status = _run_git(
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=workspace.path,
+        )
+        ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
+        if status.returncode != 0 or ahead.returncode != 0 or not (ahead.stdout or "").strip().isdigit():
+            return _stage_build_evidence_mismatch(
+                args, ticket, workspace, progress,
+                "nao foi possivel provar que a worktree sem artefatos PLAN/BUILD esta limpa "
+                f"(git status={status.returncode}, rev-list={ahead.returncode}); arquivos preservados",
+            )
+        changed = [path for path in _status_paths(status.stdout or "") if path != LEDGER_RELATIVE]
+        commits_ahead = int(ahead.stdout.strip())
+        if changed or commits_ahead:
+            return _stage_build_evidence_mismatch(
+                args, ticket, workspace, progress,
+                "worktree tem alteracoes ou commits sem artefatos PLAN/BUILD que os expliquem "
+                f"(arquivos: {', '.join(changed[:12]) or 'nenhum'}; commits fora da base: {commits_ahead}); "
+                "candidato preservado",
+            )
         ticket_engine.reset(rws)
     stage = Stage.INTAKE
     try:
@@ -3472,6 +4004,15 @@ def _stage_plan(
         return _stage_refused(args, ticket, workspace, progress, exc.stage, exc.reason)
     except (OSError, ValueError) as exc:
         return _stage_refused(args, ticket, workspace, progress, stage, f"{type(exc).__name__}: {exc}")
+    # Bind the canonical plan to this worktree/candidate before the first BUILD agent runs.
+    # This empty-prefix checkpoint makes a restart after a crash in slice 1 retain PLAN and
+    # detect any uncheckpointed local edits instead of silently starting over.
+    ticket_engine.write_build(
+        rws, route.get("harness"), [],
+        plan_digest=ticket_engine.plan_digest(rws),
+        candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+        worktree=str(workspace.path),
+    )
     if not args.json:
         print(f"[+] Plano validado: {len(planned)} sub-ticket(s).")
     return None
@@ -3809,31 +4350,40 @@ def _stage_development_route_wait(
     return EXIT_ROUTE_WAIT
 
 
-def _slices_done_before(rws: Any, plan_items: list[Any], workspace: TicketWorkspace) -> list[str]:
-    """Plan slices an earlier attempt finished (BUILD progress), only while the worktree holds work."""
-    try:
-        report = require_artifact(Stage.BUILD, rws)
-    except StageArtifactMissing:
-        return []
-    planned = {item.id for item in plan_items}
-    done = [t for t in getattr(report, "tickets_done", []) if t in planned]
-    if not done or not _implementation_diff_paths(workspace.path):
-        return []
-    return list(dict.fromkeys(done))
+def _stage_build_fully_resumed(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    progress: ProgressPublisher,
+    implementer: str,
+    plan_items: list[Any],
+) -> Any:
+    """Every plan slice was already `tickets_done` in the preserved BUILD artifact (USR-475 T1).
 
+    No agent call is needed; the candidate is whatever the worktree already carries. The worktree
+    must still show the implementation (BUILD never commits, so this is its own uncommitted diff);
+    an empty diff means the preserved artifact's claim does not match reality, which fails closed
+    the same way a real plan/candidate divergence does, instead of silently proceeding as if
+    nothing had ever been built.
+    """
+    from core.git.autonomy import GitAutonomyManager
 
-def _stage_build_already_done(
-    workspace: TicketWorkspace, rws: Any, progress: ProgressPublisher, tickets_done: list[str]
-) -> dict[str, Any]:
-    """Every plan slice is already built and committed: go on to the gate without an agent call."""
-    harness = getattr(require_artifact(Stage.BUILD, rws), "harness", None) or "unknown"
-    ticket_engine.write_build(rws, harness, tickets_done)
-    logger.info("estagio BUILD: todas as fatias ja concluidas, seguindo ao portao sem chamar o agente")
-    summary = "fatias do plano ja concluidas em tentativa anterior"
-    progress.phase("agent", "succeeded", summary, harness=harness)
+    git_mgr = GitAutonomyManager(workspace.main_root)
+    implementation_paths = [p for p in git_mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE]
+    if not implementation_paths:
+        return _stage_build_evidence_mismatch(
+            args, ticket, workspace, progress,
+            "progress.json preservado marca todas as fatias concluidas mas a worktree nao tem alteracoes",
+        )
+    harness = implementer or "unknown"
+    message = f"BUILD retomado: {len(plan_items)} fatia(s) ja concluida(s), {len(implementation_paths)} arquivo(s) alterado(s)"
+    progress.phase("agent", "succeeded", message, harness=harness)
+    if not args.json:
+        print(f"[+] {message}.")
     return {
-        "agent_result": AgentResult(ok=True, harness=harness, text=summary, duration_s=0.0),
-        "harness": harness, "model": None, "effort": None, "cost_record": {}, "agent_summary": summary,
+        "agent_result": AgentResult(ok=True, harness=harness, text="build resumed: all slices already done", duration_s=0.0),
+        "harness": harness, "model": None, "effort": None, "cost_record": {},
+        "agent_summary": message,
     }
 
 
@@ -3850,6 +4400,11 @@ def _stage_build(
     The preflight tuple in `route` is not a license to start an agent. Each plan slice picks again
     on the quota reading of that moment, before its agent (USR-428). A slice with no route waits
     and leaves the worktree, including whatever earlier slices already wrote.
+
+    A preserved, coherent BUILD artifact (USR-475 T1) seeds `tickets_done` and only the slices it
+    does not cover run; each finished slice persists `progress.json` immediately, so an interruption
+    right after loses at most the slice in flight, never a completed one. Divergent evidence fails
+    closed with `build_evidence_mismatch` instead of silently replaying or discarding work.
     """
     ticket_size = route["ticket_size"]
     # 4. Execution Phase
@@ -3862,11 +4417,33 @@ def _stage_build(
     # A multi-ticket plan runs its sub-tickets sequentially inside this same ticket (USR-375 S4).
     # Every slice revalidates development before run_agent; a one-slice plan does this once (USR-428).
     sequential = len(plan_items) > 1
-    tickets_done: list[str] = _slices_done_before(rws, plan_items, workspace)
-    if tickets_done and len(tickets_done) >= len(plan_items):
-        return _stage_build_already_done(workspace, rws, progress, tickets_done)
+    worktree_key = str(workspace.path)
+    try:
+        candidate_digest = _build_candidate_digest(ticket.id, workspace.path)
+        resumed = ticket_engine.resumable_build(rws, candidate_digest, worktree_key)
+    except ticket_engine.BuildEvidenceMismatch as exc:
+        return _stage_build_evidence_mismatch(args, ticket, workspace, progress, str(exc))
+    if resumed is None:
+        # Covers direct/test entry into BUILD as well as a valid plan that predates the
+        # checkpoint marker. Bind before invoking an agent, then prove the atomic write landed.
+        ticket_engine.write_build(
+            rws, route.get("harness"), [],
+            plan_digest=ticket_engine.plan_digest(rws),
+            candidate_digest=candidate_digest,
+            worktree=worktree_key,
+        )
+        try:
+            resumed = ticket_engine.resumable_build(rws, candidate_digest, worktree_key)
+        except ticket_engine.BuildEvidenceMismatch as exc:
+            return _stage_build_evidence_mismatch(args, ticket, workspace, progress, str(exc))
+    done_ids = set(resumed.tickets_done) if resumed is not None else set()
+    tickets_done: list[str] = list(resumed.tickets_done) if resumed is not None else []
+    implementer = str((resumed.harness if resumed is not None else None) or route.get("harness") or "")
+    if resumed is not None and not args.json:
+        print(f"[+] BUILD retomado: {len(done_ids)}/{len(plan_items)} fatia(s) ja concluida(s).")
+    if resumed is not None and done_ids.issuperset(item.id for item in plan_items):
+        return _stage_build_fully_resumed(args, ticket, workspace, progress, implementer, plan_items)
     total_duration = 0.0
-    implementer = str(route.get("harness") or "")
     selected_harness = implementer
     selected_model: Optional[str] = None
     cost_before: Any = None
@@ -3874,7 +4451,7 @@ def _stage_build(
     report: Any = None
     preflight_harness = route.get("harness") if isinstance(route.get("harness"), str) else None
     for index, item in enumerate(plan_items, start=1):
-        if item.id in tickets_done:
+        if item.id in done_ids:
             logger.info("estagio BUILD: fatia %s ja concluida em tentativa anterior, pulada", item.id)
             if not args.json:
                 print(f"--> Sub-ticket {index}/{len(plan_items)} do plano: {item.id} ja concluido, pulado.")
@@ -3913,7 +4490,14 @@ def _stage_build(
         implementer = selected_harness
         if report.route is not None:
             implementer = report.route[0]
-        ticket_engine.write_build(rws, implementer, tickets_done)  # a relaunch resumes after this slice
+        # Persist this slice now (USR-475 T1), not only after the whole plan finishes: a resume
+        # right after this point replays neither this slice nor any earlier one.
+        ticket_engine.write_build(
+            rws, implementer, tickets_done,
+            plan_digest=ticket_engine.plan_digest(rws),
+            candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+            worktree=worktree_key,
+        )
 
     agent_result = report.result
     if report.route is not None:
@@ -3945,8 +4529,8 @@ def _stage_build(
             args, ticket, workspace, agent_result, selected_harness, ticket_size, cost_record, progress
         )
 
-    # BUILD artifact: the implementer family REVIEW must differ from (stage_review reads `harness`).
-    ticket_engine.write_build(rws, implementer, tickets_done)
+    # BUILD artifact: already written per-slice above (last slice's call covers the final state);
+    # the implementer family REVIEW must differ from (stage_review reads `harness`).
     require_artifact(Stage.BUILD, rws)
     agent_summary = redacted_head(agent_result.text, 800)
     progress.phase(

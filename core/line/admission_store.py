@@ -171,6 +171,21 @@ class AdmissionStore:
                     for name in ("receipt_cause", "receipt_digest", "recovered_candidate_digest"):
                         if name not in recovery_columns:
                             db.execute(f"ALTER TABLE dispatcher_recovery ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+                    db.execute("""CREATE TABLE IF NOT EXISTS rebase_recovery (
+                        fingerprint TEXT PRIMARY KEY, project_id TEXT NOT NULL, ticket_id TEXT NOT NULL,
+                        candidate_digest TEXT NOT NULL, content_digest TEXT NOT NULL,
+                        upstream_sha TEXT NOT NULL DEFAULT '', inferred INTEGER NOT NULL DEFAULT 0,
+                        recovery_started INTEGER NOT NULL DEFAULT 0, recovery_result TEXT NOT NULL DEFAULT '',
+                        cause TEXT NOT NULL DEFAULT '', resume_command TEXT NOT NULL DEFAULT '',
+                        held_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+                    )""")
+                    rebase_columns = {row[1] for row in db.execute("PRAGMA table_info(rebase_recovery)")}
+                    for name, declaration in (
+                        ("recovery_started", "INTEGER NOT NULL DEFAULT 0"),
+                        ("recovery_result", "TEXT NOT NULL DEFAULT ''"),
+                    ):
+                        if name not in rebase_columns:
+                            db.execute(f"ALTER TABLE rebase_recovery ADD COLUMN {name} {declaration}")
                     db.commit()
             except (OSError, sqlite3.Error) as exc:
                 raise AdmissionStoreError("admission_store_unavailable") from exc
@@ -283,12 +298,13 @@ class AdmissionStore:
 
     def record_attempt(self, project: str, ticket: str, cause: str, *, run_id: str,
                        main_sha: str = "", detail: str = "", log_path: str = "",
-                       notify: Any = None) -> dict[str, Any]:
+                       phase: str = "unknown", next_step: str = "", notify: Any = None) -> dict[str, Any]:
         """Charge a failed run exactly once across launcher, dispatcher and resumes."""
         cause = canonical_cause(cause)
         category = classify(cause)
         main_sha = normalize_main_sha(main_sha)
         now = self.clock().astimezone(timezone.utc)
+        attempt_count = 0
         try:
             with self._connection() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -315,11 +331,35 @@ class AdmissionStore:
                     fp = make_fingerprint(project_id=project, ticket_id=ticket, error=cause,
                                           resource_version="ticket_budget", main_sha=main_sha)
                     new_hold = self.set_ticket_hold(fp, candidate if category != "owner" else 1, connection=db)
+                attempt_count = int(db.execute(
+                    "SELECT COUNT(*) FROM ticket_attempts WHERE project=? AND ticket=?", (project, ticket),
+                ).fetchone()[0])
                 db.commit()
-            if new_hold:
-                from core.line.failure_alerts import notify_ticket_hold
-                (notify or notify_ticket_hold)(ticket, cause, detail, log_path)
-            return self.budget(project, ticket)
+            budget = self.budget(project, ticket)
+            hold = self.ticket_hold(project_id=project, ticket_id=ticket)
+            transition = "blocked" if hold else "retrying"
+            if not next_step:
+                if hold:
+                    next_step = "Review the latest evidence, correct the cause, then release the ticket hold."
+                elif category == "infra":
+                    next_step = "The dispatcher will retry after its persisted backoff; inspect host and network evidence if it repeats."
+                else:
+                    next_step = "Inspect the latest evidence and correct the failure before the bounded retry is exhausted."
+            from core.line.failure_alerts import record_actionable_failure, notify_deterministic_failure, notify_ticket_hold
+            record_actionable_failure(
+                ticket, cause, detail, phase=phase, attempts=attempt_count,
+                next_step=next_step, transition=transition,
+            )
+            if fresh and new_hold and notify is not None:
+                notify(ticket, cause, detail, log_path)
+            elif category != "infra" and notify is None:
+                if fresh and new_hold:
+                    notify_ticket_hold(ticket, cause, detail, log_path)
+                notify_deterministic_failure(
+                    ticket, cause, detail, log_path, phase=phase, attempts=attempt_count,
+                    next_step=next_step, transition=transition,
+                )
+            return budget
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
@@ -330,6 +370,7 @@ class AdmissionStore:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute("DELETE FROM ticket_budget WHERE project=? AND ticket=?", (project, ticket))
                 db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?", (project, ticket))
+                db.execute("DELETE FROM rebase_recovery WHERE project_id=? AND ticket_id=?", (project, ticket))
                 db.commit()
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
@@ -465,6 +506,142 @@ class AdmissionStore:
         try:
             with self._connection() as db:
                 db.execute("DELETE FROM reservations WHERE scope=? AND token=?", (scope, token))
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def rebase_inference_spent(self, fingerprint: AdmissionFingerprint) -> bool:
+        """True when this fingerprint already used its single development inference."""
+        try:
+            with self._connection() as db:
+                row = db.execute(
+                    "SELECT inferred FROM rebase_recovery WHERE fingerprint=?",
+                    (fingerprint.sha256,),
+                ).fetchone()
+                return bool(row and int(row["inferred"]))
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def rebase_recovery_state(self, fingerprint: AdmissionFingerprint) -> dict[str, Any] | None:
+        """Return durable recovery progress for one exact conflict fingerprint."""
+        try:
+            with self._connection() as db:
+                row = db.execute(
+                    "SELECT * FROM rebase_recovery WHERE fingerprint=?", (fingerprint.sha256,),
+                ).fetchone()
+                return dict(row) if row is not None else None
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def begin_rebase_recovery(self, fingerprint: AdmissionFingerprint) -> bool:
+        """Claim the one deterministic repair attempt for this conflict fingerprint."""
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                cursor = db.execute("""INSERT INTO rebase_recovery (
+                    fingerprint, project_id, ticket_id, candidate_digest, content_digest, upstream_sha,
+                    inferred, recovery_started, recovery_result, cause, resume_command, held_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, '', '', '', '', ?)
+                ON CONFLICT(fingerprint) DO UPDATE SET recovery_started=1, updated_at=excluded.updated_at
+                WHERE recovery_started=0""",
+                    (fingerprint.sha256, fingerprint.project_id, fingerprint.ticket_id,
+                     fingerprint.candidate_digest, fingerprint.context_digest, fingerprint.main_sha, now))
+                db.commit()
+                return cursor.rowcount == 1
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def reserve_rebase_inference(self, fingerprint: AdmissionFingerprint) -> bool:
+        """Atomically spend the single inference before calling a development harness."""
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                cursor = db.execute("""INSERT INTO rebase_recovery (
+                    fingerprint, project_id, ticket_id, candidate_digest, content_digest, upstream_sha,
+                    inferred, recovery_started, recovery_result, cause, resume_command, held_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, '', '', '', '', ?)
+                ON CONFLICT(fingerprint) DO UPDATE SET inferred=1, updated_at=excluded.updated_at
+                WHERE inferred=0""",
+                    (fingerprint.sha256, fingerprint.project_id, fingerprint.ticket_id,
+                     fingerprint.candidate_digest, fingerprint.context_digest, fingerprint.main_sha, now))
+                db.commit()
+                return cursor.rowcount == 1
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def record_rebase_inference(self, fingerprint: AdmissionFingerprint) -> None:
+        """Compatibility wrapper; reserve before inference so a crash cannot repeat it."""
+        self.reserve_rebase_inference(fingerprint)
+
+    def record_rebase_recovery_result(
+        self, fingerprint: AdmissionFingerprint, *, result: str,
+    ) -> dict[str, Any]:
+        """Persist the outcome of the bounded deterministic or harness recovery."""
+        allowed = {"resolved", "route_wait", "interrupted", "technical_hold"}
+        if result not in allowed:
+            raise ValueError(f"invalid rebase recovery result: {result}")
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("""INSERT INTO rebase_recovery (
+                    fingerprint, project_id, ticket_id, candidate_digest, content_digest, upstream_sha,
+                    inferred, recovery_started, recovery_result, cause, resume_command, held_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, '', '', '', ?)
+                ON CONFLICT(fingerprint) DO UPDATE SET recovery_started=1,
+                    recovery_result=excluded.recovery_result, updated_at=excluded.updated_at""",
+                    (fingerprint.sha256, fingerprint.project_id, fingerprint.ticket_id,
+                     fingerprint.candidate_digest, fingerprint.context_digest, fingerprint.main_sha,
+                     result, now))
+                db.commit()
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+        state = self.rebase_recovery_state(fingerprint)
+        if state is None:
+            raise AdmissionStoreError("admission_store_unavailable")
+        return state
+
+    def record_rebase_technical_hold(
+        self, fingerprint: AdmissionFingerprint, *, cause: str, resume_command: str,
+    ) -> dict[str, Any]:
+        """Store a fingerprint hold. Does not create a ticket hold or ask the owner."""
+        stored_cause = canonical_cause(cause)
+        command = " ".join(str(resume_command).split())[:500]
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        try:
+            with self._connection() as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("""INSERT INTO rebase_recovery (
+                    fingerprint, project_id, ticket_id, candidate_digest, content_digest, upstream_sha,
+                    inferred, recovery_started, recovery_result, cause, resume_command, held_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 1, 'technical_hold', ?, ?, ?, ?)
+                ON CONFLICT(fingerprint) DO UPDATE SET recovery_started=1,
+                    recovery_result='technical_hold', cause=excluded.cause,
+                    resume_command=excluded.resume_command, held_at=excluded.held_at,
+                    updated_at=excluded.updated_at""",
+                    (fingerprint.sha256, fingerprint.project_id, fingerprint.ticket_id,
+                     fingerprint.candidate_digest, fingerprint.context_digest, fingerprint.main_sha,
+                     stored_cause, command, now, now))
+                db.commit()
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+        rows = self.rebase_recovery_rows(project_id=fingerprint.project_id, ticket_id=fingerprint.ticket_id)
+        found = next((row for row in rows if row["fingerprint"] == fingerprint.sha256), None)
+        if found is None:
+            raise AdmissionStoreError("admission_store_unavailable")
+        return found
+
+    def rebase_recovery_rows(self, *, project_id: str, ticket_id: str) -> list[dict[str, Any]]:
+        """Hashes, cause and resume command for one ticket. No conflict body is stored."""
+        try:
+            with self._connection() as db:
+                rows = db.execute("""SELECT fingerprint, project_id, ticket_id, candidate_digest,
+                    content_digest, upstream_sha, inferred, recovery_started, recovery_result,
+                    cause, resume_command, held_at, updated_at
+                    FROM rebase_recovery WHERE project_id=? AND ticket_id=? ORDER BY updated_at""",
+                    (project_id, ticket_id)).fetchall()
+                return [dict(row) for row in rows]
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 

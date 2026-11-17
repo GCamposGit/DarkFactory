@@ -705,7 +705,10 @@ def test_keyboard_interrupt_during_dispatch_cancels_the_job(monkeypatch: pytest.
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(remote_dispatch, "_stream_job", _raise_interrupt)
-    monkeypatch.setattr(remote_dispatch, "_cancel_job", lambda base_url, job_id: cancelled.append((base_url, job_id)))
+    monkeypatch.setattr(
+        remote_dispatch, "_cancel_job",
+        lambda base_url, job_id, **kwargs: cancelled.append((base_url, job_id)),
+    )
 
     with pytest.raises(KeyboardInterrupt):
         remote_dispatch._dispatch_one_job(

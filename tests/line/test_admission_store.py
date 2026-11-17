@@ -63,6 +63,68 @@ def test_launcher_legacy_infra_causes_never_consume_candidate_budget(tmp_path, c
     assert budget["candidate_failures"] == 0 and budget["infra_streak"] == 1
 
 
+def test_rebase_inference_is_once_per_fingerprint_and_merge_clears_it(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    first = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-475", candidate_digest="candidate-a",
+        context_digest={"head": "head-a", "files": "mod.py"}, error="rebase_conflict",
+        resource_version="rebase-recovery", main_sha="main-a",
+    )
+    changed = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-475", candidate_digest="candidate-a",
+        context_digest={"head": "head-b", "files": "mod.py"}, error="rebase_conflict",
+        resource_version="rebase-recovery", main_sha="main-a",
+    )
+    assert store.rebase_inference_spent(first) is False
+    store.record_rebase_inference(first)
+    store.record_rebase_inference(first)
+    assert store.rebase_inference_spent(first) is True
+    assert store.rebase_inference_spent(changed) is False
+    hold = store.record_rebase_technical_hold(
+        first, cause="rebase_conflict: mod.py", resume_command="python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery USR-475",
+    )
+    assert hold["inferred"] == 1 and hold["cause"] == "rebase_conflict"
+    assert "resume-delivery" in hold["resume_command"]
+    assert store.ticket_hold(project_id="darkfac", ticket_id="USR-475") is None
+    restarted = AdmissionStore(tmp_path / "admission.sqlite3")
+    assert restarted.rebase_inference_spent(first) is True
+    restarted.reset_budget("darkfac", "USR-475")
+    assert restarted.rebase_inference_spent(first) is False
+    assert restarted.rebase_recovery_rows(project_id="darkfac", ticket_id="USR-475") == []
+
+
+def test_rebase_recovery_claim_and_result_survive_restart(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    fingerprint = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-476", candidate_digest="candidate",
+        context_digest={"worktree": "C:/work/USR-476", "conflict": "motor.md", "evidence": "digest-1"},
+        error="rebase_conflict", resource_version="rebase-recovery", main_sha="main-a",
+    )
+
+    assert store.begin_rebase_recovery(fingerprint) is True
+    assert store.begin_rebase_recovery(fingerprint) is False
+    assert store.reserve_rebase_inference(fingerprint) is True
+    assert store.reserve_rebase_inference(fingerprint) is False
+    saved = store.record_rebase_recovery_result(fingerprint, result="technical_hold")
+    assert saved["recovery_started"] == 1
+    assert saved["recovery_result"] == "technical_hold"
+    assert saved["inferred"] == 1
+
+    restarted = AdmissionStore(tmp_path / "admission.sqlite3")
+    resumed = restarted.rebase_recovery_state(fingerprint)
+    assert resumed is not None
+    assert resumed["recovery_result"] == "technical_hold"
+    assert resumed["inferred"] == 1
+
+    changed_evidence = make_fingerprint(
+        project_id="darkfac", ticket_id="USR-476", candidate_digest="candidate",
+        context_digest={"worktree": "C:/work/USR-476", "conflict": "motor.md", "evidence": "digest-2"},
+        error="rebase_conflict", resource_version="rebase-recovery", main_sha="main-a",
+    )
+    assert restarted.begin_rebase_recovery(changed_evidence) is True
+    assert restarted.reserve_rebase_inference(changed_evidence) is True
+
+
 def test_legacy_store_opens_without_reintroducing_fingerprint_breaker(tmp_path):
     path = tmp_path / "admission.sqlite3"
     store = AdmissionStore(path)

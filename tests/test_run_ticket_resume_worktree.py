@@ -223,15 +223,12 @@ def launcher(monkeypatch: pytest.MonkeyPatch, repo: SimpleNamespace) -> SimpleNa
     return SimpleNamespace(requests=requests)
 
 
-def test_second_invocation_reuses_the_worktree_and_carries_the_continuation_notice(
+def test_second_invocation_fails_closed_on_uncheckpointed_build_change(
     repo: SimpleNamespace, launcher: SimpleNamespace, capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # USR-256 gave a timeout with real changes in the worktree its own path (advance straight to the
-    # focal pre-test/gate/self-correction loop instead of failing outright); that path is covered on its
-    # own in tests/test_run_ticket_routing.py. This test is about an older, separate concern -- CLI
-    # worktree reuse and the continuation notice across two *separate* invocations -- so it forces the
-    # plain timeout-failure branch here regardless of the real on-disk changes the fake agent leaves.
+    # An in-flight slice that changed files but never reached its checkpoint is not safe to replay:
+    # the second invocation must preserve the same worktree and stop with an actionable mismatch.
     monkeypatch.setattr(run_ticket.agent_retry, "default_worktree_has_changes", lambda cwd: False)
 
     assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1  # attempt 1: timeout, work preserved
@@ -241,15 +238,14 @@ def test_second_invocation_reuses_the_worktree_and_carries_the_continuation_noti
     first_calls = len(launcher.requests)
     capsys.readouterr()
 
-    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1  # attempt 2: times out again
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1
 
     second_requests = launcher.requests[first_calls:]
-    assert second_requests, "the agent was not run on the second invocation"
-    assert {Path(r.cwd) for r in second_requests} == {first_cwd}  # the SAME worktree
+    assert second_requests == []  # divergent partial output is never overwritten by another inference
     assert _worktree_names(repo) == [first_cwd.name]  # no new worktree was created
-    prompt = second_requests[0].prompt
-    assert "AVISO DE CONTINUA" in prompt and "impl.py" in prompt and "NÃO recomece a implementação do zero" in prompt
-    assert "Reaproveitando a worktree preservada" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "Reaproveitando a worktree preservada" in captured.err
+    assert "BUILD preservado diverge" in captured.err
     assert (first_cwd / "impl.py").read_text(encoding="utf-8") == "partial = True\n"  # the work survived
 
 
@@ -278,7 +274,10 @@ def test_resume_green_candidate_after_invalid_review_skips_development_and_binds
     run_ticket.ticket_engine.write_research(
         rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
     )
-    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", [ticket.id], plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+        candidate_digest="candidate-digest", worktree=str(ws.path),
+    )
     run_ticket.ticket_engine.write_validation(rws, True, "core/harness/runner.py --quick")
     candidate_ws = rws.model_copy(update={"path": ws.path})
     digest = stage_review._candidate_digest(candidate_ws, "main")
@@ -351,7 +350,10 @@ def test_built_candidate_resumes_delivery_without_plan_or_build_only_when_clean_
     run_ticket.ticket_engine.write_research(
         rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
     )
-    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", [ticket.id], plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+        candidate_digest="candidate-digest", worktree=str(ws.path),
+    )
     assert run_ticket._can_resume_built_candidate(ticket, ws) is False  # unbound legacy artifacts
     head = _git(ws.path, "rev-parse", "HEAD").strip()
     run_ticket._record_build_binding(ticket, ws.path, head)
@@ -394,19 +396,19 @@ def test_built_candidate_resumes_delivery_without_plan_or_build_only_when_clean_
     assert delivery_calls == [ws.path]
 
 
-def test_continuation_notice_also_covers_work_that_was_already_committed(
-    repo: SimpleNamespace, launcher: SimpleNamespace
+def test_committed_candidate_without_plan_build_evidence_fails_closed(
+    repo: SimpleNamespace, launcher: SimpleNamespace, capsys: pytest.CaptureFixture[str],
 ) -> None:
     ws = create_workspace("USR-205", cwd=repo.local)
     (ws.path / "committed_impl.py").write_text("x = 1\n", encoding="utf-8")
     _git(ws.path, "add", "committed_impl.py")
     _git(ws.path, "commit", "--quiet", "-m", "wip")
 
-    run_ticket.main(["USR-205", "--harness", "grok"])
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1
 
-    assert Path(launcher.requests[0].cwd) == ws.path
-    assert "AVISO DE CONTINUA" in launcher.requests[0].prompt
-    assert "committed_impl.py" in launcher.requests[0].prompt
+    assert launcher.requests == []
+    assert ws.path.exists() and (ws.path / "committed_impl.py").is_file()
+    assert "commits fora da base: 1" in capsys.readouterr().err
 
 
 def test_prepare_workspace_reports_the_other_preserved_worktrees_without_deleting_them(
@@ -444,6 +446,211 @@ def test_prepare_workspace_without_a_preserved_worktree_creates_a_new_one(
     assert workspace.path != untouched.path and workspace.path.exists()
     assert len(_worktree_names(repo)) == 2
     assert os.path.normcase(str(workspace.path.parent)) == os.path.normcase(str(repo.local / ".worktrees"))
+
+
+def test_build_checkpoint_selects_its_worktree_over_a_newer_preserved_attempt(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime, timezone
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    ticket = run_ticket.UserTicket(
+        id="USR-902", project_id="darkfac", title="Retomar checkpoint", problem_statement="teste",
+    )
+    older = create_workspace(
+        ticket.id, cwd=repo.local,
+        now_fn=lambda: datetime(2026, 10, 10, 21, 28, 42, tzinfo=timezone.utc),
+    )
+    newer = create_workspace(
+        ticket.id, cwd=repo.local,
+        now_fn=lambda: datetime(2026, 10, 10, 22, 30, 0, tzinfo=timezone.utc),
+    )
+    (older.path / "slice_one.py").write_text("done = True\n", encoding="utf-8")
+    (newer.path / "unrelated_attempt.py").write_text("must_not_be_selected = True\n", encoding="utf-8")
+
+    rws = run_ticket.ticket_engine.run_workspace(ticket, older.branch, older.base_sha)
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", ["T1"], plan_digest="plan-digest", candidate_digest="candidate-digest",
+        worktree=str(older.path),
+    )
+
+    resumed = run_ticket._resume_preserved_workspace(ticket, as_json=True)
+
+    assert resumed is not None and resumed.path == older.path
+    assert (older.path / "slice_one.py").is_file()
+    assert (newer.path / "unrelated_attempt.py").is_file()
+
+
+def test_empty_build_checkpoint_preserves_its_clean_worktree_before_first_slice(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    ticket = run_ticket.UserTicket(
+        id="USR-903", project_id="darkfac", title="Checkpoint antes da fatia", problem_statement="teste",
+    )
+    original = create_workspace(ticket.id, cwd=repo.local)
+    rws = run_ticket.ticket_engine.run_workspace(ticket, original.branch, original.base_sha)
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", [], plan_digest="plan-digest", candidate_digest="candidate-digest",
+        worktree=str(original.path),
+    )
+
+    resumed = run_ticket._resume_preserved_workspace(ticket, as_json=True)
+
+    assert resumed is not None and resumed.path == original.path
+    assert original.path.exists()
+    assert _worktree_names(repo) == [original.path.name]
+
+
+# ---------------------------------------------------------------------------
+# BUILD resumes per slice instead of replanning (USR-475 T1)
+# ---------------------------------------------------------------------------
+
+
+def _write_two_slice_plan(rws: Any) -> None:
+    from core.line import workspace as line_workspace
+
+    line_workspace.write_context(rws, "SPEC.md", "# SPEC\n\n## Objetivo\nDuas fatias\n")
+    line_workspace.write_context(
+        rws, "tickets.json",
+        json.dumps([
+            {"id": "T1", "title": "Primeira fatia", "acceptance": ["T1 ok"]},
+            {"id": "T2", "title": "Segunda fatia", "acceptance": ["T2 ok"]},
+        ]),
+    )
+
+
+def _write_skipped_research(rws: Any) -> None:
+    from core.line import workspace as line_workspace
+    from core.research.policy import ResearchArtifact
+
+    line_workspace.write_context(
+        rws, "research.json",
+        ResearchArtifact(kind="research_skipped", ticket_id=rws.run_id, reason="teste").model_dump_json(),
+    )
+
+
+def test_build_resume_skips_a_completed_slice_and_keeps_the_preserved_plan(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-475 T1: a BUILD interrupted after slice 1 resumes at slice 2, never replanning or
+    rerunning the finished slice (evidence note: before this, a resumed run replayed PLAN and
+    every already-finished slice because `progress.json` was only written at the very end)."""
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    monkeypatch.setattr("core.line.fleet_dispatcher.PROJECT_ROOT", repo.local)
+    ticket = run_ticket.UserTicket(
+        id="USR-900", project_id="darkfac", title="Duas fatias",
+        problem_statement="plano com duas fatias de desenvolvimento",
+    )
+    monkeypatch.setattr(_Store, "get_ticket", lambda _self, ticket_id: ticket if ticket_id == ticket.id else None)
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    _write_two_slice_plan(rws)
+    _write_skipped_research(rws)
+    (ws.path / "t1.py").write_text("slice_one = True\n", encoding="utf-8")  # slice 1's own, uncommitted work
+
+    candidate_digest = run_ticket._build_candidate_digest(ticket.id, ws.path)
+    plan_digest = run_ticket.ticket_engine.plan_digest(rws)
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", ["T1"],
+        plan_digest=plan_digest, candidate_digest=candidate_digest, worktree=str(ws.path),
+    )
+
+    from core.line import workspace as line_workspace
+
+    spec_path = line_workspace.context_dir(rws) / "SPEC.md"
+    tickets_path = line_workspace.context_dir(rws) / "tickets.json"
+    spec_contents_before = spec_path.read_text(encoding="utf-8")
+    tickets_contents_before = tickets_path.read_text(encoding="utf-8")
+
+    calls: list[AgentRequest] = []
+
+    def fake_agent(req: AgentRequest) -> AgentResult:
+        checkpoint = json.loads((line_workspace.context_dir(rws) / "progress.json").read_text(encoding="utf-8"))
+        assert checkpoint["tickets_done"] == ["T1"]  # saved before the next slice starts
+        assert checkpoint["ticket_id"] == ticket.id
+        assert checkpoint["completed_slice_count"] == 1
+        assert checkpoint["worktree"] == str(ws.path)
+        assert checkpoint["plan_digest"] == run_ticket.ticket_engine.plan_digest(rws)
+        assert checkpoint["candidate_digest"] == run_ticket._build_candidate_digest(ticket.id, ws.path)
+        calls.append(req)
+        (Path(req.cwd) / "t2.py").write_text("slice_two = True\n", encoding="utf-8")
+        return AgentResult(ok=True, harness=req.harness, model=req.model, duration_s=0.1, text="ok")
+
+    monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", lambda *a, **k: pytest.fail("PLAN was re-run on resume"))
+
+    delivery_calls: list[Path] = []
+
+    def deliver(*args, **kwargs):
+        delivery_calls.append(args[2].path)
+        return 0, {"ok": True, "status": "completed"}
+
+    monkeypatch.setattr(run_ticket, "_stage_deliver", deliver)
+
+    assert run_ticket.main([ticket.id, "--harness", "grok"]) == 0
+
+    assert len(calls) == 1  # only the missing slice (T2) ran an agent; T1 was never replayed
+    assert "T2" in calls[0].prompt and "[PLANO 2/2]" in calls[0].prompt
+    assert (ws.path / "t1.py").is_file()  # slice 1's own work was never touched
+    assert (ws.path / "t2.py").is_file()
+    assert spec_path.read_text(encoding="utf-8") == spec_contents_before  # PLAN was not regenerated
+    assert tickets_path.read_text(encoding="utf-8") == tickets_contents_before
+    progress = json.loads((line_workspace.context_dir(rws) / "progress.json").read_text(encoding="utf-8"))
+    assert progress["tickets_done"] == ["T1", "T2"]
+    assert progress["ticket_id"] == ticket.id and progress["completed_slice_count"] == 2
+    assert progress["worktree"] == str(ws.path)
+    assert progress["candidate_digest"] == run_ticket._build_candidate_digest(ticket.id, ws.path)
+    assert delivery_calls == [ws.path]
+
+
+def test_build_resume_fails_closed_when_candidate_evidence_diverges(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-475 T1: a preserved BUILD artifact that no longer matches the current candidate ends
+    the attempt with `build_evidence_mismatch` instead of silently discarding or replaying the
+    finished slice -- the worktree and the canonical progress.json are left exactly as found."""
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    monkeypatch.setattr("core.line.fleet_dispatcher.PROJECT_ROOT", repo.local)
+    ticket = run_ticket.UserTicket(
+        id="USR-901", project_id="darkfac", title="Fatia divergente",
+        problem_statement="plano com duas fatias, candidato divergente do progress.json preservado",
+    )
+    monkeypatch.setattr(_Store, "get_ticket", lambda _self, ticket_id: ticket if ticket_id == ticket.id else None)
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
+    _write_two_slice_plan(rws)
+    _write_skipped_research(rws)
+    (ws.path / "t1.py").write_text("slice_one = True\n", encoding="utf-8")
+
+    plan_digest = run_ticket.ticket_engine.plan_digest(rws)
+    candidate_digest = run_ticket._build_candidate_digest(ticket.id, ws.path)
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", ["T1"],
+        plan_digest=plan_digest, candidate_digest=candidate_digest, worktree=str(ws.path),
+    )
+    # A local edit after the checkpoint changes the candidate even though HEAD is unchanged.
+    (ws.path / "t1.py").write_text("slice_one = changed_after_checkpoint\n", encoding="utf-8")
+
+    from core.line import workspace as line_workspace
+
+    progress_path = line_workspace.context_dir(rws) / "progress.json"
+    progress_before = progress_path.read_text(encoding="utf-8")
+
+    calls: list[AgentRequest] = []
+
+    def fake_agent(req: AgentRequest) -> AgentResult:
+        calls.append(req)
+        return AgentResult(ok=True, harness=req.harness, model=req.model, duration_s=0.1, text="ok")
+
+    monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
+
+    assert run_ticket.main([ticket.id, "--harness", "grok"]) == 1
+
+    assert calls == []  # the mismatch is caught before any slice (even a missing one) runs
+    assert ws.path.exists() and (ws.path / "t1.py").is_file()  # worktree and finished slice survive
+    assert progress_path.read_text(encoding="utf-8") == progress_before  # canonical artifact untouched
     assert ticket_workspace.list_worktrees(repo.local)  # sanity: still a healthy repo
 
 
@@ -467,20 +674,23 @@ def _two_slice_plan(rws: Any, ticket: Any) -> None:
 def _resume_setup(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, *, done: list[str]
 ) -> tuple[Any, Any, Any, list[str]]:
-    """Preserved worktree with a committed slice, a two-slice plan and BUILD progress `done`."""
+    """Preserved worktree with optional built slice, a two-slice plan and BUILD progress `done`."""
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
     monkeypatch.setattr(run_ticket, "PROJECT_ROOT", repo.local)
     ticket = run_ticket.UserTicket(
         id="USR-447", project_id="darkfac", title="Retomar na etapa certa", problem_statement="problema"
     )
     ws = create_workspace(ticket.id, cwd=repo.local)
-    (ws.path / "impl.py").write_text("slice1 = True\n", encoding="utf-8")
-    _git(ws.path, "add", "impl.py")
-    _git(ws.path, "commit", "--quiet", "-m", "slice 1")
     rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
     _two_slice_plan(rws, ticket)
     if done:
-        run_ticket.ticket_engine.write_build(rws, "grok", done)
+        (ws.path / "impl.py").write_text("slice1 = True\n", encoding="utf-8")
+        run_ticket.ticket_engine.write_build(
+            rws, "grok", done,
+            plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+            candidate_digest=run_ticket._build_candidate_digest(ticket.id, ws.path),
+            worktree=str(ws.path),
+        )
     ran: list[str] = []
 
     def fake_dev_agent(args: Any, ticket: Any, workspace: Any, quotas: Any, harness: Any, model: Any,
@@ -565,3 +775,94 @@ def test_relaunch_with_every_slice_done_skips_the_agent_and_reaches_the_gate(
     built = run_ticket._stage_build(_args(), ticket, ws, {}, {"harness": "grok", "ticket_size": "large"}, _progress())
     assert ran == []
     assert isinstance(built, dict) and built["agent_result"].ok and built["harness"] == "grok"
+
+
+def test_completed_build_checkpoint_goes_to_delivery_without_replanning_or_rebuild(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T2: a completed BUILD checkpoint is the boundary for delivery-only continuation."""
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    monkeypatch.setattr("core.line.fleet_dispatcher.PROJECT_ROOT", repo.local)
+    ticket = run_ticket.UserTicket(
+        id="USR-475-COMPLETE", project_id="darkfac", title="Entregar BUILD concluido",
+        problem_statement="preserve completed slices and continue delivery",
+    )
+    monkeypatch.setattr(
+        _Store, "get_ticket", lambda _self, ticket_id: ticket if ticket_id == ticket.id else None,
+    )
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    rws = run_ticket.ticket_engine.run_workspace(ticket, ws.branch, ws.base_sha)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    _write_two_slice_plan(rws)
+    _write_skipped_research(rws)
+    (ws.path / "t1.py").write_text("slice_one = True\n", encoding="utf-8")
+    (ws.path / "t2.py").write_text("slice_two = True\n", encoding="utf-8")
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", ["T1", "T2"],
+        plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+        candidate_digest=run_ticket._build_candidate_digest(ticket.id, ws.path),
+        worktree=str(ws.path),
+    )
+
+    from core.line import workspace as line_workspace
+
+    context = line_workspace.context_dir(rws)
+    canonical_before = {
+        name: (context / name).read_bytes()
+        for name in ("SPEC.md", "tickets.json", "research.json", "progress.json")
+    }
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", lambda *_a, **_k: pytest.fail("PLAN repeated"))
+    monkeypatch.setattr(run_ticket, "run_agent", lambda *_a, **_k: pytest.fail("completed slice repeated"))
+    delivered: list[Path] = []
+
+    def deliver(*args: Any, **kwargs: Any) -> tuple[int, dict[str, Any]]:
+        delivered.append(args[2].path)
+        return 0, {"ok": True, "status": "completed"}
+
+    monkeypatch.setattr(run_ticket, "_stage_deliver", deliver)
+
+    assert run_ticket.main([ticket.id, "--harness", "grok"]) == 0
+
+    assert launcher.requests == []
+    assert delivered == [ws.path]
+    assert all((context / name).read_bytes() == content for name, content in canonical_before.items())
+    assert (ws.path / "t1.py").is_file() and (ws.path / "t2.py").is_file()
+
+
+@pytest.mark.parametrize("commit_change", [False, True], ids=["dirty-worktree", "commit-ahead"])
+def test_missing_build_artifacts_do_not_reset_preserved_candidate(
+    repo: SimpleNamespace,
+    launcher: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    commit_change: bool,
+) -> None:
+    """T2: a candidate without its PLAN/BUILD proof fails closed before reset or new PLAN."""
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(repo.tmp / "state"))
+    monkeypatch.setattr("core.line.fleet_dispatcher.PROJECT_ROOT", repo.local)
+    ticket = run_ticket.UserTicket(
+        id="USR-475-MISSING", project_id="darkfac", title="Checkpoint ausente",
+        problem_statement="candidate preserved without its canonical PLAN/BUILD evidence",
+    )
+    monkeypatch.setattr(
+        _Store, "get_ticket", lambda _self, ticket_id: ticket if ticket_id == ticket.id else None,
+    )
+    ws = create_workspace(ticket.id, cwd=repo.local)
+    (ws.path / "implementation.py").write_text("completed = True\n", encoding="utf-8")
+    if commit_change:
+        _git(ws.path, "add", "implementation.py")
+        _git(ws.path, "commit", "--quiet", "-m", "preserved implementation")
+
+    monkeypatch.setattr(
+        run_ticket.ticket_engine, "reset",
+        lambda *_a, **_k: pytest.fail("missing evidence reset canonical artifacts"),
+    )
+    monkeypatch.setattr(
+        run_ticket, "_plan_with_agent", lambda *_a, **_k: pytest.fail("missing evidence started PLAN"),
+    )
+
+    assert run_ticket.main([ticket.id, "--harness", "grok"]) == 1
+
+    assert launcher.requests == []
+    assert ws.path.exists() and (ws.path / "implementation.py").is_file()
+    assert "sem artefatos PLAN/BUILD" in capsys.readouterr().err

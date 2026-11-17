@@ -115,6 +115,30 @@ Reabrir o ledger em `planned` preserva esse contador e a mesma worktree. A esper
 automaticamente ao chegar a três falhas de candidato; abaixo disso, retoma depois do prazo.
 Uma falha ao reabrir o ledger não apaga o contador nem permite repetir a correção com orçamento novo.
 
+## Esperas terminais, elegibilidade e progresso (USR-475 T2)
+
+Antes de honrar `blocked` ou um `next_check` no futuro, o tick lê o status durável do control store.
+
+`cancelled` e `canceled` são a prova. A espera sai do disco mesmo com o JSON em `blocked` ou com o prazo ainda por vencer.
+
+`completed` só sai do disco quando o pacote de deploy é coerente e `deployed` é verdadeiro: `merge.json`, `validation.json`, `review_state.json` e `review_execution.json` concordam em SHA e digest, a revisão aprova sem `forced`, e a família do revisor não está entre as famílias de implementação. Sem essa prova a espera fica `blocked` com `deploy_evidence_missing` ou `deploy_evidence_mismatch` e o arquivo permanece, inclusive durante o backoff. A recuperação de CI sem SHA em `merge.json` nem em `deploy_report.json` continua sendo entrega: o tick não lança `--resume-delivery` enquanto `next_check` estiver no futuro.
+
+Cada transição reconciliada é registrada em `pending_delivery/reconciliations/<ticket>.json` com status e causa anteriores e novos, motivo e evidência. Repetir a mesma observação não acrescenta outro evento. Status duráveis contraditórios bloqueiam só o ticket correspondente; um ledger de reconciliação ilegível ou inconsistente também falha fechado sem apagar a espera.
+
+Hold, backoff de um ticket, espera `pending_delivery` ou falha de lançamento (`lancamento_falhou`) não retiram do mesmo ciclo os outros tickets `planned` independentes. Reserva global de recuperação, reserva de admissão e store indisponível continuam devolvendo o ticket à frente da fila daquele host.
+
+O contador de fila bloqueada (`blocked_cycles`) só continua quando o fingerprint, os tickets e os motivos atuais coincidem com o ciclo anterior. Estado legado sem esse vínculo recomeça em um ciclo; sem bloqueio atual, o contador e as causas são zerados. Assim uma espera antiga não prolonga a contagem para outro conjunto de tickets.
+
+Cada ciclo grava `activity`. O valor `running` exige filho (`status` `running` com pid), `in_flight`, despacho ou mudança de etapa de um ticket já observado. A primeira leitura de uma etapa não é avanço. Sem isso, o ciclo fica `blocked` quando há retomada `blocked` ou `dispatcher_busy`, ou quando `blocked_causes` está preenchido; nos demais casos fica `idle`. O processo do despachante estar vivo não é esteira em execução.
+
+Falha de classe diferente de `infra` alerta uma vez por fingerprint SHA-256 de ticket, causa e evidência. O ledger fica em `DARKFAC_STATE_ROOT/failure_alert_fingerprints.json`. A mesma combinação fica em silêncio. Causa ou evidência diferente produz um alerta novo. Envio que falha não grava o fingerprint, então a tentativa seguinte pode alertar. O hold da terceira falha de candidato usa esse mesmo fingerprint.
+
+## Retomada de BUILD e falhas de filhos de entrega (USR-475 T1)
+
+`run_ticket` mantem uma worktree por ticket e `progress.json` checkpointa cada fatia de BUILD, junto do digest do plano, do candidato e do caminho da worktree. Um erro tecnico com esses vinculos intactos retoma somente o restante do plano. Se a evidencia local divergir, o launcher para sem resetar o plano, o checkpoint ou a worktree.
+
+Quando um filho de `pending_delivery` falha, a fila grava primeiro uma entrada estruturada com `run_id`, codigo, causa, classe, etapa e detalhe redigido. A proxima tentativa conserva esse historico. Falha de filho na etapa `review` conserva `resume_delivery`; por isso o dispatcher inicia `--resume-delivery` na mesma worktree. Se o control store ja diz `completed`, mas ainda nao existe recibo de merge/deploy e ha uma falha de entrega registrada, a espera continua acionavel em vez de virar um bloqueio terminal.
+
 O `core.line.fleet_dispatcher` consulta a fila continuamente e despacha tickets `planned`
 na ordem Notebook, Grokbox e Desktop. Com tickets elegíveis, o Notebook livre recebe trabalho
 antes do Grokbox e do Desktop. O serviço não depende de sessão interativa.
@@ -444,6 +468,13 @@ O diagnóstico é sanitizado e exclui banners de cotas. O alerta informa o camin
 execuções manuais também mantêm um log sanitizado ao lado do outcome. `recent_failures` conserva
 as 20 últimas falhas, com causa e classe além do host e do código.
 
+O ledger `DARKFAC_STATE_ROOT/actionable_failures.json` conserva a falha mais recente de cada ticket:
+fase, fingerprint, número de tentativas, última evidência, transição (`retrying` ou `blocked`) e
+próximo passo. Ele é gravado antes do aviso. Hub/Telegram deduplicam por fingerprint e transição:
+repetir a mesma evidência não avisa de novo; uma mudança persistida de evidência ou a passagem de
+`retrying` para `blocked` pode gerar um novo aviso. O estado e o ledger de avisos sobrevivem ao
+reinício.
+
 ## Orçamento por ticket e recuperação
 
 `core.line.failure_taxonomy` é a fonte única das classes `infra`, `candidate`, `owner` e `unknown`.
@@ -457,12 +488,23 @@ Reiniciar o dispatcher ou trocar host, fingerprint ou candidato não reduz essa 
 Um novo SHA conhecido de `origin/main` limpa somente a sequência e a espera de infraestrutura.
 Holds legados cuja causa é infraestrutura são removidos ao abrir o store.
 
-Falhas `candidate` e `unknown` incrementam `candidate_failures`. A terceira cria um hold terminal
-e um único alerta Hub/Telegram por hold com causa, diagnóstico e caminho do log, sem criar ticket.
+Falhas `candidate` e `unknown` incrementam `candidate_failures`. A terceira cria um hold só desse ticket.
+O alerta Hub/Telegram traz ticket, fase, fingerprint, tentativas, última evidência, próximo passo e
+caminho do log. Uma nova evidência pode alertar novamente; a transição para `blocked` também é
+notificada uma vez. Infraestrutura registra evidência e próximo passo, mas não alerta.
 O `run_id` impede cobrança duplicada entre launcher, filho de entrega e dispatcher.
 Mudar o main, o candidato ou o contexto não libera esse hold nem zera o contador.
 Merge comprovado zera o orçamento e o limite de correção de CI. Fingerprints permanecem como
 diagnóstico e identidade de reservas; não bloqueiam tentativas depois do backoff.
+
+`rebase_conflict` é causa `candidate`. A recuperação reserva cada tentativa antes do reparo e cada
+inferência antes da chamada ao harness. `rebase_recovery` persiste o resultado por fingerprint: HEAD,
+candidato, upstream, branch, worktree, prompt do ticket, arquivos/estágios Git e evidências. A mesma
+entrada não repete recuperação; mudança verificável abre uma tentativa controlada. Se o processo
+reinicia durante um rebase, o launcher continua a worktree existente e trata uma reserva sem resultado
+como interrupção técnica, sem repetir o trabalho. Sem rota elegível, `route_wait` não gasta inferência.
+O hold guarda `rebase_conflict` e o comando de retomada, não cria `ticket_holds` nem marca
+`waiting_human`. `reset_budget`, no merge comprovado, apaga as linhas desse ticket.
 
 `pending_delivery.tick` usa o mesmo orçamento: falha infra reagenda, candidato conta até o limite.
 Retorno zero sem conclusão espera `RECHECK_SECONDS` (900s), evitando relançamento imediato.
@@ -472,6 +514,15 @@ Sem execução em voo, com host comprovadamente livre e todos os pendentes retid
 backoff ou falha por mais de dois ciclos, o sentinela publica `stalled_blocked`, com causas
 agregadas (`hold=3, backoff_infra=10`, por exemplo). A amostra leve também atualiza esse estado
 sem sondar cotas. Há um alerta por episódio; uma retomada permite um novo episódio posterior.
+
+O estado do dispatcher publica `heartbeat_epoch` para indicar que o controlador fez um ciclo e
+`last_progress_epoch` para a última evidência útil. Só início recente de trabalho, despacho, log ou
+heartbeat do filho, ou transição de etapa sustenta `activity=running`. Um processo apenas vivo e um
+heartbeat do próprio controlador não contam como progresso. A evidência expira após
+`progress_window_sec` (padrão 120 segundos), configurável por `DARKFAC_FLEET_PROGRESS_WINDOW_SEC`
+ou `--progress-window-sec`; depois disso o estado é `idle` ou `blocked`. Esses campos são gravados
+no JSON do dispatcher e preservados para a decisão após reinício. Hold, backoff, espera de entrega
+ou falha de lançamento isolam o ticket afetado e deixam a fila independente elegível.
 
 O recibo é produzido pelo dispatcher depois do deploy canônico e da prova HTTP
 do SHA exato. Um marcador escrito pelo processo filho não libera a recuperação.

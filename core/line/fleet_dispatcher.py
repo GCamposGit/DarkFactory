@@ -52,6 +52,7 @@ Uso::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import inspect
 import json
@@ -104,6 +105,7 @@ ROUTE_WAIT_MARKERS = ("harness_infra_error: route_wait", '"cause": "route_wait"'
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 FAILURE_HISTORY_LIMIT = 20
+DEFAULT_PROGRESS_WINDOW_SEC = 120.0
 
 
 def configure_logging(log_dir: Path, *, stream: Any = None) -> RotatingFileHandler:
@@ -160,6 +162,7 @@ class DispatcherConfig:
     stable_probes: int = 3
     deploy_window_sec: float = 180.0
     recovery_list_ttl_sec: float = 43200.0
+    progress_window_sec: float = DEFAULT_PROGRESS_WINDOW_SEC
     state_path: Path = STATE_PATH
 
 
@@ -573,9 +576,52 @@ def running_fleet_hosts() -> set[str]:
     return {h for h in running_fleet_runs().values() if h}
 
 
-def default_deploy() -> int:
-    return subprocess.run([sys.executable, str(PROJECT_ROOT / "scripts" / "dokploy_redeploy.py")],
-                          cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW).returncode
+#: USR-475 T5: `default_deploy` previously waited with no bound at all. A stuck Dokploy
+#: poll (or a hung child) held the deploy slot forever and left anything it dispatched
+#: remotely (e.g. a validation gate job) running with nobody left to confirm it is done.
+#: 3600s is generous against `dokploy_redeploy.py`'s own documented per-service wait
+#: (``DEFAULT_TIMEOUT_SECONDS`` = 900s) across a handful of services plus backup/node-sync.
+ENV_DEPLOY_TIMEOUT_SEC = "DARKFAC_DEPLOY_TIMEOUT_SEC"
+DEFAULT_DEPLOY_TIMEOUT_SEC = 3600.0
+#: Conventional "timed out" exit code (bash/coreutils `timeout(1)`); never a real
+#: `dokploy_redeploy.py` exit code, so a caller can tell a bound-exceeded deploy apart
+#: from an ordinary failure.
+DEPLOY_TIMEOUT_EXIT_CODE = 124
+
+
+def deploy_timeout_sec() -> float:
+    raw = os.environ.get(ENV_DEPLOY_TIMEOUT_SEC, "").strip()
+    if not raw:
+        return DEFAULT_DEPLOY_TIMEOUT_SEC
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_DEPLOY_TIMEOUT_SEC
+    return value if value > 0 else DEFAULT_DEPLOY_TIMEOUT_SEC
+
+
+def default_deploy(timeout: Optional[float] = None) -> int:
+    """Runs ``scripts/dokploy_redeploy.py`` and waits, bounded by ``timeout`` seconds.
+
+    On timeout the whole process tree is killed (not just the direct child, so a
+    grandchild ``git``/``gh`` call is never left orphaned) and the wait ends with
+    :data:`DEPLOY_TIMEOUT_EXIT_CODE` instead of hanging the dispatcher's deploy slot.
+    """
+    bound = deploy_timeout_sec() if timeout is None else timeout
+    proc = subprocess.Popen(
+        [sys.executable, str(PROJECT_ROOT / "scripts" / "dokploy_redeploy.py")],
+        cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW,
+    )
+    try:
+        return proc.wait(timeout=bound)
+    except subprocess.TimeoutExpired:
+        logger.error("default_deploy excedeu %.0fs; encerrando a subarvore do processo", bound)
+        from core.execution.sandbox import kill_process_tree
+
+        kill_process_tree(proc.pid)
+        with contextlib.suppress(Exception):
+            proc.wait(timeout=10)
+        return DEPLOY_TIMEOUT_EXIT_CODE
 
 
 def is_lock_refusal(log_tail: str) -> bool:
@@ -729,6 +775,83 @@ def daemon_demands_store() -> Any:
     from core.demands.store import DemandsStore
 
     return DemandsStore()
+
+
+def _ticket_failure_isolates(reason: str) -> bool:
+    """Hold or technical failure of one ticket leaves the rest of the queue eligible."""
+    return reason == "backoff_infra" or reason.startswith(
+        ("ticket_hold:", "pending_delivery:", "lancamento_falhou:"))
+
+
+def _progress_epoch(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if float(value) > 0 else None
+    if isinstance(value, str) and value.strip():
+        try:
+            stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return stamp.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def progress_activity(
+    cycle: Mapping[str, Any],
+    previous_stages: Mapping[str, Any] | None,
+    *,
+    previous_progress_epoch: float | None = None,
+    now: float | None = None,
+    window_sec: float = DEFAULT_PROGRESS_WINDOW_SEC,
+) -> tuple[str, dict[str, str], float | None]:
+    """Report ``running`` only while real work evidence is inside the progress window.
+
+    A process heartbeat by itself is not progress. Starts, useful worker/log heartbeats,
+    dispatches and stage transitions are persisted so a restart uses the same window.
+    """
+    observed_now = float(now if now is not None else time.time())
+    resumptions = cycle.get("resumptions") or []
+    stages: dict[str, str] = {}
+    blocked = False
+    evidence: list[float] = []
+    for row in resumptions:
+        if not isinstance(row, Mapping):
+            continue
+        ticket = str(row.get("ticket") or "")
+        stage = str(row.get("stage") or "")
+        if ticket and stage:
+            stages[ticket] = stage
+        if row.get("status") == "running" and row.get("pid"):
+            for key in ("heartbeat_epoch", "progress_epoch", "started_at"):
+                stamp = _progress_epoch(row.get(key))
+                if stamp is not None:
+                    evidence.append(stamp)
+        if row.get("status") in {"blocked", "dispatcher_busy"}:
+            blocked = True
+    previous = previous_stages if isinstance(previous_stages, Mapping) else {}
+    advanced = any(ticket in previous and str(previous[ticket]) != stage for ticket, stage in stages.items())
+    if advanced or cycle.get("dispatched"):
+        evidence.append(observed_now)
+    for item in cycle.get("progress_evidence", ()):
+        stamp = _progress_epoch(item.get("at") if isinstance(item, Mapping) else item)
+        if stamp is not None:
+            evidence.append(stamp)
+    if previous_progress_epoch is not None:
+        previous_stamp = _progress_epoch(previous_progress_epoch)
+        if previous_stamp is not None:
+            evidence.append(previous_stamp)
+    latest_progress = max(evidence) if evidence else None
+    window = max(0.0, float(window_sec))
+    recent = (latest_progress is not None and latest_progress <= observed_now + 60.0
+              and observed_now - latest_progress <= window)
+    if recent:
+        return "running", stages, latest_progress
+    if blocked or cycle.get("blocked_causes"):
+        return "blocked", stages, latest_progress
+    return "idle", stages, latest_progress
 
 
 # --- despachante ----------------------------------------------------------------------------------
@@ -926,10 +1049,15 @@ class FleetDispatcher:
                 resource_version=job.resource_version, main_sha=run_outcome.main_sha(PROJECT_ROOT),
             )
             self.admission_store.record_failure(fingerprint)
+            phase = str(outcome.stage) if outcome and outcome.stage else {
+                "launch": "launch", "lock": "dispatch", "infra": "dispatch",
+                "no_delivery_evidence": "delivery", "recovery_receipt": "deploy",
+            }.get(kind, kind)
             if not (kind == "infra" and is_opportunistic_host_loss(job.host_id, rc, tail)):
                 self.admission_store.record_attempt(
                     job.project_id, job.ticket_id, cause, run_id=job.run_id or uuid.uuid4().hex,
                     main_sha=fingerprint.main_sha, detail=reason, log_path=str(job.log_path or ""),
+                    phase=phase,
                 )
         except Exception:
             logger.exception("falha ao persistir orcamento de %s", job.ticket_id)
@@ -1226,7 +1354,7 @@ class FleetDispatcher:
         except Exception as exc:  # noqa: BLE001 - falha de infra: ticket volta a fila
             self._record_launch_failure(
                 host, tid, project_id, candidate, context, resource_version,
-                candidate_key, context_key, resource_key, token, recovery_token, exc, idle, now,
+                candidate_key, context_key, resource_key, token, recovery_token, exc, idle, skipped, now,
             )
 
     def _launch_with_contract(self, tid: str, host: HostSpec, run_id: str, candidate: str) -> InFlight:
@@ -1255,17 +1383,21 @@ class FleetDispatcher:
         job.admission_token = token
         job.run_id = run_id
         job.recovery_token = recovery_token
+        if job.started_at <= 0:
+            job.started_at = float(self.clock())
         self.in_flight[host_id] = job
 
     def _record_launch_failure(
         self, host: HostSpec, tid: str, project_id: str, candidate: str, context: str,
         resource_version: str, candidate_key: str, context_key: str, resource_key: str,
-        token: str, recovery_token: str | None, exc: Exception, idle: dict[str, str], now: float,
+        token: str, recovery_token: str | None, exc: Exception, idle: dict[str, str],
+        skipped: dict[str, str], now: float,
     ) -> None:
         from core.line.agent_cli import redact_secrets
 
         safe_error = " | ".join(redact_secrets(str(exc)).splitlines())[-800:]
         idle[host.id] = f"lancamento_falhou:{safe_error}"
+        skipped[tid] = f"lancamento_falhou:{type(exc).__name__}"
         failed_job = InFlight(
             tid, host.id, None, project_id=project_id, candidate_digest=candidate,
             context_digest=context, resource_version=resource_version,
@@ -1349,7 +1481,7 @@ class FleetDispatcher:
                 if reason == "identical_failure_open":
                     carried.append(tid)
                     continue
-                if reason == "backoff_infra" or reason.startswith("ticket_hold:"):
+                if _ticket_failure_isolates(reason):
                     continue
                 break
             if carried:
@@ -1457,10 +1589,18 @@ class FleetDispatcher:
                 continue
             demand["status"] = "planned"
 
+    def _resumptions(self) -> list[dict[str, Any]]:
+        """Due delivery waits. A test double or a real launch skips this probe."""
+        if self.launch is not None or self.dry_run:
+            return []
+        from core.line.pending_delivery import tick
+
+        return tick(PROJECT_ROOT)
+
     def run_cycle(self) -> dict[str, Any]:
         self._reap()
-        from core.line.pending_delivery import tick, acknowledge_deploy
-        resumptions = tick(PROJECT_ROOT) if self.launch is None and not self.dry_run else []
+        from core.line.pending_delivery import acknowledge_deploy
+        resumptions = self._resumptions()
         if any(r.get("status") == "dispatcher_busy" for r in resumptions):
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "resumptions": resumptions,
                                        "dispatched": [], "deployed": False})
@@ -1576,6 +1716,33 @@ class FleetDispatcher:
 
     def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
         self._record_queue_blockage(cycle)
+        now = float(self.clock())
+        progress_evidence: list[dict[str, Any]] = []
+        if cycle.get("dispatched"):
+            progress_evidence.append({"source": "dispatch", "at": now})
+        for job in self.in_flight.values():
+            candidates = [job.started_at]
+            if job.log_path is not None:
+                try:
+                    candidates.append(job.log_path.stat().st_mtime)
+                except OSError:
+                    pass
+            stamp = max((value for value in candidates if value and value > 0), default=0.0)
+            if stamp:
+                progress_evidence.append({"ticket": job.ticket_id, "source": "in_flight", "at": stamp})
+        cycle["progress_evidence"] = progress_evidence
+        activity, stages, last_progress = progress_activity(
+            cycle,
+            self.last_cycle.get("stages"),
+            previous_progress_epoch=_progress_epoch(self.last_cycle.get("last_progress_epoch")),
+            now=now,
+            window_sec=self.config.progress_window_sec,
+        )
+        cycle["activity"] = activity
+        cycle["stages"] = stages
+        cycle["progress_window_sec"] = max(0.0, float(self.config.progress_window_sec))
+        cycle["heartbeat_epoch"] = now
+        cycle["last_progress_epoch"] = last_progress
         observed = self._read_checkout_sha()
         cycle["code_sha"] = observed
         cycle["code_sha_changed"] = _checkout_sha_changed(self._startup_sha, observed)
@@ -1586,14 +1753,16 @@ class FleetDispatcher:
 
     def _previous_cycle(self) -> dict[str, Any]:
         try:
-            return json.loads(self.config.state_path.read_text(encoding="utf-8"))
+            loaded = json.loads(self.config.state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
+        return loaded if isinstance(loaded, dict) else {}
 
     def _record_queue_blockage(self, cycle: dict[str, Any]) -> None:
         pending = cycle.get("pending_tickets", [])
         skipped = cycle.get("skipped", {})
         causes: dict[str, int] = {}
+        blockers: dict[str, str] = {}
         for ticket in pending:
             reason = str(skipped.get(ticket, ""))
             if reason.startswith("ticket_hold:"):
@@ -1603,11 +1772,30 @@ class FleetDispatcher:
             elif reason.startswith("pending_delivery:"):
                 key = "delivery_failure"
             else:
-                return
+                blockers = {}
+                break
+            blockers[str(ticket)] = reason
             causes[key] = causes.get(key, 0) + 1
-        active = pending and cycle.get("free_hosts") and not cycle.get("in_flight") and not cycle.get("dispatched")
-        cycle["blocked_cycles"] = int(self.last_cycle.get("blocked_cycles", 0)) + 1 if active else 0
+        active = (bool(pending) and len(blockers) == len(pending) and cycle.get("free_hosts")
+                  and not cycle.get("in_flight") and not cycle.get("dispatched"))
+        fingerprint = hashlib.sha256(json.dumps(
+            blockers, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest() if active else ""
+        previous_count = self.last_cycle.get("blocked_cycles", 0)
+        try:
+            previous_count = max(0, int(previous_count))
+        except (TypeError, ValueError):
+            previous_count = 0
+        same_blockage = (
+            bool(fingerprint)
+            and self.last_cycle.get("blocked_fingerprint") == fingerprint
+            and self.last_cycle.get("blocked_ticket_reasons") == blockers
+            and self.last_cycle.get("blocked_causes") == causes
+        )
+        cycle["blocked_cycles"] = previous_count + 1 if active and same_blockage else int(bool(active))
         cycle["blocked_causes"] = causes if active else {}
+        cycle["blocked_ticket_reasons"] = blockers if active else {}
+        cycle["blocked_fingerprint"] = fingerprint
 
     def _pending_skip_reasons(self, resumptions: list[dict[str, Any]], demands: list[dict[str, Any]],
                               skipped: dict[str, str], now: float) -> None:
@@ -1706,6 +1894,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--recovery-tickets", metavar="ID1,ID2", action="append", default=[],
                     help="Um unico valor CSV (IDs separados por virgulas); processa na ordem, uma correcao por vez")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
+    try:
+        progress_window_default = max(
+            0.0, float(os.environ.get("DARKFAC_FLEET_PROGRESS_WINDOW_SEC", DEFAULT_PROGRESS_WINDOW_SEC)),
+        )
+    except ValueError:
+        progress_window_default = DEFAULT_PROGRESS_WINDOW_SEC
+    ap.add_argument("--progress-window-sec", type=float, default=progress_window_default,
+                    help="Idade maxima de evidencia de progresso para publicar activity=running")
     ap.add_argument("unexpected_args", nargs="*", metavar="ARG",
                     help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
@@ -1722,7 +1918,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
-    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec, resume_only=args.resume_only and not recovery,
+    d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec,
+                                        progress_window_sec=max(0.0, args.progress_window_sec),
+                                        resume_only=args.resume_only and not recovery,
                                         recovery_tickets=recovery), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
