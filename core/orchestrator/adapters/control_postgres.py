@@ -270,10 +270,18 @@ class PostgresControlStore:
             self._init_db()
 
     def _connect(self) -> Any:
-        """Open the canonical control-store connection with its shared bounded settings."""
-        if self._psycopg is None or self._resolved_database is None:
+        """Open the canonical control-store connection with its shared bounded settings.
+
+        Tests that build a store with ``object.__new__`` and assign ``raw_url``/``_psycopg``
+        directly (bypassing ``__init__``) never populate ``_resolved_database``; resolve it
+        lazily from ``raw_url`` in that case rather than treating the store as unconfigured.
+        """
+        resolved = getattr(self, "_resolved_database", None) or resolve_control_database(
+            database_url=getattr(self, "raw_url", None)
+        )
+        if self._psycopg is None or resolved is None:
             raise RuntimeError("PostgreSQL control store is not configured")
-        return self._psycopg.connect(self._resolved_database.url, **self._resolved_database.psycopg_kwargs())
+        return self._psycopg.connect(resolved.url, **resolved.psycopg_kwargs())
 
     def _init_db(self) -> None:
         """Initialize PostgreSQL tables if running against a live database."""

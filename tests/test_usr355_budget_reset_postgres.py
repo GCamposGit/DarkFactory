@@ -56,7 +56,7 @@ def _store(cause: str | None, fail_budget: bool = False) -> tuple[PostgresContro
     store = PostgresControlStore(mock_mode=True)
     store.mock_mode = False
     store.raw_url = "postgres://x"
-    store._psycopg = SimpleNamespace(connect=lambda url: _Conn(_Cur(log, cause, fail_budget)))
+    store._psycopg = SimpleNamespace(connect=lambda url, **kwargs: _Conn(_Cur(log, cause, fail_budget)))
     return store, log
 
 

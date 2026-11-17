@@ -569,7 +569,7 @@ def test_postgres_cancel_run_truncates_long_reason_for_cause_code() -> None:
 
     class _Pg:
         @staticmethod
-        def connect(_url):
+        def connect(_url, **_kwargs):
             return _Conn()
 
     store = PostgresControlStore(mock_mode=True)

@@ -201,3 +201,12 @@ Validacao apos deploy: verificar o marcador de migracao no volume, comparar ids/
 do Hub com o banco, fechar uma OA de teste e conferir persistencia apos reinicio. Durante
 indisponibilidade controlada do banco, GET e POST devem devolver 503 e nenhuma mutacao
 pode afirmar sucesso. Este procedimento nao foi executado em producao nesta entrega.
+
+## Conexao compartilhada do control store (USR-455)
+
+`PostgresControlStore._connect()` centraliza toda abertura de conexao (antes espalhada por
+`self._psycopg.connect(self.raw_url)` em cada metodo) usando `resolve_control_database` e seus
+limites padronizados de `connect_timeout`/`statement_timeout`. Semantica de fila e reservas nao
+mudou; apenas a conexao passou a ser unica e consistente. `_connect()` resolve `raw_url` sob
+demanda quando `_resolved_database` nao foi preenchido (construcao manual em teste), em vez de
+tratar o store como desconfigurado.

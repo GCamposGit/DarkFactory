@@ -1109,7 +1109,7 @@ def test_postgres_get_run_status_returns_job_cause_code_and_retry_count() -> Non
 
     class _Psycopg:
         @staticmethod
-        def connect(url): return _Conn()
+        def connect(url, **kwargs): return _Conn()
 
     store = PostgresControlStore(mock_mode=True, runtime_owner=RuntimeOwner.HF05_SQLITE.value)
     store.mock_mode = False
