@@ -11741,14 +11741,15 @@
     "project_id": "darkfac",
     "title": "Gate isolado falha com PermissionError ao tocar suite-0.lock sob identidade restrita (CodexSandboxUsers)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ticket/usr-463",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand"
     ],
+    "express_causes": [],
     "problem_statement": "Durante USR-453 T2/T4, o fallback de clone isolado (core/line/external_pr_publish._run_gate_in_detached_clone -> core/harness/runner.py --quick) morreu com 'PermissionError: [Errno 13] Permission denied' em C:\\Users\\guigc\\AppData\\Local\\DarkFac\\harness\\suite-0.lock (traceback completo em .factory/runs/usr-453-pr821/t2_gate_run.log, linha do path.touch em core/harness/suite_lock.py::_try_lock_file). A ACL do arquivo (Get-Acl) concede ao grupo AI_Notebook\\CodexSandboxUsers apenas ReadAndExecute+Synchronize, sem write; FullControl fica so com guigc/SYSTEM/Administradores. _try_lock_file chama path.touch(exist_ok=True) sem capturar PermissionError, entao qualquer processo de gate executado sob esse grupo restrito (ex.: subprocesso Codex sandboxed) derruba o runner inteiro com traceback em vez de um retry/erro estruturado, mesmo quando o lock esta livre. Isso bloqueia a obtencao de HARNESS_PASS para qualquer candidato cujo gate corra sob essa identidade, incluindo o T2 do USR-453.",
     "core_journey": [
       "Durante USR-453 T2/T4, o fallback de clone isolado (core/line/external_pr_publish._run_gate_in_detached_clone -> core/harness/runner.py --quick) morreu com 'PermissionError: [Errno 13] Permission denied' em C:\\Users\\guigc\\AppData\\Local\\DarkFac\\harness\\suite-0.lock (traceback completo em .factory/runs/usr-453-pr821/t2_gate_run.log, linha do path.touch em core/harness/suite_lock.py::_try_lock_file). A ACL do arquivo (Get-Acl) concede ao grupo AI_Notebook\\CodexSandboxUsers apenas ReadAndExecute+Synchronize, sem write; FullControl fica so com guigc/SYSTEM/Administradores. _try_lock_file chama path.touch(exist_ok=True) sem capturar PermissionError, entao qualquer processo de gate executado sob esse grupo restrito (ex.: subprocesso Codex sandboxed) derruba o runner inteiro com traceback em vez de um retry/erro estruturado, mesmo quando o lock esta livre. Isso bloqueia a obtencao de HARNESS_PASS para qualquer candidato cujo gate corra sob essa identidade, incluindo o T2 do USR-453."

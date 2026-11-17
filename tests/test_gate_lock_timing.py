@@ -8,6 +8,7 @@ no network, no git (clean-tree and candidate-SHA checks are stubbed), no real su
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import threading
@@ -230,3 +231,131 @@ def test_remote_attempts_lost_to_a_fallback_are_accounted_apart_from_lock_and_ex
     assert record["remote_lost_sec"] == 75.0
     assert record["exec_sec"] < 30  # the 75 s lost remotely are NOT in the local execution time
     assert record["remote_attempts"][0]["error_code"] == "worker_unreachable"
+
+
+# --- USR-463: runner reports suite-lock degradation instead of crashing -------
+
+
+def _deny_canonical_sidecar_write(canonical: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate a restricted identity that can lock the canonical file but
+    cannot write the sidecar metadata in the canonical state directory.
+
+    The degraded path must cover this case too, so the gate and its timing log
+    use one writable per-identity directory.
+    """
+
+    canonical.mkdir(parents=True, exist_ok=True)
+    lock_path = canonical / "suite-0.lock"
+    lock_path.touch(exist_ok=True)
+    sidecar_tmp = canonical / "suite-0.tmp"
+    real_open = Path.open
+
+    def _denied_sidecar_write(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if self == sidecar_tmp and mode == "w":
+            raise PermissionError(13, "Permission denied")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _denied_sidecar_write)
+    monkeypatch.setenv("USERNAME", "sandboxed-user")
+
+
+def test_gate_passes_and_reports_degraded_lock_when_canonical_sidecar_is_unwritable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-463: a gate running under a restricted identity still reaches
+    [HARNESS_PASS], and the per-run record shows which (degraded) directory
+    the lock -- and the timing log itself -- actually used, instead of either
+    crashing with a traceback or silently losing the telemetry."""
+
+    canonical = tmp_path / "state"
+    _deny_canonical_sidecar_write(canonical, monkeypatch)
+
+    passed = _run(_config(tmp_path, sleep_sec=0.1, timeout_sec=30))
+
+    out = capsys.readouterr().out
+    assert passed is True
+    assert "[STEP_PASS] probe" in out
+    assert runner.MARKER_HARNESS_PASS in out
+    assert "sandboxed-user" in out  # the one degraded [SUITE_LOCK] warning names the fallback dir
+
+    fallback = canonical / "darkfac-harness-sandboxed-user"
+    assert not (canonical / runner.RUN_TIMINGS_LOG_NAME).exists()
+    (record,) = _timing_records_at(fallback)
+    assert record["success"] is True
+    assert record["lock_degraded"] is True
+    assert record["lock_state_dir"] == str(fallback)
+
+
+def _timing_records_at(directory: Path) -> list[dict]:
+    log = directory / runner.RUN_TIMINGS_LOG_NAME
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_append_run_timing_uses_the_directory_recorded_for_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-463: telemetry follows the fallback selected by lock acquisition,
+    even when a fresh probe can still read the canonical lock."""
+
+    canonical = tmp_path / "state"
+    _deny_canonical_sidecar_write(canonical, monkeypatch)
+    fallback = canonical / "darkfac-harness-sandboxed-user"
+    fallback.mkdir(parents=True)
+    record = {"schema": 1, "probe": True, "lock_state_dir": str(fallback)}
+
+    runner._append_run_timing(record)
+
+    assert not (canonical / runner.RUN_TIMINGS_LOG_NAME).exists()
+    (record,) = _timing_records_at(fallback)
+    assert record == {"schema": 1, "probe": True, "lock_state_dir": str(fallback)}
+
+
+def test_timed_suite_lock_reports_suite_lock_unwritable_as_a_clean_message_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-463: the residual case where even the degraded fallback directory
+    turns out unwritable must surface as the structured ``[SUITE_LOCK]``
+    message ``SuiteLockUnwritable`` already carries, not a bare traceback --
+    in addition to the existing ``SuiteLockTimeout`` handling."""
+
+    @contextlib.contextmanager
+    def _boom(**_kwargs: object):
+        raise suite_lock.SuiteLockUnwritable(Path("unused") / "suite-0.lock", "denied")
+        yield  # pragma: no cover - unreachable, required to make this a generator
+
+    monkeypatch.setattr(runner.harness_suite_lock, "suite_lock", _boom)
+
+    timings = runner.RunTimings()
+    with pytest.raises(suite_lock.SuiteLockUnwritable):
+        with runner._timed_suite_lock(timings):
+            pass  # pragma: no cover - the context manager raises on __enter__
+
+    out = capsys.readouterr().out
+    assert "[SUITE_LOCK] cannot access lock state" in out
+    assert "Traceback" not in out
+
+
+def test_run_with_cache_propagates_suite_lock_unwritable_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same residual case as above, exercised through the real ``run_with_cache``
+    path: the run still fails closed (no false [HARNESS_PASS]), the per-run
+    timing record is still written, and nothing resembling a raw traceback
+    reaches the gate's stdout."""
+
+    @contextlib.contextmanager
+    def _boom(**_kwargs: object):
+        raise suite_lock.SuiteLockUnwritable(Path("unused") / "suite-0.lock", "denied")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(runner.harness_suite_lock, "suite_lock", _boom)
+
+    with pytest.raises(suite_lock.SuiteLockUnwritable):
+        _run(_config(tmp_path, sleep_sec=0.1, timeout_sec=30))
+
+    out = capsys.readouterr().out
+    assert "[SUITE_LOCK] cannot access lock state" in out
+    assert "Traceback" not in out
+    assert runner.MARKER_HARNESS_PASS not in out
+    (record,) = _timing_records(tmp_path)
+    assert record["success"] is None

@@ -38,6 +38,110 @@ precisa adquirir `suite_lock`, pois outro processo pode ocupar o slot depois da
 sonda. Worker ocupado gera espera de admissão, sem iniciar PLAN/BUILD para produzir
 mais candidatos que não podem ser validados.
 
+### Identidade restrita no lock da suíte (USR-463)
+
+O arquivo `suite-N.lock` existente é aberto em modo `rb`: o sistema operacional
+mantém a trava, sem alterar o conteúdo ou os metadados do arquivo. A sonda não
+chama `touch()`. Isso permite
+que uma identidade restrita -- por exemplo `CodexSandboxUsers`, cuja ACL concede
+`ReadAndExecute` sobre locks criados por outra conta -- adquira um slot canônico
+livre. Um lock ausente é criado com `xb` exclusivo; se outro processo vencer a
+corrida de criação, o arquivo criado por ele é aberto para leitura. Se a
+identidade puder travar o lock, mas não gravar o sidecar de metadados, o runner
+libera o slot canônico e migra para o fallback por identidade antes de executar
+os testes. Falhas de permissão ao abrir ou travar o lock recebem até três
+tentativas em `_try_lock_file`; a sonda de acessibilidade também usa até três
+tentativas. Se persistirem no acesso ao diretório, ao lock ou ao sidecar, viram
+`SuiteLockUnwritable` com `path` e `reason`, sem propagar um `PermissionError`
+cru. `_try_lock_file` só retorna `None` para slot efetivamente ocupado por outro
+processo. `probe_free_slot()` nunca propaga o erro estruturado: trata um slot
+inacessível como "nenhum slot livre observado" e segue para o próximo, sem
+derrubar o chamador com traceback.
+
+#### Modo degradado: estado por identidade (USR-463 T2)
+
+`resolve_state_dir()` é o contrato que `SuiteLock.acquire()` usa para escolher
+onde manter o lock. Uma falha de permissão no diretório canônico ou na leitura
+do lock leva ao fallback por identidade. Se a leitura passar mas a gravação do
+sidecar falhar durante a aquisição, `SuiteLock.acquire()` libera o lock
+canônico e troca para o mesmo fallback. Se nenhum fallback puder criar ou abrir
+seu lock, a resolução levanta `SuiteLockUnwritable` estruturado:
+
+- Verifica o artefato exato que uma aquisição real usa
+  (`<diretório-canônico>/suite-0.lock`) abrindo um arquivo preexistente em
+  `rb`. Se estiver ausente, cria-o com `xb` exclusivo, tratando
+  `FileExistsError` como uma corrida vencida por outro processo, e então o
+  reabre para leitura. Nunca chama `touch()` nem abre um lock preexistente para
+  escrita ou altera seus metadados.
+- Com acesso de leitura: retorna o diretório canônico, `degraded=False`,
+  `reason=None`.
+  Nenhum diretório novo é criado além do canônico; nenhum aviso é impresso.
+- Sem acesso ou sem capacidade para criar um lock ausente: tenta primeiro o diretório por identidade --
+  `DARKFAC_HARNESS_STATE_DIR/darkfac-harness-<usuário>` quando essa variável
+  está configurada, senão `tempfile.gettempdir()/darkfac-harness-<usuário>`.
+  Se a árvore configurada também negar a criação ou leitura do lock, tenta
+  `tempfile.gettempdir()/darkfac-harness-<usuário>` como reserva independente.
+  O diretório escolhido retorna com `degraded=True` e `reason` explicando a
+  degradação.
+- A sondagem e `_try_lock_file` repetem falhas de permissão até três vezes. Se todos
+  os candidatos forem inacessíveis, a resolução falha com
+  `SuiteLockUnwritable` estruturado.
+- Se a permissão do lock canônico mudar depois da sondagem, a própria aquisição
+  também troca para o fallback por identidade e espera um eventual dono
+  canônico confirmado antes de adquirir o slot.
+
+`SuiteLock.acquire()` em modo degradado:
+
+- Expõe `degraded=True` e `state_dir_used` (o diretório realmente usado para o
+  lock mantido) na instância, preenche `waited_sec` como de costume, e imprime
+  exatamente uma linha `[SUITE_LOCK]` explicando a degradação e deixando claro
+  que a exclusão entre identidades diferentes é best-effort (duas contas, cada
+  uma no seu próprio fallback, não se veem).
+- Antes de tomar o slot no diretório de fallback, espera enquanto o diretório
+  **canônico** tiver um sidecar `suite-N.json` legível apontando para um
+  processo confirmadamente vivo neste host (`process_identity.same_process`,
+  mesmo hostname). Um sidecar ausente, ilegível, de outro host, ou cujo dono
+  já morreu nunca bloqueia -- só um dono vivo confirmado bloqueia. A espera
+  respeita o `timeout_sec` já configurado da instância; se o prazo estourar
+  antes do dono canônico liberar, `acquire()` levanta `SuiteLockTimeout` com
+  `waited_sec` preenchido, exatamente como o timeout normal de slot ocupado.
+- Caso canônico acessível continua sem aviso e sem criar diretório de fallback:
+  nenhum aviso novo impresso, nenhum diretório de fallback criado.
+
+#### Portão oficial reporta o modo degradado sem quebrar (USR-463 T3)
+
+`core/harness/runner.py` (o portão oficial, `--quick`) usa o modo degradado
+acima de ponta a ponta, sem propagar `PermissionError`/`SuiteLockUnwritable`
+cru nem perder a telemetria do run:
+
+- `_append_run_timing()` grava `run_timings.jsonl` no diretório registrado pela
+  aquisição do lock -- canônico ou fallback por identidade -- para que a
+  telemetria acompanhe o lock efetivamente usado. Quando a execução termina
+  antes de adquirir um lock, consulta `resolve_state_dir()` como fallback.
+  `_finish_run_timing()` continua envolvendo a gravação em
+  `contextlib.suppress(Exception)`, então uma falha residual aqui (ex.: disco
+  cheio) nunca muda o veredito, mas agora a gravação em si tem onde funcionar
+  sob identidade restrita.
+- `_timed_suite_lock()` grava no `RunTimings` de cada run se o lock usado
+  foi `lock_degraded` (bool) e qual `lock_state_dir` foi de fato usado --
+  lidos de `SuiteLock.degraded`/`state_dir_used` -- então o registro
+  `[RUN_TIMING]` e o `run_timings.jsonl` distinguem um run degradado (gate
+  passou, mas sob um diretório de fallback, exclusão best-effort) de um run
+  normal sem precisar re-derivar isso da ACL do host.
+- Além do tratamento já existente de `SuiteLockTimeout`, `_timed_suite_lock()`
+  também captura `SuiteLockUnwritable` antes de deixá-la subir: imprime a
+  mensagem estruturada `[SUITE_LOCK] ...` que a própria exceção já carrega e
+  relança o mesmo tipo (subclasse de `RuntimeError`), que o `main()` do
+  runner já converte em `[ERROR]`/`[HARNESS_FAIL]` com código de saída 2 --
+  nunca um traceback cru. Isso cobre o caso residual em que até o diretório de
+  fallback por identidade está inacessível (o caso comum, fallback gravável,
+  já é tratado por `resolve_state_dir()` sem levantar nada).
+- Resultado de ponta a ponta: um gate rodando sob identidade restrita
+  (ex.: grupo sandboxed `CodexSandboxUsers`, que só tem `ReadAndExecute` nos
+  arquivos de lock pré-existentes de outra conta) ainda executa os passos e
+  emite `[HARNESS_PASS]` quando a suíte passa, com a evidência da degradação
+  no próprio `run_timings.jsonl`.
+
 ## Testes de forma
 
 Teste de forma e o que so confere a existencia de um arquivo, um trecho de texto dentro de markdown, skill, docs ou HTML, ou a presenca de chaves em um JSON/YAML de configuracao, sem executar comportamento. Ele passa mesmo que o produto esteja quebrado, entao nao prova nada sobre o produto e nao deve segurar o portao.

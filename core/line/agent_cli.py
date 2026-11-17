@@ -439,10 +439,9 @@ def check_optional_mcp_servers(
         return True, []
 
     path = config_path or (Path.home() / ".claude.json")
-    if not path.is_file():
-        return True, []
-
     try:
+        if not path.is_file():
+            return True, []
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return True, []
