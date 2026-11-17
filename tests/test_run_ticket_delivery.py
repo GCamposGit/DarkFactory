@@ -1272,3 +1272,24 @@ def test_usr467_preserved_exit_reopens_without_another_build(
     assert _git_head(repo) == head_before
     assert (ctx / "merge.json").is_file()
     assert "review_route" in (ctx / "review_execution.json").read_text(encoding="utf-8")
+
+
+def test_docs_sync_refusal_is_candidate_even_when_file_names_look_like_infra(tmp_path: Path) -> None:
+    from core.line.failure_taxonomy import classify
+    from core.line.stages import Stage
+
+    reason = (
+        "docs-sync: arquivo coberto alterado sem alterar a pagina do manual. Atualize a pagina\n"
+        "- core/line/quota_meter.py -> docs/manual/cotas.md"
+    )
+    progress = MagicMock()
+    payload = run_ticket._delivery_stage_refused(
+        MagicMock(id="USR-9"), Stage.DOCS, reason, tmp_path, "b", "cmd", progress, False, True,
+    )
+    assert payload["cause"] == "docs_sync_failed" and classify(payload["cause"]) == "candidate"
+    assert payload["exit_code"] == 1
+    infra = run_ticket._delivery_stage_refused(
+        MagicMock(id="USR-9"), Stage.DOCS, reason + "\nfix_commit_failed: Connection refused", tmp_path, "b", "cmd",
+        progress, False, True,
+    )
+    assert infra["cause"] == "network"

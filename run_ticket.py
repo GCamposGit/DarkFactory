@@ -2396,8 +2396,12 @@ def _delivery_stage_refused(
     return_result: bool,
 ) -> Any:
     """A delivery stage without its artifact: nothing further runs and the ticket is not delivered."""
-    cause = (canonical_cause(reason) if classify(reason) == "infra" else
-             "review_changes_required" if stage == Stage.REVIEW else f"stage_artifact_missing:{stage.value}")
+    # DOCS: o texto do docs-sync lista nomes de arquivos (ex.: "quota"), entao so a cauda de commit pode ser infra.
+    probe = reason.split("fix_commit_failed:", 1)[1] if stage == Stage.DOCS and "fix_commit_failed:" in reason else (
+        "" if stage == Stage.DOCS else reason)
+    cause = (canonical_cause(probe) if classify(probe) == "infra" else
+             "review_changes_required" if stage == Stage.REVIEW else
+             "docs_sync_failed" if stage == Stage.DOCS else f"stage_artifact_missing:{stage.value}")
     message = f"estagio {stage.value} sem artefato valido: {reason}"
     progress.phase("merge" if stage.value in ("MERGE", "DEPLOY_SMOKE") else "gate", "failed", message, cause=cause)
     progress.set_outcome(message, cause)

@@ -1810,6 +1810,10 @@ class GitAutonomyManager:
 
 TicketFinder = Callable[[str], Optional[str]]
 TicketCreator = Callable[[str, str, Sequence[str]], Optional[str]]
+OpenTicketFinder = Callable[[], Optional[str]]
+TicketUpdater = Callable[[str, str, str], bool]
+MAIN_RED_TITLE_PREFIX = "CI vermelho no "
+_CLOSED_TICKET_STATUSES = frozenset({"completed", "cancelled"})
 Notifier = Callable[[str, str], bool]
 
 _LEDGER_RELATIVE = ".factory/demands/demands.json"
@@ -1862,6 +1866,49 @@ def find_ticket_for_sha(short_sha: str, root: Path = PROJECT_ROOT) -> Optional[s
             if needle in " ".join(parts).lower():
                 return str(item.get("id") or "") or None
     return None
+
+
+def find_open_main_red_ticket(root: Path = PROJECT_ROOT) -> Optional[str]:
+    """Id of the open (not completed/cancelled) ticket titled ``CI vermelho no ...``, if any.
+
+    Reads the local ledger, ``origin/main`` and the durable queue, so a ticket queued
+    from another machine or still only in the control store is found too.
+    """
+    sources: list[dict[str, Any]] = []
+    shown = safe_show("origin/main", _LEDGER_RELATIVE, cwd=root, runner=lambda args, directory: _run_git(args, cwd=directory))
+    if shown.returncode == 0:
+        sources.extend(_ledger_entries(shown.stdout))
+    try:
+        sources.extend(_ledger_entries((root / ".factory" / "demands" / "demands.json").read_text(encoding="utf-8")))
+    except OSError:
+        pass
+    try:
+        sources.extend(t.model_dump(mode="json") for t in DemandsStore(root / ".factory" / "demands" / "demands.json").list_tickets())
+    except Exception as exc:  # noqa: BLE001 - the queue is best-effort evidence
+        logger.warning("Could not list the durable queue for main-red dedup: %s", sanitize(str(exc)))
+    open_ids: dict[str, bool] = {}
+    for item in sources:
+        ticket_id = str(item.get("id") or "")
+        if ticket_id and str(item.get("title") or "").startswith(MAIN_RED_TITLE_PREFIX):
+            closed = str(item.get("status") or "").lower() in _CLOSED_TICKET_STATUSES
+            open_ids[ticket_id] = open_ids.get(ticket_id, True) and not closed
+    return next((tid for tid, is_open in sorted(open_ids.items()) if is_open), None)
+
+
+def refresh_main_red_ticket(ticket_id: str, title: str, problem: str, root: Path = PROJECT_ROOT) -> bool:
+    """Point an open red-main ticket at the current sha and jobs; False when it cannot be updated."""
+    try:
+        store = DemandsStore(root / ".factory" / "demands" / "demands.json")
+        ticket = store.get_ticket(ticket_id)
+        if ticket is None or ticket.status.value in _CLOSED_TICKET_STATUSES:
+            return False
+        store.save_ticket(ticket.model_copy(update={
+            "title": title, "problem_statement": problem, "updated_at": datetime.now(timezone.utc),
+        }))
+        return True
+    except Exception as exc:  # noqa: BLE001 - refreshing is best-effort; the ticket already exists
+        logger.warning("Could not refresh %s: %s", ticket_id, sanitize(str(exc)))
+        return False
 
 
 def create_defect_ticket(
@@ -1954,14 +2001,17 @@ def run_check_main(
     alert_owner: bool = False,
     ticket_finder: Optional[TicketFinder] = None,
     ticket_creator: Optional[TicketCreator] = None,
+    open_ticket_finder: Optional[OpenTicketFinder] = None,
+    ticket_updater: Optional[TicketUpdater] = None,
     notifier: Optional[Notifier] = None,
     owner_action_store: Optional[OwnerActionStore] = None,
     owner_action_notifier: Optional[main_ci_alert.Notifier] = None,
 ) -> tuple[int, dict[str, Any]]:
     """Probe the base branch CI. Exit code: 0 green, 1 red, 2 unknown (gh failure).
 
-    ``open_ticket`` files ONE defect ticket per SHA (idempotent: an existing
-    ticket mentioning the short SHA is reused). ``notify`` sends an alert on every
+    ``open_ticket`` keeps at most ONE open ``CI vermelho no ...`` ticket (idempotent: a
+    ticket mentioning the short SHA, or any other still-open one, is reused and
+    refreshed with the current sha and jobs instead of opening another). ``notify`` sends an alert on every
     invocation where the branch is red, so schedule it with a sensible cadence.
     ``alert_owner`` keeps the single ``OA-MAIN-CI`` owner-action alert (DarkHub +
     Telegram ops/owner) in sync (USR-247): raised, never duplicated, on red; closed
@@ -1985,11 +2035,14 @@ def run_check_main(
     if open_ticket:
         finder = ticket_finder or (lambda sha: find_ticket_for_sha(sha, root))
         creator = ticket_creator or (lambda t, p, c: create_defect_ticket(t, p, c, root))
-        existing = finder(status.short_sha)
+        open_finder = open_ticket_finder or (lambda: find_open_main_red_ticket(root))
+        updater = ticket_updater or (lambda tid, t, p: refresh_main_red_ticket(tid, t, p, root))
+        title, problem, criteria = build_main_red_ticket(status)
+        existing = finder(status.short_sha) or open_finder()
         if existing:
-            payload["ticket"] = {"id": existing, "created": False}
+            refreshed = bool(updater(existing, title, problem))
+            payload["ticket"] = {"id": existing, "created": False, "refreshed": refreshed}
         else:
-            title, problem, criteria = build_main_red_ticket(status)
             created = creator(title, problem, criteria)
             payload["ticket"] = (
                 {"id": created, "created": True}

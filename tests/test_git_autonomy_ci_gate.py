@@ -1087,10 +1087,12 @@ def test_check_main_open_ticket_is_idempotent_per_sha() -> None:
         return "USR-86"
 
     runner = red_main_script()
-    code, first = autonomy.run_check_main(runner=runner, open_ticket=True, ticket_finder=finder, ticket_creator=creator)
+    code, first = autonomy.run_check_main(runner=runner, open_ticket=True, ticket_finder=finder, ticket_creator=creator,
+        open_ticket_finder=lambda: None, ticket_updater=lambda *_a: True)
     assert code == 1 and first["ticket"] == {"id": "USR-86", "created": True}
-    code, second = autonomy.run_check_main(runner=runner, open_ticket=True, ticket_finder=finder, ticket_creator=creator)
-    assert code == 1 and second["ticket"] == {"id": "USR-86", "created": False}
+    code, second = autonomy.run_check_main(runner=runner, open_ticket=True, ticket_finder=finder, ticket_creator=creator,
+        open_ticket_finder=lambda: None, ticket_updater=lambda *_a: True)
+    assert code == 1 and second["ticket"] == {"id": "USR-86", "created": False, "refreshed": True}
     assert len(created) == 1
     title, problem, criteria = created[0]
     assert "5da723e" in title and len(title) <= 120 and MAIN_JOB in title
@@ -1110,7 +1112,8 @@ def test_check_main_does_not_open_a_ticket_when_main_is_green_or_flag_is_off() -
 
 def test_check_main_ticket_creation_failure_keeps_exit_code_red() -> None:
     code, payload = autonomy.run_check_main(
-        runner=red_main_script(), open_ticket=True, ticket_finder=lambda s: None, ticket_creator=lambda t, p, c: None
+        runner=red_main_script(), open_ticket=True, ticket_finder=lambda s: None, ticket_creator=lambda t, p, c: None,
+        open_ticket_finder=lambda: None
     )
     assert code == 1 and payload["ticket"]["id"] is None and payload["ticket"]["created"] is False
 
@@ -1359,3 +1362,36 @@ def test_a_raising_on_phase_hook_never_changes_the_delivery(repo: tuple[Path, Pa
 
 def test_default_ci_wait_covers_slow_windows_checks() -> None:
     assert ci_checks.DEFAULT_CI_WAIT_SECONDS >= 2400
+
+
+def _write_ledger(root: Path, rows: list[dict[str, Any]]) -> None:
+    ledger = root / ".factory" / "demands"
+    ledger.mkdir(parents=True)
+    (ledger / "demands.json").write_text(json.dumps(rows), encoding="utf-8")
+
+
+def test_check_main_reuses_and_refreshes_open_ticket_for_a_newer_sha(tmp_path: Path) -> None:
+    _write_ledger(tmp_path, [
+        {"id": "USR-1", "title": "CI vermelho no main @1111111: job", "status": "completed", "tags": []},
+        {"id": "USR-2", "title": "CI vermelho no main @2222222: job", "status": "planned", "tags": []},
+    ])
+    assert autonomy.find_open_main_red_ticket(tmp_path) == "USR-2"
+    refreshed: list[tuple[str, str]] = []
+
+    def creator(*_a: Any) -> Optional[str]:
+        raise AssertionError("must reuse the open ticket")
+
+    code, payload = autonomy.run_check_main(
+        runner=red_main_script(), open_ticket=True, ticket_finder=lambda s: None, ticket_creator=creator,
+        open_ticket_finder=lambda: "USR-2", ticket_updater=lambda tid, t, p: refreshed.append((tid, t)) or True,
+    )
+    assert code == 1 and payload["ticket"] == {"id": "USR-2", "created": False, "refreshed": True}
+    assert refreshed[0][0] == "USR-2" and "5da723e" in refreshed[0][1]
+
+
+def test_find_open_main_red_ticket_ignores_closed_tickets(tmp_path: Path) -> None:
+    _write_ledger(tmp_path, [
+        {"id": "USR-1", "title": "CI vermelho no main @1111111: job", "status": "cancelled", "tags": []},
+        {"id": "USR-3", "title": "Outra coisa", "status": "planned", "tags": []},
+    ])
+    assert autonomy.find_open_main_red_ticket(tmp_path) is None

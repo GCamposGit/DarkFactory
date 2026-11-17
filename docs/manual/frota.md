@@ -518,3 +518,4 @@ A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao com
 O laço do despachante publica as cotas no Hub a cada 5 minutos por `core.usage.sync_task.publish_once()`, sem sonda paga. Falha de publicação fica só no log e não interrompe o ciclo.
 
 Causas de entrega (USR-475): `rebase_conflict` e falha do candidato; `merge_blocked` e infra e espera com backoff sem gastar tentativa.
+A recusa da etapa DOCS (docs-sync) sai como `docs_sync_failed`, causa de candidato que gasta orçamento; o texto do docs-sync cita nomes de arquivo e nunca é inferido como infraestrutura. Só `fix_commit_failed` de rede ou permissão vira infra. `stage_artifact_missing` também é de candidato.

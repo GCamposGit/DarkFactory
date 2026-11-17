@@ -1022,3 +1022,33 @@ def test_real_pytest_counts_parametrized_selection_and_runs_serial(monkeypatch, 
     output = capsys.readouterr().out
     assert "selected=3 timeout_sec=180 workers=0" in output
     assert "3 passed" in output
+
+
+def test_pr_fallback_keeps_contracts_and_tests_citing_changed_module(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "core/line/agent_cli.py", "VALUE = 1\n")
+    _write(repo, "tests/test_a.py", "def test_a(): assert True\n")
+    _write(repo, "tests/line/test_citer.py", "def test_c():\n    target = 'core.line.agent_cli.build'\n")
+    _write(repo, "tests/test_model_id_ratchet_usr185.py", "def test_r(): assert True\n")
+    _commit_all(repo, "baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "tests/conftest.py", "# global\n")  # forca o fallback
+    _write(repo, "core/line/agent_cli.py", "VALUE = 2\n")
+    selection = affected.select_pr_tests(repo)
+    assert selection.mode == "affected_fallback"
+    assert {"tests/test_model_id_ratchet_usr185.py", "tests/line/test_citer.py",
+            *affected.PR_SMOKE_TESTS} <= set(selection.tests)
+    assert "tests/test_a.py" not in selection.tests
+
+
+def test_pr_subset_always_adds_contract_tests_for_docs_only_diff(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "docs/manual/custo.md", "a\n")
+    _write(repo, "tests/test_model_id_ratchet_usr185.py", "def test_r(): assert True\n")
+    _commit_all(repo, "baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "docs/manual/custo.md", "b\n")
+    selection = affected.select_pr_tests(repo)
+    assert "tests/test_model_id_ratchet_usr185.py" in selection.tests

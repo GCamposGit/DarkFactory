@@ -428,3 +428,5 @@ de candidatos anteriores permanecem preservadas; o novo candidato exige suas
 proprias provas de portao, revisao e producao.
 
 Na admissao, "mesma familia" compara a familia do modelo, nao o nome do harness: escritor e revisor via OpenRouter com modelos de familias diferentes sao independentes.
+
+Recusa da etapa DOCS: o launcher reinvoca o agente uma vez com a mensagem do docs-sync; persistindo, a causa é `docs_sync_failed` (candidato, exit 1), não infra (exit 75).
