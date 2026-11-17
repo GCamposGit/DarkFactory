@@ -9,6 +9,9 @@ Como manter: este arquivo é o snapshot da fase atual (canais, máquinas, orçam
 - Os três devem funcionar sem erro e levar a demanda pelo mesmo motor (`run_ticket.py` / despachante).
 - Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger — adotando o **Gemini 4 Argon High** como modelo de alta inteligência para planejamento e coordenação da fábrica e o **Gemini 4 Hydrogen High** para tarefas simples de codificação, testes e subagentes. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
 
+## Política de dados entre hosts
+- `.factory/config/data_policies.json` é a referência compartilhada e versionada do projeto. Uma política legada divergente em `.factory/enterprise/configs.json` é tratada como override local e gera diagnóstico estruturado `data_policy_host_divergence`; quando ela remove todas as rotas, a admissão retorna `route_wait` com `policy_cause` contendo a fonte efetiva. Testes usam raízes temporárias e a suíte protege toda a árvore `.factory/enterprise` do checkout.
+
 ## Ambiente e máquinas
 - Recuperação em vigor: testes remotos vão para o Desktop saudável (`100.78.181.90:8080`); Grokbox indisponível fica excluído. `DARKFAC_FLEET_RESUME_ONLY=1` mantém retomadas sem novos BUILDs até a saída estabilizar. A exclusão do Desktop descrita abaixo, por outra carga, não é esta recuperação.
 - Windows é o ambiente principal; Linux roda no CI e na VM do Grok.

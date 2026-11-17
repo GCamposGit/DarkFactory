@@ -1062,6 +1062,21 @@
       "origin": "rca",
       "status": "active",
       "active": true
+    },
+    {
+      "rca_id": "rca_7dc9d588",
+      "timestamp": "2026-11-17T10:38:48.689349+00:00",
+      "category": "test_regression",
+      "symptom": "No gate, o teste de admissao esperava causa route_wait no JSON mas recebeu null",
+      "mechanism": "O payload define cause=route_wait e depois expande AdmissionDecision.public_dict(), cujo campo cause null sobrescreve a causa operacional; quando preenchido, o objeto da politica também ocuparia o mesmo campo",
+      "root_cause": "Dois contratos diferentes partilhavam a chave JSON cause sem namespace para a explicacao de politica",
+      "patch_description": "Separar a explicacao como policy_cause, preservar cause=route_wait e cobrir ambos os casos; sentinela agora fingerprinta toda a arvore enterprise do checkout",
+      "preventative_rule": "O JSON do launcher reserva cause para o estado operacional; diagnosticos de politica ficam em policy_cause, e testes verificam ambos",
+      "regression_test_file": "tests/test_run_ticket_routing.py",
+      "verification_gate_id": "gate_2c22f732",
+      "origin": "rca",
+      "status": "active",
+      "active": true
     }
   ],
   "transfers": [
@@ -1736,7 +1751,15 @@
       "passed": true,
       "output_snippet": ".............                                                            [100%]\n13 passed in 0.26s\n",
       "executed_at": "2026-09-21T10:59:55.573982+00:00"
+    },
+    {
+      "gate_id": "gate_2c22f732",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_run_ticket_routing.py::test_admission_wait_exits_75_before_the_worktree tests/test_run_ticket_routing.py::test_admission_wait_keeps_route_cause_and_exposes_policy_diagnostic -q -n 0",
+      "passed": true,
+      "output_snippet": "[WORKERS] allowed 2 xdist workers (available RAM: 7.9 GiB (reserve: 2.0 GiB, 2.0 GiB/w -> 2 supported))\n..                                                                       [100%]\n2 passed in 1.22s\n",
+      "executed_at": "2026-11-17T10:38:48.686341+00:00"
     }
   ],
-  "last_updated": "2026-09-21T10:59:55.577981+00:00"
+  "last_updated": "2026-11-17T10:38:48.689349+00:00"
 }

@@ -76,25 +76,38 @@ from core.harness import suite_lock as _suite_lock
 from tests import _cache_dir, _tree_hygiene, _worker_capacity
 
 
-def _file_fingerprint(path: Path) -> tuple[int, int, bytes] | None:
+def _directory_fingerprint(path: Path) -> tuple[tuple[str, int, int, bytes], ...] | None:
     try:
-        stat = path.stat()
+        if not path.is_dir():
+            return None
     except FileNotFoundError:
         return None
-    return stat.st_mtime_ns, stat.st_size, hashlib.sha256(path.read_bytes()).digest()
+
+    entries: list[tuple[str, int, int, bytes]] = []
+    for entry in sorted(path.rglob("*")):
+        relative = entry.relative_to(path).as_posix()
+        stat = entry.lstat()
+        if entry.is_symlink():
+            digest = hashlib.sha256(os.readlink(entry).encode("utf-8")).digest()
+            entries.append((relative, stat.st_mtime_ns, stat.st_size, digest))
+        elif entry.is_dir():
+            entries.append((relative, stat.st_mtime_ns, 0, b"directory"))
+        elif entry.is_file():
+            entries.append((relative, stat.st_mtime_ns, stat.st_size, hashlib.sha256(entry.read_bytes()).digest()))
+    return tuple(entries)
 
 
-_CHECKOUT_ENTERPRISE_POLICY = IMPORT_ROOT / ".factory" / "enterprise" / "configs.json"
-_CHECKOUT_ENTERPRISE_POLICY_BEFORE = _file_fingerprint(_CHECKOUT_ENTERPRISE_POLICY)
+_CHECKOUT_ENTERPRISE_DIR = IMPORT_ROOT / ".factory" / "enterprise"
+_CHECKOUT_ENTERPRISE_DIR_BEFORE = _directory_fingerprint(_CHECKOUT_ENTERPRISE_DIR)
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _checkout_enterprise_policy_is_read_only() -> Iterator[None]:
-    """Fail if the suite creates or modifies enterprise policy in its real checkout."""
+    """Fail if the suite creates, removes or modifies files under enterprise state in its checkout."""
     yield
-    assert _file_fingerprint(_CHECKOUT_ENTERPRISE_POLICY) == _CHECKOUT_ENTERPRISE_POLICY_BEFORE, (
-        "tests must keep enterprise policy configs in temporary state roots; "
-        f"checkout file changed: {_CHECKOUT_ENTERPRISE_POLICY}"
+    assert _directory_fingerprint(_CHECKOUT_ENTERPRISE_DIR) == _CHECKOUT_ENTERPRISE_DIR_BEFORE, (
+        "tests must keep enterprise policy state in temporary roots; "
+        f"checkout directory changed: {_CHECKOUT_ENTERPRISE_DIR}"
     )
 
 

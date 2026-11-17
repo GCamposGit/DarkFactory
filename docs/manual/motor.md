@@ -64,6 +64,10 @@ reset de cota mais próximo conhecido, no máximo 30 minutos à frente e nunca a
 `discovered`, `accepted`, `implementing` ou `validating`. Um ticket que já estava `planned` permanece
 na fila. A worktree não é criada e o dry run não imprime `[DRY RUN]`.
 
+Quando os provedores elegíveis são removidos por uma política empresarial, o JSON mantém
+`cause: "route_wait"` para o dispatcher e coloca o diagnóstico sanitizado em `policy_cause`.
+O caminho `policy_cause.source_file` identifica o arquivo local ou compartilhado que decidiu a rota.
+
 `allow` não é gravado. `_stage_route`, o PLAN, cada fatia de development e o REVIEW chamam `pick` de
 novo na leitura daquele momento.
 

@@ -3219,13 +3219,16 @@ def _stage_admission(
         f"[AGUARDANDO] {message}. Ticket segue planned e volta a fila depois ({ROUTE_WAIT_MARKER}).",
         file=sys.stderr,
     )
+    decision_fields = decision.public_dict()
+    policy_cause = decision_fields.pop("cause")
     payload = {
+        **decision_fields,
         "ok": False,
         "cause": "route_wait",
+        "policy_cause": policy_cause,
         "error": decision.code,
         "ticket_id": ticket.id,
         "exit_code": EXIT_ROUTE_WAIT,
-        **decision.public_dict(),
     }
     print(json.dumps(payload, ensure_ascii=False))
     return EXIT_ROUTE_WAIT
