@@ -499,3 +499,12 @@ Para comparar a configuracao dos destinos antes de reexecutar um ticket, rode o 
 `python C:\dev\DarkFac\scripts\live_progress_doctor.py`. A `causa` desse diagnostico
 (`dsn_divergente`, `timeout_curto`, `credencial_ausente`, `host_sem_rota`, `no_url`, `ok`) compara os
 dois destinos e usa um codigo proprio, distinto do `cause_code` acima.
+
+## Limpeza apos falha sem implementacao (USR-500)
+
+Quando uma tentativa termina sem erro recuperavel do agente, `_report_workspace_fate`
+remove a worktree e a branch somente se `HEAD` ainda e a base e o ledger do proprio ticket
+e a unica alteracao local. O ledger e passado como caminho descartavel explicito; a rotina
+so o restaura se for a unica alteracao rastreada. Qualquer outra alteracao, processo ativo,
+lock ou estado de processo que nao possa ser verificado preserva a worktree para diagnostico.
+Espera por falta de rota continua preservada para retomada e nao entra nesse descarte.

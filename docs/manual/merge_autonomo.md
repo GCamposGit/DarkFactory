@@ -40,6 +40,17 @@ A fabrica faz push e merge com um token de curta duracao de uma GitHub App, sem 
 3. `_open_delivery_pr` faz push (`--force-with-lease`; `--force` so para atualizar a head de um PR de fila ja aberto com o mesmo titulo) e cria ou reaproveita o PR. Ajusta titulo e label (`queue`, `implementation` ou `registry`). Implementacao tambem registra o catalogo.
 4. Com `merge` ligado, `_deliver` so chama `gh pr merge --squash --delete-branch` depois do portao de CI no head exato. Qualquer check em `fail` bloqueia o merge, incluindo `ledger-fast` e `pr-validation`; o caminho leve de ledger nao ignora os checks. Se nao houver workflow configurado, a ausencia de checks so e aceita depois da janela de tolerancia. Se o ruleset bloquear, o portao roda de novo e ha uma segunda tentativa de merge. Se o PR nao estiver mergeable, a branch e reaplicada em `origin/<base>` e o portao roda de novo, ate 3 vezes. O SHA do merge precisa aparecer em `origin/<base>` antes da limpeza da branch.
 
+## Limpeza de worktree ao concluir (USR-500)
+
+Depois do merge, `deliver_branch` tenta remover a worktree secundaria e a branch local pelo
+fluxo seguro de `ticket_workspace.cleanup`. O mesmo fluxo e usado para uma entrega `no_changes`
+quando `merge=True`. `DeliveryReport.worktree_cleanup_attempted` informa se essa tentativa
+ocorreu; `cleaned` informa se a limpeza da entrega terminou com sucesso. Em `complete_ticket`,
+os caminhos de conclusao que ainda nao tentaram a remocao chamam
+`cleanup_terminal_ticket_worktree` depois das provas de entrega. Bloqueios preservam a
+worktree e geram registro em `.factory/runs/cleanup_pending/`, que a varredura diaria tenta
+novamente sem repetir a tentativa imediatamente no mesmo fluxo.
+
 ## Ledger de acoes do owner
 
 `core/owner_actions/store.py` trata leituras de forma tolerante para manter a fila disponivel, mas toda mutacao valida o documento completo antes de gravar. Cada item precisa obedecer ao contrato de `OwnerAction` (incluindo `kind=action|decision`), e IDs duplicados, envelopes invalidos ou linhas malformadas fazem a escrita falhar sem substituir o arquivo. Assim, um item legado invalido como `OA-071` com `kind=approval` nao pode ser propagado por uma nova gravacao. As mesmas validacoes se aplicam ao ledger de controle e ao overlay de resolucoes.

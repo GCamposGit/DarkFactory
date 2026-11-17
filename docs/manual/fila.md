@@ -88,6 +88,16 @@ numa linha nova. A linha igual nao e repetida. Ticket que ja esta `planned` nao 
 regravado e nao ganha outra linha. Branch, worktree e trava de linha nao entram
 nesse metodo.
 
+## Limpeza ao encerrar ticket (USR-500)
+
+`DemandsStore.update_status` primeiro persiste a transicao e libera o lock do ledger. Ao
+marcar o ticket como `completed` ou `cancelled`, tenta remover sua worktree mais recente
+por `core.git.ticket_workspace.cleanup`. Uma worktree com alteracoes, lock, processo em
+execucao ou estado de processo desconhecido e preservada; a falha de limpeza nao desfaz
+nem bloqueia o status terminal. Tentativas que nao removeram o diretorio ficam registradas
+em `.factory/runs/cleanup_pending/` para nova classificacao pela varredura diaria de
+worktrees.
+
 ## Reconciliação no ciclo do despachante (USR-498)
 
 No início de cada ciclo, antes de montar a fila (`select_tickets`), o despachante chama `reconcile_stale_active`. O limiar default é 24 horas: ticket `implementing` ou `validating` sem vida além desse prazo volta a `planned` e pode ser despachado no mesmo ciclo. A causa fica no ticket (`delivery_evidence`) e a ação fica em `cycle["reconciled"]`, gravado em `.factory/runs/fleet_dispatcher_state.json`.

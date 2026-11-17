@@ -213,3 +213,17 @@ Tabela de `cause_code` do publicador (classifica uma tentativa de escrita que fa
 | `unknown` | excecao fora da lista |
 
 Para comparar o control store e o sink sem rede ou escrita (host, porta, `sslmode`, timeout e presenca de credenciais, sempre redigidos): `python C:\dev\DarkFac\scripts\live_progress_doctor.py`. A `causa` desse doctor (`dsn_divergente`, `timeout_curto`, `credencial_ausente`, `host_sem_rota`, `no_url`, `ok`) e um codigo distinto do `cause_code` acima: compara os dois destinos, nao classifica uma excecao. Detalhe operacional: `docs/runbooks/live_progress.md`.
+
+## Limpeza de tentativa sem implementacao (USR-500)
+
+Se o agente falhar sem gravar implementacao, o launcher remove a worktree apenas quando
+ela continua na base e a unica alteracao e o ledger criado pela propria tentativa. Qualquer
+outro arquivo alterado, processo ativo, lock ou estado de processo nao verificavel mantem a
+worktree para diagnostico. A espera `route_wait` continua preservada para retomada.
+
+## Preflight de MCP opcional
+
+O preflight do Claude consulta os servidores opcionais em `~/.claude.json`. Arquivo ausente
+ou inacessivel, inclusive quando a consulta de existencia recebe `PermissionError`, e tratado
+como configuracao opcional indisponivel e nao interrompe a execucao do ticket. Para exigir o
+modo MCP estrito explicitamente, use `DARKFAC_STRICT_MCP_CONFIG=1`.
