@@ -85,7 +85,9 @@ def test_probe_claude_headless_still_returns_a_window_when_cleanup_fails(
         returncode = 0
         stdout = (
             '{"type": "rate_limit_event", "rate_limit_info": '
-            '{"unifiedWindows": {"five_hour": {"utilization": 0.42}}}}\n'
+            '{"unifiedWindows": {"five_hour": {"utilization": 0.42}, '
+            '"seven_day": {"utilization": 0.1}}}}\n'
+            '{"type": "system", "model": "claude-haiku-5-5"}\n'
         )
         stderr = ""
 

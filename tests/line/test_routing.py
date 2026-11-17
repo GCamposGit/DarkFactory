@@ -725,11 +725,11 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     ]
     calls = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_run(cmd, *args, **kwargs):
         calls.append((cmd, kwargs))
         return subprocess.CompletedProcess(cmd, 0, "\n".join(json.dumps(x) for x in lines), "")
 
-    monkeypatch.setattr(adapters_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(adapters_mod, "_run_probe_command", fake_run)
     adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
     usage = adapter.inspect(force=True)
     assert usage.quota_supported and usage.adapter == "claude_code_headless"
@@ -777,7 +777,7 @@ def test_claude_headless_probe_keeps_account_quota_whatever_the_model(
     ]
     output = "\n".join([*(json.dumps(event) for event in events), diagnostic]).strip()
     monkeypatch.setattr(
-        adapters_mod.subprocess, "run", lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
+        adapters_mod, "_run_probe_command", lambda cmd, *args, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
     )
     adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
 
@@ -805,9 +805,9 @@ def test_claude_headless_probe_requires_both_windows_and_reported_effective_mode
     ]
     output = "\n".join(json.dumps(event) for event in events)
     monkeypatch.setattr(
-        adapters_mod.subprocess,
-        "run",
-        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
+        adapters_mod,
+        "_run_probe_command",
+        lambda cmd, *args, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
     )
     adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
 
@@ -826,7 +826,7 @@ def test_claude_probe_fails_before_any_cli_command_when_model_config_is_missing(
     monkeypatch.setattr(registry, "DEFAULT_REGISTRY_PATH", tmp_path / "missing-model-registry.json")
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
     calls = []
-    monkeypatch.setattr(adapters_mod.subprocess, "run", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(adapters_mod, "_run_probe_command", lambda *args, **kwargs: calls.append(args))
     adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
 
     with pytest.raises(registry.ClaudeProbeModelConfigurationError, match="missing or invalid"):
