@@ -520,3 +520,5 @@ O laço do despachante publica as cotas no Hub a cada 5 minutos por `core.usage.
 
 Causas de entrega (USR-475): `rebase_conflict` e falha do candidato; `merge_blocked` e infra e espera com backoff sem gastar tentativa.
 A recusa da etapa DOCS (docs-sync) sai como `docs_sync_failed`, causa de candidato que gasta orçamento; o texto do docs-sync cita nomes de arquivo e nunca é inferido como infraestrutura. Só `fix_commit_failed` de rede ou permissão vira infra. `stage_artifact_missing` também é de candidato.
+
+Relancamento pelo despachante (USR-447): se a worktree preservada do ticket tem commits a frente de `origin/main` e plano valido (SPEC.md e tickets.json), `default_launch` acrescenta `--resume-delivery --worktree <caminho>` ao comando da frota; sem isso o ticket e relancado inteiro.

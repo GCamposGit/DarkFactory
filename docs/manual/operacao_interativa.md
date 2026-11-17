@@ -170,3 +170,5 @@ No rebase da entrega (USR-475), conflito so em `.factory/demands/demands.json`, 
 Etapa DOCS reprovada após a reinvocação única encerra com causa `docs_sync_failed` (candidato): atualize a página do manual indicada pelo docs-sync e retome.
 
 Relancamento de ticket (USR-447): com plano valido para a mesma demanda o launcher nao replaneja, pula as fatias ja concluidas e, se todas estao prontas e ha diff, vai direto ao portao. Detalhes em `docs/manual/motor.md`.
+
+O commit do agente de conserto regrava o vinculo de build (USR-447): o candidato reparado continua retomavel por `--resume-delivery`.
