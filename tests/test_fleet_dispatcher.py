@@ -651,6 +651,36 @@ def test_grokbox_route_wait_keeps_the_global_cooldown(tmp_path: Path):
     assert e.launched == [("USR-01", "grokbox")]
 
 
+@pytest.mark.parametrize("host_id", ["notebook", "desktop"])
+def test_is_opportunistic_host_loss_is_grokbox_specific(host_id: str) -> None:
+    """USR-492 T2: a mesma queda (exit 75 ou [REMOTE_JOB_LOST]) so e tratamento
+    silencioso no Grokbox; Notebook e Desktop continuam como infra comum."""
+    assert fd.is_opportunistic_host_loss("grokbox", 75, "") is True
+    assert fd.is_opportunistic_host_loss("grokbox", 2, "[REMOTE_JOB_LOST] worker sumiu\n") is True
+    assert fd.is_opportunistic_host_loss(host_id, 75, "") is False
+    assert fd.is_opportunistic_host_loss(host_id, 2, "[REMOTE_JOB_LOST] worker sumiu\n") is False
+
+
+def test_desktop_infra_loss_keeps_the_existing_cooldown_treatment(tmp_path: Path) -> None:
+    """USR-492 T2: a mesma perda que e silenciosa no Grokbox continua reenfileirando
+    com cooldown global no Desktop -- a supressao de alerta/cooldown e especifica
+    do Grokbox, nao um relaxamento geral de infra."""
+    demands = [_d("USR-01"), _d("USR-02")]
+    e = Env(tmp_path, demands, free=("notebook", "desktop"))
+    e.d.run_cycle()
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "desktop")]
+    job = e.d.in_flight["desktop"]
+    log = tmp_path / "USR-02-desktop-lost.log"
+    log.write_text("", encoding="utf-8")  # mesmo exit code (75) usado na queda silenciosa do Grokbox
+    job.log_path = log
+    e.handles["USR-02"].rc = 75
+    e.free = {"notebook", "grokbox", "desktop"}
+    cycle = e.d.run_cycle()
+    assert cycle["cooldown"] == ["USR-02"]
+    assert demands[1]["status"] == "planned"
+    assert e.launched == [("USR-01", "notebook"), ("USR-02", "desktop")]
+
+
 def test_self_modification_alert_stays_on_the_express_path(tmp_path: Path):
     alerts: list[object] = []
     e = Env(tmp_path, [])

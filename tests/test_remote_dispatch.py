@@ -194,14 +194,63 @@ def _noop_emit_cache_hit(record: dict, *, config_path: Path) -> bool:  # pragma:
 # =============================================================================
 
 
-def test_worker_urls_defaults_to_grokbox_then_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_urls_defaults_to_notebook_grokbox_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
+    # USR-492: default order is derived from .factory/config/line_fleet.json
+    # (Notebook > Grokbox > Desktop priority), not a hardcoded grokbox-first list.
     monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
     monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
     expected = [u.strip() for u in remote_dispatch.DEFAULT_WORKERS.split(",") if u.strip()]
     urls = remote_dispatch.worker_urls()
     assert urls == expected
-    assert urls[0] == "http://100.77.130.5:8080"  # grokbox first
-    assert urls[1] == "http://100.78.181.90:8080"  # Desktop second
+    assert urls[0] == "http://100.81.84.124:8080"  # Notebook first
+    assert urls[1] == "http://100.77.130.5:8080"  # Grokbox second (opportunistic)
+    assert urls[2] == "http://100.78.181.90:8080"  # Desktop last
+
+
+def test_default_workers_from_fleet_follows_priority_not_config_file_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    # USR-492: the derivation sorts by HostConfig.priority (FleetConfig.sorted_hosts()),
+    # regardless of the order hosts happen to be declared in -- proves it is a real
+    # derivation and not a copy of today's line_fleet.json host order.
+    from core.line.fleet_policy import FleetConfig, HostConfig
+
+    shuffled = FleetConfig(
+        max_fleet_slots=3,
+        hosts=[
+            HostConfig(id="desktop", name="Desktop", priority=3),
+            HostConfig(id="notebook", name="Notebook", priority=1),
+            HostConfig(id="grokbox", name="Grokbox", priority=2),
+        ],
+    )
+    assert remote_dispatch._default_workers_from_fleet(shuffled) == (
+        "http://100.81.84.124:8080,http://100.77.130.5:8080,http://100.78.181.90:8080"
+    )
+
+
+def test_default_workers_from_fleet_skips_hosts_without_a_known_worker_url() -> None:
+    from core.line.fleet_policy import FleetConfig, HostConfig
+
+    fleet = FleetConfig(
+        max_fleet_slots=2,
+        hosts=[
+            HostConfig(id="notebook", name="Notebook", priority=1),
+            HostConfig(id="some_new_host", name="New Host", priority=2),
+            HostConfig(id="grokbox", name="Grokbox", priority=3),
+        ],
+    )
+    assert remote_dispatch._default_workers_from_fleet(fleet) == (
+        "http://100.81.84.124:8080,http://100.77.130.5:8080"
+    )
+
+
+def test_default_workers_from_fleet_falls_back_when_config_cannot_load() -> None:
+    # A fleet_config stand-in whose sorted_hosts() raises exercises the
+    # except-and-fall-back branch the same way a missing/malformed
+    # line_fleet.json would via load_fleet_config().
+    class _BrokenFleetConfig:
+        def sorted_hosts(self) -> list:
+            raise RuntimeError("corrupt config")
+
+    assert remote_dispatch._default_workers_from_fleet(_BrokenFleetConfig()) == remote_dispatch._FALLBACK_DEFAULT_WORKERS
 
 
 def test_worker_urls_filters_disabled_desktop_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,7 +258,7 @@ def test_worker_urls_filters_disabled_desktop_by_name(monkeypatch: pytest.Monkey
     monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
     urls = remote_dispatch.worker_urls()
     assert "http://100.78.181.90:8080" not in urls
-    assert urls == ["http://100.77.130.5:8080"]
+    assert urls == ["http://100.81.84.124:8080", "http://100.77.130.5:8080"]
 
 
 def test_worker_urls_filters_disabled_desktop_by_ip_and_custom_list(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -451,6 +500,54 @@ def test_busy_worker_waits_then_falls_back(monkeypatch: pytest.MonkeyPatch) -> N
         notify_hub_on_pass=lambda: None,
     )
     assert result is None
+
+
+def test_maybe_dispatch_remote_opportunistically_falls_through_fleet_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-492: with no `DARKFAC_TEST_WORKERS` override, the fleet-derived order
+    (Notebook > Grokbox > Desktop) is probed in that order; the first host being
+    offline is not an error -- the gate falls to the next one without raising
+    and without any human intervention, exactly like today's grokbox/desktop pair."""
+
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
+
+    notebook_url, grokbox_url, desktop_url = remote_dispatch.worker_urls()
+    probed: list[str] = []
+
+    def _probe(url: str, *_args: object, **_kwargs: object) -> dict | None:
+        probed.append(url)
+        if url == notebook_url:
+            return None  # offline -- expected, never an error
+        return {"busy": False, "platform_family": "windows", "python_version": "3.12", "hostname": "grokbox"}
+
+    dispatched: list[str] = []
+
+    def _fake_dispatch_one_job(base_url: str, **_kwargs: object) -> tuple[bool, HarnessResult]:
+        dispatched.append(base_url)
+        return True, HarnessResult.model_validate(_valid_remote_result_json())
+
+    monkeypatch.setattr(remote_dispatch, "probe_health", _probe)
+    monkeypatch.setattr(remote_dispatch, "_dispatch_one_job", _fake_dispatch_one_job)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "a" * 40)
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(),
+        config_hash="b" * 64,
+        quick=True,
+        include_holdout=False,
+        config_path=Path("harness.config.json"),
+        project_root=REPO_ROOT,
+        cache_lookup_enabled=False,
+        local_only=False,
+        remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit,
+        notify_hub_on_pass=lambda: None,
+    )
+
+    assert result is True
+    assert probed == [notebook_url, grokbox_url], "Desktop must never be probed once Grokbox succeeds"
+    assert dispatched == [grokbox_url]
 
 
 # =============================================================================
