@@ -195,7 +195,7 @@ class _FakePg:
         self.executed: list[tuple[str, Any]] = []
         self.commits = 0
 
-    def connect(self, url: str) -> "_FakeConn":
+    def connect(self, url: str, **kwargs: Any) -> "_FakeConn":
         return _FakeConn(self)
 
 

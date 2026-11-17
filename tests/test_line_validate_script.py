@@ -163,6 +163,8 @@ print("STUB_NEW=" + (Path("new.txt").read_text() if Path("new.txt").exists() els
 print("STUB_IGNORED=" + ("present" if Path("ignored.log").exists() else "absent"))
 print("STUB_SANDBOX=" + os.environ.get("DARKFAC_CODEX_SANDBOX_MODE", "absent"))
 print("STUB_DB=" + os.environ.get("DARKFAC_HF02_DATABASE_URL", "absent"))
+print("STUB_PROJECT_ROOT=" + os.environ.get("DARKFAC_PROJECT_ROOT", "absent"))
+print("STUB_STATE_ROOT=" + os.environ.get("DARKFAC_STATE_ROOT", "absent"))
 Path(os.environ["STUB_OUT"]).write_text("\\n".join(lines), encoding="utf-8")
 sys.exit(int(os.environ.get("STUB_EXIT", "0")))
 """
@@ -201,6 +203,9 @@ def test_dirty_tree_runs_the_official_runner_on_a_clean_snapshot_commit(
     monkeypatch.setenv("STUB_OUT", str(out_file))
     monkeypatch.setenv("DARKFAC_CODEX_SANDBOX_MODE", "bypass")
     monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://u:p@db:5432/x")
+    # USR-455: a headless fleet launcher sets both to the shared main checkout, not this snapshot.
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", "C:\\dev\\DarkFac")
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", "C:\\dev\\DarkFac\\.factory")
     head_before = _git_out(root, "rev-parse", "HEAD")
     branch_before = _git_out(root, "rev-parse", "--abbrev-ref", "HEAD")
     status_before = _git_out(root, "status", "--porcelain=v1", "--untracked-files=all")
@@ -217,6 +222,8 @@ def test_dirty_tree_runs_the_official_runner_on_a_clean_snapshot_commit(
     assert fields["STUB_IGNORED"] == "absent"  # gitignored noise is not
     assert fields["STUB_SANDBOX"] == "absent"  # runner env is sanitized
     assert fields["STUB_DB"] == "absent"
+    assert fields["STUB_PROJECT_ROOT"] == "absent"  # USR-455: never leaks the shared main checkout
+    assert fields["STUB_STATE_ROOT"] == "absent"
     # the real repository is exactly as before: HEAD, branch, index, working tree
     assert _git_out(root, "rev-parse", "HEAD") == head_before
     assert _git_out(root, "rev-parse", "--abbrev-ref", "HEAD") == branch_before
@@ -384,6 +391,18 @@ def test_runner_env_drops_checkout_redirects(line_validate) -> None:
     assert "DARKFAC_HARNESS_STATE_DIR" not in env
     assert env["PATH"] == "/usr/bin"
     assert env["DARKFAC_TEST_WORKERS"] == "http://w:8080"
+
+
+def test_sanitized_env_drops_project_root_and_state_root(line_validate) -> None:
+    """USR-455: a headless launcher sets both to the shared main checkout; leaking them into the
+    snapshot subprocess makes `core.paths.project_root()` resolve there instead of the checkout
+    being validated, so `runner.py`'s own clean-worktree check rejects a clean snapshot as dirty."""
+    base = {
+        "PATH": "/usr/bin",
+        "DARKFAC_PROJECT_ROOT": "C:\\dev\\DarkFac",
+        "DARKFAC_STATE_ROOT": "C:\\dev\\DarkFac\\.factory",
+    }
+    assert line_validate.sanitized_env(base) == {"PATH": "/usr/bin"}
 
 
 def test_runner_env_caps_xdist_workers_off_windows_unless_already_set(line_validate) -> None:

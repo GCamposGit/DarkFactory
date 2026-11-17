@@ -37,13 +37,16 @@ def test_a_silent_local_sqlite_sink_warns_that_the_hub_will_not_see_the_run(
 
     for index in range(3):
         progress.phase("agent", "running", f"fase {index}")
+    # the structured warning is deferred until the run is accounted for (USR-455 T3)
+    progress.finish(True)
 
     assert len(warnings) == 1
-    assert "NAO aparecera" in warnings[0] and "DARKFAC_HF02_DATABASE_URL" in warnings[0]
+    assert '"cause_code":"local_only"' in warnings[0] and "DARKFAC_HF02_DATABASE_URL" in warnings[0]
     assert "DARKFAC_LOCAL_PROGRESS=local" in warnings[0] and "live_progress.md" in warnings[0]
     # it still writes to the local control.db: the warning is about visibility, not about publishing
+    # (3 phase events plus the terminal run-succeeded event written by finish())
     with closing(sqlite3.connect(tmp_path / "control.db")) as conn:
-        assert conn.execute("SELECT count(*) FROM local_run_events").fetchone() == (3,)
+        assert conn.execute("SELECT count(*) FROM local_run_events").fetchone() == (4,)
 
 
 def test_the_local_switch_keeps_the_sqlite_sink_on_purpose_without_a_warning(

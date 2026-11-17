@@ -255,9 +255,13 @@ def test_no_configured_sink_warns_with_the_variable_names_and_exits_zero(
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "empty_state"))  # no control.db: no SQLite fallback
     warnings: list[str] = []
     assert cli("open", "--ticket", "USR-164", "--json", warnings=warnings) == 0
-    assert len(warnings) == 1 and "DARKFAC_HF02_DATABASE_URL" in warnings[0]
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True and payload["published"] is False and payload["warning"] == warnings[0]
+    assert warnings == []  # final warning is emitted at close with the complete lost-phase count
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["ok"] is True and payload["published"] is False
+    assert payload["live_progress"]["cause_code"] == "no_url"
+    assert payload["live_progress"]["unpublished_phases"] == 1
+    assert "DARKFAC_HF02_DATABASE_URL" in captured.err and "live_progress_doctor" in captured.err
     assert payload["ticket_id"] == "USR-164" and payload["run_id"].startswith("local-USR-164-")
 
 
@@ -689,6 +693,58 @@ def test_live_run_does_not_infer_claude_when_harness_is_unknown(cli: Any) -> Non
     sink = RecordingSink()
     cli("open", "--ticket", "USR-318", sink=sink, environ={})
     assert sink.events[0].harness is None
+
+
+def _esteira_lines(err: str) -> list[str]:
+    return [line for line in err.splitlines() if line.startswith("[ESTEIRA]")]
+
+
+def test_open_json_reports_publicado_on_stderr_and_live_progress_on_stdout(
+    cli: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-455 T3: one JSON document on stdout; the verdict line stays on stderr and carries no secret."""
+    assert cli("open", "--ticket", "USR-164", "--json", sink=RecordingSink()) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["published"] is True
+    assert payload["live_progress"] == {
+        "published": True, "warning": None, "cause_code": None, "unpublished_phases": 0,
+    }
+    assert _esteira_lines(captured.err) == [
+        "[ESTEIRA] progresso publicado no Hub (darkhub.ggcampos.com/live)."
+    ]
+    assert "[ESTEIRA]" not in captured.out
+
+
+def test_a_muted_open_keeps_exit_zero_and_the_json_has_no_password_or_url(
+    cli: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class LeakySink:
+        def write(self, event: LocalRunEvent) -> None:
+            raise ConnectionRefusedError("sink unavailable")
+
+    assert cli("open", "--ticket", "USR-164", "--json", sink=LeakySink()) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["ok"] is True and payload["published"] is False
+    progress = payload["live_progress"]
+    assert progress["published"] is False
+    assert progress["cause_code"] == "connection_refused"
+    assert progress["warning"]
+    esteira = _esteira_lines(captured.err)
+    assert len(esteira) == 1 and esteira[0].startswith("[ESTEIRA] progresso mudo - ")
+    visible = captured.out + "\n" + "\n".join(esteira) + "\n" + json.dumps(progress)
+    assert "sink unavailable" not in visible and "postgresql" not in visible
+
+
+def test_text_mode_keeps_the_esteira_line_on_stderr(cli: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli("phase", "agent", "--ticket", "USR-164", sink=RecordingSink()) == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("[live_run]")
+    assert "[ESTEIRA]" not in captured.out
+    assert _esteira_lines(captured.err) == [
+        "[ESTEIRA] progresso publicado no Hub (darkhub.ggcampos.com/live)."
+    ]
 
 
 def test_published_means_visible_to_the_cloud_hub(cli: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

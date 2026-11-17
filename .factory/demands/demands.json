@@ -11431,14 +11431,15 @@
     "project_id": "darkfac",
     "title": "Publicacao de progresso do launcher falha enquanto control store responde",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ticket/usr-455",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand"
     ],
+    "express_causes": [],
     "problem_statement": "Em 2026-11-02T04:19Z run_ticket USR-454 com rede autorizada leu reservas PostgreSQL e adquiriu notebook, mas local_progress preflight/succeeded falhou com ConnectionTimeout e aviso de banco inalcancavel. A falha impede visibilidade real da execucao no Hub. Investigar resolucao do sink e conectividade sem expor credenciais.",
     "core_journey": [
       "Em 2026-11-02T04:19Z run_ticket USR-454 com rede autorizada leu reservas PostgreSQL e adquiriu notebook, mas local_progress preflight/succeeded falhou com ConnectionTimeout e aviso de banco inalcancavel. A falha impede visibilidade real da execucao no Hub. Investigar resolucao do sink e conectividade sem expor credenciais."

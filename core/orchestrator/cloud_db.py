@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +20,38 @@ _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"://([^:]+):([^@]+)@"),
     re.compile(r"password=([^\s;]+)", re.I),
 )
+DEFAULT_CONTROL_WRITE_TIMEOUT_S = 20.0
+
+
+@dataclass(frozen=True)
+class ResolvedControlDatabase:
+    """A PostgreSQL target with bounded settings; control and progress stores may use different URLs."""
+
+    url: str
+    connect_timeout_s: float = 5.0
+    statement_timeout_ms: int = 5000
+    write_timeout_s: float = DEFAULT_CONTROL_WRITE_TIMEOUT_S
+
+    def psycopg_kwargs(self) -> dict[str, object]:
+        return {
+            # libpq's connect_timeout is a whole number of seconds; round rather than truncate so a
+            # sub-second override (tests only) never collapses to "no timeout" at 0.
+            "connect_timeout": max(1, round(self.connect_timeout_s)),
+            "options": f"-c statement_timeout={self.statement_timeout_ms}",
+        }
+
+
+def resolve_control_database(environ: Mapping[str, str] | None = None, *, database_url: str | None = None) -> ResolvedControlDatabase | None:
+    """Resolve a PostgreSQL URL and bounded libpq settings without logging secrets.
+
+    Without ``database_url`` this reads the control-store setting. Callers with a dedicated progress
+    destination pass that URL explicitly, so the connection context is shared without forcing one DSN.
+    """
+    env = os.environ if environ is None else environ
+    url = (database_url or env.get("DARKFAC_HF02_DATABASE_URL") or "").strip()
+    if not url or url.lower().startswith("mock"):
+        return None
+    return ResolvedControlDatabase(url=url)
 
 
 def sanitize_database_url(url: str | None) -> str:
@@ -28,6 +62,31 @@ def sanitize_database_url(url: str | None) -> str:
     for pat in _SECRET_PATTERNS:
         sanitized = pat.sub(r"://\1:***@", sanitized)
     return sanitized
+
+
+class DatabaseTarget(BaseModel):
+    """Host/port/database of a connection URL, with the credentials dropped entirely (USR-455)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    host: str | None = None
+    port: int | None = None
+    database: str | None = None
+
+
+def sanitize_database_target(url: str | None) -> DatabaseTarget:
+    """``host``/``port``/``database`` only; never the user, password or full URL.
+
+    Unlike :func:`sanitize_database_url` (which keeps the shape of the URL for a human-readable
+    warning), this is for structured diagnostics where even a masked ``user:***@`` is unwanted.
+    """
+    if not url:
+        return DatabaseTarget()
+    try:
+        parsed = urlparse(url)
+    except Exception:  # noqa: BLE001 - an unparsable URL yields an empty target, never raises
+        return DatabaseTarget()
+    return DatabaseTarget(host=parsed.hostname, port=parsed.port, database=parsed.path.lstrip("/") or None)
 
 
 class DatabaseProbeResult(BaseModel):
@@ -70,7 +129,7 @@ def probe_cloud_database(
     except Exception as exc:
         return DatabaseProbeResult(
             status="error",
-            error_message=f"Invalid database URL format: {exc}",
+            error_message=f"Invalid database URL format ({type(exc).__name__})",
         )
 
     if username.casefold() in {"postgres", "root", "admin", "superuser"}:
@@ -120,15 +179,12 @@ def probe_cloud_database(
                     error_message="Database probe query returned zero rows",
                 )
     except Exception as exc:
-        # Sanitize exception message to ensure password is never exposed
-        raw_msg = str(exc)
-        sanitized_msg = sanitize_database_url(raw_msg)
-        if parsed.password and parsed.password in sanitized_msg:
-            sanitized_msg = sanitized_msg.replace(parsed.password, "***")
         return DatabaseProbeResult(
             status="error",
             database_name=db_name,
             current_user=username,
             is_unprivileged=True,
-            error_message=sanitized_msg,
+            # Driver messages can include the full DSN and arbitrary query credentials. Keep only
+            # the exception type; callers can classify the structured failure without echoing it.
+            error_message=f"PostgreSQL connection failed ({type(exc).__name__})",
         )

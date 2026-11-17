@@ -33,6 +33,10 @@ Contract
 * It NEVER fails the session because of the board: an unreachable or unconfigured sink, an unwritable
   state directory or a corrupt state file only produce one ``[AVISO]`` on stderr per run. The exit code
   is 0 in all of those cases; only a malformed command line exits with 2.
+* Every command also prints one credential-free line on stderr (USR-455 T3): ``[ESTEIRA] progresso
+  publicado no Hub`` or ``[ESTEIRA] progresso mudo - <motivo curto>``. With ``--json`` stdout stays a
+  single JSON document and ``live_progress`` carries ``published``, ``warning`` and ``cause_code``.
+  A muted publication does not change the exit code.
 """
 
 from __future__ import annotations
@@ -327,12 +331,24 @@ def _writes_clean(pub: ProgressPublisher | None) -> bool:
 
 def _hub_visible(pub: ProgressPublisher | None) -> bool:
     """Visible to the cloud Hub: a real sink, every write ok; the machine's own control.db does not count."""
-    return (
-        _writes_clean(pub)
-        and pub is not None
-        and pub.sink is not None
-        and not isinstance(pub.sink, SqliteSink)
-    )
+    return pub is not None and pub.hub_visible
+
+
+def _board_status(pub: ProgressPublisher | None, fallback_warning: str | None = None) -> dict[str, Any]:
+    """``live_progress`` for this call: three credential-free fields, even when nothing was published."""
+    from core.line.ticket_stages import publish_status
+
+    status = publish_status(pub)
+    if not status.get("published") and not status.get("warning") and fallback_warning:
+        from core.line.ticket_stages import redact_progress_text
+
+        status = {**status, "warning": redact_progress_text(fallback_warning)}
+    return status
+
+
+def _annotate(outcome: dict[str, Any], pub: ProgressPublisher | None, fallback_warning: str | None = None) -> dict[str, Any]:
+    outcome["live_progress"] = _board_status(pub, fallback_warning)
+    return outcome
 
 
 def _closing_settled(pub: ProgressPublisher | None, env: Mapping[str, str], *, applied: bool) -> bool:
@@ -397,9 +413,13 @@ def run_command(
     state = load_state(directory, args.ticket, keep_pending_close=closing_command)
     if state is None:
         if closing_command:
-            return {"ok": True, "action": command, "ticket_id": args.ticket, "run_id": None,
-                    "published": False, "state_kept": False, "warning": None,
-                    "detail": "nenhum run aberto para este ticket (nada a fazer)"}
+            detail = "nenhum run aberto para este ticket (nada a fazer)"
+            return _annotate(
+                {"ok": True, "action": command, "ticket_id": args.ticket, "run_id": None,
+                 "published": False, "state_kept": False, "warning": None, "detail": detail},
+                None,
+                detail,
+            )
         state = _new_state(args, env, hostname)
     elif command == "open":
         # idempotent open: keep the run, refresh the descriptive fields the caller passed explicitly
@@ -412,8 +432,12 @@ def run_command(
         detail = "run ja aberto: reaproveitado (nada a publicar)"
         if reopened:
             detail += "; encerramento pendente descartado (o proximo finish fecha este mesmo run)"
-        return {"ok": True, "action": "open", "ticket_id": state.ticket_id, "run_id": state.run_id,
-                "published": False, "state_kept": False, "warning": None, "detail": detail}
+        return _annotate(
+            {"ok": True, "action": "open", "ticket_id": state.ticket_id, "run_id": state.run_id,
+             "published": False, "state_kept": False, "warning": None, "detail": detail},
+            None,
+            detail,
+        )
     elif command == "phase" and (args.harness or args.worker or args.title):
         state.title = args.title or state.title
         state.harness = args.harness or state.harness
@@ -460,9 +484,16 @@ def run_command(
         state.active_phase = pub.active_phase if pub is not None else state.active_phase
         state.updated_at = _now().isoformat()
         save_state(directory, state)
-    return {"ok": True, "action": command, "ticket_id": state.ticket_id, "run_id": state.run_id,
-            "harness": state.harness, "worker": state.worker, "published": _hub_visible(pub),
-            "state_kept": state_kept, "warning": warning, "detail": detail}
+    fallback = None
+    if state_kept and (pub is None or pub.warning_reason is None):
+        fallback = "encerramento nao publicado; estado mantido para nova tentativa"
+    return _annotate(
+        {"ok": True, "action": command, "ticket_id": state.ticket_id, "run_id": state.run_id,
+         "harness": state.harness, "worker": state.worker, "published": _hub_visible(pub),
+         "state_kept": state_kept, "warning": warning, "detail": detail},
+        pub,
+        fallback,
+    )
 
 
 def main(
@@ -498,8 +529,13 @@ def main(
         )
     except Exception as exc:  # noqa: BLE001 - the last line of defence: the session is never failed
         logger.warning("live_run: unexpected failure (%s)", type(exc).__name__)
-        outcome = {"ok": True, "action": args.command, "ticket_id": args.ticket, "run_id": None,
-                   "published": False, "warning": None, "detail": f"falha inesperada ({type(exc).__name__})"}
+        detail = f"falha inesperada ({type(exc).__name__})"
+        outcome = _annotate(
+            {"ok": True, "action": args.command, "ticket_id": args.ticket, "run_id": None,
+             "published": False, "warning": None, "detail": detail},
+            None,
+            detail,
+        )
     visibility = "publicado" if outcome["published"] else "NAO publicado"
     _emit(
         args,
@@ -507,7 +543,20 @@ def main(
         f"[live_run] {outcome['ticket_id']} {outcome['detail']} ({visibility})"
         + (f" run={outcome['run_id']}" if outcome.get("run_id") else ""),
     )
+    _print_esteira(outcome.get("live_progress"))
     return 0
+
+
+def _print_esteira(status: Any) -> None:
+    """One stderr line. A broken stream must not change the exit code."""
+    from core.line.ticket_stages import publish_status_line
+
+    if not isinstance(status, dict):
+        status = {"published": False, "warning": None, "cause_code": None}
+    try:
+        print(publish_status_line(status), file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - the session is never failed by the summary line
+        logger.warning("live_run: esteira line failed (%s)", type(exc).__name__)
 
 
 if __name__ == "__main__":  # pragma: no cover

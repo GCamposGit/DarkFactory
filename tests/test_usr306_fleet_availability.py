@@ -342,7 +342,7 @@ def test_postgres_production_finish_checks_reservation_ttl():
     store = PostgresControlStore(mock_mode=True)
     store.mock_mode = False
     store.raw_url = "postgresql://test"
-    store._psycopg = SimpleNamespace(connect=lambda _url: connection)
+    store._psycopg = SimpleNamespace(connect=lambda _url, **_kwargs: connection)
 
     with pytest.raises(StaleLeaseError, match="no longer active"):
         store.finish(claim, StageResult(outcome="success", output_refs=["stale-output"]), now)

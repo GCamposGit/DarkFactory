@@ -16,7 +16,9 @@ Layout atual:
 - Apoio: `readiness.py`, `reconciliation.py`, `verification.py`, `manual_resolution.py`, `line_live.py`. `safe_export.py` e `cli.py` foram removidos em USR-377 S2.
 
 Nota: `materialize` aparece em `ControlStore` (declaracao do Protocol) e em
-`SQLiteControlStore` (implementacao); nao e duplicata.
+`SQLiteControlStore` (implementacao); nao e duplicata. Em `successors.materialize_result`,
+a checagem `is_postgres` precede `sqlite_backend` porque `PostgresControlStore` tambem
+implementa `_connect()` (`USR-455`).
 
 ## Exclusao de ciclos da frota (USR-418)
 

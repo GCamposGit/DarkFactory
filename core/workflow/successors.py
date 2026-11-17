@@ -380,9 +380,9 @@ def materialize_result(
             return retry_not_before
         return None
 
-    # 2. Atomically persist to storage backend
-    sqlite_backend = getattr(store, "_backend", None) if getattr(store, "mock_mode", False) else (store if hasattr(store, "_connect") else None)
+    # 2. Atomically persist to storage backend (is_postgres first: PostgresControlStore also has _connect() since USR-455, so a bare hasattr check below would misroute it to the sqlite branch)
     is_postgres = hasattr(store, "raw_url") and not getattr(store, "mock_mode", False) and hasattr(store, "_psycopg")
+    sqlite_backend = getattr(store, "_backend", None) if getattr(store, "mock_mode", False) else (store if not is_postgres and hasattr(store, "_connect") else None)
 
     if sqlite_backend is not None:
         conn = sqlite_backend._connect()
