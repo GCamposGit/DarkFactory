@@ -31,7 +31,7 @@ snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
 
 ## Probe headless do Claude (USR-416)
 
-`ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova).
+`ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova). O alias permitido `haiku` e resolvido pelo registro de modelos, mas a chamada usa o ID explicito configurado em `claude_cli_model_id`; hoje ele precisa coincidir com `claude-haiku-5-5`. A coleta so aceita a leitura se a CLI informar exatamente esse ID, mantendo modelo solicitado, modelo efetivo e identidade de custo alinhados. Se a CLI rejeitar o modelo ou informar outro ID, nenhum snapshot novo e gravado.
 
 ## Medidor Antigravity RPC (USR-433)
 

@@ -718,10 +718,10 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
     reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
     lines = [
-        {"type": "system"},
+        {"type": "system", "subtype": "init", "model": "claude-haiku-5-5"},
         # CLI 2.1.x shape (captured 28/10): both windows under `unifiedWindows`.
         {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "resetsAt": reset, "unifiedWindows": {
-            "five_hour": {"utilization": 0.25, "resetsAt": reset}, "seven_day": {"utilization": 0.65, "resetsAt": reset + 86400}}}},
+            "five_hour": {"utilization": 0.25625, "resetsAt": reset}, "seven_day": {"utilization": 0.65625, "resetsAt": reset + 86400}}}},
     ]
     calls = []
 
@@ -734,9 +734,144 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     usage = adapter.inspect(force=True)
     assert usage.quota_supported and usage.adapter == "claude_code_headless"
     used = {w.quota_id: w.used_percent for w in usage.windows}
-    assert used == {"claude:5h": 25.0, "claude:weekly": 65.0}
+    assert used == {"claude:5h": 25.625, "claude:weekly": 65.625}
     assert "-p" in calls[0][0] and "--model" in calls[0][0]
+    assert calls[0][0][calls[0][0].index("--model") + 1] == "claude-haiku-5-5"
+    assert calls[0][0][calls[0][0].index("--max-turns") + 1] == "1"
+    from core.models.registry import resolve_claude_probe_model
+
+    assert resolve_claude_probe_model("haiku").cost_model_id == "claude-haiku-5-5"
+    assert usage.raw_fields["model_selection"] == {
+        "alias": "haiku",
+        "requested_model": "claude-haiku-5-5",
+        "effective_models": ["claude-haiku-5-5"],
+        "cost_model_id": "claude-haiku-5-5",
+        "max_turns": 1,
+        "prompt_characters": 2,
+    }
     assert (tmp_path / "anthropic.json").is_file()
+
+
+@pytest.mark.parametrize("reported_model", ["haiku", "claude-haiku-4-5", "anthropic/claude-haiku-5-5"])
+def test_claude_headless_probe_rejects_model_that_is_not_the_pinned_registry_id(
+    tmp_path, monkeypatch, reported_model: str
+):
+    import subprocess
+
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
+    events = [
+        {"type": "system", "subtype": "init", "model": reported_model},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "unifiedWindows": {
+            "five_hour": {"utilization": 0.2, "resetsAt": reset},
+            "seven_day": {"utilization": 0.4, "resetsAt": reset + 86400}}}},
+    ]
+    output = "\n".join(json.dumps(event) for event in events)
+    monkeypatch.setattr(
+        adapters_mod.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
+    )
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+
+    usage = adapter.inspect(force=True)
+
+    assert not usage.quota_supported
+    assert usage.windows == []
+    assert not (tmp_path / "anthropic.json").exists()
+
+
+@pytest.mark.parametrize(
+    "error_stdout,error_stderr",
+    [
+        ('{"type":"error","error":{"type":"unrecognized_model"}}', ""),
+        ("", "Error: unrecognized_model for requested model"),
+    ],
+)
+def test_claude_headless_probe_rejects_model_error_even_with_real_quota_events(
+    tmp_path, monkeypatch, error_stdout: str, error_stderr: str
+):
+    import subprocess
+
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
+    valid_events = [
+        {"type": "system", "subtype": "init", "model": "claude-haiku-5-5"},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "unifiedWindows": {
+            "five_hour": {"utilization": 0.2, "resetsAt": reset},
+            "seven_day": {"utilization": 0.4, "resetsAt": reset + 86400}}}},
+    ]
+    stdout = "\n".join([*(json.dumps(event) for event in valid_events), error_stdout]).strip()
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout, error_stderr)
+
+    monkeypatch.setattr(adapters_mod.subprocess, "run", fake_run)
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+    usage = adapter.inspect(force=True)
+
+    assert len(calls) == 1
+    assert not usage.quota_supported
+    assert usage.windows == []
+    assert not (tmp_path / "anthropic.json").exists()
+
+
+def test_claude_headless_probe_requires_both_windows_and_reported_effective_model(tmp_path, monkeypatch):
+    import subprocess
+
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
+    events = [
+        {"type": "system", "subtype": "init", "model": "claude-sonnet-5-5"},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "unifiedWindows": {
+            "five_hour": {"utilization": 0.2, "resetsAt": reset}}}},
+    ]
+    output = "\n".join(json.dumps(event) for event in events)
+    monkeypatch.setattr(
+        adapters_mod.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, output, ""),
+    )
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+
+    usage = adapter.inspect(force=True)
+
+    assert not usage.quota_supported
+    assert usage.windows == []
+    assert not (tmp_path / "anthropic.json").exists()
+
+
+def test_claude_probe_fails_before_any_cli_command_when_model_config_is_missing(tmp_path, monkeypatch):
+    from core.models import registry
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(registry, "DEFAULT_REGISTRY_PATH", tmp_path / "missing-model-registry.json")
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    calls = []
+    monkeypatch.setattr(adapters_mod.subprocess, "run", lambda *args, **kwargs: calls.append(args))
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+
+    with pytest.raises(registry.ClaudeProbeModelConfigurationError, match="missing or invalid"):
+        adapter.inspect(force=True)
+    assert calls == []
 
 
 def test_pick_development_elects_antigravity_when_operating_interactively_without_monkeypatch(tmp_path: Path):

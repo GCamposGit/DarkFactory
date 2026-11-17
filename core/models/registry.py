@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
@@ -33,6 +34,20 @@ DEFAULT_MAX_PRICE_OUTPUT_PER_MTOK = 75.0
 DEFAULT_FRONTIER_TIERS = ("frontier",)
 DEFAULT_MIN_QUALIFICATION_STEPS = 3  # contract + tools + at least one reference task
 QUALIFIED_STATUSES = ("approved", "grandfathered")
+CLAUDE_PROBE_ALLOWED_ALIASES = frozenset({"haiku"})
+
+
+@dataclass(frozen=True)
+class ClaudeProbeModelSelection:
+    """Explicit Claude CLI model plus the registry identity used for cost control."""
+
+    alias: str
+    cli_model_id: str
+    cost_model_id: str
+
+
+class ClaudeProbeModelConfigurationError(ValueError):
+    """Raised when the authenticated Claude quota probe has no safe model selection."""
 
 
 class QualificationRecord(BaseModel):
@@ -56,6 +71,7 @@ class ModelEntry(BaseModel):
     tier: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     gateway_ids: list[str] = Field(default_factory=list)  # provider/gateway-prefixed ids (e.g. OpenRouter); naming only
+    claude_cli_model_id: Optional[str] = None
     status: ModelStatus
     price_input_per_mtok: Optional[float] = Field(default=None, ge=0)
     price_output_per_mtok: Optional[float] = Field(default=None, ge=0)
@@ -183,7 +199,7 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
     "models": [
         _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
         _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"], gateway_ids=["claude-sonnet"]),
-        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"]),
+        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"], claude_cli_model_id="claude-haiku-5-5"),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
         _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
         _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna", "openai/gpt-5-6-luna-high"]),
@@ -285,6 +301,54 @@ def resolve(alias_or_role: str, registry: Optional[ModelRegistry] = None) -> str
             )
         return entry.id
     raise KeyError(f"unknown model alias or role: {alias_or_role!r}")
+
+
+def resolve_claude_probe_model(
+    alias: str = "haiku", registry: Optional[ModelRegistry] = None
+) -> ClaudeProbeModelSelection:
+    """Resolve the permitted probe alias to its pinned Claude CLI model, without fallback.
+
+    The public alias selects a registry entry; the CLI receives that entry's exact model ID
+    so an upstream alias change cannot silently select a different model or cost identity.
+    Missing or invalid on-disk configuration is an error for this probe path; unlike general
+    registry readers, it must never silently switch to the embedded registry.
+    """
+    key = alias.strip().lower()
+    if key not in CLAUDE_PROBE_ALLOWED_ALIASES:
+        raise ClaudeProbeModelConfigurationError(f"Claude quota probe alias {alias!r} is not permitted")
+
+    if registry is None:
+        try:
+            raw = json.loads(DEFAULT_REGISTRY_PATH.read_text(encoding="utf-8"))
+            reg = parse_registry(raw)
+        except (OSError, ValueError, TypeError, ValidationError) as exc:
+            raise ClaudeProbeModelConfigurationError(
+                f"Claude quota probe model registry is missing or invalid: {exc}"
+            ) from exc
+    else:
+        reg = registry
+
+    matches = [entry for entry in reg.models if key in {item.strip().lower() for item in entry.aliases}]
+    if len(matches) != 1:
+        raise ClaudeProbeModelConfigurationError(
+            f"Claude quota probe alias {key!r} must resolve to exactly one registry model"
+        )
+    entry = matches[0]
+    if (
+        entry.provider != "anthropic"
+        or entry.family != "claude"
+        or entry.status != "active"
+        or entry.forbidden_autonomous
+    ):
+        raise ClaudeProbeModelConfigurationError(
+            f"Claude quota probe alias {key!r} resolves to an incompatible model {entry.id!r}"
+        )
+    cli_model_id = entry.claude_cli_model_id
+    if not cli_model_id or cli_model_id != entry.id:
+        raise ClaudeProbeModelConfigurationError(
+            f"Claude quota probe alias {key!r} has no pinned Claude CLI model ID matching {entry.id!r}"
+        )
+    return ClaudeProbeModelSelection(alias=key, cli_model_id=cli_model_id, cost_model_id=entry.id)
 
 
 def list_candidates(registry: Optional[ModelRegistry] = None) -> list[ModelEntry]:
