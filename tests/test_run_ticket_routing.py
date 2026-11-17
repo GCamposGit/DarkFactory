@@ -480,6 +480,8 @@ def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_
             env["agent"].reset_mock()
             env["agent"].side_effect = _agent
             env["sleeps"].clear()
+            # Each run is a fresh ticket: a relaunch would resume from the previous run's finished slices.
+            run_ticket.ticket_engine.reset(run_ticket.ticket_engine.run_workspace(_TICKET))
 
             assert main(["USR-99", "--skip-validation", "--no-commit", "--json"]) == 0
             payload = json.loads(capsys.readouterr().out)
