@@ -176,11 +176,13 @@ def delivery_failure_result(
     delivery_report = (
         completion_report if external_project else completion_report.delivery
     ) if completion_report else None
-    fail_cause = (
-        delivery_report.action
-        if delivery_report is not None and delivery_report.action == "staged_inspect_failed"
-        else "delivery_failed"
-    )
+    fail_cause = "delivery_failed"
+    if delivery_report is not None:
+        fail_cause = {
+            "staged_inspect_failed": "staged_inspect_failed",
+            "merge_blocked": "merge_blocked",
+            "conflict": "rebase_conflict",
+        }.get(delivery_report.action, "delivery_failed")
     progress.set_outcome(error_msg, fail_cause)
     fail_payload = {
         "exit_code": 1,

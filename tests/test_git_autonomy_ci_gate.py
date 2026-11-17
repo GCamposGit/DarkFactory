@@ -771,11 +771,48 @@ def test_policy_prohibits_merge_that_stays_barred_reports_policy_and_pending(rep
     write_ledger(local)
     gh = FakeRepoGh(bare, [[check("pass")], [check("pass")], [check("pending", "trusted-pr-policy")]], policy_blocks=99)
     rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
-    assert not rep.ok and rep.action == "error", rep.message
+    assert not rep.ok and rep.action == "merge_blocked", rep.message
     assert "base branch policy" in rep.message and "trusted-pr-policy" in rep.message
     assert gh.count(["pr", "merge"]) == 2  # exactly one retry, never a loop
     assert not rep.cleaned
     assert gh.prs[1]["state"] == "OPEN"
+
+
+def test_policy_block_on_a_branch_behind_main_updates_the_branch_before_the_retry(
+    repo: tuple[Path, Path], tmp_path: Path
+) -> None:
+    local, bare = repo
+    write_code(local)
+    other = tmp_path / "other"
+
+    class MovingMain(FakeRepoGh):
+        moved = False
+
+        def __call__(self, args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+            a = list(args)
+            if a[:2] == ["pr", "merge"] and not self.moved:
+                self.moved = True  # main advances while the PR waits for its checks
+                _git(tmp_path, "clone", "--quiet", str(bare), str(other))
+                _ident(other)
+                (other / "other.txt").write_text("x\n", encoding="utf-8")
+                _git(other, "add", "-A")
+                _git(other, "commit", "--quiet", "-m", "chore: main moves")
+                _git(other, "push", "--quiet", "origin", "main")
+            if a[:2] == ["pr", "update-branch"]:
+                self.calls.append(a)
+                head = self.prs[int(a[2])]["head"]
+                _git(other, "fetch", "--quiet", "origin")
+                _git(other, "checkout", "--quiet", "-B", head, f"origin/{head}")
+                _git(other, "merge", "--quiet", "--no-edit", "origin/main")
+                _git(other, "push", "--quiet", "origin", head)
+                return self.result(a, 0)
+            return super().__call__(args, cwd)
+
+    gh = MovingMain(bare, [[check("pass")]], policy_blocks=1)
+    rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh)
+    assert rep.ok and rep.action == "merged", rep.message
+    assert gh.count(["pr", "update-branch"]) == 1
+    assert gh.count(["pr", "merge"]) == 2
 
 
 def test_policy_prohibits_merge_regate_failure_blocks_second_merge(repo: tuple[Path, Path]) -> None:
