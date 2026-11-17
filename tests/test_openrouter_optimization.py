@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -296,3 +297,61 @@ def test_run_spend_comes_from_the_ledger_and_two_empty_edit_runs_cool_openrouter
     assert pick("development", caps, **{**pick_kwargs, "ticket_id": "USR-3"})[0] == "openrouter"
     r.record_openrouter_edits(0, config=cfg, cooldown_path=cooldowns)
     assert pick("development", caps, **{**pick_kwargs, "ticket_id": "USR-3"}) is None
+
+
+def _agent_run_with_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, usage, ledger, model: str = "gpt-sol"):
+    from core.line import agent_cli
+
+    def fake_codex(req, *, gateway_model=None, env=None):  # nunca chama o Codex CLI de verdade
+        return agent_cli.AgentResult(ok=True, text="feito", harness="codex", model="x", duration_s=1.0, usage=usage)
+
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: "codex")
+    monkeypatch.setattr(agent_cli, "_run_codex", fake_codex)
+    monkeypatch.setattr(agent_cli, "_changed_paths", lambda _cwd: set())
+    monkeypatch.setattr("core.execution.providers.get_openrouter_api_key", lambda: "chave-de-teste")
+    monkeypatch.setattr("core.line.routing.record_openrouter_edits", lambda *_a, **_k: None)
+    monkeypatch.setattr("core.usage.ledger.ModelUsageLedger", lambda *_a, **_k: ledger)
+    return agent_cli.run_agent(agent_cli.AgentRequest(
+        prompt="p", cwd=tmp_path, mode="write", harness="openrouter", model=model, ticket_id="USR-9",
+    ))
+
+
+def test_openrouter_agent_cost_enters_the_ledger_and_caps_the_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.usage.ledger import ModelUsageLedger
+
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    prices = types.SimpleNamespace(input_cost_per_m=4.0, output_cost_per_m=20.0)
+    monkeypatch.setattr(
+        "core.benchmarks.fetcher.ensure_daily_benchmark",
+        lambda: types.SimpleNamespace(models={"openai/gpt-5.6-sol": prices}),
+    )
+    usage = {"input_tokens": 400_000, "cached_input_tokens": 300_000, "output_tokens": 50_000}
+    result = _agent_run_with_usage(tmp_path, monkeypatch, usage, ledger)
+
+    expected = (400_000 * 4.0 + 50_000 * 20.0) / 1_000_000  # cache conta como entrada normal
+    assert result.cost_usd == pytest.approx(expected)
+    assert ledger.spent_usd("USR-9", "openrouter") == pytest.approx(expected)
+    assert expected > 2.0
+
+    cfg = load_routing_config(default_config_path())
+    kwargs = dict(config=cfg, quota_lookup=lambda _p: 5.0, cooldown_path=tmp_path / "cd.json",
+                  openrouter_balance_lookup=lambda: 10.0)
+    assert pick("development", ["harness:claude"], ticket_id="USR-9", **kwargs) is None
+    assert pick("development", ["harness:claude"], ticket_id="USR-10", **kwargs)[0] == "openrouter"
+
+
+def test_openrouter_agent_with_unpriced_model_records_null_cost_and_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    from core.usage.ledger import ModelUsageLedger
+
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    monkeypatch.setattr("core.benchmarks.fetcher.ensure_daily_benchmark", lambda: types.SimpleNamespace(models={}))
+    with caplog.at_level("WARNING"):
+        result = _agent_run_with_usage(tmp_path, monkeypatch, {"input_tokens": 10, "output_tokens": 5}, ledger)
+
+    assert result.ok is True and result.cost_usd is None
+    assert ledger.spent_usd("USR-9", "openrouter") == 0.0
+    assert any("cost unknown" in rec.message for rec in caplog.records)

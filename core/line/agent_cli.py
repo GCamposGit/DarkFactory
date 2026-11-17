@@ -1934,7 +1934,33 @@ def _run_openrouter_agent(req: AgentRequest, model: str) -> Optional[AgentResult
     from core.line.routing import record_openrouter_edits  # local import: routing imports agent_cli
 
     record_openrouter_edits(len(edited))
-    return result.model_copy(update={"harness": "openrouter", "model": model})
+    # `run_agent` grava este resultado no ModelUsageLedger com `ticket_id` e `cost_usd`: sem custo aqui o
+    # teto por execucao (`run_caps.openrouter_usd`) nao enxerga o gasto do agente.
+    return result.model_copy(update={"harness": "openrouter", "model": model, "cost_usd": _openrouter_agent_cost(result, model)})
+
+
+def _openrouter_agent_cost(result: AgentResult, model: str) -> Optional[float]:
+    """Estimated dollars of an agent run from its token usage and the registry price; None if unpriced.
+
+    Cached input tokens are already inside `input_tokens` and are charged as normal input (conservative).
+    """
+    from core.execution.providers import priced_openrouter_cost
+
+    usage = result.usage or {}
+
+    def _tokens(*names: str) -> int:
+        for name in names:
+            value = usage.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return int(value)
+        return 0
+
+    prompt_tokens = _tokens("input_tokens", "prompt_tokens")
+    completion_tokens = _tokens("output_tokens", "completion_tokens")
+    cost = priced_openrouter_cost(model, prompt_tokens, completion_tokens) if (prompt_tokens or completion_tokens) else None
+    if cost is None:
+        logger.warning("OpenRouter agent cost unknown for model=%s (no usage or no price); recorded as null", model)
+    return cost
 
 
 def _run_openrouter(req: AgentRequest) -> AgentResult:
