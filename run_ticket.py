@@ -942,10 +942,13 @@ def _commit_fix_agent_changes_safely(
     """`_commit_fix_agent_changes` that turns a commit failure (secret scan, staged state...) into an
     error message instead of a traceback, so the loop can end with `fix_commit_failed` (USR-249)."""
     try:
-        return _commit_fix_agent_changes(target_worktree, ticket, stage), None
+        changed = _commit_fix_agent_changes(target_worktree, ticket, stage)
     except Exception as exc:  # noqa: BLE001 - commit_ticket raises RuntimeError; any failure ends the loop cleanly
         logger.warning("Could not commit the fix agent's changes for %s: %s", ticket.id, exc)
         return False, str(exc)
+    if changed:
+        _rebind_build_candidate(ticket, target_worktree)
+    return changed, None
 
 
 def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
@@ -3544,6 +3547,21 @@ def _build_binding(rws: Any, head: str) -> dict[str, Any]:
     return {"head": head, "artifacts": {
         name: hashlib.sha256((context / name).read_bytes()).hexdigest() for name in files
     }}
+
+
+def _rebind_build_candidate(ticket: UserTicket, path: Path) -> None:
+    """Regrava o vinculo de build no novo HEAD apos commit do agente de conserto (USR-447).
+
+    So acompanha candidato que ja tinha vinculo; assim o candidato reparado continua retomavel.
+    """
+    from core.git.autonomy import _run_git
+    from core.line import workspace as line_workspace
+
+    if not (line_workspace.context_dir(ticket_engine.run_workspace(ticket)) / "build_binding.json").is_file():
+        return
+    head = _run_git(["rev-parse", "HEAD"], cwd=path)
+    if head.returncode == 0 and head.stdout.strip():
+        _record_build_binding(ticket, path, head.stdout.strip())
 
 
 def _record_build_binding(ticket: UserTicket, path: Path, head: str) -> None:

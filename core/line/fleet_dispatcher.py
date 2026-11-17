@@ -440,6 +440,29 @@ def _admission_workers_for_pin(previous: str | None, pin_url: str) -> str:
     return ",".join(urls)
 
 
+def resumable_delivery_worktree(ticket_id: str) -> Optional[Path]:
+    """Worktree preservada com commits a frente de origin/main e plano valido, ou None (USR-447).
+
+    Nesse caso o ticket nao precisa replanejar nem reconstruir: o launcher retoma a entrega.
+    Qualquer falha na busca cai no relancamento completo.
+    """
+    from core.git.ticket_workspace import find_preserved_workspaces
+
+    try:
+        chosen = find_preserved_workspaces(
+            ticket_id, cwd=PROJECT_ROOT, ignore_paths=(".factory/demands/demands.json",),
+        ).chosen
+    except Exception as exc:  # noqa: BLE001 - sem busca, relancamento completo
+        logger.warning("busca de worktree preservada de %s falhou: %s", ticket_id, exc)
+        return None
+    if chosen is None or chosen.commits_ahead < 1 or chosen.changed_paths:
+        return None
+    context = chosen.workspace.path / ".darkfac" / "runs" / ticket_id
+    if not all((context / name).is_file() for name in ("SPEC.md", "tickets.json")):
+        return None
+    return chosen.workspace.path
+
+
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
                    run_id: Optional[str] = None, recovery: bool = False,
                    candidate_digest: str = "unknown") -> InFlight:
@@ -476,6 +499,9 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
     env["DARKFAC_RUN_LOG"] = str(log_path.resolve())
     operational_checkout = _create_operational_checkout(ticket_id, host.id, demand)
     cmd = [sys.executable, str(operational_checkout / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
+    resume_worktree = resumable_delivery_worktree(ticket_id)
+    if resume_worktree is not None:
+        cmd.extend(["--resume-delivery", "--worktree", str(resume_worktree)])
     if run_id:
         cmd.extend(["--run-id", run_id])
     if recovery:
