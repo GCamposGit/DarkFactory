@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.line.live_run import main  # noqa: E402
+from core.line.routing import touch_coordinator_heartbeat  # noqa: E402
 
 if __name__ == "__main__":
     for stream in (sys.stdout, sys.stderr):
@@ -25,4 +26,8 @@ if __name__ == "__main__":
             stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
         except Exception:  # noqa: BLE001
             pass
+    try:
+        touch_coordinator_heartbeat()
+    except Exception:  # noqa: BLE001
+        pass
     raise SystemExit(main())

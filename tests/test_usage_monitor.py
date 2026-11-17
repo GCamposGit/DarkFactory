@@ -412,6 +412,8 @@ def test_claude_statusline_capture_is_atomic_and_privacy_filtered(tmp_path: Path
         (61.0, 39.0, "2026-10-30T08:00:00Z"),
     ]
     assert captured["checked_at"]
+    hb = json.loads((tmp_path / "usage" / "coordinator_heartbeat.json").read_text(encoding="utf-8"))
+    assert hb["heartbeat_at"] == captured["checked_at"] and hb["harness"] == "claude"
     serialized = target.read_text(encoding="utf-8")
     for private_value in ("must-not-persist", "private/project", "private prompt", "rate_limits"):
         assert private_value not in serialized

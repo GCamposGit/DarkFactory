@@ -108,6 +108,14 @@ def capture_statusline(payload_text: str, usage_dir: Path | None = None) -> bool
     finally:
         if temp_name and os.path.exists(temp_name):
             os.unlink(temp_name)
+    try:
+        hb_target = target_dir.parent / "coordinator_heartbeat.json"
+        hb_target.write_text(
+            json.dumps({"heartbeat_at": snapshot["checked_at"], "harness": "claude"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return True
 
 

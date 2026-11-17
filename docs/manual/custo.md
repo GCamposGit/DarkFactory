@@ -19,7 +19,8 @@ segundos. O comando recebe o JSON do statusline pela entrada padrão. A document
 confirma que `refreshInterval` repete o comando a cada N segundos, além das atualizações por
 eventos ([Claude Code — Customize your status line](https://code.claude.com/docs/en/statusline#manually-configure-a-status-line)).
 O script extrai somente `rate_limits.five_hour` e `rate_limits.seven_day` e grava `anthropic.json`
-atomicamente em `.factory/usage/providers/` (ou no `DARKFAC_STATE_ROOT` configurado).
+atomicamente em `.factory/usage/providers/` (ou no `DARKFAC_STATE_ROOT` configurado),
+alem de atualizar `coordinator_heartbeat.json` em `usage/` para sinalizar sessao interativa ativa (`USR-528`).
 O adaptador considera snapshots de ate 15 minutos; assim, a leitura do statusline pode alimentar
 o roteador mesmo quando a CLI local nao esta autenticada ou nao fornece `rate_limits`.
 

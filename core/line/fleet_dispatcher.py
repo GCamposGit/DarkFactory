@@ -457,8 +457,14 @@ def resumable_delivery_worktree(ticket_id: str) -> Optional[Path]:
         return None
     if chosen is None or chosen.commits_ahead < 1 or chosen.changed_paths:
         return None
-    context = chosen.workspace.path / ".darkfac" / "runs" / ticket_id
-    if not all((context / name).is_file() for name in ("SPEC.md", "tickets.json")):
+    candidate_roots = (
+        chosen.workspace.path,
+        state_root() / "artifacts" / "ticket_runs" / ticket_id,
+    )
+    if not any(
+        all(((root / ".darkfac" / "runs" / ticket_id) / name).is_file() for name in ("SPEC.md", "tickets.json"))
+        for root in candidate_roots
+    ):
         return None
     return chosen.workspace.path
 

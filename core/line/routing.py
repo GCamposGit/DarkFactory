@@ -32,7 +32,7 @@ from typing import Any, Callable, Iterable, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
-from core.line.operating_harness import resolve_operating_harness
+from core.line.operating_harness import detect_operating_harness, resolve_operating_harness
 from core.models.registry import QUOTA_FLOOR_MIN, forbidden_markers, get_registry, resolve as resolve_model
 from core.paths import project_root, state_root
 
@@ -147,9 +147,11 @@ class RoutingConfig(BaseModel):
     # (`harness_infra_error`, USR-188) — not a quota/login problem — sits out briefly, so the next
     # stage or job does not pick it again straight away.
     crash_cooldown_minutes: int = 10
-    # USR-490: headless (fleet) routing never elects `claude` while its known remaining quota is at or
-    # below this percent, keeping the coordinator's interactive chat alive. 0 disables the reserve.
+    # USR-490 / USR-528: headless (fleet) routing never elects `claude` while its known remaining
+    # quota is at or below this percent and an interactive coordinator session heartbeat is active
+    # within `coordinator_heartbeat_ttl_minutes`. 0 disables the reserve.
     coordinator_reserve_pct: float = 35.0
+    coordinator_heartbeat_ttl_minutes: int = 30
     forbidden_autonomous_models: list[str] = Field(
         default_factory=lambda: list(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS)
     )
@@ -168,6 +170,65 @@ def default_config_path() -> Path:
 
 def default_cooldown_path() -> Path:
     return state_root() / "usage" / "cooldowns.json"
+
+
+def default_coordinator_heartbeat_path() -> Path:
+    return state_root() / "usage" / "coordinator_heartbeat.json"
+
+
+def touch_coordinator_heartbeat(
+    path: Optional[Path] = None,
+    *,
+    harness: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> Path:
+    """Record a fresh interactive coordinator session heartbeat (USR-528)."""
+    target = path or default_coordinator_heartbeat_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    payload = {
+        "heartbeat_at": moment.isoformat(),
+        "harness": harness or detect_operating_harness() or "interactive",
+    }
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def is_coordinator_session_active(
+    path: Optional[Path] = None,
+    *,
+    ttl_minutes: float = 30.0,
+    now: Optional[datetime] = None,
+) -> bool:
+    """True when an interactive coordinator heartbeat exists within ``ttl_minutes`` (USR-528)."""
+    if ttl_minutes <= 0:
+        return False
+    target = path or default_coordinator_heartbeat_path()
+    if not target.is_file():
+        return False
+    ts: Optional[datetime] = None
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            raw = data.get("heartbeat_at") or data.get("checked_at")
+            if isinstance(raw, str) and raw.strip():
+                ts = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        ts = None
+    if ts is None:
+        try:
+            ts = datetime.fromtimestamp(target.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    age_s = (current - ts).total_seconds()
+    return 0.0 <= age_s <= ttl_minutes * 60.0
 
 
 def _default_routing_config() -> RoutingConfig:
@@ -1112,10 +1173,21 @@ def _pick_winner(
 
 
 def _with_coordinator_reserve(
-    lookup: Callable[[str], Optional[float]], cfg: RoutingConfig, execution_context: str
+    lookup: Callable[[str], Optional[float]],
+    cfg: RoutingConfig,
+    execution_context: str,
+    cooldown_path: Optional[Path] = None,
+    coordinator_heartbeat_path: Optional[Path] = None,
 ) -> Callable[[str], Optional[float]]:
-    """USR-490: for the fleet, `claude` at or below `coordinator_reserve_pct` reads as exhausted (0.0)."""
+    """USR-490 / USR-528: for the fleet, `claude` at or below reserve reads as exhausted while coordinator is active."""
     if execution_context != "headless" or cfg.coordinator_reserve_pct <= 0:
+        return lookup
+    hb_path = coordinator_heartbeat_path or (
+        (cooldown_path.parent / "coordinator_heartbeat.json")
+        if cooldown_path is not None
+        else default_coordinator_heartbeat_path()
+    )
+    if not is_coordinator_session_active(hb_path, ttl_minutes=float(cfg.coordinator_heartbeat_ttl_minutes)):
         return lookup
 
     def reserved(provider_id: str) -> Optional[float]:
@@ -1148,6 +1220,7 @@ def pick(
     project_id: Optional[str] = None,
     slack_lookup: Optional[Callable[[str], Optional[float]]] = None,
     execution_context: ExecutionContext = "interactive",
+    coordinator_heartbeat_path: Optional[Path] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
@@ -1195,7 +1268,7 @@ def pick(
     caps = set(host_caps)
     excluded_harnesses, excluded_pairs = _split_exclude(exclude)
     cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
-    lookup = _with_coordinator_reserve(quota_lookup or _default_quota_headroom, cfg, execution_context)
+    lookup = _with_coordinator_reserve(quota_lookup or _default_quota_headroom, cfg, execution_context, cooldown_path, coordinator_heartbeat_path)
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
