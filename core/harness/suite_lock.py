@@ -327,16 +327,14 @@ def _try_lock_file(path: Path) -> object | None:
     """
 
     try:
-        try:
-        try:
         path.touch(exist_ok=True)
-    except PermissionError:
-        # The lock file may already exist but be unwritable to this identity.
-        # Treat it as unavailable so acquire() can retry and report its normal
-        # structured timeout/error instead of leaking a PermissionError.
-        return False
-    except PermissionError:
-        return False
+    except PermissionError as exc:
+        # The lock file may already exist but be unwritable to this identity
+        # (USR-463): a pre-existing file's per-file ACL can deny write access
+        # even though the directory itself is otherwise usable. Report it as
+        # a structured error so callers degrade instead of crashing.
+        raise SuiteLockUnwritable(path, str(exc)) from exc
+    try:
         handle = open(path, "r+b")
     except PermissionError as exc:
         raise SuiteLockUnwritable(path, str(exc)) from exc
