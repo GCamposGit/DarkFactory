@@ -437,6 +437,23 @@ def _resolve_openrouter_wire_model(model: str) -> str:
         return model
 
 
+def priced_openrouter_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    """Dollar cost from the benchmark ledger's per-model prices; None when the model has no known price."""
+    try:
+        from core.benchmarks.fetcher import ensure_daily_benchmark
+
+        model_entry = ensure_daily_benchmark().models.get(model)
+        if model_entry:
+            return round(
+                (prompt_tokens * model_entry.input_cost_per_m + completion_tokens * model_entry.output_cost_per_m)
+                / 1_000_000,
+                6,
+            )
+    except Exception:  # noqa: BLE001 - missing benchmark data or null prices mean "unknown", never a guess
+        pass
+    return None
+
+
 def _openrouter_costs(
     model: str,
     prompt_tokens: int,
@@ -446,23 +463,7 @@ def _openrouter_costs(
     provider_id: str,
 ) -> tuple[float | None, float, bool]:
     """Return measured cost, fallback estimate, and whether the cost was measured."""
-    cost_usd: float | None = None
-    try:
-        from core.benchmarks.fetcher import ensure_daily_benchmark
-
-        ledger = ensure_daily_benchmark()
-        model_entry = ledger.models.get(model)
-        if model_entry:
-            cost_usd = round(
-                (
-                    prompt_tokens * model_entry.input_cost_per_m
-                    + completion_tokens * model_entry.output_cost_per_m
-                )
-                / 1_000_000,
-                6,
-            )
-    except Exception:
-        pass
+    cost_usd = priced_openrouter_cost(model, prompt_tokens, completion_tokens)
 
     if cost_usd is not None:
         return cost_usd, cost_usd, True
