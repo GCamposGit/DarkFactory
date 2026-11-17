@@ -40,15 +40,26 @@ Defeitos achados em operação e já corrigidos:
 | Agente de desenvolvimento rodava a suíte inteira dentro do turno e estourava o tempo | PR #874 |
 | Worktree com trabalho já commitado virava `agent_no_changes` e hold | PR #875 |
 
+Fechados na madrugada de 17/11:
+
+- Conflito de rebase e merge bloqueado ganharam causa própria; conflito só em ledger ou em `docs/FASE_ATUAL.md` se resolve sozinho; branch atrás do `main` roda `gh pr update-branch` antes de desistir (PR #885).
+- PR e portão do ticket rodam os contratos do repositório inteiro e os testes que citam o módulo alterado; etapa DOCS reprovada é falha do candidato; um só ticket aberto de CI vermelho por vez (PR #886).
+- Retomada reaproveita o plano válido da mesma demanda, pula fatias concluídas e vai direto ao portão quando todas estão prontas (PR #884).
+- Sonda de cota do Claude mantém a leitura quando a CLI avisa `unrecognized_model` (regressão do PR #882, corrigida no #883) e roda em sandbox com encerramento da árvore de processos (USR-457, PR #888).
+- O bloqueio de `pull_request_target` era um brownout programado do GitHub; o owner criou a política em Actions > Policies (OA-096). A isenção só se comprova na próxima janela.
+- Entregas da frota sem ajuda no período: USR-516, USR-454, USR-458, USR-491.
+
 Abertos, em ordem de impacto (cada um cabe em um PR pequeno):
 
-1. **Conflito de rebase e merge antes do CI saem como `unknown`** e gastam tentativa do candidato. Classificar `rebase_conflict` e `merge_blocked_by_policy` como infra em `core/line/failure_taxonomy.py`; no segundo caso a entrega deve esperar o CI e tentar de novo (`gh pr update-branch` quando a branch está atrás). O ledger `.factory/demands/demands.json` conflita em todo rebase: resolver sempre com a versão do `main`.
-2. **Retomada ainda refaz PLAN e BUILD** (resto do E5): com `SPEC.md`, `tickets.json` e commits na worktree preservada, ir direto ao portão. O PR #875 só evita a falsa falha.
-3. **Reserva de cota do coordenador:** a frota não deve levar o plano Claude abaixo de uma reserva configurável enquanto houver sessão interativa. Hoje o contorno é manual: entrada `claude` com `reason: coordinator_reserve` em `.factory/usage/cooldowns.json`.
-4. **Gasto por execução da rota agente-OpenRouter** não entra no teto por execução (`run_caps.openrouter_usd`), só no mensal. Somar o custo a partir do uso em tokens devolvido pelo Codex CLI. Em 16/11 duas execuções de 30 minutos custaram cerca de US$ 1,70.
-5. **Limite da API do GitHub (5.000/h) estourou** à tarde. Medir quem chama `gh` no ciclo do despachante e na espera de entrega, e trocar sondagem por uma consulta por ciclo.
-6. **`trusted-pr-policy` com `startup_failure`** a partir das 14:34 de 16/11 bloqueou merges com CI verde. Se repetir, a entrega precisa tratar verificação obrigatória ausente como espera, não como falha.
-7. Linhas antigas de E8 (vagas por RAM) e E9 (poda da suíte) seguem como estavam.
+1. **Resto do E5:** o despachante ainda relança o ticket inteiro em vez de `--resume-delivery` quando a worktree preservada já tem candidato validado; o vínculo do build não é regravado depois de commit de reparo. A retomada por fatia confia em `progress.json` mais diff não vazio, sem conferir o conteúdo de cada fatia.
+2. **Renovação de cota fora da data:** se a assinatura renova antes do `resets_at` gravado, o snapshot abaixo do piso segue valendo e a sonda paga continua proibida. Contorno usado em 17/11: mover `.factory/usage/providers/anthropic.json`. Solução: permitir uma sonda a cada N horas mesmo abaixo do piso.
+3. **Reserva de cota do coordenador:** a frota não deve levar o plano Claude abaixo de uma reserva configurável enquanto houver sessão interativa. Contorno manual: entrada `claude` com `reason: coordinator_reserve` em `.factory/usage/cooldowns.json`.
+4. **Gasto por execução da rota agente-OpenRouter** não entra no teto por execução (`run_caps.openrouter_usd`), só no mensal. Somar o custo a partir do uso em tokens devolvido pelo Codex CLI.
+5. **Esperas de entrega obsoletas:** `.factory/pending_delivery/<ticket>.json` de ticket já concluído fica `blocked` (`deploy_evidence_missing`) para sempre e polui o estado. Remover ao concluir o ticket e ao detectar `completed` no control store.
+6. **Limite da API do GitHub (5.000/h) estourou** em 16/11 à tarde. Medir quem chama `gh` no ciclo do despachante e na espera de entrega.
+7. **`dokploy_redeploy.py` sai com código 1** quando só testes mudaram ("no image change" mais sincronização de nós falsa). Tratar como sucesso.
+8. **Tamanho das entregas da frota:** USR-498 somou 1.472 linhas e USR-500 passa de 2.100 para tarefas pequenas. O plano precisa de teto de linhas por fatia e a revisão precisa cobrar o saldo de código.
+9. Linhas antigas de E8 (vagas por RAM) e E9 (poda da suíte) seguem como estavam.
 
 ## Frentes
 
