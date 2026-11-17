@@ -48,6 +48,8 @@ from core.workflow.control_contracts import IntakeCommand, JobKey
 pytestmark = pytest.mark.postgres_integration
 
 ENV_DSN = "DARKFAC_TEST_POSTGRES_DSN"
+# Fixed on purpose: the skip path must never interpolate the DSN (no password, no URL).
+SKIP_WITHOUT_DSN = f"{ENV_DSN} not set: real-PostgreSQL integration tests are opt-in"
 RUNBOOK = Path(__file__).resolve().parents[1] / "docs" / "runbooks" / "live_progress.md"
 
 # The minimum the writer role needs, exactly as documented in the runbook. {db}/{role} are substituted.
@@ -64,6 +66,15 @@ NOW = datetime(2026, 10, 8, 12, 0, 0, tzinfo=UTC)
 
 
 # ------------------------------------------------------------------------------ doc drift (offline)
+
+
+def test_real_postgres_suite_skips_with_a_fixed_message_and_no_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the opt-in variable the suite stops before any connection string is built."""
+    monkeypatch.delenv(ENV_DSN, raising=False)
+    assert "://" not in SKIP_WITHOUT_DSN and "@" not in SKIP_WITHOUT_DSN
+    with pytest.raises(pytest.skip.Exception) as caught:
+        require_admin_dsn()
+    assert str(caught.value) == SKIP_WITHOUT_DSN
 
 
 @pytest.mark.parametrize("template", WRITER_GRANTS)
@@ -99,13 +110,18 @@ class ScratchDb:
             return cur.fetchall() if cur.description else []
 
 
-@pytest.fixture
-def admin_dsn() -> str:
+def require_admin_dsn() -> str:
+    """Opt-in DSN for the real-PostgreSQL suite. Skip text is fixed and never includes the URL."""
     dsn = os.environ.get(ENV_DSN, "").strip()
     if not dsn:
-        pytest.skip(f"{ENV_DSN} not set: real-PostgreSQL integration tests are opt-in")
+        pytest.skip(SKIP_WITHOUT_DSN)
     pytest.importorskip("psycopg")
     return dsn
+
+
+@pytest.fixture
+def admin_dsn() -> str:
+    return require_admin_dsn()
 
 
 def _dsn_for(base: str, **overrides: str) -> str:
@@ -446,7 +462,9 @@ def test_add_job_evidence_statement_needs_only_select_and_update_on_jobs(scratch
 
 
 def test_hub_read_only_role_reads_local_run_events_into_the_live_line(scratch: ScratchDb) -> None:
-    """End to end: minimal writer publishes, read-only Hub role reads and folds it (USR-140)."""
+    """End to end (USR-455 T3): a real sequence of phases published, then read back by the Hub's own
+    live-line reader -- run_id, every phase and its status, and no publish warning at all."""
+    from core.line import ticket_stages
     from core.workflow.line_live import read_line_live
 
     store, key = _parked_job(scratch)  # creates the control store tables as the writer
@@ -455,9 +473,16 @@ def test_hub_read_only_role_reads_local_run_events_into_the_live_line(scratch: S
         ticket_id="USR-167", title="Visivel no Hub", run_id=run_id, sink=PostgresSink(scratch.writer), timeout_s=15.0,
         clock=lambda: datetime.now(UTC),
     )
-    publisher.phase("preflight", "running")
+    publisher.phase("preflight", "running", "cota e roteamento")
+    publisher.phase("preflight", "succeeded", "rota claude", harness="claude")
+    publisher.phase("workspace", "running")
+    publisher.phase("workspace", "succeeded")
     publisher.phase("agent", "running", harness="claude")
     assert publisher.warning is None
+    assert publisher.hub_visible is True
+    status = ticket_stages.publish_status(publisher)
+    assert status == {"published": True, "warning": None, "cause_code": None}
+    assert ticket_stages.publish_status_line(status) == "[ESTEIRA] progresso publicado no Hub (darkhub.ggcampos.com/live)."
 
     # Exactly the read-only grants documented for the Hub (docs/DARKHUB_ROADMAP.md + the runbook).
     scratch.admin_exec(
@@ -468,5 +493,11 @@ def test_hub_read_only_role_reads_local_run_events_into_the_live_line(scratch: S
     assert snapshot.warnings == []
     by_run = {run.run_id: run for run in snapshot.runs}
     assert run_id in by_run, f"local run missing from the live line: {sorted(by_run)}"
-    assert by_run[run_id].ticket_id == "USR-167"
+    local_run = by_run[run_id]
+    assert local_run.ticket_id == "USR-167"
+    by_stage = {stage.stage: stage.status for stage in local_run.stages}
+    assert by_stage["preflight"] == "succeeded"
+    assert by_stage["workspace"] == "succeeded"
+    assert by_stage["agent"] == "running"
+    assert local_run.current_stage == "agent"
     assert key.run_id in by_run  # the control-store run is projected too

@@ -57,6 +57,10 @@ _SENSITIVE_ENV = re.compile(
 # ambient environment (slot count, Codex sandbox mode, workspace/data dirs,
 # cheap-model routing, remote harness URLs). The official gate runs on a
 # workstation where none of these are set, so the suite must not see them.
+# DARKFAC_PROJECT_ROOT/DARKFAC_STATE_ROOT (USR-455): a headless launcher sets both to the
+# shared main checkout. Leaking them into the snapshot subprocess makes `core.paths.project_root()`
+# resolve to that checkout instead of the clean snapshot/dirty-tree root being validated, so
+# `runner.py`'s own `_ensure_clean_worktree()` rejects a perfectly clean snapshot as dirty.
 _AMBIENT_CONFIG_ENV = frozenset(
     {
         "DARKFAC_CODEX_SANDBOX_MODE",
@@ -65,6 +69,8 @@ _AMBIENT_CONFIG_ENV = frozenset(
         "DARKFAC_OPENROUTER_CHEAP_MODEL",
         "DARKFAC_OPERATING_HARNESS",
         "DARKFAC_ONPREM_BACKUP_DIR",
+        "DARKFAC_PROJECT_ROOT",
+        "DARKFAC_STATE_ROOT",
         "DATA_DIR",
         "FACTORY_DIR",
         "OLLAMA_BASE_URL",

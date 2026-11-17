@@ -15,13 +15,16 @@ Design choices
 * The Hub reader folds the events into the existing live contract (``LiveRun``/``LiveStage``), so
   no new endpoint, authentication channel or frontend contract is needed.
 * Publishing is strictly best-effort: every public method swallows every error, each write is bounded
-  by a short timeout in a daemon thread, and after repeated failures the publisher mutes itself. It
-  can never block, slow down noticeably or change the outcome of ``run_ticket``.
+  by a wall-clock timeout (longer than the connect plus statement budgets) in a daemon thread, and
+  after repeated failures the publisher mutes itself. It can never block or change the outcome of
+  ``run_ticket``.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
 import socket
 import sqlite3
@@ -29,13 +32,18 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from contextlib import closing
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.orchestrator.cloud_db import sanitize_database_url
+from core.orchestrator.cloud_db import (
+    ResolvedControlDatabase,
+    resolve_control_database,
+    sanitize_database_url,
+)
 from core.common.time import utc_now as _utc_now
 
 logger = logging.getLogger("darkfac.local_progress")
@@ -91,12 +99,30 @@ ENV_WARNED = "DARKFAC_LOCAL_PROGRESS_WARNED"
 RUNBOOK = "docs/runbooks/live_progress.md"
 # Exact fix for a missing driver (USR-198); same pin as requirements-live.txt and the dokploy Dockerfiles.
 PSYCOPG_INSTALL_CMD = 'python -m pip install "psycopg[binary]>=3.2.0,<3.3.0"'
-# Writer-capable URLs first: the Hub's read-only role (DARKHUB_CONTROL_DATABASE_URL) is the last resort.
+# Progress has its own destination when DARKHUB_LINE_DATABASE_URL is set. The control store reads only
+# DARKFAC_HF02_DATABASE_URL, so prefer the explicit progress writer and fall back to the control-store
+# URL only when no writer-specific URL is configured. Before USR-455 T1 the control-store URL won even
+# when the runbook explicitly configured a separate, reachable Hub writer endpoint.
 WRITE_DATABASE_URL_ENVS: tuple[str, ...] = (
-    "DARKFAC_HF02_DATABASE_URL",
     "DARKHUB_LINE_DATABASE_URL",
+    "DARKFAC_HF02_DATABASE_URL",
     "DARKHUB_CONTROL_DATABASE_URL",
 )
+# The old progress sink allowed only 3s to connect while the control store allowed 5s. A network path
+# that answered between those bounds therefore worked for reservation reads but timed out on progress.
+# Use a longer bounded default while keeping the sink's connection settings independently overridable.
+ENV_CONNECT_TIMEOUT_S = "DARKFAC_LOCAL_PROGRESS_CONNECT_TIMEOUT_S"
+ENV_STATEMENT_TIMEOUT_S = "DARKFAC_LOCAL_PROGRESS_STATEMENT_TIMEOUT_S"
+ENV_WRITE_TIMEOUT_S = "DARKFAC_LOCAL_PROGRESS_WRITE_TIMEOUT_S"
+ENV_RETRIES = "DARKFAC_LOCAL_PROGRESS_RETRIES"
+DEFAULT_SINK_CONNECT_TIMEOUT_S = 10.0
+DEFAULT_SINK_STATEMENT_TIMEOUT_S = 10.0
+DEFAULT_WRITE_TIMEOUT_S = 30.0  # wall-clock budget for a publish; greater than connect + statement
+MAX_SINK_CONNECT_TIMEOUT_S = 30.0
+MAX_SINK_STATEMENT_TIMEOUT_S = 30.0
+MAX_WRITE_TIMEOUT_S = 120.0
+DEFAULT_SINK_RETRIES = 1
+MAX_SINK_RETRIES = 2
 READ_COLUMNS = "event_id, run_id, ticket_id, project_id, title, phase, status, harness, worker, cause_code, message, at"
 
 SQLITE_DDL = f"""
@@ -204,36 +230,169 @@ class SqliteSink:
 
 
 class PostgresSink:
-    """Appends to the cloud control database with short connect/statement timeouts.
+    """Appends to the cloud live Hub database, reusing one connection across every event of a run.
+
+    The sink may use an explicit progress-writer URL distinct from the control store's URL. It uses
+    the shared PostgreSQL connection settings model with its own bounded timeout values
+    (``resolve_sink_source`` applies them; see ``ENV_CONNECT_TIMEOUT_S`` above). It reuses one
+    connection across events and reconnects for a bounded, configurable number of retries before
+    reporting the error to ``ProgressPublisher``.
 
     It inserts first and only runs the DDL when the table is missing (USR-164): the restricted writer
     role (``INSERT`` on ``local_run_events`` only, no ``CREATE`` on the schema) therefore never runs DDL,
     while a privileged role still bootstraps the table on its first write.
     """
 
-    def __init__(self, url: str, *, connect_timeout_s: int = 3) -> None:
-        self._url = url
-        self.connect_timeout_s = connect_timeout_s
+    def __init__(self, connection: ResolvedControlDatabase | str, *, retries: int = DEFAULT_SINK_RETRIES) -> None:
+        # String input remains useful for explicit test/injection construction. Production resolution
+        # passes the same canonical connection object used by PostgresControlStore.
+        resolved = connection if isinstance(connection, ResolvedControlDatabase) else resolve_control_database(
+            database_url=connection
+        )
+        if resolved is None:
+            raise ValueError("PostgreSQL control database is not configured")
+        self.connection = resolved
+        self.write_timeout_s = resolved.write_timeout_s
+        self.retries = min(MAX_SINK_RETRIES, max(0, int(retries)))
+        self._conn: Any = None
+        self._lock = threading.Lock()
 
-    def write(self, event: LocalRunEvent) -> None:
+    @property
+    def url(self) -> str:
+        """The raw connection URL (credentials included): only for building a new connection, never logged."""
+        return self.connection.url
+
+    @property
+    def connect_timeout_s(self) -> float:
+        return float(self.connection.connect_timeout_s)
+
+    def _connect(self) -> Any:
+        import psycopg  # type: ignore[import-not-found]
+
+        return psycopg.connect(self.connection.url, autocommit=True, **self.connection.psycopg_kwargs())
+
+    def _insert(self, conn: Any, event: LocalRunEvent) -> None:
         import psycopg  # type: ignore[import-not-found]
 
         insert = f"INSERT INTO {TABLE} ({', '.join(_COLUMNS)}) VALUES ({', '.join('%s' for _ in _COLUMNS)})"
-        with psycopg.connect(
-            self._url,
-            connect_timeout=self.connect_timeout_s,
-            autocommit=True,
-            options="-c statement_timeout=3000",
-        ) as conn:
-            try:
-                conn.execute(insert, _row(event))
-                return
-            except psycopg.errors.UndefinedTable:
-                pass  # first write ever: create the table (autocommit: the failed INSERT left no open transaction)
-            for statement in POSTGRES_DDL.split(";"):
-                if statement.strip():
-                    conn.execute(statement)
+        try:
             conn.execute(insert, _row(event))
+            return
+        except psycopg.errors.UndefinedTable:
+            pass  # first write ever: create the table (autocommit: the failed INSERT left no open transaction)
+        for statement in POSTGRES_DDL.split(";"):
+            if statement.strip():
+                conn.execute(statement)
+        conn.execute(insert, _row(event))
+
+    def _discard_connection(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:  # noqa: BLE001 - a connection broken enough to fail may already be gone
+                pass
+            self._conn = None
+
+    def _write_once(self, event: LocalRunEvent) -> None:
+        if self._conn is None:
+            self._conn = self._connect()
+        self._insert(self._conn, event)
+
+    def write(self, event: LocalRunEvent) -> None:
+        with self._lock:
+            for attempt in range(self.retries + 1):
+                try:
+                    self._write_once(event)
+                    return
+                except Exception:  # noqa: BLE001 - retries are capped and bounded by the publisher
+                    self._discard_connection()
+                    if attempt >= self.retries:
+                        raise
+
+    def close(self) -> None:
+        """Release the reused connection, if any (best-effort; the next ``write`` reconnects on demand)."""
+        with self._lock:
+            self._discard_connection()
+
+
+CONTROL_DB_SOURCE = "control.db"
+
+
+def _positive_float_env(
+    env: Mapping[str, str], name: str, default: float, *, maximum: float
+) -> float:
+    """Read a finite positive timeout override, capped so configuration cannot make writes unbounded."""
+    raw = (env.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if not math.isfinite(value) or value <= 0:
+        return default
+    return min(value, maximum)
+
+
+def _retry_count_env(env: Mapping[str, str]) -> int:
+    """A bounded retry count; one retry is the default, and two is the hard ceiling."""
+    raw = (env.get(ENV_RETRIES) or "").strip()
+    if not raw:
+        return DEFAULT_SINK_RETRIES
+    try:
+        retries = int(raw)
+    except ValueError:
+        return DEFAULT_SINK_RETRIES
+    return min(MAX_SINK_RETRIES, max(0, retries))
+
+
+def resolve_sink_source(environ: Mapping[str, str] | None = None) -> tuple[ProgressSink | None, str | None]:
+    """``resolve_sink`` plus which source won: an env var name, ``"control.db"``, or ``None``.
+
+    ``source`` is ``None`` whenever ``sink`` is ``None`` too (publishing off on purpose, or no sink at
+    all): a diagnostic tool (``core.line.live_progress_doctor``, USR-455) distinguishes the two cases
+    with ``missing_sink_reason``/``local_only_reason``, exactly like ``open_progress`` already does.
+    """
+    if environ is None:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return None, None
+        env: Mapping[str, str] = os.environ
+    else:
+        env = environ
+    switch = env.get(ENV_SWITCH, "").strip().lower()
+    if switch in SWITCH_OFF:
+        return None, None
+    for name in () if switch == SWITCH_LOCAL else WRITE_DATABASE_URL_ENVS:
+        value = env.get(name, "").strip()
+        if value and not value.startswith("mock"):
+            connection = resolve_control_database(env, database_url=value)
+            if connection is None:
+                continue
+            connection = replace(
+                connection,
+                connect_timeout_s=_positive_float_env(
+                    env, ENV_CONNECT_TIMEOUT_S, DEFAULT_SINK_CONNECT_TIMEOUT_S,
+                    maximum=MAX_SINK_CONNECT_TIMEOUT_S,
+                ),
+                statement_timeout_ms=int(
+                    _positive_float_env(
+                        env, ENV_STATEMENT_TIMEOUT_S, DEFAULT_SINK_STATEMENT_TIMEOUT_S,
+                        maximum=MAX_SINK_STATEMENT_TIMEOUT_S,
+                    ) * 1000
+                ),
+                write_timeout_s=_positive_float_env(
+                    env, ENV_WRITE_TIMEOUT_S, DEFAULT_WRITE_TIMEOUT_S, maximum=MAX_WRITE_TIMEOUT_S
+                ),
+            )
+            sink = PostgresSink(connection, retries=_retry_count_env(env))
+            return sink, name
+    try:
+        from core.paths import state_root
+
+        local_db = state_root() / "control.db"
+    except Exception:  # noqa: BLE001
+        return None, None
+    return (SqliteSink(local_db), CONTROL_DB_SOURCE) if local_db.is_file() else (None, None)
 
 
 def resolve_sink(environ: Mapping[str, str] | None = None) -> ProgressSink | None:
@@ -242,26 +401,7 @@ def resolve_sink(environ: Mapping[str, str] | None = None) -> ProgressSink | Non
     With the default environment, ``pytest`` runs never publish (a developer machine may carry the
     production database URL). Tests pass an explicit mapping or inject a sink instead.
     """
-    if environ is None:
-        if os.environ.get("PYTEST_CURRENT_TEST"):
-            return None
-        env: Mapping[str, str] = os.environ
-    else:
-        env = environ
-    switch = env.get(ENV_SWITCH, "").strip().lower()
-    if switch in SWITCH_OFF:
-        return None
-    for name in () if switch == SWITCH_LOCAL else WRITE_DATABASE_URL_ENVS:
-        value = env.get(name, "").strip()
-        if value and not value.startswith("mock"):
-            return PostgresSink(value)
-    try:
-        from core.paths import state_root
-
-        local_db = state_root() / "control.db"
-    except Exception:  # noqa: BLE001
-        return None
-    return SqliteSink(local_db) if local_db.is_file() else None
+    return resolve_sink_source(environ)[0]
 
 
 def missing_sink_reason(environ: Mapping[str, str] | None = None) -> str | None:
@@ -303,12 +443,49 @@ def local_only_reason(environ: Mapping[str, str] | None = None) -> str | None:
     )
 
 
-def describe_publish_failure(exc: BaseException) -> str:
-    """Short, credential-free reason for a failed write (never echoes the driver message)."""
+CauseCode = Literal[
+    "no_url",
+    "missing_driver",
+    "dns_error",
+    "tcp_timeout",
+    "connection_refused",
+    "auth_failed",
+    "missing_table",
+    "read_only",
+    "unknown",
+]
+# Connection-layer causes grouped under the same "banco inalcancavel ou conexao recusada" wording in
+# describe_publish_failure (USR-455 T2): distinct enough to diagnose with (classify_connection_cause),
+# but close enough in remediation to share the operator-facing sentence that existing warnings already use.
+_CONNECTION_CAUSES = frozenset({"dns_error", "tcp_timeout", "connection_refused", "auth_failed"})
+CAUSE_FIXES: dict[CauseCode, str] = {
+    "no_url": f"defina {' ou '.join(WRITE_DATABASE_URL_ENVS[:2])} com um usuario que possa gravar",
+    "missing_driver": f"instale o driver: {PSYCOPG_INSTALL_CMD}",
+    "dns_error": "o host da URL nao resolveu via DNS; confira o nome/IP configurado e a tailnet",
+    "tcp_timeout": (
+        "a rede nao respondeu dentro do tempo de conexao do sink; confira firewall/tailnet"
+    ),
+    "connection_refused": "a porta esta fechada ou o servico esta fora do ar no host/porta configurados",
+    "auth_failed": f"usuario ou senha incorretos na URL de conexao; reprovisione com {PROVISION_SCRIPT}",
+    "missing_table": f"tabela {TABLE} ausente e o usuario nao tem CREATE; reprovisione com {PROVISION_SCRIPT}",
+    "read_only": f"sem permissao de escrita em {TABLE}; use o papel restrito criado por {PROVISION_SCRIPT}",
+    "unknown": "causa nao identificada; verifique o tipo de excecao nos logs",
+}
+
+
+def classify_connection_cause(exc: BaseException) -> CauseCode:
+    """Which of a short, closed set of causes explains a sink failure (USR-455 T2).
+
+    USR-454 showed ``local_progress`` warning the operator with one generic "banco inalcancavel"
+    bucket for every connectivity problem (DNS failure, TCP timeout, refused connection, bad
+    credentials, ...), which gives no actionable next step. This turns the same exception into one of
+    a fixed, credential-free set of codes, each with its own remediation in ``CAUSE_FIXES`` -- used by
+    both the publisher's own warning (``describe_publish_failure``) and ``live_progress_doctor``.
+    """
     name = type(exc).__name__
     text = str(exc).lower()
     if isinstance(exc, ImportError):
-        return f"driver psycopg nao instalado neste ambiente: instale com {PSYCOPG_INSTALL_CMD}"
+        return "missing_driver"
     if (
         name == "InsufficientPrivilege"
         or "permission denied" in text
@@ -316,13 +493,51 @@ def describe_publish_failure(exc: BaseException) -> str:
         or "read-only" in text
         or "must be owner" in text
     ):
+        return "read_only"
+    if "undefinedtable" in name.lower() or ("relation" in text and "does not exist" in text):
+        return "missing_table"
+    if (
+        "password authentication failed" in text
+        or "authentication failed" in text
+        or ("role" in text and "does not exist" in text)
+    ):
+        return "auth_failed"
+    if (
+        isinstance(exc, socket.gaierror)
+        or "name or service not known" in text
+        or "nodename nor servname" in text
+        or "getaddrinfo failed" in text
+        or "temporary failure in name resolution" in text
+        or "could not translate host name" in text
+    ):
+        return "dns_error"
+    # psycopg names its connect failure ConnectionTimeout; the message does not always contain "timeout".
+    if isinstance(exc, TimeoutError) or name == "ConnectionTimeout":
+        return "tcp_timeout"
+    if isinstance(exc, ConnectionRefusedError) or "connection refused" in text or "actively refused" in text:
+        return "connection_refused"
+    if "timeout" in text or "timed out" in text:
+        return "tcp_timeout"
+    if isinstance(exc, OSError) or name in {"OperationalError", "InterfaceError"} or "connect" in text:
+        return "connection_refused"
+    return "unknown"
+
+
+def describe_publish_failure(exc: BaseException) -> str:
+    """Short, credential-free reason for a failed write (never echoes the driver message)."""
+    cause = classify_connection_cause(exc)
+    if cause == "missing_driver":
+        return f"driver psycopg nao instalado neste ambiente: instale com {PSYCOPG_INSTALL_CMD}"
+    if cause == "read_only":
         return (
             f"sem permissao de escrita em {TABLE}: use o papel restrito criado por {PROVISION_SCRIPT} "
             f"(ou conceda INSERT e USAGE na sequence ao usuario do banco)"
         )
-    if isinstance(exc, (OSError, TimeoutError)) or name in {"OperationalError", "InterfaceError"} or "connect" in text:
-        return "banco inalcancavel ou conexao recusada (host, porta, credenciais ou rede)"
-    return f"falha ao gravar ({name})"
+    if cause == "missing_table":
+        return f"tabela {TABLE} ausente e sem privilegio de CREATE: reprovisione com {PROVISION_SCRIPT}"
+    if cause in _CONNECTION_CAUSES:
+        return f"banco inalcancavel ou conexao recusada (host, porta, credenciais ou rede) - {CAUSE_FIXES[cause]}"
+    return f"falha ao gravar ({type(exc).__name__})"
 
 
 def stderr_warning(text: str) -> None:
@@ -366,7 +581,7 @@ class ProgressPublisher:
         worker: str | None = None,
         harness: str | None = None,
         owns_run: bool = True,
-        timeout_s: float = 5.0,
+        timeout_s: float = DEFAULT_WRITE_TIMEOUT_S,
         max_consecutive_failures: int = 2,
         clock: Callable[[], datetime] = _utc_now,
         warn: Callable[[str], None] | None = None,
@@ -388,6 +603,11 @@ class ProgressPublisher:
         self._unconfigured_reason = unconfigured_reason
         self._local_only_reason = local_only_reason
         self.warning: str | None = None  # the single warning of this run, once emitted
+        self.warning_reason: str | None = None  # same event, short and without the "[AVISO] ..." wrapper
+        self.warning_cause_code: str | None = None  # structured cause of that same warning (USR-455 T2)
+        self.warning_phase: str | None = None  # first phase that failed to reach the sink (USR-455 T2)
+        self.unpublished_phases = 0  # phase events absent from the cloud Hub; local event history is retained
+        self._warning_pending = False
         self._failures = 0
         self._muted = False
         self._finished = False
@@ -418,6 +638,44 @@ class ProgressPublisher:
     @property
     def enabled(self) -> bool:
         return self.sink is not None and not self._muted and not self._discarded
+
+    @property
+    def hub_visible(self) -> bool:
+        """Whether every write attempted so far reached a sink the cloud Hub actually reads (USR-455 T3).
+
+        The machine's own ``control.db`` fallback does not count: the cloud Hub never reads it
+        (USR-164), so a run recorded only there must report as not visible even with zero failures.
+        """
+        return (
+            self.sink is not None
+            and not isinstance(self.sink, SqliteSink)
+            and self._failures == 0
+            and self.warning is None
+        )
+
+    def publish_status(self) -> dict[str, Any]:
+        """Credential-free ``{"published": bool, "warning": str | None, "cause_code": str | None}``.
+
+        ``warning`` is the short reason (``warning_reason``), not the full ``[AVISO] Esteira ao vivo``
+        sentence already printed once when it happened: a summary line must not repeat that text.
+        ``cause_code`` (USR-455 T2) is the structured classification of that same warning (one of
+        ``CauseCode``), so a caller can act on it without parsing the free-text reason. The single
+        summary ``run_ticket`` (and ``scripts/live_run.py``) report to the operator so a silent publish
+        failure is visible in the launcher's own output, never only in a log file.
+        """
+        status = {
+            "published": self.hub_visible,
+            "warning": self.warning_reason,
+            "cause_code": self.warning_cause_code,
+            "unpublished_phases": self.unpublished_phases,
+        }
+        if self.warning_reason and self.warning_phase and self.warning_cause_code:
+            status["failure"] = {
+                "phase": self.warning_phase,
+                "category": self.warning_cause_code,
+                "message": _clean(self.warning_reason),
+            }
+        return status
 
     def add_observer(self, observer: Callable[..., None]) -> None:
         """Register a callback for every phase transition (errors are swallowed, never reach the run)."""
@@ -478,6 +736,7 @@ class ProgressPublisher:
             self.phase(
                 RUN_PHASE, "failed", message or self._outcome_message, cause=cause or self._outcome_cause
             )
+        self._flush_warning()
 
     def cancel(self, message: str = "", *, cause: str = "owner_cancelled") -> None:
         """Record that the run was cancelled (USR-166): the phase in progress and, if owned, the run.
@@ -493,6 +752,7 @@ class ProgressPublisher:
             if self.owns_run:
                 self._finished = True
                 self.phase(RUN_PHASE, "cancelled", text, cause=cause)
+            self._flush_warning()
         except Exception as exc:  # noqa: BLE001
             logger.warning("local progress: cancel failed: %s", type(exc).__name__)
 
@@ -531,52 +791,81 @@ class ProgressPublisher:
             return
         self._send(event)
 
-    def _emit_warning(self, reason: str, *, local_only: bool = False) -> None:
-        """At most one warning per run; never raises and never touches the run result."""
-        if self.warning is not None:
+    def _emit_warning(
+        self, reason: str, *, local_only: bool = False, cause_code: str | None = None, phase: str | None = None
+    ) -> None:
+        """Remember the run's degradation; emit it once all phase events have been accounted for."""
+        if self.warning is not None or self._warning_pending:
             return
         try:
-            if local_only:
-                text = (
-                    "[AVISO] Esteira ao vivo: este run so sera gravado no control.db local desta maquina e "
-                    f"NAO aparecera em darkhub.ggcampos.com/live - {reason}. "
-                    f"A execucao continua normalmente. Veja {RUNBOOK}."
-                )
-            else:
-                text = (
-                    f"[AVISO] Esteira ao vivo: progresso desta execucao nao sera publicado - {reason}. "
-                    f"A execucao continua normalmente. Veja {RUNBOOK}."
-                )
-            self.warning = sanitize_database_url(text)
+            self.warning_reason = _clean(reason)
+            self.warning_phase = phase if phase in {*PHASES, RUN_PHASE} else "unknown"
+            self.warning_cause_code = cause_code or ("local_only" if local_only else None)
+            self._warning_pending = True
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _flush_warning(self) -> None:
+        """Emit the unique structured warning after all phases have been accounted for."""
+        if not self._warning_pending or self.warning is not None:
+            return
+        try:
+            payload = {
+                "event": "live_progress_degraded",
+                "ticket_id": self.ticket_id,
+                "phase": self.warning_phase,
+                "category": self.warning_cause_code,
+                "cause_code": self.warning_cause_code,
+                "reason": self.warning_reason,
+                "unpublished_phases": self.unpublished_phases,
+                "doctor": "python -m core.line.live_progress_doctor",
+                "runbook": RUNBOOK,
+            }
+            self.warning = sanitize_database_url(
+                "[AVISO] Esteira ao vivo: " + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            )
+            self._warning_pending = False
             if self._warn is not None:
                 self._warn(self.warning)
         except Exception:  # noqa: BLE001
             pass
+    def _record_unpublished(self, event: LocalRunEvent) -> None:
+        # Events are appended to ``events`` before reaching this point, so the local diagnostic
+        # history remains complete even when the remote sink is unavailable or muted.
+        self.unpublished_phases += 1
 
     def _send(self, event: LocalRunEvent) -> None:
+        if self._discarded:
+            return
         if self.sink is None:
-            if self._unconfigured_reason and not self._discarded:
-                self._emit_warning(self._unconfigured_reason)
+            self._record_unpublished(event)
+            if self._unconfigured_reason:
+                self._emit_warning(self._unconfigured_reason, cause_code="no_url", phase=event.phase)
             return
         if not self.enabled:
+            self._record_unpublished(event)
             return
         if self._local_only_reason:
-            self._emit_warning(self._local_only_reason, local_only=True)
+            self._record_unpublished(event)
+            self._emit_warning(self._local_only_reason, local_only=True, phase=event.phase)
         sink = self.sink
         phase, status = event.phase, event.status
         try:
             _run_bounded(lambda: sink.write(event), self.timeout_s)
             self._failures = 0
         except Exception as exc:  # noqa: BLE001 - network, driver, lock, timeout: all contained
+            if not self._local_only_reason:
+                self._record_unpublished(event)
             self._failures += 1
-            self._emit_warning(describe_publish_failure(exc))
+            cause_code = classify_connection_cause(exc)
+            self._emit_warning(describe_publish_failure(exc), cause_code=cause_code, phase=event.phase)
             logger.warning(
-                "local progress: publish failed for %s %s/%s (%s: %s)",
+                "local progress: publish failed for %s %s/%s (cause=%s exception=%s)",
                 self.run_id,
                 phase,
                 status,
+                cause_code,
                 type(exc).__name__,
-                sanitize_database_url(_clean(str(exc), 160)),
             )
             if self._failures >= self.max_consecutive_failures:
                 self._muted = True
@@ -635,6 +924,7 @@ def open_progress(
             worker=worker,
             harness=harness,
             owns_run=not (inherited and not run_id),
+            timeout_s=(resolved.write_timeout_s if isinstance(resolved, PostgresSink) else DEFAULT_WRITE_TIMEOUT_S),
             warn=warn,
             unconfigured_reason=reason,
             local_only_reason=local_reason,

@@ -40,6 +40,7 @@ from core.workflow.control_contracts import (
     normalize_cause_code,
 )
 from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough, RUN_OPEN_JOB_STATUSES
+from core.orchestrator.cloud_db import resolve_control_database
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,7 @@ class PostgresControlStore:
         self.runtime_owner = runtime_owner
         self.lease_duration_sec = lease_duration_sec
         self.raw_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
+        self._resolved_database = resolve_control_database(database_url=self.raw_url)
         self._psycopg = None
 
         if mock_mode or not self.raw_url or self.raw_url.startswith("mock"):
@@ -267,17 +269,25 @@ class PostgresControlStore:
             self.mock_mode = False
             self._init_db()
 
+    def _connect(self) -> Any:
+        """Open the canonical control-store connection with its shared bounded settings."""
+        if self._psycopg is None or self._resolved_database is None:
+            raise RuntimeError("PostgreSQL control store is not configured")
+        return self._psycopg.connect(self._resolved_database.url, **self._resolved_database.psycopg_kwargs())
+
     def _init_db(self) -> None:
         """Initialize PostgreSQL tables if running against a live database."""
         if self.mock_mode:
             return
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(POSTGRES_DDL)
                 conn.commit()
         except Exception as exc:
-            raise StoreUnavailableError("PostgreSQL schema unavailable") from exc
+            raise StoreUnavailableError(
+                f"Failed to initialize PostgreSQL schema ({type(exc).__name__})"
+            ) from exc
 
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         if self.mock_mode:
@@ -286,7 +296,7 @@ class PostgresControlStore:
         now_utc = now.astimezone(UTC)
         digest = command.payload_digest
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT payload_digest, demand_id, demand_version, run_id, initial_job_id, mode, committed_at "
@@ -450,7 +460,7 @@ class PostgresControlStore:
         expires_at_utc = now_utc + timedelta(seconds=self.lease_duration_sec)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     # High concurrency locking via SELECT FOR UPDATE SKIP LOCKED
                     cur.execute(
@@ -595,7 +605,7 @@ class PostgresControlStore:
         jk = claim.job_key
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT status, expires_at, fencing_token FROM claims WHERE lease_id = %s FOR UPDATE",
@@ -711,7 +721,7 @@ class PostgresControlStore:
         result = result.model_copy(update={"cause_code": normalize_cause_code(result.cause_code)})
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT status, expires_at FROM claims WHERE lease_id = %s FOR UPDATE",
@@ -869,7 +879,7 @@ class PostgresControlStore:
         repaired_keys: list[dict[str, Any]] = []
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -961,7 +971,7 @@ class PostgresControlStore:
             return self._backend.get_operation(key)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -998,7 +1008,7 @@ class PostgresControlStore:
         jk = claim.job_key
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT status, expires_at, fencing_token FROM claims WHERE lease_id = %s FOR UPDATE",
@@ -1074,7 +1084,7 @@ class PostgresControlStore:
 
         now_utc = now.astimezone(UTC)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1123,7 +1133,7 @@ class PostgresControlStore:
             return self._backend.get_pending_outbox(limit=limit)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1162,9 +1172,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.get_run_identity(run_id)
         try:
-            with self._psycopg.connect(
-                self.raw_url, connect_timeout=5, options="-c statement_timeout=5000"
-            ) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT project_id FROM runs WHERE run_id = %s", (run_id,))
                     row = cur.fetchone()
@@ -1179,9 +1187,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.get_manual_ticket_owner(project_id, ticket_id, now=now)
         try:
-            with self._psycopg.connect(
-                self.raw_url, connect_timeout=5, options="-c statement_timeout=5000"
-            ) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT to_regclass('local_run_events')")
                     if cur.fetchone()[0] is None:
@@ -1203,9 +1209,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.get_active_ticket_reservation(project_id, ticket_id, now=now)
         try:
-            with self._psycopg.connect(
-                self.raw_url, connect_timeout=5, options="-c statement_timeout=5000"
-            ) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
@@ -1251,7 +1255,7 @@ class PostgresControlStore:
                 conn.close()
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1334,7 +1338,7 @@ class PostgresControlStore:
             raise OutboxNotFoundError("Event dictionary must contain 'outbox_id' or 'event_id'.")
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "UPDATE outbox SET status = 'published', published_at = %s WHERE outbox_id = %s",
@@ -1356,7 +1360,7 @@ class PostgresControlStore:
             return self._backend.list_active_projects(cursor=cursor, limit=limit)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     if cursor:
                         cur.execute(
@@ -1391,7 +1395,7 @@ class PostgresControlStore:
             return self._backend.get_run_payload(run_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT payload FROM intake_commands WHERE run_id = %s", (run_id,))
                     row = cur.fetchone()
@@ -1411,7 +1415,7 @@ class PostgresControlStore:
 
         escaped = external_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT external_id, run_id FROM intake_commands "
@@ -1428,7 +1432,7 @@ class PostgresControlStore:
             return self._backend.record_grill_answer(run_id, question_id, choice, now)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1445,7 +1449,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.upsert_ticket(project_id, ticket_id, status, payload, now)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO tickets (project_id, ticket_id, status, payload, updated_at) "
@@ -1464,7 +1468,7 @@ class PostgresControlStore:
         if project_id:
             sql, params = sql + " WHERE project_id = %s", (project_id,)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql + " ORDER BY ticket_id", params)
                     return [json.loads(row[0]) for row in cur.fetchall()]
@@ -1475,7 +1479,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.upsert_owner_action(action_id, status, payload, now)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO owner_actions (action_id, status, payload, updated_at) "
@@ -1491,7 +1495,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.list_owner_actions()
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT payload::text FROM owner_actions ORDER BY action_id")
                     return [json.loads(row[0]) for row in cur.fetchall()]
@@ -1504,7 +1508,7 @@ class PostgresControlStore:
             return self._backend.get_grill_answers(run_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT question_id, choice FROM grill_answers WHERE run_id = %s", (run_id,))
                     return {row[0]: row[1] for row in cur.fetchall()}
@@ -1518,7 +1522,7 @@ class PostgresControlStore:
             return self._backend.find_job(run_id, stage, status=status)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     if status:
                         cur.execute(
@@ -1549,7 +1553,7 @@ class PostgresControlStore:
     def _parked_on_missing_route(self, job_key: JobKey) -> bool:
         """True if the waiting job's cause is `no_route_available*`; any failure reads as False (USR-355)."""
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT cause_code FROM jobs WHERE run_id = %s AND ticket_id = %s AND plan_version = %s "
@@ -1565,7 +1569,7 @@ class PostgresControlStore:
     def _reset_run_budget(self, run_id: str, now_utc: datetime) -> None:
         """Restart the run's wall-clock budget (USR-355); a failure only degrades to `created_at`."""
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("UPDATE runs SET budget_reset_at = %s WHERE run_id = %s", (now_utc, run_id))
                 conn.commit()
@@ -1577,7 +1581,7 @@ class PostgresControlStore:
         if self.mock_mode:
             return self._backend.get_run_budget_started_at(run_id)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT GREATEST(created_at, budget_reset_at) FROM runs WHERE run_id = %s", (run_id,))
                     row = cur.fetchone()
@@ -1598,7 +1602,7 @@ class PostgresControlStore:
         now_utc = now.astimezone(UTC)
         reset_budget = self._parked_on_missing_route(job_key)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1642,7 +1646,7 @@ class PostgresControlStore:
             return self._backend.add_job_evidence(job_key, ref)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1687,7 +1691,7 @@ class PostgresControlStore:
             return self._backend.list_waiting_jobs(statuses=statuses)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -1718,7 +1722,7 @@ class PostgresControlStore:
             return self._backend.list_active_run_ids()
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT run_id FROM runs WHERE status = 'active' ORDER BY created_at ASC")
                     return [str(row[0]) for row in cur.fetchall()]
@@ -1732,7 +1736,7 @@ class PostgresControlStore:
             return self._backend.list_project_runs(project_id, limit)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT run_id, created_at FROM runs WHERE project_id = %s ORDER BY created_at DESC LIMIT %s",
@@ -1751,7 +1755,7 @@ class PostgresControlStore:
             return self._backend.max_iteration(run_id, ticket_id, plan_version, stage)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT MAX(iteration) FROM jobs WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s",
@@ -1770,7 +1774,7 @@ class PostgresControlStore:
             return self._backend.get_run_created_at(run_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT created_at FROM runs WHERE run_id = %s", (run_id,))
                     row = cur.fetchone()
@@ -1787,7 +1791,7 @@ class PostgresControlStore:
             return self._backend.get_latest_success_output_refs(run_id, exclude_stage=exclude_stage)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     if exclude_stage:
                         cur.execute(
@@ -1825,7 +1829,7 @@ class PostgresControlStore:
 
         now_utc = now.astimezone(UTC)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT COUNT(*) FROM runs WHERE status = 'active'")
                     row = cur.fetchone()
@@ -1896,7 +1900,7 @@ class PostgresControlStore:
         current_time = now or datetime.now(UTC)
         now_utc = current_time.astimezone(UTC)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT run_id, status FROM runs WHERE run_id = %s", (run_id,))
                     row = cur.fetchone()
@@ -2019,7 +2023,7 @@ class PostgresControlStore:
         now_utc = now.astimezone(UTC)
         expires_at_utc = now_utc + timedelta(seconds=lease_duration_sec)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     # Advisory transaction lock serializes concurrent ceiling checks
                     cur.execute("SELECT pg_advisory_xact_lock(hashtext('darkfac_fleet_reservation_lock'))")
@@ -2161,7 +2165,7 @@ class PostgresControlStore:
         dur = lease_duration_sec if lease_duration_sec is not None else self.lease_duration_sec
         new_expires_utc = now_utc + timedelta(seconds=dur)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2236,7 +2240,7 @@ class PostgresControlStore:
 
         now_dt = (now or datetime.now(UTC)).astimezone(UTC)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2290,7 +2294,7 @@ class PostgresControlStore:
             return self._backend.get_reservation(reservation_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2314,7 +2318,7 @@ class PostgresControlStore:
             return self._backend.get_active_reservation_for_ticket(project_id, ticket_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2336,7 +2340,7 @@ class PostgresControlStore:
             return self._backend.get_active_reservation_for_host(host_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2358,7 +2362,7 @@ class PostgresControlStore:
             return self._backend.get_active_reservation_for_run(run_id)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2380,7 +2384,7 @@ class PostgresControlStore:
             return self._backend.list_active_reservations()
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2402,7 +2406,7 @@ class PostgresControlStore:
             return self._backend.drain_host(host_id=host_id, reason=reason, now=now)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2430,7 +2434,7 @@ class PostgresControlStore:
         expires_utc = now_utc + timedelta(seconds=self.lease_duration_sec)
         cutoff_utc = now_utc - timedelta(seconds=pending_grace_sec)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2458,7 +2462,7 @@ class PostgresControlStore:
 
         now_utc = now.astimezone(UTC)
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2499,7 +2503,7 @@ class PostgresControlStore:
             return self._backend.reconcile_unknown_operations(now=now)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -2534,7 +2538,7 @@ class PostgresControlStore:
             return self._backend.list_eligible_admission_jobs(limit=limit)
 
         try:
-            with self._psycopg.connect(self.raw_url) as conn:
+            with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """

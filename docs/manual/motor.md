@@ -442,3 +442,54 @@ Na admissao, "mesma familia" compara a familia do modelo, nao o nome do harness:
 Recusa da etapa DOCS: o launcher reinvoca o agente uma vez com a mensagem do docs-sync; persistindo, a causa é `docs_sync_failed` (candidato, exit 1), não infra (exit 75).
 
 Cada commit do agente de conserto regrava `build_binding.json` no novo HEAD (quando o candidato ja tinha vinculo), para o candidato reparado continuar retomavel por `--resume-delivery` sem replanejar nem reconstruir (USR-447).
+
+## Resultado da publicacao na esteira ao vivo (USR-455 T3)
+
+`core/line/ticket_stages.py` expoe `publish_status(progress, completion_info=None)` e
+`publish_status_line(status)`: o primeiro devolve `{"published": bool, "warning": str | None,
+"cause_code": str | None}` a partir do `ProgressPublisher.publish_status()` do processo atual (o
+`cause_code`, USR-455 T2, e a classificacao estruturada do mesmo aviso -- ver `docs/runbooks/live_progress.md`),
+preferindo `completion_info["live_progress"]`
+quando a entrega rodou num processo filho (USR-116); o segundo formata a linha `[ESTEIRA] progresso
+publicado/mudo` impressa no stderr pelos dois pontos de encerramento do launcher (`main`, `resume_delivery`)
+e incluida no payload JSON final (`live_progress`) por `delivery_success_result`, `delivery_failure_result`
+e `final_json_payload`. Detalhe operacional e exemplos: `docs/runbooks/live_progress.md`.
+
+A mesma linha sai no stderr do fluxo completo (`main`) e do `--resume-delivery` isolado. `scripts/live_run.py`
+imprime a mesma linha em cada comando. Publicacao mudo nao muda o exit code. Com `--json` o stdout continua
+um unico JSON; `live_progress` traz `published`, `warning` e `cause_code`; em falha inclui `failure`
+com fase, categoria e mensagem sanitizada, sem senha e sem URL de banco.
+
+O sink resolve a mesma URL do control store (`DARKFAC_HF02_DATABASE_URL`), inclusive `sslmode` da
+URL/`PGSSLMODE`, mas com limites proprios e mais largos que os 5 s de conexao do control store --
+exatamente o cenario do USR-454, em que a leitura do control store funcionou e a publicacao do sink
+expirou na mesma rede. Cada limite aceita um valor positivo nas variaveis abaixo; vazio ou invalido
+cai no padrao.
+
+| Limite do sink | Variavel | Padrao | O que limita |
+| --- | --- | --- | --- |
+| `connect_timeout` | `DARKFAC_LOCAL_PROGRESS_CONNECT_TIMEOUT_S` | 10 s (max. 30) | abrir a conexao |
+| `statement_timeout` | `DARKFAC_LOCAL_PROGRESS_STATEMENT_TIMEOUT_S` | 10 s (max. 30) | cada comando PostgreSQL |
+| limite total da publicacao | `DARKFAC_LOCAL_PROGRESS_WRITE_TIMEOUT_S` | 30 s (max. 120) | cada chamada de publicacao |
+| retries | `DARKFAC_LOCAL_PROGRESS_RETRIES` | 1 (max. 2; 0 desliga) | novas tentativas depois de descartar a conexao que falhou |
+
+`cause_code` do publicador (classifica uma tentativa de escrita que falhou; usado por
+`live_progress.cause_code` e pelo aviso `[AVISO] Esteira ao vivo`):
+
+| `cause_code` | Quando |
+| --- | --- |
+| `no_url` | nenhuma variavel de banco (nem `control.db`) |
+| `missing_driver` | `psycopg` ausente |
+| `dns_error` | o host da URL nao resolveu |
+| `tcp_timeout` | a rede nao respondeu no tempo configurado |
+| `connection_refused` | porta fechada ou servico fora |
+| `auth_failed` | usuario ou senha incorretos |
+| `missing_table` | `local_run_events` ausente e sem `CREATE` |
+| `read_only` | sem `INSERT` em `local_run_events` |
+| `unknown` | excecao fora da lista |
+
+Para comparar a configuracao dos destinos antes de reexecutar um ticket, rode o diagnostico offline
+(nao acessa rede nem banco; imprime host, porta, `sslmode` e timeout efetivos sem usuario, senha ou URL):
+`python C:\dev\DarkFac\scripts\live_progress_doctor.py`. A `causa` desse diagnostico
+(`dsn_divergente`, `timeout_curto`, `credencial_ausente`, `host_sem_rota`, `no_url`, `ok`) compara os
+dois destinos e usa um codigo proprio, distinto do `cause_code` acima.

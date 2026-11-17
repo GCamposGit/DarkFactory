@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any, Optional
 
 from core.line import line_lock, local_cancel, run_outcome
 from core.line.diagnostics import redacted_head
-from core.line.local_progress import ENV_RUN_ID, ENV_WARNED
+from core.line.local_progress import CAUSE_FIXES, ENV_RUN_ID, ENV_WARNED, PHASES, RUN_PHASE
 from core.workflow import execution_registry
 
 logger = logging.getLogger("darkfac.run_ticket")
@@ -158,6 +159,100 @@ def rebase_conflict_result(
     return conflict_payload if return_result else 1
 
 
+# Scheme URLs (database DSNs included) and assigned secrets. The public Hub host in the success
+# line has no scheme, so it stays; a ``postgresql://user:secret@host/db`` does not.
+_SCHEME_URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://\S+")
+_SECRET_ASSIGN = re.compile(
+    r"(?i)\b(password|passwd|senha|token|secret|api[_-]?key|authorization)\s*([=:])\s*\S+"
+)
+
+
+def redact_progress_text(text: str) -> str:
+    """Drop scheme URLs and assigned passwords from a progress reason. Never raises."""
+    try:
+        cleaned = _SCHEME_URL.sub("[url]", text)
+        return _SECRET_ASSIGN.sub(lambda match: f"{match.group(1)}{match.group(2)}***", cleaned)
+    except Exception:  # noqa: BLE001 - a summary line must not fail the run
+        return "falha ao publicar (motivo omitido)"
+
+
+def _normalize_publish_status(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize public progress fields; only a closed, sanitized failure shape survives."""
+    warning = raw.get("warning")
+    if not isinstance(warning, str) or not warning.strip():
+        warning_out: str | None = None
+    else:
+        warning_out = redact_progress_text(warning)
+    cause = raw.get("cause_code")
+    if not isinstance(cause, str) or not cause.strip():
+        cause_out: str | None = None
+    else:
+        cause_out = redact_progress_text(cause)
+    try:
+        unpublished = max(0, int(raw.get("unpublished_phases", 0)))
+    except (TypeError, ValueError):
+        unpublished = 0
+    normalized = {
+        "published": bool(raw.get("published")),
+        "warning": warning_out,
+        "cause_code": cause_out,
+        "unpublished_phases": unpublished,
+    }
+    failure = raw.get("failure")
+    if isinstance(failure, dict):
+        phase = failure.get("phase")
+        category = failure.get("category")
+        message = failure.get("message")
+        if (
+            isinstance(phase, str)
+            and phase in {*PHASES, RUN_PHASE}
+            and isinstance(category, str)
+            and category in {*CAUSE_FIXES, "local_only"}
+            and isinstance(message, str)
+            and message.strip()
+        ):
+            normalized["failure"] = {
+                "phase": phase,
+                "category": category,
+                "message": redact_progress_text(message)[:400],
+            }
+    return normalized
+
+
+def publish_status(progress: Any, completion_info: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Credential-free ``{"published": bool, "warning": str | None, "cause_code": str | None}``.
+
+    Prefers ``completion_info["live_progress"]`` (set by a nested delivery subprocess, which owns most
+    phases) and falls back to this process's own ``progress`` (USR-455 T3): the operator must see
+    whether phases reached the cloud Hub without reading a log file, whichever process published them.
+    """
+    if isinstance(completion_info, dict) and isinstance(completion_info.get("live_progress"), dict):
+        raw = completion_info["live_progress"]
+    else:
+        publish_status_of = getattr(progress, "publish_status", None)
+        raw = publish_status_of() if callable(publish_status_of) else {"published": False, "warning": None, "cause_code": None}
+    if not isinstance(raw, dict):
+        raw = {"published": False, "warning": None, "cause_code": None}
+    return _normalize_publish_status(raw)
+
+
+def publish_status_line(status: dict[str, Any]) -> str:
+    """One stderr line with Hub visibility and actionable degradation details."""
+    if status.get("published"):
+        return "[ESTEIRA] progresso publicado no Hub (darkhub.ggcampos.com/live)."
+    reason = status.get("warning") or "nenhuma fase foi publicada (ver docs/runbooks/live_progress.md)."
+    if not isinstance(reason, str) or not reason.strip():
+        reason = "nenhuma fase foi publicada (ver docs/runbooks/live_progress.md)."
+    try:
+        count = max(0, int(status.get("unpublished_phases", 0)))
+    except (TypeError, ValueError):
+        count = 0
+    return (
+        f"[ESTEIRA] progresso mudo - {redact_progress_text(reason)}; "
+        f"fases_nao_publicadas={count}; rode `python -m core.line.live_progress_doctor`."
+    )
+
+
 def delivery_failure_result(
     ticket: Any, completion_report: Any, external_project: bool, target_worktree: Path, current_branch: str,
     current_sha: str, resume_cmd: str, progress: Any, as_json: bool, return_result: bool,
@@ -172,6 +267,7 @@ def delivery_failure_result(
     print("\nPara retomar a entrega deste ticket após solucionar o problema, execute:", file=sys.stderr)
     print(f"  {resume_cmd}", file=sys.stderr)
     print("=" * 68 + "\n", file=sys.stderr)
+    live_progress = publish_status(progress)
 
     delivery_report = (
         completion_report if external_project else completion_report.delivery
@@ -192,6 +288,7 @@ def delivery_failure_result(
         "error": error_msg,
         "branch": current_branch,
         "current_sha": current_sha,
+        "live_progress": live_progress,
         "worktree": str(target_worktree),
         "resume_command": resume_cmd,
     }
@@ -202,7 +299,7 @@ def delivery_failure_result(
 
 def delivery_success_result(
     ticket: Any, completion_report: Any, target_worktree: Path, current_branch: str, current_sha: str,
-    attempts_log: list[dict[str, Any]], as_json: bool, return_result: bool, awaiting_deploy: bool = False,
+    attempts_log: list[dict[str, Any]], as_json: bool, return_result: bool, progress: Any, awaiting_deploy: bool = False,
     artifact_directory: Optional[Path] = None,
 ) -> Any:
     merge_artifact = artifact_directory / "merge.json" if artifact_directory else None
@@ -255,6 +352,7 @@ def delivery_success_result(
         "merge_sha": merge_sha,
         "deploy_status": deploy_status,
         "deploy_report": str(deploy_artifact) if deploy_artifact and deploy_artifact.is_file() else None,
+        "live_progress": publish_status(progress),
     }
     if completion_report and getattr(completion_report, "sync_result", None):
         success_payload["sync_action"] = completion_report.sync_result.action
@@ -414,7 +512,7 @@ def parse_delivery_output(delivery_proc: Any, exit_code: int) -> tuple[dict[str,
 def final_json_payload(
     ticket: Any, ticket_size: str, cost_record: Any, selected_harness: Any, selected_model: Any,
     selected_effort: Any, agent_result: Any, workspace: Any, agent_summary: str, delivered: bool,
-    completion_info: dict[str, Any],
+    completion_info: dict[str, Any], progress: Any = None,
 ) -> dict[str, Any]:
     payload = {
         "ok": delivered,
@@ -428,6 +526,7 @@ def final_json_payload(
         "workspace": str(workspace.path),
         "branch": workspace.branch,
         "agent_summary": agent_summary,
+        "live_progress": publish_status(progress, completion_info),
     }
     if "commit_sha" in completion_info:
         payload["commit_sha"] = completion_info["commit_sha"]

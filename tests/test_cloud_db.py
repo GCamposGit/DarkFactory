@@ -9,6 +9,9 @@ Tests:
 
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 from core.orchestrator.cloud_db import (
     DatabaseProbeResult,
@@ -46,3 +49,22 @@ def test_unprivileged_user_without_psycopg_driver_returns_clean_blocked() -> Non
     result = probe_cloud_database(database_url=fake_worker_url)
     assert result.status in {"blocked", "error"}
     assert "secret123" not in str(result.model_dump())
+
+
+def test_driver_exception_does_not_echo_dsn_or_sensitive_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret_url = (
+        "postgresql://writer:secret-pass@private-db:5432/factory"
+        "?token=secret-token&sslpassword=secret-ssl&api_key=secret-key"
+    )
+
+    def fail_connect(*args: object, **kwargs: object) -> None:
+        raise TimeoutError(f"could not connect to {secret_url}")
+
+    monkeypatch.setitem(sys.modules, "psycopg", SimpleNamespace(connect=fail_connect))
+    result = probe_cloud_database(database_url=secret_url)
+    output = str(result.model_dump())
+
+    assert result.status == "error"
+    assert result.error_message == "PostgreSQL connection failed (TimeoutError)"
+    for sensitive in (secret_url, "secret-pass", "secret-token", "secret-ssl", "secret-key", "private-db"):
+        assert sensitive not in output

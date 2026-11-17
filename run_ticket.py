@@ -1681,6 +1681,9 @@ def resume_delivery(
                 holder[0].cancel(_cancel_message())
             else:
                 holder[0].finish(code == 0, "" if code == 0 else f"entrega terminou com codigo {code}")
+            # USR-455 T3: one credential-free line on the launcher's own stderr, so a silent publish
+            # failure (or a confirmed publication) is visible without reading a log file.
+            print(ticket_stages.publish_status_line(ticket_stages.publish_status(holder[0])), file=sys.stderr)
 
 
 def _resume_delivery(
@@ -2223,7 +2226,7 @@ def _deliver_worktree(
         progress.phase("deploy", "skipped", "merge e deploy desligados por --no-commit/--no-push")
     return ticket_stages.delivery_success_result(
         ticket, completion_report, target_worktree, current_branch, current_sha, attempts_log,
-        as_json, return_result, awaiting_deploy=awaiting_deploy,
+        as_json, return_result, progress, awaiting_deploy=awaiting_deploy,
         artifact_directory=ticket_engine.workspace.context_dir(rws),
     )
 
@@ -2619,6 +2622,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if code != 0:
                     box[0].set_outcome(f"run_ticket terminou com codigo {code}", f"exit_{code}", only_if_unset=True)
                 box[0].finish(code == 0)
+            # USR-455 T3: one credential-free line on the launcher's own stderr, so a silent publish
+            # failure (or a confirmed publication) is visible without reading a log file.
+            print(ticket_stages.publish_status_line(ticket_stages.publish_status(box[0])), file=sys.stderr)
 
 
 def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
@@ -4095,7 +4101,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         payload = ticket_stages.final_json_payload(
             ticket, route["ticket_size"], built["cost_record"], built["harness"], built["model"],
             built["effort"], built["agent_result"], workspace, built["agent_summary"], delivered,
-            completion_info,
+            completion_info, progress,
         )
         print(json.dumps(payload, indent=2, ensure_ascii=False))
 

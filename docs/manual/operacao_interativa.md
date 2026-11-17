@@ -172,3 +172,42 @@ Etapa DOCS reprovada após a reinvocação única encerra com causa `docs_sync_f
 Relancamento de ticket (USR-447): com plano valido para a mesma demanda o launcher nao replaneja, pula as fatias ja concluidas e, se todas estao prontas e ha diff, vai direto ao portao. Detalhes em `docs/manual/motor.md`.
 
 O commit do agente de conserto regrava o vinculo de build (USR-447): o candidato reparado continua retomavel por `--resume-delivery`.
+
+## Resultado da publicacao na esteira ao vivo (USR-455)
+
+Toda chamada de `run_ticket.py` (ticket completo, `--resume-delivery` isolado, ou a entrega em processo filho) e toda chamada de `scripts/live_run.py` termina com uma linha no stderr informando se as fases desta execucao chegaram ao Postgres da nuvem que o DarkHub le:
+
+```
+[ESTEIRA] progresso publicado no Hub (darkhub.ggcampos.com/live).
+[ESTEIRA] progresso mudo - <motivo curto, sem senha e sem URL>
+```
+
+O operador ve esse veredito sem abrir log algum. Publicacao mudo preserva o exit code. Com `--json` a linha continua so no stderr (o stdout permanece um JSON unico) e o mesmo veredito tambem fica em `live_progress` no payload JSON (`published`, `warning`, `cause_code` e, em falha, `failure` com fase, categoria e mensagem sanitizada). A linha e o JSON nao trazem senha nem URL de banco.
+
+O sink resolve a mesma URL (`DARKFAC_HF02_DATABASE_URL`) que o control store, incluindo host, porta e
+`sslmode` da URL/`PGSSLMODE`, mas com limites proprios e mais largos que os 5 s de conexao do control
+store. Cada timeout aceita um valor positivo; vazio ou invalido cai no padrao, e o valor e limitado ao teto.
+O numero de retries aceita `0` a `2` (padrao `1`).
+
+| Limite do sink | Variavel | Padrao | O que limita |
+| --- | --- | --- | --- |
+| `connect_timeout` | `DARKFAC_LOCAL_PROGRESS_CONNECT_TIMEOUT_S` | 10 s (max. 30) | abrir a conexao |
+| `statement_timeout` | `DARKFAC_LOCAL_PROGRESS_STATEMENT_TIMEOUT_S` | 10 s (max. 30) | cada comando PostgreSQL |
+| limite total da publicacao | `DARKFAC_LOCAL_PROGRESS_WRITE_TIMEOUT_S` | 30 s (max. 120) | cada chamada de publicacao |
+| retries | `DARKFAC_LOCAL_PROGRESS_RETRIES` | 1 (max. 2; 0 desliga) | novas tentativas depois de descartar a conexao que falhou |
+
+Tabela de `cause_code` do publicador (classifica uma tentativa de escrita que falhou):
+
+| `cause_code` | Quando |
+| --- | --- |
+| `no_url` | nenhuma variavel de banco (nem `control.db`) |
+| `missing_driver` | `psycopg` ausente |
+| `dns_error` | o host da URL nao resolveu |
+| `tcp_timeout` | a rede nao respondeu no tempo configurado |
+| `connection_refused` | porta fechada ou servico fora |
+| `auth_failed` | usuario ou senha incorretos |
+| `missing_table` | `local_run_events` ausente e sem `CREATE` |
+| `read_only` | sem `INSERT` em `local_run_events` |
+| `unknown` | excecao fora da lista |
+
+Para comparar o control store e o sink sem rede ou escrita (host, porta, `sslmode`, timeout e presenca de credenciais, sempre redigidos): `python C:\dev\DarkFac\scripts\live_progress_doctor.py`. A `causa` desse doctor (`dsn_divergente`, `timeout_curto`, `credencial_ausente`, `host_sem_rota`, `no_url`, `ok`) e um codigo distinto do `cause_code` acima: compara os dois destinos, nao classifica uma excecao. Detalhe operacional: `docs/runbooks/live_progress.md`.
