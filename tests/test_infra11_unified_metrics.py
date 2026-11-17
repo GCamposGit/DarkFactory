@@ -278,17 +278,18 @@ def test_collect_desktop_hardware_metrics_rejects_wrong_node(monkeypatch: pytest
     assert node.last_contact_at is None
 
 
-def test_remote_worker_hardware_metrics_endpoint() -> None:
+def test_remote_worker_hardware_metrics_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """The worker exposes the shared headless hardware collector over HTTP."""
-    sample = _sample_hardware(node_id="desktop-g45ipem")
+    monkeypatch.setattr(socket, "gethostname", lambda: "desktop-g45ipem")
+    sample = _sample_hardware(node_id="onprem-z97-server")
     worker_client = TestClient(create_worker_app(node_id="desktop-g45ipem"))
     with patch("core.harness.remote_worker.collect_host_hardware_metrics", return_value=sample) as collect:
         response = worker_client.get("/metrics/hardware")
 
     assert response.status_code == 200
-    assert response.json()["node_id"] == "desktop-g45ipem"
+    assert response.json()["node_id"] == "onprem-z97-server"
     assert response.json()["cpu_percent"] == 24.0
-    collect.assert_called_once_with(node_id="desktop-g45ipem")
+    collect.assert_called_once_with(node_id="onprem-z97-server")
 
 
 # ==============================================================================

@@ -39,6 +39,8 @@ logger = logging.getLogger("darkfac.fleet_worker")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+from core.infra.host_identity import resolve_host_id_detail  # noqa: E402
+
 _PIDS_DIR = _REPO_ROOT / ".factory" / "pids"
 _FLEET_CONFIG_PATH = _REPO_ROOT / ".factory" / "config" / "line_fleet.json"
 
@@ -89,22 +91,12 @@ class WorkerLifecycleStatus(BaseModel):
 
 def discover_local_host_id() -> str:
     """Infer logical host_id from environment, hostname, or OS family."""
-    env_host = os.environ.get("DARKFAC_HOST_ID", "").strip().lower()
-    if env_host in FLEET_HOST_PRIORITIES:
-        return env_host
-
-    hostname = platform.node().lower()
-    if "grok" in hostname or "vm-418" in hostname:
-        return "grokbox"
-    if "desktop" in hostname or "g45ipem" in hostname:
-        return "desktop"
-    if "notebook" in hostname or "ai_notebook" in hostname or "ai-notebook" in hostname:
-        return "notebook"
-
-    # Default to platform family heuristic
-    if sys.platform.startswith("linux"):
-        return "grokbox"
-    return "notebook"
+    return resolve_host_id_detail(
+        env_host_id=os.environ.get("DARKFAC_HOST_ID"),
+        hostname=platform.node(),
+        fleet_compat=True,
+        platform_name=sys.platform,
+    ).host_id
 
 
 def get_pid_file(host_id: str) -> Path:

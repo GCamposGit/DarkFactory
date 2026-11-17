@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
+from core.infra.host_identity import resolve_host_id_detail
 from core.paths import state_root
 from core.workflow.control_contracts import (
     FleetCapacityExceededError,
@@ -165,16 +166,11 @@ def is_fleet_mode() -> bool:
 
 def resolve_host_id(host_id: Optional[str] = None) -> str:
     """Resolve logical fleet host ID (grokbox, notebook, desktop) or fallback to hostname."""
-    if host_id and host_id.strip():
-        return host_id.strip().lower()
-    env_host = os.environ.get("DARKFAC_HOST_ID")
-    if env_host and env_host.strip():
-        return env_host.strip().lower()
-    raw_name = socket.gethostname().lower()
-    for known in ("grokbox", "notebook", "desktop"):
-        if known in raw_name:
-            return known
-    return raw_name
+    return resolve_host_id_detail(
+        host_id,
+        env_host_id=os.environ.get("DARKFAC_HOST_ID"),
+        hostname=socket.gethostname(),
+    ).host_id
 
 
 def get_lock_info(root: Optional[Path] = None) -> Optional[LineLockInfo]:
@@ -317,10 +313,16 @@ class LineLock:
         self._heartbeat_wait = heartbeat_wait
         self._require_reservation = require_reservation
         self._ticket_id = ticket_id
+        self._hostname = socket.gethostname()
+        self._host_resolution = resolve_host_id_detail(
+            host_id,
+            env_host_id=os.environ.get("DARKFAC_HOST_ID"),
+            hostname=self._hostname,
+        )
         # Fleet mode (USR-366): one lock slot per gate host, so several hosts can run in parallel from
         # the same machine; outside fleet mode the single machine-wide lock is kept.
         _fleet_slot = fleet_mode if fleet_mode is not None else is_fleet_mode()
-        self._path = lock_path(root, fleet_host=resolve_host_id(host_id) if _fleet_slot else None)
+        self._path = lock_path(root, fleet_host=self._host_resolution.host_id if _fleet_slot else None)
         self._root = root
         self._store = store
         self._host_id = host_id
@@ -428,7 +430,7 @@ class LineLock:
                 self._fail_reservation_closed("store canonico sem reserva de ciclo (sem fallback local)")
 
             if self._store is not None and hasattr(self._store, "reserve_cycle"):
-                host_id = resolve_host_id(self._host_id)
+                host_id = self._host_resolution.host_id
                 run_id = self._run_id or os.environ.get("DARKFAC_RUN_ID") or f"run-{self._ticket_id}-{int(now)}"
                 now_utc = datetime.now(timezone.utc)
                 try:
@@ -442,11 +444,12 @@ class LineLock:
                         max_fleet_slots=self._max_fleet_slots,
                         metadata={"origin": "manual"} if self._require_reservation else None,
                     )
-                except ReservationConflictError:
+                except ReservationConflictError as exc:
                     # Clean up local lock file so machine is not left locked on conflict
                     with contextlib.suppress(FileNotFoundError, OSError):
                         self._path.unlink()
                     self._acquired = False
+                    self._append_host_resolution(exc)
                     raise
                 except Exception as exc:
                     if self._require_reservation:
@@ -460,7 +463,26 @@ class LineLock:
         with contextlib.suppress(FileNotFoundError, OSError):
             self._path.unlink()
         self._acquired = False
-        raise ReservationConflictError(f"Reserva canonica do ticket {self._ticket_id} falhou fechada: {reason}")
+        exc = ReservationConflictError(
+            f"Reserva canonica do ticket {self._ticket_id} falhou fechada: {reason}"
+        )
+        self._append_host_resolution(exc)
+        raise exc
+
+    def _append_host_resolution(self, exc: ReservationConflictError) -> None:
+        """Add local host evidence without changing the conflict class or its attributes."""
+        source = {
+            "argument": "argumento explícito",
+            "environment": "DARKFAC_HOST_ID",
+            "hostname": "hostname",
+            "fallback": "fallback",
+        }[self._host_resolution.source]
+        detail = (
+            f"host resolvido: {self._host_resolution.host_id} "
+            f"(origem: {source}; hostname: {self._hostname})"
+        )
+        original = str(exc)
+        exc.args = (f"{original} ({detail})",)
 
     def _start_heartbeat(self, info: LineLockInfo) -> None:
         def beat() -> None:

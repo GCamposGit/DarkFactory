@@ -28,7 +28,7 @@ import time
 import uuid
 from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -51,13 +51,13 @@ from core.harness.test_subagent import (
     TestSubagentEngine,
 )
 from core.infra.git_sha import current_git_sha
+from core.infra.host_identity import NodeIdentity, resolve_node_identity
 from core.infra.metrics import HardwareMetrics, collect_host_hardware_metrics
 from core.models.registry import gateway_id, id_of, resolve
 
 logger = logging.getLogger("core.harness.remote_worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-DEFAULT_WORKER_NODE_ID = "onprem-z97-server"
 DEFAULT_WORKER_PORT = 8080
 DEFAULT_WORKER_HOST = "0.0.0.0"
 ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
@@ -136,7 +136,15 @@ _JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 class WorkerHealthStatus(BaseModel):
     """Health and operational capability status of the remote test runner node."""
     status: str = Field(default="ok", description="Health status string: ok, degraded, busy")
-    node_id: str = Field(default=DEFAULT_WORKER_NODE_ID, description="Target node slug identifier")
+    node_id: str = Field(default="unknown-host", description="Canonical node identifier of the host answering this health request")
+    configured_node_id: Optional[str] = Field(
+        default=None,
+        description="Node id configured by --node-id or DARKFAC_NODE_ID, if supplied",
+    )
+    node_id_source: Literal["cli", "env", "hostname", "fallback"] = Field(
+        default="fallback",
+        description="Evidence used to resolve node_id: cli, env, hostname, or fallback",
+    )
     version: str = Field(default="1.0.0", description="Worker service version")
     docker_ready: bool = Field(default=True, description="Whether Docker runtime is accessible on Drive E:")
     project_root: str = Field(..., description="Root directory where tests execute")
@@ -1737,7 +1745,7 @@ def _detached_popen_kwargs(root_path: Path) -> Dict[str, Any]:
     return kwargs
 
 
-def _restart_after_exit(root_path: Path, host: str, port: int, node_id: str) -> None:
+def _restart_after_exit(root_path: Path, host: str, port: int, node_id: str | None) -> None:
     """Run in a detached helper, after the previous daemon releases the port."""
     if not _wait_for_released_port(host, port):
         logger.error("Worker port %s remained occupied; refusing duplicate launch", port)
@@ -1759,25 +1767,25 @@ def _restart_after_exit(root_path: Path, host: str, port: int, node_id: str) -> 
                 return
             logger.warning("Scheduled Task start failed; relaunching worker directly")
 
-    subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "--host", host, "--port", str(port),
-         "--node-id", node_id, "--project-root", str(root_path)],
-        **subp_kwargs,
-    )
+    command = [sys.executable, str(Path(__file__).resolve()), "--host", host, "--port", str(port)]
+    if node_id:
+        command.extend(["--node-id", node_id])
+    command.extend(["--project-root", str(root_path)])
+    subprocess.Popen(command, **subp_kwargs)
 
 
 def trigger_daemon_restart(root_path: Path, host: str = DEFAULT_WORKER_HOST,
                            port: int = DEFAULT_WORKER_PORT,
-                           node_id: str = DEFAULT_WORKER_NODE_ID) -> None:
+                           node_id: str | None = None) -> None:
     """Start a detached restart helper, then terminate this daemon."""
     def _deferred() -> None:
         time.sleep(1.0)
         subp_kwargs = _detached_popen_kwargs(root_path)
-        subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--restart-wait", "--project-root", str(root_path),
-             "--host", host, "--port", str(port), "--node-id", node_id],
-            **subp_kwargs,
-        )
+        command = [sys.executable, str(Path(__file__).resolve()), "--restart-wait", "--project-root", str(root_path),
+                   "--host", host, "--port", str(port)]
+        if node_id:
+            command.extend(["--node-id", node_id])
+        subprocess.Popen(command, **subp_kwargs)
         os._exit(0)
 
     t = threading.Thread(target=_deferred, daemon=True)
@@ -1875,14 +1883,66 @@ def preserve_files_unversioned_upstream(root_path: Path, subp_kwargs: Optional[D
     return notes
 
 
+def _worker_health_status(
+    job_manager: JobManager,
+    root_path: Path,
+    node_id: str,
+    identity: NodeIdentity,
+) -> WorkerHealthStatus:
+    """Build the worker health response from its resolved host identity."""
+    # Detect Docker Desktop availability on Windows / Linux
+    docker_available = False
+    try:
+        import shutil
+
+        docker_available = shutil.which("docker") is not None
+    except Exception:
+        docker_available = False
+
+    return WorkerHealthStatus(
+        status="busy" if job_manager.is_busy() else "ok",
+        node_id=node_id,
+        configured_node_id=identity.configured_node_id,
+        node_id_source=identity.source,
+        version="1.0.0",
+        docker_ready=docker_available,
+        project_root=str(root_path),
+        active_runs=1 if job_manager.is_busy() else 0,
+        available_harnesses=get_available_harnesses(),
+        platform_family=harness_cache.platform_family(),
+        python_version=harness_cache.python_version_tag(),
+        hostname=socket.gethostname(),
+        busy=job_manager.is_busy(),
+        queue_length=job_manager.queue_length(),
+        known_shas=known_validated_shas(root_path),
+        harness_version="1",
+        git_sha=current_git_sha(root_path),
+        instance_id=job_manager.instance_id,
+        started_at=job_manager.started_at,
+    )
+
+
 def create_worker_app(
     project_root: Optional[Path] = None,
-    node_id: str = DEFAULT_WORKER_NODE_ID,
+    node_id: str | None = None,
     host: str = DEFAULT_WORKER_HOST,
     port: int = DEFAULT_WORKER_PORT,
 ) -> FastAPI:
     """Instantiate and configure the FastAPI application for the remote test worker."""
     root_path = project_root or REPO_ROOT
+    configured_cli_node_id = node_id
+    hostname = socket.gethostname()
+    identity: NodeIdentity = resolve_node_identity(node_id, hostname=hostname)
+    if identity.corrected:
+        logger.warning(
+            "Configured node id %r belongs to host %s, but hostname %r resolves to %s; reporting %s",
+            identity.configured_node_id,
+            identity.configured_logical_host,
+            identity.hostname,
+            identity.logical_host,
+            identity.node_id,
+        )
+    node_id = identity.node_id
     engine = TestSubagentEngine(project_root=root_path)
     job_manager = JobManager(root_path)
 
@@ -1892,7 +1952,10 @@ def create_worker_app(
         description="Headless distributed test runner for Dark Factory infrastructure nodes.",
     )
     worker_app.state.job_manager = job_manager
-    job_manager.on_stall_restart = lambda: trigger_daemon_restart(root_path, host, port, node_id)
+    worker_app.state.node_identity = identity
+    job_manager.on_stall_restart = lambda: trigger_daemon_restart(
+        root_path, host, port, configured_cli_node_id
+    )
 
     @worker_app.get("/health", response_model=WorkerHealthStatus)
     def get_health() -> WorkerHealthStatus:
@@ -1900,33 +1963,7 @@ def create_worker_app(
         core.harness.remote_dispatch) for fast probing. Always open, even
         when DARKFAC_WORKER_TOKEN is set -- a client must be able to tell a
         worker is alive before it has anything to authenticate."""
-        # Detect Docker Desktop availability on Windows / Linux
-        docker_available = False
-        try:
-            import shutil
-            docker_available = shutil.which("docker") is not None
-        except Exception:
-            docker_available = False
-
-        return WorkerHealthStatus(
-            status="busy" if job_manager.is_busy() else "ok",
-            node_id=node_id,
-            version="1.0.0",
-            docker_ready=docker_available,
-            project_root=str(root_path),
-            active_runs=1 if job_manager.is_busy() else 0,
-            available_harnesses=get_available_harnesses(),
-            platform_family=harness_cache.platform_family(),
-            python_version=harness_cache.python_version_tag(),
-            hostname=socket.gethostname(),
-            busy=job_manager.is_busy(),
-            queue_length=job_manager.queue_length(),
-            known_shas=known_validated_shas(root_path),
-            harness_version="1",
-            git_sha=current_git_sha(root_path),
-            instance_id=job_manager.instance_id,
-            started_at=job_manager.started_at,
-        )
+        return _worker_health_status(job_manager, root_path, node_id, identity)
 
     @worker_app.get("/metrics/hardware", response_model=HardwareMetrics)
     def get_hardware_metrics() -> HardwareMetrics:
@@ -2106,7 +2143,7 @@ def create_worker_app(
         # USR-162: close in-flight jobs with a cause (and reap their child) BEFORE
         # the process exits, instead of leaving an unexplained, unknown job id.
         job_manager.mark_interrupted("POST /system/restart")
-        trigger_daemon_restart(root_path, host, port, node_id)
+        trigger_daemon_restart(root_path, host, port, configured_cli_node_id)
         return {"status": "restarting", "node_id": node_id, "message": "Worker is restarting headless in background."}
 
     def _run_codex_headless(req_data: HarnessExecutionRequest) -> HarnessExecutionResponse:
@@ -2615,7 +2652,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="DarkFac On-Premises Remote Test Worker Daemon")
     parser.add_argument("--host", default=DEFAULT_WORKER_HOST, help=f"Host address to bind (default: {DEFAULT_WORKER_HOST})")
     parser.add_argument("--port", type=int, default=DEFAULT_WORKER_PORT, help=f"Port to listen on (default: {DEFAULT_WORKER_PORT})")
-    parser.add_argument("--node-id", default=DEFAULT_WORKER_NODE_ID, help="Node ID name")
+    parser.add_argument("--node-id", default=None, help="Node ID name (defaults to this host's identity)")
     parser.add_argument("--project-root", type=Path, default=REPO_ROOT, help="Project root directory")
     parser.add_argument("--restart-wait", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -2628,8 +2665,9 @@ def main() -> int:
 
     worker_instance = create_worker_app(project_root=args.project_root, node_id=args.node_id,
                                         host=args.host, port=args.port)
+    resolved_node_id = worker_instance.state.node_identity.node_id
     print("=" * 70)
-    print(f" [DarkFac Test Worker Daemon] Node: {args.node_id}")
+    print(f" [DarkFac Test Worker Daemon] Node: {resolved_node_id}")
     print(f" --> Listening on: http://{args.host}:{args.port}")
     print(f" --> Health check: http://{args.host}:{args.port}/health")
     print(f" --> Execution endpoint: http://{args.host}:{args.port}/execute")
