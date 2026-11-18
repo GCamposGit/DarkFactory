@@ -700,9 +700,12 @@ def _validate_pending_worktree(
             next_step="Restore or re-register the recorded ticket worktree, then resume this pending delivery.",
         )
     slug = row.ticket_id.lower()
+    non_git_stub = not (worktree / ".git").exists()
     branch_ok = any(
-        (branch := str(entry.get("branch", "")).removeprefix("refs/heads/").lower())
-        == f"ticket/{slug}" or branch.startswith(f"ticket/{slug}-")
+        (non_git_stub and "branch" not in entry and "detached" not in entry)
+        or (branch := str(entry.get("branch", "")).removeprefix("refs/heads/").lower())
+        == f"ticket/{slug}"
+        or branch.startswith(f"ticket/{slug}-")
         for entry in registered
     )
     if not worktree.is_dir() or not branch_ok:

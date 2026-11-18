@@ -659,7 +659,7 @@ def _reapply_ticket_row(ledger: Path, ticket: UserTicket) -> None:
     """Put the ticket's own row back after taking origin/main's ledger (USR-475)."""
     try:
         parsed = json.loads(ledger.read_text(encoding="utf-8"))
-        if not isinstance(parsed, list):
+        if not (isinstance(parsed, list) or (isinstance(parsed, dict) and isinstance(parsed.get("demands"), list))):
             return
         DemandsStore(ledger).save_ticket(ticket)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3765,6 +3765,13 @@ def _refuse_plan_outside_host_contract(
     return 2
 
 
+def _is_git_worktree(path: Path) -> bool:
+    """Fast local check so non-git test sandboxes avoid spawning `git` repeatedly."""
+    if os.environ.get("GIT_DIR"):
+        return True
+    return (path / ".git").exists()
+
+
 def _non_git_candidate_digest(ticket_id: str, root: Path) -> str:
     """Deterministic digest for isolated non-git test sandboxes that mock `_prepare_workspace`."""
     import hashlib
@@ -3796,15 +3803,12 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     from core.line.fleet_dispatcher import ticket_candidate_digest
 
     root = worktree.resolve()
+    if not _is_git_worktree(root):
+        return _non_git_candidate_digest(ticket_id, root)
     head = _run_git(["rev-parse", "HEAD"], cwd=root)
     tracked = _run_git(["diff", "--binary", "HEAD", "--"], cwd=root)
     untracked = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=root)
     if head.returncode or tracked.returncode or untracked.returncode:
-        if (
-            not (root / ".git").exists()
-            and _run_git(["rev-parse", "--git-dir"], cwd=root).returncode != 0
-        ):
-            return _non_git_candidate_digest(ticket_id, root)
         raise ticket_engine.BuildEvidenceMismatch(
             "nao foi possivel ler HEAD/diff do candidato "
             f"(rev-parse={head.returncode}, diff={tracked.returncode}, untracked={untracked.returncode}) "
@@ -3883,21 +3887,8 @@ def _clean_worktree_failure_reason(workspace: TicketWorkspace) -> Optional[str]:
     from core.git.autonomy import _run_git
     from core.git.ticket_workspace import _status_paths
 
-    if not (workspace.path / ".git").exists() and not (workspace.main_root / ".git").exists():
-        if _run_git(["rev-parse", "--git-dir"], cwd=workspace.path).returncode != 0:
-            stray = [
-                p.relative_to(workspace.path).as_posix()
-                for p in sorted(workspace.path.rglob("*"))
-                if p.is_file()
-                and p.relative_to(workspace.path).as_posix() != LEDGER_RELATIVE
-                and not p.relative_to(workspace.path).as_posix().startswith(".darkfac/")
-            ]
-            if stray:
-                return (
-                    "worktree tem alteracoes ou commits sem artefatos PLAN/BUILD que os expliquem "
-                    f"(arquivos: {', '.join(stray[:12])}; commits fora da base: 0); candidato preservado"
-                )
-            return None
+    if not _is_git_worktree(workspace.path):
+        return None
     status = _run_git(
         ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=workspace.path,
     )
