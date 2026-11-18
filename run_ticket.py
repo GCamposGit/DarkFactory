@@ -3765,6 +3765,23 @@ def _refuse_plan_outside_host_contract(
     return 2
 
 
+def _non_git_candidate_digest(ticket_id: str, root: Path) -> str:
+    """Deterministic digest for isolated non-git test sandboxes that mock `_prepare_workspace`."""
+    import hashlib
+
+    from core.line.admission_store import safe_digest
+
+    files: list[tuple[str, str]] = []
+    for source_path in sorted(root.rglob("*")):
+        if not source_path.is_file():
+            continue
+        rel = source_path.relative_to(root).as_posix()
+        if rel == LEDGER_RELATIVE or rel.startswith(".darkfac/"):
+            continue
+        files.append((rel, hashlib.sha256(source_path.read_bytes()).hexdigest()))
+    return safe_digest({"ticket": ticket_id, "worktree": str(root), "git": False, "files": files})
+
+
 def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     """Identity of registered candidate plus this worktree's exact local BUILD contents.
 
@@ -3783,6 +3800,11 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     tracked = _run_git(["diff", "--binary", "HEAD", "--"], cwd=root)
     untracked = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=root)
     if head.returncode or tracked.returncode or untracked.returncode:
+        if (
+            not (root / ".git").exists()
+            and _run_git(["rev-parse", "--git-dir"], cwd=root).returncode != 0
+        ):
+            return _non_git_candidate_digest(ticket_id, root)
         raise ticket_engine.BuildEvidenceMismatch(
             "nao foi possivel ler HEAD/diff do candidato "
             f"(rev-parse={head.returncode}, diff={tracked.returncode}, untracked={untracked.returncode}) "
@@ -3854,6 +3876,46 @@ def _stage_build_evidence_mismatch(
             "ticket_id": ticket.id, "workspace": str(workspace.path),
         }, indent=2, ensure_ascii=False))
     return 1
+
+
+def _clean_worktree_failure_reason(workspace: TicketWorkspace) -> Optional[str]:
+    """Verify a worktree without canonical PLAN/BUILD artifacts has no unexplained changes."""
+    from core.git.autonomy import _run_git
+    from core.git.ticket_workspace import _status_paths
+
+    if not (workspace.path / ".git").exists() and not (workspace.main_root / ".git").exists():
+        if _run_git(["rev-parse", "--git-dir"], cwd=workspace.path).returncode != 0:
+            stray = [
+                p.relative_to(workspace.path).as_posix()
+                for p in sorted(workspace.path.rglob("*"))
+                if p.is_file()
+                and p.relative_to(workspace.path).as_posix() != LEDGER_RELATIVE
+                and not p.relative_to(workspace.path).as_posix().startswith(".darkfac/")
+            ]
+            if stray:
+                return (
+                    "worktree tem alteracoes ou commits sem artefatos PLAN/BUILD que os expliquem "
+                    f"(arquivos: {', '.join(stray[:12])}; commits fora da base: 0); candidato preservado"
+                )
+            return None
+    status = _run_git(
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=workspace.path,
+    )
+    ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
+    if status.returncode != 0 or ahead.returncode != 0 or not (ahead.stdout or "").strip().isdigit():
+        return (
+            "nao foi possivel provar que a worktree sem artefatos PLAN/BUILD esta limpa "
+            f"(git status={status.returncode}, rev-list={ahead.returncode}); arquivos preservados"
+        )
+    changed = [path for path in _status_paths(status.stdout or "") if path != LEDGER_RELATIVE]
+    commits_ahead = int(ahead.stdout.strip())
+    if changed or commits_ahead:
+        return (
+            "worktree tem alteracoes ou commits sem artefatos PLAN/BUILD que os expliquem "
+            f"(arquivos: {', '.join(changed[:12]) or 'nenhum'}; commits fora da base: {commits_ahead}); "
+            "candidato preservado"
+        )
+    return None
 
 
 def _stage_plan(
@@ -3949,28 +4011,9 @@ def _stage_plan(
         # attempt may have lost or replaced its PLAN/BUILD files after writing implementation code
         # or committing it. Refuse before reset/PLAN so those candidate changes cannot be silently
         # detached from their evidence and overwritten by a fresh run.
-        from core.git.autonomy import _run_git
-        from core.git.ticket_workspace import _status_paths
-
-        status = _run_git(
-            ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=workspace.path,
-        )
-        ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
-        if status.returncode != 0 or ahead.returncode != 0 or not (ahead.stdout or "").strip().isdigit():
-            return _stage_build_evidence_mismatch(
-                args, ticket, workspace, progress,
-                "nao foi possivel provar que a worktree sem artefatos PLAN/BUILD esta limpa "
-                f"(git status={status.returncode}, rev-list={ahead.returncode}); arquivos preservados",
-            )
-        changed = [path for path in _status_paths(status.stdout or "") if path != LEDGER_RELATIVE]
-        commits_ahead = int(ahead.stdout.strip())
-        if changed or commits_ahead:
-            return _stage_build_evidence_mismatch(
-                args, ticket, workspace, progress,
-                "worktree tem alteracoes ou commits sem artefatos PLAN/BUILD que os expliquem "
-                f"(arquivos: {', '.join(changed[:12]) or 'nenhum'}; commits fora da base: {commits_ahead}); "
-                "candidato preservado",
-            )
+        dirty_reason = _clean_worktree_failure_reason(workspace)
+        if dirty_reason:
+            return _stage_build_evidence_mismatch(args, ticket, workspace, progress, dirty_reason)
         ticket_engine.reset(rws)
     stage = Stage.INTAKE
     try:
