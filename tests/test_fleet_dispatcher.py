@@ -1652,8 +1652,8 @@ def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(t
     holder = "python (pid 17192)"
     calls = []
 
-    def protected_cleanup(path, main_root):
-        calls.append((path, main_root))
+    def protected_cleanup(path, main_root, **kwargs):
+        calls.append((path, main_root, kwargs.get("discard_path_hashes")))
         return CleanupResult(
             path=path, removed=False, method="preserved",
             detail=f"{path} is in use; preserved because processes have cwd inside it: {holder}",
@@ -1662,10 +1662,17 @@ def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(t
     monkeypatch.setattr("core.git.ticket_workspace.cleanup", protected_cleanup)
     monkeypatch.setattr(fd, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr("core.git.ticket_workspace.main_checkout_root", lambda _path: tmp_path)
+    monkeypatch.setitem(
+        fd._OPERATIONAL_CHECKOUT_LEDGER_HASHES,
+        os.path.normcase(os.path.realpath(checkout)),
+        "a" * 64,
+    )
 
     fd._remove_operational_checkout(checkout)
 
-    assert calls == [(checkout, tmp_path)]
+    assert calls == [
+        (checkout, tmp_path, {".factory/demands/demands.json": "a" * 64})
+    ]
     assert "checkout operacional preservado" in caplog.text
     assert str(checkout) in caplog.text and holder in caplog.text
     assert "recuperacao possivel" in caplog.text
@@ -2224,6 +2231,18 @@ def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
     assert cycle["resumptions"][0]["status"] == "check_failed"
     assert path.read_bytes() == before
     assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
+
+
+def test_run_forever_invokes_orphan_worktree_cleanup_hook(tmp_path: Path, monkeypatch) -> None:
+    events: list[str] = []
+    dispatcher, _execs = _sha_dispatcher(tmp_path / "state", lambda: _SHA_A)
+    dispatcher.run_cycle = lambda: events.append("cycle") or {}
+    dispatcher.orphan_worktree_cleanup_hook = lambda: events.append("cleanup")
+    monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+
+    dispatcher.run_forever(stop=_stop_after(1))
+
+    assert events == ["cycle", "cleanup", "sleep"]
 
 
 def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(

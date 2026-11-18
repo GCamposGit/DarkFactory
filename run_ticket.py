@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from dataclasses import replace
+import hashlib
 import json
 import logging
 import os
@@ -483,12 +485,17 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         if dirty:
             raise SharedCheckoutDirty(dirty)
     workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
+    is_new_workspace = workspace is None
     if workspace is None:
         workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
     ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
+    generated_discard_hashes: dict[str, str] = {}
     if ledger.get_ticket(ticket.id) is None:
         ledger.save_ticket(ticket)
-    return workspace
+        if is_new_workspace:
+            ledger_path = workspace.path / LEDGER_RELATIVE
+            generated_discard_hashes[LEDGER_RELATIVE] = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
+    return replace(workspace, discard_path_hashes=generated_discard_hashes)
 
 
 def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
@@ -503,7 +510,11 @@ def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
     # The ledger row of a ticket created by this very run is the only change the harness itself makes.
     if [p for p in mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE]:
         return False
-    if not cleanup(workspace.path, workspace.main_root).removed:
+    if not cleanup(
+        workspace.path,
+        workspace.main_root,
+        discard_path_hashes=workspace.discard_path_hashes,
+    ).removed:
         return False
     _run_git(["branch", "-D", workspace.branch], cwd=workspace.main_root)
     return True

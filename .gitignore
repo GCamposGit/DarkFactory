@@ -120,6 +120,7 @@ hub/data/owner_actions/
 
 # Runtime do despachante da frota e do resumo diario (estado local; sujava o checkout compartilhado e o run_ticket recusava todo lancamento da frota)
 .factory/runs/fleet_dispatcher_logs/
+.factory/runs/cleanup_pending/
 .factory/runs/fleet_dispatcher_state.json
 .factory/runs/sentinel_state.json
 .factory/runs/fleet_policy_snapshot.json

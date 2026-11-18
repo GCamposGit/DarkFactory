@@ -21,12 +21,18 @@ This module gives every ticket its own worktree and makes its removal reliable:
 * :func:`find_orphan_dirs` -- directories under ``.worktrees`` / ``.claude/worktrees``
   with no ``.git`` entry that ``git worktree list`` does not know. They are only
   ever MOVED to the trash (:func:`trash_directory`), never deleted directly.
+* :func:`classify_ownerless` -- pure verdict for one worktree (eligible for a
+  later sweep, or preserved, with a reason). It never calls :func:`cleanup`,
+  never removes a directory and never deletes a branch. Worktrees are eligible
+  only after :data:`OWNERLESS_MAX_AGE_S` (48 hours).
 
 Stdlib-only (it must not import ``core.git.autonomy``, which imports it).
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import re
@@ -39,7 +45,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Literal, Mapping, Optional, Sequence
 
 from core.paths import state_root
 from core.common.tempdirs import chmod_and_retry as _chmod_and_retry
@@ -51,6 +57,8 @@ WORKTREES_DIRNAME = ".worktrees"
 # Roots swept for dead directories, relative to the main checkout.
 WORKTREE_ROOTS: tuple[Path, ...] = (Path(WORKTREES_DIRNAME), Path(".claude") / "worktrees")
 TRASH_RELATIVE = Path(".factory") / "backups" / "trash"
+CLEANUP_PENDING_RELATIVE = Path(".factory") / "runs" / "cleanup_pending"
+TICKET_LEDGER_RELATIVE = ".factory/demands/demands.json"
 TRASH_RETENTION_DAYS = 7
 # Machine-state directories that live next to worktrees and must never be
 # treated as dead worktrees (e.g. a DARKFAC_HARNESS_STATE_DIR pointed there).
@@ -78,6 +86,8 @@ GitArgRunner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
 SleepFn = Callable[[float], None]
 NowFn = Callable[[], datetime]
 RmtreeFn = Callable[[Path], None]
+HolderProbe = Callable[[Path], Optional[Sequence[str]]]
+CleanupOutcome = Literal["removed", "blocked_changes", "blocked_process", "error"]
 
 
 def is_delivery_scratch(path: str) -> bool:
@@ -146,11 +156,17 @@ class TicketWorkspace:
     main_root: Path
     base_ref: str
     base_sha: str
+    discard_path_hashes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class CleanupResult:
-    """Outcome of :func:`cleanup`; ``removed`` is True when the path is gone from the worktree tree."""
+    """Observable outcome of :func:`cleanup`.
+
+    ``outcome`` is stable for callers that need to record why cleanup stopped:
+    ``removed``, ``blocked_changes``, ``blocked_process``, or ``error``. ``method``
+    retains the removal mechanism and older caller behavior.
+    """
 
     path: Path
     removed: bool
@@ -159,6 +175,8 @@ class CleanupResult:
     trash_path: Optional[Path] = None
     detail: str = ""
     errors: list[str] = field(default_factory=list)
+    outcome: CleanupOutcome = "error"
+    reason: str = ""
 
 
 @dataclass
@@ -455,37 +473,24 @@ def _outside_dir(path: Path, fallback_root: Path) -> Iterator[None]:
                 logger.warning("could not restore cwd %s: %s", previous, exc)
 
 
-def _find_holders(path: Path) -> list[str]:
-    """Best-effort ``name (pid)`` of processes whose cwd is inside ``path`` (needs psutil; else empty)."""
-    try:
-        import psutil  # optional
-    except ImportError:
-        return []
-    holders: list[str] = []
-    try:
-        for proc in psutil.process_iter(["pid", "name"]):
-            try:
-                if _is_within(proc.cwd(), path):
-                    holders.append(f"{proc.info.get('name')} (pid {proc.info.get('pid')})")
-            except Exception:  # noqa: BLE001 -- access denied / vanished process
-                continue
-    except Exception:  # noqa: BLE001
-        return holders
-    return holders
+def _find_holders(path: Path) -> Optional[list[str]]:
+    """Processes using the worktree, or ``None`` when inspection is inconclusive."""
+    holders = probe_worktree_holders(path)
+    return None if holders is None else list(holders)
 
 
 def removal_hint(path: Path, main_root: Path) -> str:
-    """Final-warning text: who may hold ``path`` and the exact command to finish the cleanup."""
+    """Final-warning text; physical removal must be retried through :func:`cleanup`."""
     holders = _find_holders(path)
-    who = (
-        "processes with cwd inside it: " + ", ".join(holders)
-        if holders
-        else "a process (shell, editor, antivirus, agent) still has a handle or cwd inside it"
-    )
+    if holders is None:
+        who = "process state could not be inspected"
+    elif holders:
+        who = "processes using it: " + ", ".join(holders)
+    else:
+        who = "a process or filesystem handle may still be using it"
     return (
-        f"{path} could not be removed ({who}). Close that process, then run: "
-        f'git -C "{main_root}" worktree remove --force "{path}" ; '
-        f'Remove-Item -LiteralPath "{path}" -Recurse -Force ; git -C "{main_root}" worktree prune'
+        f"{path} could not be removed ({who}). Resolve the holder or filesystem error, "
+        "then retry removal through ticket_workspace.cleanup."
     )
 
 
@@ -493,44 +498,287 @@ def cleanup(
     path: Path,
     main_root: Path,
     *,
+    discard_path_hashes: Optional[Mapping[str, str]] = None,
     sleep_fn: Optional[SleepFn] = None,
     retries: int = DEFAULT_CLEANUP_RETRIES,
     backoff_s: Sequence[float] = DEFAULT_BACKOFF_S,
     run_git: Optional[GitRunner] = None,
     rmtree_fn: Optional[RmtreeFn] = None,
     now_fn: Optional[NowFn] = None,
+    holder_probe: Optional[HolderProbe] = None,
 ) -> CleanupResult:
     """Remove a worktree directory as reliably as the platform allows.
 
-    1. ``git worktree remove --force`` up to ``retries`` times, sleeping
+    1. non-forced ``git worktree remove`` up to ``retries`` times, sleeping
        ``backoff_s[i]`` between attempts (a transient Windows lock usually clears);
     2. a robust ``rmtree`` of whatever git left behind;
     3. when the directory is still there: RENAME it into the trash (never lose
        data, never leave a half-registered worktree) and ``git worktree prune``.
 
-    Live processes with cwd inside ``path`` preserve the checkout before any Git or
-    filesystem mutation. Otherwise, this process cwd is moved out of ``path`` for the
-    removal operation (:func:`_outside_dir`).
-    Never raises; ``CleanupResult.removed`` says whether ``path`` is gone.
+    Each destructive operation rechecks that ``path`` is a registered, unlocked,
+    clean worktree and that no process is using it. Callers may provide SHA-256
+    hashes for tracked generated inputs; a path is restored to HEAD only while its
+    current bytes still match the caller's expected content. Unknown Git or process
+    state preserves the worktree. This process cwd is moved out of ``path`` before
+    those final checks (:func:`_outside_dir`).
+    Never raises; ``CleanupResult.outcome`` records removal, dirty/process blocks,
+    or an error. The Git remove is intentionally non-forced so a change created
+    between inspection and removal is still rejected by Git.
     """
-    if path.exists():
-        holders = _find_holders(path)
-        if holders:
-            result = CleanupResult(
-                path=path,
-                removed=False,
-                method="preserved",
-                detail=f"{path} is in use; preserved because processes have cwd inside it: "
-                + ", ".join(holders),
+    try:
+        with _outside_dir(path, main_root):
+            result = _cleanup_outside(
+                path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
+                run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn, holder_probe=holder_probe,
+                discard_path_hashes=discard_path_hashes or {},
             )
-            logger.warning(result.detail)
-            return result
-
-    with _outside_dir(path, main_root):
-        return _cleanup_outside(
-            path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
-            run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn,
+    except Exception as exc:  # noqa: BLE001 -- cleanup reports failures instead of leaking them
+        detail = f"cleanup failed for {path}: {exc}"
+        logger.exception(detail)
+        result = CleanupResult(
+            path=path,
+            removed=False,
+            method="failed",
+            detail=detail,
+            errors=[str(exc)],
+            outcome="error",
+            reason="cleanup_exception",
         )
+    _sync_cleanup_pending(result, main_root)
+    return result
+
+
+def _cleanup_pending_record_path(path: Path, main_root: Path) -> Path:
+    """Stable per-worktree record path; separate files avoid lost updates across cleanups."""
+    key = hashlib.sha256(_norm(path).encode("utf-8", errors="surrogatepass")).hexdigest()
+    return main_root / CLEANUP_PENDING_RELATIVE / f"{key}.json"
+
+
+def _sync_cleanup_pending(result: CleanupResult, main_root: Path) -> None:
+    """Persist every surviving cleanup attempt, or clear its record after removal."""
+    record_path = _cleanup_pending_record_path(result.path, main_root)
+    try:
+        if result.removed or not result.path.exists():
+            record_path.unlink(missing_ok=True)
+            return
+
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "path": str(result.path.resolve()),
+            "main_root": str(main_root.resolve()),
+            "outcome": result.outcome,
+            "reason": result.reason,
+            "detail": result.detail,
+            "updated_at": utc_now().isoformat(),
+        }
+        temporary = record_path.with_name(
+            f"{record_path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+        )
+        try:
+            temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, record_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 -- reporting cleanup must not introduce a new failure
+        logger.error("Could not update pending cleanup record for %s: %s", result.path, exc)
+        result.errors.append(f"cleanup_pending: {exc}")
+        if result.detail:
+            result.detail += f"; pending cleanup record failed: {exc}"
+        else:
+            result.detail = f"pending cleanup record failed: {exc}"
+
+
+def list_cleanup_pending(main_root: Path) -> list[dict[str, Any]]:
+    """Read the durable records for worktrees whose removal still needs attention."""
+    records: list[dict[str, Any]] = []
+    directory = main_root / CLEANUP_PENDING_RELATIVE
+    if not directory.is_dir():
+        return records
+    for record_path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read pending cleanup record %s: %s", record_path, exc)
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("path"), str):
+            records.append(payload)
+        else:
+            logger.warning("Ignoring malformed pending cleanup record %s", record_path)
+    return records
+
+
+def cleanup_pending_worktree_paths(main_root: Path) -> frozenset[str]:
+    """Normalized paths with a durable cleanup record that must stay out of orphan sweeps."""
+    return frozenset(
+        _norm(record["path"])
+        for record in list_cleanup_pending(main_root)
+        if isinstance(record.get("path"), str)
+    )
+
+
+@dataclass(frozen=True)
+class _CleanupSafetyIssue:
+    outcome: CleanupOutcome
+    reason: str
+    detail: str
+
+
+def _cleanup_safety_issue(
+    path: Path,
+    main_root: Path,
+    runner: GitRunner,
+    holder_probe: HolderProbe,
+    discard_path_hashes: Mapping[str, str] | frozenset[str] = frozenset(),
+) -> Optional[_CleanupSafetyIssue]:
+    """Return why removal is unsafe, failing closed when ownership cannot be proved."""
+    try:
+        entries = list_worktrees(main_root, runner)
+    except Exception as exc:  # noqa: BLE001 -- a failed probe must not authorize deletion
+        return _CleanupSafetyIssue("error", "worktree_list_error", f"could not inspect registered worktrees: {exc}")
+    if not entries:
+        return _CleanupSafetyIssue(
+            "error", "worktree_list_empty", "could not inspect registered worktrees; Git returned no worktrees"
+        )
+
+    target = _norm(path)
+    primary = _norm(entries[0]["worktree"])
+    if target == primary:
+        return _CleanupSafetyIssue("error", "primary_checkout", "preserved because the path is the primary checkout")
+    entry = next((item for item in entries if _norm(item.get("worktree", "")) == target), None)
+    if entry is None:
+        return _CleanupSafetyIssue("error", "not_registered", "preserved because the path is not a registered worktree")
+    if "locked" in entry:
+        return _CleanupSafetyIssue("error", "locked", "preserved because the worktree is locked")
+
+    try:
+        status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+    except Exception as exc:  # noqa: BLE001 -- unknown worktree state must be preserved
+        return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes: {exc}")
+    if status.returncode != 0:
+        detail = (status.stderr or status.stdout or "git status failed").strip()
+        return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
+    changes = _status_paths(status.stdout or "")
+    discardable = {change.replace("\\", "/") for change in changes}
+    if changes and not discardable.issubset(discard_path_hashes):
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "worktree_dirty",
+            "preserved because the worktree has staged, tracked, or untracked changes: " + ", ".join(changes[:5]),
+        )
+
+    # Process inspection is the final check immediately before each destructive
+    # call. Git probes above are read-only and establish registration and status.
+    try:
+        holders = holder_probe(path)
+    except Exception as exc:  # noqa: BLE001 -- a broken probe must not look idle
+        return _CleanupSafetyIssue("error", "process_probe_error", f"could not inspect live processes; preserved: {exc}")
+    if holders is None:
+        return _CleanupSafetyIssue(
+            "error", "process_state_unknown", "could not inspect live processes; preserved because process state is unknown"
+        )
+    if holders:
+        return _CleanupSafetyIssue(
+            "blocked_process", "live_process", "preserved because processes are using it: " + ", ".join(holders)
+        )
+    return None
+
+
+def _validated_discard_path_hashes(path_hashes: Mapping[str, str]) -> dict[str, str]:
+    """Normalize generated paths and validate their expected SHA-256 content hashes."""
+    normalized: dict[str, str] = {}
+    for raw_path, expected_hash in path_hashes.items():
+        value = str(raw_path).replace("\\", "/")
+        parts = value.split("/")
+        if (
+            not value
+            or value.startswith("/")
+            or (len(value) >= 2 and value[1] == ":")
+            or value.startswith(":(")
+            or any(part in {"", ".", ".."} for part in parts)
+        ):
+            raise ValueError(f"discard path must be a literal repository-relative path: {raw_path!r}")
+        digest = str(expected_hash).casefold()
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError(f"discard path requires an expected SHA-256 hash: {raw_path!r}")
+        normalized[value] = digest
+    return normalized
+
+
+def _restore_discard_paths(
+    path: Path,
+    discard_path_hashes: Mapping[str, str],
+    runner: GitRunner,
+) -> Optional[_CleanupSafetyIssue]:
+    """Restore generated files only while their bytes match the recorded hash."""
+    if not discard_path_hashes:
+        return None
+    status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+    if status.returncode != 0:
+        detail = (status.stderr or status.stdout or "git status failed").strip()
+        return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
+    changed = [item.replace("\\", "/") for item in _status_paths(status.stdout or "")]
+    if not changed:
+        return None
+    if not set(changed).issubset(discard_path_hashes):
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "worktree_dirty",
+            "preserved because the worktree has staged, tracked, or untracked changes: " + ", ".join(changed[:5]),
+        )
+
+    literal_paths = [f":(literal){item}" for item in changed]
+    tracked = runner(["ls-files", "--error-unmatch", "--", *literal_paths], path)
+    if tracked.returncode != 0:
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "discard_path_untracked",
+            "preserved because an explicitly discardable path is not tracked: " + ", ".join(changed[:5]),
+        )
+    staged = runner(["diff", "--cached", "--quiet", "--", *literal_paths], path)
+    if staged.returncode == 1:
+        return _CleanupSafetyIssue(
+            "blocked_changes",
+            "discard_path_staged",
+            "preserved because generated paths contain staged changes: " + ", ".join(changed[:5]),
+        )
+    if staged.returncode != 0:
+        detail = (staged.stderr or staged.stdout or "could not inspect staged paths").strip()
+        return _CleanupSafetyIssue(
+            "error", "discard_path_index_error", f"could not inspect staged generated paths; preserved: {detail}"
+        )
+    for relative in changed:
+        candidate = path / Path(relative)
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                raise OSError("not a regular file")
+            actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        except OSError as exc:
+            return _CleanupSafetyIssue(
+                "blocked_changes",
+                "discard_path_unverified",
+                f"preserved because generated path {relative} could not be verified: {exc}",
+            )
+        if actual_hash != discard_path_hashes[relative]:
+            return _CleanupSafetyIssue(
+                "blocked_changes",
+                "discard_path_changed",
+                f"preserved because generated path {relative} no longer matches its recorded content",
+            )
+    restored = runner(
+        ["restore", "--source=HEAD", "--staged", "--worktree", "--", *literal_paths], path
+    )
+    if restored.returncode != 0:
+        detail = (restored.stderr or restored.stdout or "git restore failed").strip()
+        return _CleanupSafetyIssue(
+            "error", "discard_path_restore_failed", f"could not restore generated paths; preserved: {detail}"
+        )
+    status_after = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+    if status_after.returncode != 0 or status_after.stdout.strip():
+        detail = (status_after.stderr or status_after.stdout or "worktree changed during cleanup").strip()
+        return _CleanupSafetyIssue(
+            "blocked_changes", "worktree_changed_during_cleanup", f"preserved because worktree changed: {detail}"
+        )
+    return None
 
 
 def _cleanup_outside(
@@ -543,33 +791,59 @@ def _cleanup_outside(
     run_git: Optional[GitRunner],
     rmtree_fn: Optional[RmtreeFn],
     now_fn: Optional[NowFn],
+    holder_probe: Optional[HolderProbe],
+    discard_path_hashes: Mapping[str, str],
 ) -> CleanupResult:
     runner = run_git or _git
     sleeper = sleep_fn or time.sleep
     remove_tree = rmtree_fn or robust_rmtree
+    inspect_holders = holder_probe if holder_probe is not None else _find_holders
+    try:
+        discardable = _validated_discard_path_hashes(discard_path_hashes)
+    except ValueError as exc:
+        return CleanupResult(
+            path=path,
+            removed=False,
+            method="preserved",
+            detail=str(exc),
+            outcome="error",
+            reason="invalid_discard_path",
+        )
     result = CleanupResult(path=path, removed=False, method="failed")
 
     if not path.exists():
         _prune(main_root, runner)
-        result.removed, result.method = True, "absent"
+        result.removed, result.method, result.outcome = True, "absent", "removed"
         return result
-
-    # A locked worktree is in use by a running agent: git refuses to remove it and
-    # the rmtree/trash fallbacks below must not be used to get around that.
-    target = _norm(path)
-    for entry in list_worktrees(main_root, run_git):
-        if _norm(entry["worktree"]) == target and "locked" in entry:
-            result.detail = f"{path} is a locked worktree (in use); left untouched"
-            logger.warning(result.detail)
-            return result
 
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
+        issue = _cleanup_safety_issue(path, main_root, runner, inspect_holders, discardable)
+        if issue:
+            result.removed, result.method, result.attempts = False, "preserved", attempt - 1
+            result.outcome, result.reason = issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
+        issue = _restore_discard_paths(path, discardable, runner)
+        if issue:
+            result.removed, result.method, result.attempts = False, "preserved", attempt - 1
+            result.outcome, result.reason = issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
+        issue = _cleanup_safety_issue(path, main_root, runner, inspect_holders)
+        if issue:
+            result.removed, result.method, result.attempts = False, "preserved", attempt - 1
+            result.outcome, result.reason = issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
         result.attempts = attempt
-        res = runner(["worktree", "remove", "--force", str(path)], main_root)
-        if res.returncode == 0 and not path.exists():
+        res = runner(["worktree", "remove", str(path)], main_root)
+        if not path.exists():
             _prune(main_root, runner)
-            result.removed, result.method = True, "git"
+            result.removed, result.method, result.outcome = True, "git", "removed"
             return result
         message = (res.stderr or res.stdout or "").strip() or "directory still present after git worktree remove"
         result.errors.append(f"attempt {attempt}: {message}")
@@ -580,25 +854,40 @@ def _cleanup_outside(
     # git gave up: delete what is left ourselves.
     try:
         if path.exists():
+            issue = _cleanup_safety_issue(path, main_root, runner, inspect_holders)
+            if issue:
+                result.removed, result.method = False, "preserved"
+                result.outcome, result.reason = issue.outcome, issue.reason
+                result.detail = f"{path} {issue.detail}"
+                logger.warning(result.detail)
+                return result
             remove_tree(path)
     except OSError as exc:
         result.errors.append(f"rmtree: {exc}")
         logger.warning("rmtree %s failed: %s", path, exc)
     if not path.exists():
         _prune(main_root, runner)
-        result.removed, result.method = True, "rmtree"
+        result.removed, result.method, result.outcome = True, "rmtree", "removed"
         return result
 
     # Still locked: rename out of the way, recoverable for TRASH_RETENTION_DAYS.
     try:
+        issue = _cleanup_safety_issue(path, main_root, runner, inspect_holders)
+        if issue:
+            result.removed, result.method = False, "preserved"
+            result.outcome, result.reason = issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
         result.trash_path = trash_directory(path, main_root, now_fn=now_fn)
     except OSError as exc:
         result.errors.append(f"trash: {exc}")
         result.detail = f"could not remove or move {path}: {exc}. {removal_hint(path, main_root)}"
+        result.reason = "trash_failed"
         logger.error("Could not remove or trash %s: %s", path, result.detail)
         return result
     _prune(main_root, runner)
-    result.removed, result.method = True, "trash"
+    result.removed, result.method, result.outcome = True, "trash", "removed"
     result.detail = f"moved to {result.trash_path}"
     return result
 
@@ -1027,4 +1316,522 @@ def find_preserved_workspaces(
         lookup.chosen = ranked[0][1]
         lookup.others = [item[1] for item in ranked[1:]]
     return lookup
+
+
+# ----------------------------------------------------------------------
+# Ownerless worktrees (USR-500): classify only, never delete
+# ----------------------------------------------------------------------
+
+# The boundary itself is preserved; eligibility requires strictly older than 48h.
+OWNERLESS_MAX_AGE_S = 48 * 60 * 60
+# Exact repo-relative paths that are factory bookkeeping, not product work.
+_OWNERLESS_LEDGER = ".factory/demands/demands.json"
+_TERMINAL_TICKET_STATUSES = frozenset({"completed", "cancelled", "canceled"})
+
+
+class TicketStatusUnreadable(RuntimeError):
+    """The demands ledger could not be read and the queue has no row to trust."""
+
+
+@dataclass(frozen=True)
+class OwnerlessFacts:
+    """Everything :func:`classify_ownerless` needs. Gathering them is a separate step.
+
+    ``holders is None`` means process inspection was impossible (``psutil`` missing
+    or broken): the worktree is preserved. An empty tuple means no holder was found.
+    ``ticket_status is None`` with ``ticket_status_known`` means the ticket is absent.
+    ``head_outside_base`` is consulted only when ``detached`` is true: commits that
+    sit on a named branch stay reachable after the worktree directory is gone.
+    """
+
+    path: Path
+    is_main: bool = False
+    locked: bool = False
+    index_locked: bool = False
+    git_readable: bool = True
+    detached: bool = False
+    head_outside_base: bool = False
+    changed_paths: tuple[str, ...] = ()
+    status_readable: bool = True
+    ticket_status: Optional[str] = None
+    ticket_status_known: bool = True
+    holders: Optional[tuple[str, ...]] = ()
+    age_s: Optional[float] = None
+    cleanup_pending: bool = False
+
+
+@dataclass(frozen=True)
+class OwnerlessVerdict:
+    """Eligible worktrees are candidates for a later sweep. Nothing here was deleted."""
+
+    path: Path
+    eligible: bool
+    reason: str
+    detail: str = ""
+
+
+def _preserved(path: Path, reason: str, detail: str = "") -> OwnerlessVerdict:
+    return OwnerlessVerdict(path=path, eligible=False, reason=reason, detail=detail)
+
+
+def worktree_named_stamp(name: str) -> Optional[datetime]:
+    """UTC stamp encoded in a worktree directory name, or ``None`` when it is absent or invalid."""
+    match = _STAMP_PATTERN.search(name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), _STAMP_FORMAT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def worktree_age_s(path: Path, *, now: Optional[datetime] = None) -> Optional[float]:
+    """Age in seconds from the directory-name stamp.
+
+    The directory's own ``st_mtime`` is used only when that stamp is absent or
+    not a real UTC timestamp. Child mtimes are never consulted. ``None`` when
+    there is no stamp and the directory itself cannot be stat'ed.
+    """
+    moment = now or utc_now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    else:
+        moment = moment.astimezone(timezone.utc)
+    stamped = worktree_named_stamp(path.name)
+    if stamped is not None:
+        return (moment - stamped).total_seconds()
+    try:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return None
+    return (moment - mtime).total_seconds()
+
+
+def worktree_ticket_id(path: Path, branch: str = "") -> Optional[str]:
+    """Ticket slug from ``ticket/<id>`` or from the ``<slug>-<stamp>`` directory name.
+
+    A branch named ``ticket/<slug>-<stamp>`` yields ``<slug>``. Detached HEAD
+    falls back to the directory name. Anything else has no ticket.
+    """
+    label = branch.removeprefix("refs/heads/")
+    if label.lower().startswith("ticket/"):
+        slug = label.split("/", 1)[1]
+        match = _STAMP_PATTERN.search(slug)
+        if match:
+            slug = slug[: match.start()]
+        slug = slug.strip("-")
+        return slug or None
+    match = _STAMP_PATTERN.search(path.name)
+    if match and match.start() > 0:
+        return path.name[: match.start()].strip("-") or None
+    return None
+
+
+def _ownerless_rel(path: str) -> str:
+    text = str(path).replace("\\", "/").strip().strip("\r")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def substantive_worktree_changes(paths: Iterable[str]) -> list[str]:
+    """Paths that count as product work.
+
+    Delivery scratch (``.tmp`` and everything under it) and the demands ledger
+    ``.factory/demands/demands.json`` do not. Order and the caller's spelling
+    of the surviving paths are preserved.
+    """
+    kept: list[str] = []
+    for path in paths:
+        rel = _ownerless_rel(path)
+        if is_delivery_scratch(rel) or rel == _OWNERLESS_LEDGER:
+            continue
+        kept.append(path)
+    return kept
+
+
+def _normalize_ticket_status(status: Optional[str]) -> Optional[str]:
+    if status is None:
+        return None
+    return str(status).strip().casefold()
+
+
+def resolve_ticket_status(
+    file_status: Optional[str],
+    queued_status: Optional[str],
+    *,
+    file_readable: bool,
+) -> Optional[str]:
+    """Merge a ledger row with the control-store row.
+
+    A terminal ledger status wins. Otherwise the queue wins. ``None`` means the
+    ticket is absent. Raises :class:`TicketStatusUnreadable` when the ledger
+    cannot be parsed and the queue has no row (fail closed: do not call that
+    "absent").
+    """
+    file_norm = _normalize_ticket_status(file_status)
+    queued_norm = _normalize_ticket_status(queued_status)
+    if file_norm in _TERMINAL_TICKET_STATUSES:
+        return file_norm
+    if queued_norm is not None:
+        return queued_norm
+    if not file_readable:
+        raise TicketStatusUnreadable("demands ledger unreadable and the queue has no row")
+    return file_norm
+
+
+def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
+    """Preserve or mark eligible. Does not touch the disk, git, or :func:`cleanup`.
+
+    Ownership and age are established before reporting retryable local safety
+    blockers. This lets the scheduled sweep send only ownerless, old worktrees
+    to :func:`cleanup`, which records blocked attempts in ``cleanup_pending``.
+    The main checkout, unknown/open tickets, young worktrees, and detached
+    commits outside the base are always preserved.
+    """
+    path = facts.path
+    if facts.cleanup_pending:
+        return _preserved(path, "cleanup_pending", "registered as pending cleanup")
+    if facts.is_main:
+        return _preserved(path, "main_checkout", "primary checkout")
+    if not facts.ticket_status_known:
+        return _preserved(path, "ticket_status_unknown", "ticket status unreadable")
+    status = _normalize_ticket_status(facts.ticket_status)
+    if status is not None and status not in _TERMINAL_TICKET_STATUSES:
+        return _preserved(path, "open_ticket", status)
+    if facts.age_s is None:
+        return _preserved(path, "age_unknown", "no stamp and no directory mtime")
+    if facts.age_s <= OWNERLESS_MAX_AGE_S:
+        return _preserved(path, "too_young", f"age {facts.age_s:.0f}s <= {OWNERLESS_MAX_AGE_S}s")
+    if facts.detached and facts.head_outside_base:
+        return _preserved(path, "detached_outside_base", "detached HEAD is not the base commit")
+    if facts.holders is None:
+        return _preserved(path, "psutil_unavailable", "psutil ImportError; cannot prove the worktree is idle")
+    if facts.holders:
+        return _preserved(path, "holder", ", ".join(facts.holders))
+    if facts.locked:
+        return _preserved(path, "locked", "git worktree lock")
+    if facts.index_locked:
+        return _preserved(path, "index_lock", "index.lock present")
+    if not facts.git_readable:
+        return _preserved(path, "git_unreadable", "git dir unreadable")
+    if not facts.status_readable:
+        return _preserved(path, "status_unreadable", "git status failed")
+    changes = substantive_worktree_changes(facts.changed_paths)
+    if changes:
+        return _preserved(path, "dirty", ", ".join(changes[:5]))
+    return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
+
+
+def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
+    """``name (pid)`` of processes using ``path`` as cwd or through an open file.
+
+    ``None`` when ``psutil`` is unavailable or process enumeration fails;
+    callers must preserve the worktree because its state is unknown. Windows
+    commonly denies metadata access to unrelated protected processes, so an
+    ``AccessDenied`` for an individual property is skipped. Open-file paths are
+    inspected for processes whose cwd is the repository root or one of its
+    parents; unrelated processes are excluded to avoid a machine-wide handle
+    scan. Non-forced Git and filesystem removal still refuse a blocking open
+    handle. An empty tuple means no holder was found among the relevant
+    accessible process data. This does not remove anything.
+    """
+    try:
+        import psutil  # optional
+    except ImportError:
+        logger.debug("psutil unavailable; preserving worktree %s", path)
+        return None
+    repository_root: Optional[Path] = None
+    try:
+        resolved_path = path.resolve()
+        for candidate in (resolved_path, *resolved_path.parents):
+            if (candidate / ".git").is_dir():
+                repository_root = candidate
+                break
+    except OSError as exc:
+        logger.debug("Could not resolve worktree path %s while inspecting process holders: %s", path, exc)
+    found: list[str] = []
+    try:
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                cwd = proc.cwd()
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+            except psutil.AccessDenied:
+                cwd = None
+            except Exception:  # noqa: BLE001 -- an unexpected per-process error must not look like "no holder"
+                logger.warning("Could not inspect process paths for %s; preserving it", path)
+                return None
+            using_path = cwd is not None and _is_within(cwd, path)
+            process_cwd_is_related = (
+                cwd is not None
+                and repository_root is not None
+                and (_is_within(path, cwd) or _is_within(repository_root, cwd))
+            )
+            if not using_path and process_cwd_is_related:
+                try:
+                    using_path = any(_is_within(open_file.path, path) for open_file in proc.open_files())
+                except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                    continue
+                except psutil.AccessDenied:
+                    continue
+                except Exception:  # noqa: BLE001 -- unexpected errors must not look like "no holder"
+                    logger.warning("Could not inspect process paths for %s; preserving it", path)
+                    return None
+            if using_path:
+                found.append(f"{proc.info.get('name')} (pid {proc.info.get('pid')})")
+    except Exception:  # noqa: BLE001 -- cannot prove the worktree is idle
+        logger.warning("Could not inspect processes for %s; preserving it", path)
+        return None
+    return tuple(found)
+
+
+def _ledger_ticket_status(ledger: Path, ticket_id: str) -> tuple[Optional[str], bool]:
+    """``(status, readable)``. A missing file is readable and has no row.
+
+    Does not create the ledger.
+    """
+    if not ledger.exists():
+        return None, True
+    try:
+        payload = json.loads(ledger.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None, False
+    rows = payload.get("demands") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return None, False
+    wanted = ticket_id.casefold()
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id", "")).casefold() == wanted:
+            status = row.get("status")
+            return (None if status is None else str(status)), True
+    return None, True
+
+
+def _default_queue_status(ticket_id: str) -> Optional[str]:
+    """Control-store status, or ``None`` when that store has no row for ``ticket_id``.
+
+    An exception propagates so the caller preserves the worktree instead of
+    treating a failed lookup as an absent ticket.
+    """
+    from core.demands import queue_store
+
+    ticket = queue_store.get_ticket(ticket_id)
+    if ticket is None:
+        return None
+    return str(getattr(ticket.status, "value", ticket.status))
+
+
+def _lookup_ticket_status(
+    ticket_id: Optional[str],
+    *,
+    main_root: Path,
+    statuses: Optional[Mapping[str, str]],
+    ledger_path: Optional[Path],
+    queue_lookup: Optional[Callable[[str], Optional[str]]],
+) -> tuple[Optional[str], bool]:
+    """``(status or None when absent, known)``. ``statuses`` replaces ledger and queue."""
+    if not ticket_id:
+        return None, True
+    if statuses is not None:
+        folded = {str(key).casefold(): value for key, value in statuses.items()}
+        if ticket_id.casefold() not in folded:
+            return None, True
+        return str(folded[ticket_id.casefold()]), True
+    ledger = ledger_path if ledger_path is not None else main_root / ".factory" / "demands" / "demands.json"
+    file_status, readable = _ledger_ticket_status(ledger, ticket_id)
+    lookup = queue_lookup or _default_queue_status
+    queued: Optional[str] = None
+    for candidate in dict.fromkeys((ticket_id, ticket_id.upper())):
+        try:
+            found = lookup(candidate)
+        except Exception as exc:  # noqa: BLE001 -- unreadable queue must not look like "absent"
+            logger.warning("Ticket status lookup failed for %s: %s", candidate, exc)
+            return None, False
+        if found is not None:
+            queued = found
+            break
+    try:
+        return resolve_ticket_status(file_status, queued, file_readable=readable), True
+    except TicketStatusUnreadable:
+        return None, False
+
+
+def _detached_outside_base(path: Path, entry: Mapping[str, str], runner: GitRunner, base_ref: str) -> bool:
+    """True when a detached HEAD is not ``base_ref`` (or the base cannot be resolved)."""
+    if "detached" not in entry:
+        return False
+    head = (entry.get("HEAD") or "").strip()
+    if not head:
+        rev = runner(["rev-parse", "HEAD"], path)
+        if rev.returncode != 0 or not rev.stdout.strip():
+            return True
+        head = rev.stdout.strip()
+    base = runner(["rev-parse", "--verify", f"{base_ref}^{{commit}}"], path)
+    if base.returncode != 0 or not base.stdout.strip():
+        return True
+    return head.lower() != base.stdout.strip().lower()
+
+
+def _index_lock_state(path: Path, runner: GitRunner) -> tuple[bool, bool]:
+    """``(index_locked, git_readable)`` from ``--absolute-git-dir`` / ``index.lock``."""
+    res = runner(["rev-parse", "--absolute-git-dir"], path)
+    if res.returncode != 0 or not res.stdout.strip():
+        return False, False
+    try:
+        return (Path(res.stdout.strip()) / "index.lock").exists(), True
+    except OSError:
+        return False, False
+
+
+def classify_ownerless_worktree(
+    path: Path,
+    *,
+    cwd: Optional[Path] = None,
+    main_root: Optional[Path] = None,
+    entry: Optional[Mapping[str, str]] = None,
+    is_main: Optional[bool] = None,
+    now: Optional[datetime] = None,
+    base: str = "main",
+    remote: str = "origin",
+    run_git: Optional[GitRunner] = None,
+    statuses: Optional[Mapping[str, str]] = None,
+    ledger_path: Optional[Path] = None,
+    queue_lookup: Optional[Callable[[str], Optional[str]]] = None,
+    holder_probe: Optional[Callable[[Path], Optional[tuple[str, ...]]]] = None,
+    pending_paths: Optional[Iterable[str]] = None,
+) -> OwnerlessVerdict:
+    """Read one worktree and classify it. Does not call :func:`cleanup` or change git state.
+
+    ``statuses``, when given, is the only ticket table consulted (a missing id is
+    an absent ticket). Otherwise the main checkout ledger is read and not created,
+    then the control-store queue. ``holder_probe`` defaults to
+    :func:`probe_worktree_holders`.
+    """
+    moment = now or utc_now()
+    runner = run_git or _git
+    root = main_root
+    if root is None:
+        try:
+            root = main_checkout_root(cwd or path, runner)
+        except WorkspaceError as exc:
+            return _preserved(path, "git_unreadable", str(exc))
+    if pending_paths is None:
+        try:
+            pending_paths = cleanup_pending_worktree_paths(root)
+        except Exception as exc:  # noqa: BLE001 -- unknown pending inventory must not authorize removal
+            return _preserved(path, "cleanup_pending_inventory_error", str(exc))
+    pending = {_norm(candidate) for candidate in pending_paths}
+    cleanup_pending = _norm(path) in pending
+    age = worktree_age_s(path, now=moment)
+    if is_main is None:
+        entries = list_worktrees(root, runner)
+        if not entries:
+            return _preserved(path, "git_unreadable", "git worktree list failed")
+        is_main = _norm(path) == _norm(entries[0]["worktree"])
+        if entry is None:
+            target = _norm(path)
+            entry = next((item for item in entries if _norm(item.get("worktree", "")) == target), None)
+    if is_main:
+        return classify_ownerless(
+            OwnerlessFacts(path=path, is_main=True, cleanup_pending=cleanup_pending, age_s=age)
+        )
+    if entry is None:
+        return _preserved(path, "unregistered", "path is not a registered worktree")
+    locked = "locked" in entry
+    index_locked, git_readable = _index_lock_state(path, runner)
+    changed: tuple[str, ...] = ()
+    status_readable = True
+    if git_readable and not index_locked:
+        status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+        if status.returncode != 0:
+            status_readable = False
+        else:
+            changed = tuple(_status_paths(status.stdout or ""))
+    detached = "detached" in entry
+    outside = _detached_outside_base(path, entry, runner, f"{remote}/{base}") if detached else False
+    probe = holder_probe or probe_worktree_holders
+    try:
+        holders = probe(path)
+    except Exception as exc:  # noqa: BLE001 -- a broken probe must not look like "no process"
+        logger.warning("Holder probe failed for %s: %s", path, exc)
+        holders = None
+    ticket_status, ticket_known = _lookup_ticket_status(
+        worktree_ticket_id(path, entry.get("branch", "")),
+        main_root=root,
+        statuses=statuses,
+        ledger_path=ledger_path,
+        queue_lookup=queue_lookup,
+    )
+    return classify_ownerless(
+        OwnerlessFacts(
+            path=path,
+            is_main=False,
+            cleanup_pending=cleanup_pending,
+            locked=locked,
+            index_locked=index_locked,
+            git_readable=git_readable,
+            detached=detached,
+            head_outside_base=outside,
+            changed_paths=changed,
+            status_readable=status_readable,
+            ticket_status=ticket_status,
+            ticket_status_known=ticket_known,
+            holders=holders,
+            age_s=age,
+        )
+    )
+
+
+def classify_ownerless_worktrees(
+    cwd: Path,
+    *,
+    now: Optional[datetime] = None,
+    base: str = "main",
+    remote: str = "origin",
+    run_git: Optional[GitRunner] = None,
+    statuses: Optional[Mapping[str, str]] = None,
+    ledger_path: Optional[Path] = None,
+    queue_lookup: Optional[Callable[[str], Optional[str]]] = None,
+    holder_probe: Optional[Callable[[Path], Optional[tuple[str, ...]]]] = None,
+) -> list[OwnerlessVerdict]:
+    """Classify every registered worktree, including the primary checkout.
+
+    The primary checkout is always preserved. Nothing is removed.
+    """
+    runner = run_git or _git
+    try:
+        root = main_checkout_root(cwd, runner)
+    except WorkspaceError:
+        return [_preserved(cwd, "git_unreadable", "not inside a git repository")]
+    entries = list_worktrees(root, runner)
+    if not entries:
+        return [_preserved(cwd, "git_unreadable", "git worktree list failed")]
+    try:
+        pending_paths = cleanup_pending_worktree_paths(root)
+    except Exception as exc:  # noqa: BLE001 -- preserve all candidates if the inventory is uncertain
+        return [
+            _preserved(Path(item["worktree"]), "cleanup_pending_inventory_error", str(exc))
+            for item in entries
+        ]
+    verdicts: list[OwnerlessVerdict] = []
+    for index, item in enumerate(entries):
+        verdicts.append(
+            classify_ownerless_worktree(
+                Path(item["worktree"]),
+                main_root=root,
+                entry=item,
+                is_main=index == 0,
+                now=now,
+                base=base,
+                remote=remote,
+                run_git=runner,
+                statuses=statuses,
+                ledger_path=ledger_path,
+                queue_lookup=queue_lookup,
+                holder_probe=holder_probe,
+                pending_paths=pending_paths,
+            )
+        )
+    return verdicts
 

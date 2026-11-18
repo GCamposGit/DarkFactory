@@ -99,7 +99,7 @@ def test_cleanup_runs_every_git_call_with_the_process_cwd_outside_the_worktree(
 ) -> None:  # noqa: F811
     ws = create_workspace("USR-231", cwd=repo.local)
     # Exercise _outside_dir independently from the live-holder preservation gate.
-    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: [])
+    monkeypatch.setattr(ticket_workspace, "probe_worktree_holders", lambda _path: ())
     seen: list[str] = []
 
     def spy(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
@@ -120,38 +120,41 @@ def test_cleanup_preserves_worktree_while_a_process_cwd_is_inside_it(
 ) -> None:  # noqa: F811
     ws = create_workspace("USR-231", cwd=repo.local)
     (ws.path / "sub").mkdir()
-    (ws.path / "sub" / "work.txt").write_text("w\n", encoding="utf-8")
     os.chdir(ws.path / "sub")
 
-    holders = ["powershell.exe (pid 17192)"]
-    monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _path: list(holders))
+    holders = ("powershell.exe (pid 17192)",)
+    monkeypatch.setattr(ticket_workspace, "probe_worktree_holders", lambda _path: holders)
     git_calls: list[Sequence[str]] = []
 
     def fail_if_git_mutates(args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
         git_calls.append(args)
-        raise AssertionError(f"cleanup must not run git while occupied: {args!r} in {cwd}")
+        if list(args[:2]) == ["worktree", "remove"]:
+            raise AssertionError(f"cleanup must not remove an occupied worktree: {args!r} in {cwd}")
+        return ticket_workspace._git(args, cwd)
 
     result = cleanup(ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=fail_if_git_mutates)
 
-    assert not result.removed and result.method == "preserved"
+    assert not result.removed and result.method == "preserved" and result.outcome == "blocked_process"
     assert "powershell.exe (pid 17192)" in result.detail
-    assert ws.path.exists() and (ws.path / "sub" / "work.txt").read_text(encoding="utf-8") == "w\n"
+    assert ws.path.exists() and (ws.path / "sub").is_dir()
     assert _same(os.getcwd(), ws.path / "sub")
     assert any(
         _same(ws.path, entry["worktree"])
         for entry in ticket_workspace.list_worktrees(ws.main_root)
     )
     assert ticket_workspace._git(["branch", "--show-current"], ws.path).stdout.strip() == ws.branch
-    assert not git_calls
+    assert not any(list(args[:2]) == ["worktree", "remove"] for args in git_calls)
 
     # Once the holder exits, the same checkout is eligible for the normal cleanup path.
-    holders.clear()
+    holders = ()
     result = cleanup(ws.path, ws.main_root, sleep_fn=lambda _s: None)
-    assert result.removed and result.method in {"git", "rmtree"}, (result.method, result.errors)
+    assert result.removed and result.method in {"git", "rmtree"} and result.outcome == "removed", (
+        result.method, result.errors
+    )
     assert not ws.path.exists()
 
 
-def test_cleanup_failure_warning_names_the_holder_and_the_exact_command(
+def test_cleanup_failure_warning_names_the_holder_and_routes_retry_through_cleanup(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:
     ws = create_workspace("USR-231", cwd=repo.local)
@@ -160,22 +163,26 @@ def test_cleanup_failure_warning_names_the_holder_and_the_exact_command(
         raise PermissionError("[WinError 32] in use")
 
     monkeypatch.setattr(ticket_workspace, "trash_directory", refuse)
-    holder_checks = iter(([], ["Code.exe (pid 4242)"]))
+    holder_checks = iter((["Code.exe (pid 4242)"],))
     monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _p: next(holder_checks))
 
     result = cleanup(
-        ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True), rmtree_fn=_locked_rmtree
+        ws.path, ws.main_root, sleep_fn=lambda _s: None, run_git=FlakyGit(always=True),
+        rmtree_fn=_locked_rmtree, holder_probe=lambda _path: (),
     )
 
     assert not result.removed
     assert "Code.exe (pid 4242)" in result.detail
-    assert f'Remove-Item -LiteralPath "{ws.path}" -Recurse -Force' in result.detail
-    assert f'worktree remove --force "{ws.path}"' in result.detail
+    assert "ticket_workspace.cleanup" in result.detail
+    assert "Remove-Item" not in result.detail
+    assert "worktree remove" not in result.detail
 
 
-def test_removal_hint_without_a_known_holder_still_gives_the_command(
+def test_removal_hint_without_a_known_holder_still_routes_through_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(ticket_workspace, "_find_holders", lambda _p: [])
     hint = removal_hint(tmp_path / "wt", tmp_path)
-    assert "handle or cwd" in hint and "Remove-Item" in hint and str(tmp_path / "wt") in hint
+    assert "handle" in hint and "ticket_workspace.cleanup" in hint
+    assert "Remove-Item" not in hint and "worktree remove" not in hint
+    assert str(tmp_path / "wt") in hint
