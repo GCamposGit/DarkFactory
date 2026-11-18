@@ -1458,7 +1458,7 @@ def test_usr467_preserved_exit_reopens_without_another_build(
 
     with patch("core.line.line_lock.is_locked", return_value=False), \
             patch("core.demands.queue_store.control_store", return_value=store), \
-            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree}]), \
+            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree, "branch": "refs/heads/ticket/usr-467"}]), \
             patch.object(pending, "_route", return_value=None), \
             patch.object(pending.subprocess, "Popen", side_effect=popen):
         held = pending.tick(tmp_path, directory=directory, now=50)[0]
@@ -1471,7 +1471,7 @@ def test_usr467_preserved_exit_reopens_without_another_build(
     saved = pending.PendingDelivery.model_validate_json((directory / "USR-467.json").read_text(encoding="utf-8"))
     with patch("core.line.line_lock.is_locked", return_value=False), \
             patch("core.demands.queue_store.control_store", return_value=store), \
-            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree}]), \
+            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree, "branch": "refs/heads/ticket/usr-467"}]), \
             patch.object(pending, "_route", return_value=("claude", "claude-sonnet")), \
             patch.object(pending.subprocess, "Popen", side_effect=popen):
         opened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]

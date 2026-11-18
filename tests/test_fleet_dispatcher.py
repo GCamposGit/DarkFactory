@@ -3279,7 +3279,8 @@ def test_development_launcher_exit_is_not_reopened_by_the_review_rule(tmp_path: 
     monkeypatch.setattr(pending, "_live_candidate_digest", lambda _worktree: "d" * 64)
     monkeypatch.setattr(pending, "_route", lambda _row: ("claude", "claude-sonnet"))
     path = _save_review_wait(
-        pending, tmp_path / "pending", worktree, ticket_id, cause="launcher_exit:1", stage="development",
+        pending, tmp_path / "pending", worktree, ticket_id,
+        cause="launcher_exit:1", stage="development", resume_delivery=False,
     )
     result = pending.tick(tmp_path, directory=tmp_path / "pending", now=5)[0]
     assert result["status"] == "blocked"
