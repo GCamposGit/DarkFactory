@@ -11066,14 +11066,15 @@
     "project_id": "darkfac",
     "title": "Sonda de disponibilidade agendada aponta para modulo inexistente",
     "origin": "user",
-    "status": "waiting_human",
-    "delivery_evidence": "ci_red_twice: CI failed on DarkFac CI / pr-tests (ubuntu-latest); merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nrun 41576021783 is still in progress; logs will be available when it is complete",
+    "status": "completed",
+    "delivery_evidence": "DarkFac-Hub-Availability removed; PR #822 closed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand"
     ],
+    "express_causes": [],
     "problem_statement": "Tarefa Windows DarkFac-Hub-Availability executa python -m core.infra.availability probe e retorna 1; o modulo nao existe no checkout atual.",
     "core_journey": [
       "Tarefa Windows DarkFac-Hub-Availability executa python -m core.infra.availability probe e retorna 1; o modulo nao existe no checkout atual."
@@ -14804,5 +14805,36 @@
     "dependencies": [],
     "created_at": "2026-11-09T08:41:16.764734Z",
     "updated_at": "2026-11-17T14:19:06.069957Z"
+  },
+  {
+    "id": "USR-500",
+    "project_id": "darkfac",
+    "title": "Limpar worktree no encerramento do ticket e varrer diariamente",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "ticket/usr-500",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 09/11 havia 228 worktrees acumuladas sem dono.",
+    "core_journey": [
+      "Em 09/11 havia 228 worktrees acumuladas sem dono."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reaproveita ticket_workspace.cleanup",
+      "Nunca remove worktree com alteracao ou processo vivo",
+      "Nenhuma worktree sem dono com mais de 48h"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T22:20:17.080494Z",
+    "updated_at": "2026-11-17T15:59:43.240418Z"
   }
 ]
