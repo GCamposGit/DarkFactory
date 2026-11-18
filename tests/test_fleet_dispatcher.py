@@ -281,7 +281,7 @@ def test_canonical_reservation_failure_during_prelaunch_revalidation_fails_close
 
 
 def test_infra_backoff_survives_dispatcher_restart_then_retries(tmp_path, monkeypatch):
-    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    e = Env(tmp_path, [_d("USR-01")], free=("notebook",))
     for index in range(5):
         e.d.run_cycle()
         e.handles["USR-01"].rc = 75
@@ -296,7 +296,7 @@ def test_infra_backoff_survives_dispatcher_restart_then_retries(tmp_path, monkey
                                      clock=lambda: datetime.fromtimestamp(e.now, timezone.utc)))
         assert not e.d.run_cycle()["dispatched"]
         e.now = budget["next_attempt_at"] + 1
-    assert e.d.run_cycle()["dispatched"] == [{"ticket": "USR-01", "host": "grokbox"}]
+    assert e.d.run_cycle()["dispatched"] == [{"ticket": "USR-01", "host": "notebook"}]
 
 
 def test_structured_outcome_beats_banner_and_other_run_is_ignored(tmp_path, monkeypatch):
@@ -568,7 +568,7 @@ def test_grokbox_without_health_is_silent_and_does_not_block_the_cycle(tmp_path:
     assert calls == [] and alerts == []
 
     # Notebook cheio e Grokbox ainda sem health: o Desktop livre recebe o ticket.
-    e.handles["USR-02"].rc = 0
+    e.handles["USR-02"].rc = 75
     log = tmp_path / "USR-02.log"
     log.write_text("fim sem merge\n", encoding="utf-8")
     e.d.in_flight["desktop"].log_path = log
