@@ -30,7 +30,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Literal, NamedTuple, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -51,9 +51,18 @@ from core.line.review_payload import (
     render_paid_context,
 )
 from core.line.route_wait import RouteWaiter
-from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
+from core.line.routing import (
+    RoutingConfig,
+    harness_cli_pin,
+    load_routing_config,
+    pick,
+    quota_remaining_percent,
+    record_result,
+)
 from core.line.stage_build import fill_template
 from core.line.workspace import RunWorkspace
+from core.models.audit import ExecutionSample, record_execution_sample, reported_context_tokens
+from core.models.review_benchmark import observe_measured_review
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageResult
 
@@ -72,6 +81,22 @@ _DEFAULT_HOST_CAPS: tuple[str, ...] = (
 # The run's own context files (logs, reviews, progress) are not product code.
 _DIFF_PATHSPEC = (".", ":(exclude).darkfac/runs")
 _CANDIDATE_DIFF_NAME = "candidate.diff"
+
+
+class _ReviewFacts(NamedTuple):
+    """One review call bound to the ticket route and the candidate it judged."""
+
+    run_id: str
+    round_num: int
+    harness: str
+    implementing_harness: Optional[str]
+    complexity: Optional[str]
+    result: AgentResult
+    context_sha256: str
+    context_bytes: int
+    expected_model: Optional[str]
+    expected_effort: Optional[str]
+    candidate_digest: Optional[str]
 _REVIEW_CONTEXT_FILES = ("SPEC.md", "tickets.json")
 
 _FALLBACK_REVIEW_TEMPLATE = """\
@@ -404,6 +429,25 @@ def _review_ticket_id(run_id: str) -> Optional[str]:
     return env or None
 
 
+def _review_ticket_complexity(ws: RunWorkspace, ticket_id: Optional[str]) -> Optional[str]:
+    """Read the planning-declared complexity for this ticket; never infer a tier."""
+    if not ticket_id:
+        return None
+    path = workspace.context_dir(ws) / "tickets.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    rows = payload.get("tickets") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id", "")).upper() == ticket_id.upper():
+            value = row.get("complexity")
+            return value.strip().lower() if isinstance(value, str) and value.strip() else None
+    return None
+
+
 def _compose_review_prompt(
     ws: RunWorkspace, harness: str, template_prompt: str, payload: ReviewPayload,
 ) -> str:
@@ -549,8 +593,9 @@ class ReviewStage:
         round_num: int,
         harness: str,
         model: Optional[str],
+        complexity: Optional[str] = None,
         persona_prompt: str = "",
-    ) -> AgentResult | StageResult:
+    ) -> tuple[AgentResult, str, int] | StageResult:
         """Build the prompt, refuse a missing SPEC or tickets, and call the reviewer."""
         diff_text = _get_diff(git_ws, default_branch)
         changed = _changed_paths(git_ws, default_branch)
@@ -578,19 +623,25 @@ class ReviewStage:
             payload,
         )
         staged_inputs = _materialize_review_sources(git_ws, ws, run_id, diff_text)
+        cli_model, pinned_effort = harness_cli_pin(
+            harness, model, stage="review", config=self.routing_config, complexity=complexity,
+        )
         try:
-            return self.run_agent_func(
+            result = self.run_agent_func(
                 AgentRequest(
                     prompt=prompt,
                     cwd=git_ws.path,
                     mode="read",
                     harness=harness,
-                    model=model,
+                    model=cli_model,
+                    effort=pinned_effort,
                     timeout_s=self.agent_timeout_s,
                     output_schema=ReviewVerdict.model_json_schema(),
                     ticket_id=_review_ticket_id(run_id),
                 )
             )
+            prompt_bytes = prompt.encode("utf-8")
+            return result, hashlib.sha256(prompt_bytes).hexdigest(), len(prompt_bytes)
         finally:
             _restore_staged(staged_inputs)
 
@@ -652,6 +703,211 @@ class ReviewStage:
                 implementing_harness=implementing_harness, exclude=excluded,
             )
         return StageResult(outcome="retry", cause_code=cause_for(nxt), output_refs=[])
+
+    @staticmethod
+    def _record_review_attempt(
+        ws: RunWorkspace,
+        *,
+        run_id: str,
+        candidate_digest: str,
+        result: AgentResult,
+        context_sha256: str,
+        context_bytes: int,
+        structured_result: Optional[dict[str, Any]],
+        failure: Optional[str] = None,
+    ) -> None:
+        """Persist measured provider output and the exact transported prompt binding."""
+        context_dir = workspace.context_dir(ws)
+        path = context_dir / "review_attempts.json"
+        try:
+            attempts = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+            if not isinstance(attempts, list):
+                attempts = []
+        except (OSError, json.JSONDecodeError):
+            attempts = []
+        attempts.append({
+            "run_id": run_id,
+            "ticket_id": _review_ticket_id(run_id),
+            "candidate_digest": candidate_digest,
+            "harness": result.harness,
+            "model": result.model,
+            "effort": result.effort,
+            "duration_s": result.duration_s,
+            "usage": result.usage,
+            "cost_usd": result.cost_usd,
+            "context_sha256": context_sha256,
+            "context_bytes": context_bytes,
+            "provider_ok": result.ok,
+            "error_kind": result.error_kind,
+            "truncated": _output_truncated(result),
+            "structured_result": structured_result,
+            "failure": failure,
+        })
+        workspace.write_context(ws, "review_attempts.json", json.dumps(attempts, indent=2))
+
+    def _record_execution_sample(
+        self,
+        *,
+        run_id: str,
+        round_num: int,
+        harness: str,
+        implementing_harness: Optional[str],
+        complexity: Optional[str],
+        result: AgentResult,
+        context_sha256: str,
+        context_bytes: int,
+        schema_valid: bool,
+        real_delivery: bool,
+        expected_model: Optional[str] = None,
+        expected_effort: Optional[str] = None,
+        candidate_digest: Optional[str] = None,
+    ) -> None:
+        """Observe a real review-agent call for the model-route auditor (USR-471 T1/T5).
+
+        `schema_valid` distinguishes a malformed-but-real reply from a crash/timeout/truncation
+        (`real_delivery=False`); a write failure here is logged and swallowed, never raised into
+        the review outcome. Expected model and effort are the route pin, not the provider report.
+        """
+        ticket_id = _review_ticket_id(run_id)
+        if not ticket_id:
+            return
+        try:
+            sample = ExecutionSample(
+                execution_id=f"{run_id}:review:{round_num}",
+                ticket_id=ticket_id,
+                stage="review",
+                harness=harness,
+                provider=result.provider,
+                model_source=result.model_source,
+                started_at=result.started_at,
+                finished_at=result.finished_at,
+                execution_parameters=result.execution_parameters,
+                reported_model=result.model,
+                complexity=complexity,
+                implementing_harness=implementing_harness,
+                quota_remaining_percent=quota_remaining_percent(harness),
+                latency_ms=max(0, round(result.duration_s * 1000)),
+                timeout_sec=float(self.agent_timeout_s),
+                timed_out=result.error_kind == "timeout",
+                cost_usd=result.cost_usd or 0.0,
+                reported_context_tokens=reported_context_tokens(result.usage),
+                context_sha256=context_sha256,
+                context_bytes=context_bytes,
+                reported_effort=result.effort,
+                expected_model=expected_model,
+                expected_effort=expected_effort,
+                candidate_digest=candidate_digest,
+                schema_valid=schema_valid,
+                real_delivery=real_delivery,
+                error_kind=result.error_kind,
+                finish_reason=result.finish_reason,
+            )
+            record_execution_sample(sample, ticket_id=ticket_id)
+        except Exception as exc:  # noqa: BLE001 - observation only, never blocks the stage
+            logger.warning("model_audit: failed to record execution sample for %s: %s", ticket_id, exc)
+
+    def _review_facts(
+        self,
+        run_id: str,
+        round_num: int,
+        harness: str,
+        routed_model: Optional[str],
+        implementing_harness: Optional[str],
+        complexity: Optional[str],
+        result: AgentResult,
+        context_sha256: str,
+        context_bytes: int,
+        candidate_digest: Optional[str],
+    ) -> _ReviewFacts:
+        """Bind the call to the configured review pin and the candidate digest."""
+        expected_model, expected_effort = harness_cli_pin(
+            harness, routed_model, stage="review", config=self.routing_config, complexity=complexity,
+        )
+        return _ReviewFacts(
+            run_id=run_id,
+            round_num=round_num,
+            harness=harness,
+            implementing_harness=implementing_harness,
+            complexity=complexity,
+            result=result,
+            context_sha256=context_sha256,
+            context_bytes=context_bytes,
+            expected_model=expected_model or routed_model or result.model,
+            expected_effort=expected_effort,
+            candidate_digest=candidate_digest,
+        )
+
+    def _observe_review_turn(
+        self,
+        ws: RunWorkspace,
+        facts: _ReviewFacts,
+        *,
+        schema_valid: bool,
+        real_delivery: bool,
+        failure: Optional[str] = None,
+        structured_result: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Record the attempt, the audit sample and one measured benchmark row."""
+        self._record_review_attempt(
+            ws,
+            run_id=facts.run_id,
+            candidate_digest=facts.candidate_digest or "",
+            result=facts.result,
+            context_sha256=facts.context_sha256,
+            context_bytes=facts.context_bytes,
+            structured_result=structured_result,
+            failure=failure,
+        )
+        self._record_execution_sample(
+            run_id=facts.run_id,
+            round_num=facts.round_num,
+            harness=facts.harness,
+            implementing_harness=facts.implementing_harness,
+            complexity=facts.complexity,
+            result=facts.result,
+            context_sha256=facts.context_sha256,
+            context_bytes=facts.context_bytes,
+            schema_valid=schema_valid,
+            real_delivery=real_delivery,
+            expected_model=facts.expected_model,
+            expected_effort=facts.expected_effort,
+            candidate_digest=facts.candidate_digest,
+        )
+        try:
+            observe_measured_review(
+                harness=facts.harness,
+                model=facts.result.model,
+                expected_model=facts.expected_model,
+                latency_ms=max(0, round(facts.result.duration_s * 1000)),
+                schema_valid=schema_valid,
+                real_delivery=real_delivery,
+                delivery_nonempty=bool((facts.result.text or "").strip()),
+                implementing_harness=facts.implementing_harness,
+            )
+        except Exception as exc:  # noqa: BLE001 - benchmark observation never blocks review
+            logger.warning("review_benchmark: failed to record %s: %s", facts.run_id, exc)
+
+    def _persist_approved_review(
+        self, ws: RunWorkspace, facts: _ReviewFacts, *, route: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Receipt for an approved review: measured latency, schema, family and nonempty text."""
+        from core.line.recovery_receipt import record_review_execution
+
+        record_review_execution(
+            ws,
+            facts.candidate_digest or "",
+            facts.implementing_harness or "",
+            facts.harness,
+            facts.result.model,
+            ticket_id=_review_ticket_id(facts.run_id),
+            latency_ms=max(0, round(facts.result.duration_s * 1000)),
+            schema_valid=True,
+            real_delivery=True,
+            delivery_nonempty=bool((facts.result.text or "").strip()),
+            context_sha256=facts.context_sha256,
+            context_bytes=facts.context_bytes,
+            route=route,
+        )
 
     def _retry_invalid_response(
         self,
@@ -802,6 +1058,8 @@ class ReviewStage:
 
         round_num = len(state.rounds) + 1
         implementing_harness = _read_progress_harness(ws)
+        ticket_id = _review_ticket_id(run_id)
+        complexity = _review_ticket_complexity(ws, ticket_id)
 
         excluded_harnesses = _exclude_tokens(state, cur_candidate, cur_policy)
         review_route = select_review_route(
@@ -813,6 +1071,7 @@ class ReviewStage:
             exclude=excluded_harnesses,
             openrouter_fallbacks=("review.openrouter", "distill.openrouter"),
             config=self.routing_config,
+            complexity=complexity,
         )
         if review_route is None:
             # No route at any cascade level is a matter of time, not of the owner (USR-87).
@@ -826,17 +1085,22 @@ class ReviewStage:
 
         agent_result = self._invoke_reviewer(
             ws, git_ws, run_id, default_branch, round_num, harness, model,
+            complexity=complexity,
             persona_prompt=ADVERSARIAL_PROMPT if review_route.level == 4 else "",
         )
         if isinstance(agent_result, StageResult):
             return agent_result
+        agent_result, context_sha256, context_bytes = agent_result
         record_result(agent_result, config=self.routing_config)
+        observed = self._review_facts(run_id, round_num, harness, model, implementing_harness, complexity, agent_result, context_sha256, context_bytes, cur_candidate)
         if _output_truncated(agent_result):
+            self._observe_review_turn(ws, observed, schema_valid=False, real_delivery=False, failure="truncated_output")
             return StageResult(
                 outcome="failed", cause_code="review_output_truncated", output_refs=[],
             )
 
         if not agent_result.ok:
+            self._observe_review_turn(ws, observed, schema_valid=False, real_delivery=False, failure=agent_result.error_kind or "provider_failure")
             return self._handle_agent_failure(
                 ws, state, agent_result, project=project, run_id=run_id,
                 harness=harness, model=model, candidate_digest=cur_candidate,
@@ -849,11 +1113,14 @@ class ReviewStage:
 
         verdict, invalid_reason = _parse_verdict_with_reason(agent_result.text)
         if verdict is None:
+            self._observe_review_turn(ws, observed, schema_valid=False, real_delivery=True, failure=f"invalid_structured_result:{invalid_reason}")
             return self._retry_invalid_response(
                 ws, state, project=project, run_id=run_id, harness=harness, model=model,
                 text=agent_result.text, reason=invalid_reason, candidate_digest=cur_candidate,
                 policy_digest=cur_policy, implementing_harness=implementing_harness,
             )
+
+        self._observe_review_turn(ws, observed, schema_valid=True, real_delivery=True, structured_result=verdict.model_dump(mode="json"))
 
         approved = verdict.verdict == "approve"
         exhausted = round_num > max_rounds and not approved
@@ -874,11 +1141,7 @@ class ReviewStage:
         if approved:
             # USR-375 S4: the stage contract artifact `stages.require_artifact(REVIEW)` validates.
             workspace.write_context(ws, VERDICT_FILE, verdict.model_dump_json(indent=2))
-            from core.line.recovery_receipt import record_review_execution
-            record_review_execution(
-                ws, cur_candidate, implementing_harness or "", harness, agent_result.model or model,
-                route=review_route.record(),
-            )
+            self._persist_approved_review(ws, observed, route=review_route.record())
 
         job_key = f"{run_id}:review:{round_num}"
         if publish:

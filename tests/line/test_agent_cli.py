@@ -94,6 +94,46 @@ def test_claude_read_mode_uses_plan_permission(tmp_path, make_fake_cli, monkeypa
     assert "--model" not in argv  # model omitted when None
 
 
+def test_bounded_harness_launch_receives_its_own_identity_and_roots(tmp_path, monkeypatch):
+    checkout = tmp_path / "ticket-checkout"
+    shared_state = tmp_path / "shared-state"
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, "ok", "")
+
+    monkeypatch.setattr(agent_cli.subprocess, "run", fake_run)
+    env = {
+        "DARKFAC_EXECUTION_CONTEXT": "headless",
+        "DARKFAC_FLEET_MODE": "1",
+        "DARKFAC_OPERATING_HARNESS": "antigravity",
+        "ANTIGRAVITY_AGENT": "1",
+        "DARKFAC_PROJECT_ROOT": str(tmp_path / "parent-checkout"),
+        "DARKFAC_STATE_ROOT": str(shared_state),
+        "PATH": "test-path",
+    }
+
+    result = agent_cli._run_bounded(
+        ["fake-harness"],
+        cwd=checkout,
+        env=env,
+        scrub_env=False,
+        process_harness="codex",
+    )
+
+    assert result.returncode == 0
+    child_env = captured["env"]
+    assert child_env["DARKFAC_PROCESS_HARNESS"] == "codex"
+    assert child_env["DARKFAC_EXECUTION_CONTEXT"] == "headless"
+    assert child_env["DARKFAC_PROJECT_ROOT"] == str(checkout.resolve())
+    assert child_env["PROJECT_ROOT"] == str(checkout.resolve())
+    assert child_env["DARKFAC_STATE_ROOT"] == str(shared_state.resolve())
+    assert child_env["STATE_ROOT"] == str(shared_state.resolve())
+    assert child_env["DARKFAC_OPERATING_HARNESS"] == ""
+    assert "ANTIGRAVITY_AGENT" not in child_env
+
+
 def test_claude_schema_mode_extracts_structured_output_and_serializes_schema_deterministically(
     tmp_path, make_fake_cli, monkeypatch
 ):
@@ -429,6 +469,7 @@ def test_codex_effective_model_and_effort_are_read_from_the_cli_events_when_not_
 
     assert result.ok is True
     assert result.model == "gpt-6-luna"
+    assert result.model_source == "provider_reported"
     assert result.effort == "high"
     # Nothing was declared, so the executed argv carries neither flag -- the model only came back
     # on the CLI's report, not because it was asked for.
@@ -732,6 +773,7 @@ def test_antigravity_exit_zero_with_text_is_success(tmp_path, make_fake_cli, mon
     assert result.text == "looks good to me"
     assert result.exit_code == 0
     assert result.model == "flash"
+    assert result.model_source == "harness_default"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["argv"] == ["new-conversation", "--model=flash", "review the diff"]
 

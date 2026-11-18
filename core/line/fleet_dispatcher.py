@@ -132,6 +132,8 @@ class HostSpec:
     id: str
     priority: int
     worker_url: Optional[str] = None  # None = executa localmente (Notebook)
+    enabled: bool = True
+    config: Optional[dict[str, Any]] = None
 
 
 def default_hosts() -> list[HostSpec]:
@@ -142,14 +144,10 @@ def default_hosts() -> list[HostSpec]:
     """
     from core.line import fleet_policy
 
-    defaults = {"grokbox": "http://100.77.130.5:8080", "desktop": "http://100.78.181.90:8080"}
-    disabled = {x.strip().lower() for x in os.environ.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(",") if x.strip()}
+    config = fleet_policy.load_fleet_config()
     hosts: list[HostSpec] = []
-    for h in fleet_policy.load_fleet_config().sorted_hosts():
-        if h.id.lower() in disabled:
-            continue
-        url = os.environ.get(f"DARKFAC_FLEET_URL_{h.id.upper()}", defaults.get(h.id))
-        hosts.append(HostSpec(h.id, h.priority, url))
+    for h in config.sorted_hosts():
+        hosts.append(HostSpec(h.id, h.priority, h.endpoint, h.enabled, h.model_dump(mode="json")))
     return hosts
 
 
@@ -164,6 +162,7 @@ class DispatcherConfig:
     recovery_list_ttl_sec: float = 43200.0
     progress_window_sec: float = DEFAULT_PROGRESS_WINDOW_SEC
     state_path: Path = STATE_PATH
+    policy_path: Optional[Path] = None
 
 
 @dataclass
@@ -188,6 +187,9 @@ class HostProbe:
     free: bool
     reason: str = ""
     resource_version: str = ""
+    workers: Optional[int] = None
+    available_gib: Optional[float] = None
+    observed_at: Optional[str] = None
 
 
 # --- selecao pura ---------------------------------------------------------------------------------
@@ -337,25 +339,41 @@ def default_probe(host: HostSpec, stable_probes: int = 3) -> HostProbe:
 
             if line_lock.is_locked():
                 return HostProbe(False, "line_lock_ativo", f"{host.id}:line_lock")
-            workers = gate_ram.measure_workers().workers
+            reading = gate_ram.measure_workers()
+            workers = reading.workers
         except Exception as exc:  # noqa: BLE001
             return HostProbe(False, f"probe_local_falhou:{type(exc).__name__}", f"{host.id}:probe_error:{type(exc).__name__}")
-        return HostProbe(workers >= MIN_NOTEBOOK_WORKERS, f"workers={workers}", f"{host.id}:workers={workers}")
+        return HostProbe(workers >= MIN_NOTEBOOK_WORKERS, f"workers={workers}", f"{host.id}:workers={workers}",
+                         workers=workers, available_gib=reading.available_gib,
+                         observed_at=datetime.now(timezone.utc).isoformat())
     from core.harness import remote_dispatch as rd
 
     for _ in range(max(1, stable_probes)):
         health = rd.probe_health(host.worker_url)
         if health is None:
             return HostProbe(False, "health_indisponivel", f"{host.id}:health_unavailable")
+        workers = health.get("workers")
         if health.get("busy"):
             return HostProbe(False, "worker_ocupado", f"{host.id}:busy")
+        if not isinstance(workers, int) or workers <= 0:
+            return HostProbe(False, "worker_capacity_missing_or_zero", f"{host.id}:workers_missing")
+        observed_at = health.get("observed_at") or health.get("resource_observed_at")
+        if observed_at:
+            try:
+                stamp = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+                if stamp.tzinfo is None or (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() >= 90:
+                    return HostProbe(False, "resource_reading_stale", f"{host.id}:stale")
+            except ValueError:
+                return HostProbe(False, "resource_reading_invalid", f"{host.id}:invalid")
     # Exclude observation timestamps: polling a healthy worker must not create a new resource version.
     identity = {
         key: health.get(key) for key in ("worker_id", "workers", "busy", "status", "version", "machine_id")
         if key in health
     }
     from core.line.admission_store import safe_digest
-    return HostProbe(True, "saudavel", f"{host.id}:{safe_digest(identity)}")
+    return HostProbe(True, "saudavel", f"{host.id}:{safe_digest(identity)}", workers=workers,
+                     available_gib=health.get("available_gib"),
+                     observed_at=str(observed_at or datetime.now(timezone.utc).isoformat()))
 
 
 def _git_checked(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -497,38 +515,44 @@ def resumable_delivery_worktree(ticket_id: str) -> Optional[Path]:
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
                    run_id: Optional[str] = None, recovery: bool = False,
                    candidate_digest: str = "unknown") -> InFlight:
-    env = dict(os.environ)
     # The launcher runs from a temporary operational checkout, but its mutable
     # control store is shared with the dispatcher and the other workers. Resolve
-    # the parent's effective root before changing cwd; this also makes a relative
-    # DARKFAC_STATE_ROOT override stable in the child process.
+    # the parent's effective root before the child env replaces DARKFAC_PROJECT_ROOT.
+    from core.line.operating_harness import headless_executor_env
     from core.paths import state_root
 
-    env["DARKFAC_STATE_ROOT"] = str(state_root().resolve())
-    # The child starts in an operational checkout, while delivery targets a
-    # separate candidate worktree. Do not pin project_root() to the dispatcher
-    # checkout: run_ticket binds it to the candidate for each gate invocation.
-    env.pop("DARKFAC_PROJECT_ROOT", None)
-    env["DARKFAC_HOST_ID"] = host.id
-    if run_id:
-        env["DARKFAC_RUN_ID"] = run_id
-    if recovery:
-        env["DARKFAC_RECOVERY_MODE"] = "1"
-    env["DARKFAC_CANDIDATE_DIGEST"] = candidate_digest
-    if host.worker_url:
-        # Gate pin stays on DARKFAC_TEST_WORKERS. Admission reads the fleet list.
-        env["DARKFAC_ADMISSION_WORKERS"] = _admission_workers_for_pin(
-            env.get("DARKFAC_TEST_WORKERS"), host.worker_url,
-        )
-        env["DARKFAC_TEST_WORKERS"] = host.worker_url
-        env["DARKFAC_REMOTE_HARNESS"] = "required"
-        env["DARKFAC_FLEET_GATE_REMOTE"] = "1"
-    else:
-        env["DARKFAC_REMOTE_HARNESS"] = "off"
+    shared_state = state_root().resolve()
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{ticket_id}-{host.id}.log"
-    env["DARKFAC_RUN_LOG"] = str(log_path.resolve())
     operational_checkout = _create_operational_checkout(ticket_id, host.id, demand)
+    updates = {
+        "DARKFAC_CANDIDATE_DIGEST": candidate_digest,
+        "DARKFAC_RUN_LOG": str(log_path.resolve()),
+    }
+    if recovery:
+        updates["DARKFAC_RECOVERY_MODE"] = "1"
+    if host.worker_url:
+        # Gate pin stays on DARKFAC_TEST_WORKERS unless ordered workers are explicitly configured;
+        # admission reads the fleet list via DARKFAC_ADMISSION_WORKERS (USR-510 / USR-471).
+        updates["DARKFAC_ADMISSION_WORKERS"] = _admission_workers_for_pin(
+            os.environ.get("DARKFAC_TEST_WORKERS"), host.worker_url,
+        )
+        updates["DARKFAC_TEST_WORKERS"] = host.worker_url
+        updates["DARKFAC_REMOTE_HARNESS"] = "required"
+        updates["DARKFAC_FLEET_GATE_REMOTE"] = "1"
+    else:
+        updates["DARKFAC_REMOTE_HARNESS"] = "off"
+    env = headless_executor_env(
+        os.environ,
+        project_root=operational_checkout,
+        state_root=shared_state,
+        host_id=host.id,
+        run_id=run_id,
+        updates=updates,
+    )
+    # run_ticket binds project_root() to the candidate worktree for each gate invocation (USR-516).
+    env.pop("DARKFAC_PROJECT_ROOT", None)
+    env.pop("PROJECT_ROOT", None)
     cmd = [sys.executable, str(operational_checkout / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
     resume_worktree = resumable_delivery_worktree(ticket_id)
     if resume_worktree is not None:
@@ -920,6 +944,7 @@ class FleetDispatcher:
         self.deploys = 0
         self.last_cycle: dict[str, Any] = self._previous_cycle()
         self.failures: list[dict[str, Any]] = []  # ultimas falhas: ticket, host, exit_code, motivo, classe
+        self.resource_readings: dict[str, dict[str, Any]] = {}
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
         self._code_sha_reader = code_sha_reader or _default_checkout_sha
@@ -1283,7 +1308,7 @@ class FleetDispatcher:
                     return
             token = self.admission_store.reserve(
                 project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
-                context_digest=context_key, resource_version=resource_key,
+                context_digest=context_key, resource_version=resource_key, host_id=host.id,
             )
             if token is None:
                 if recovery_token:
@@ -1439,7 +1464,26 @@ class FleetDispatcher:
         now: float,
         reservation_state: dict[str, Any],
     ) -> None:
+        configured_disabled = {
+            host_id.strip().casefold()
+            for host_id in self._fleet_config.disabled_hosts
+            if host_id.strip()
+        }
+        disabled_env = {
+            host_id.strip().casefold()
+            for host_id in os.environ.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(",")
+            if host_id.strip()
+        }
         for host in sorted(self.config.hosts, key=lambda h: h.priority):
+            if not host.enabled:
+                idle[host.id] = "disabled_by_config"
+                continue
+            if host.id.casefold() in configured_disabled:
+                idle[host.id] = "excluded_by_config"
+                continue
+            if host.id.casefold() in disabled_env:
+                idle[host.id] = "excluded_by_environment"
+                continue
             if self.pending_releases:
                 idle[host.id] = "recovery_awaiting_deploy_proof"
                 continue
@@ -1456,10 +1500,29 @@ class FleetDispatcher:
             if reservation is not None:
                 idle[host.id] = f"host_reserved:{reservation.ticket_id}"
                 continue
+            if not queue and not any(d.get("status") == "planned" for d in demands):
+                idle[host.id] = "sem_ticket_executavel"
+                continue
             pr = self.probe(host)
+            host_config = host.config or {}
+            reading = {
+                "workers": pr.workers if pr.workers is not None else int(pr.free),
+                "available_gib": pr.available_gib if pr.available_gib is not None else host_config.get("min_free_memory_gib", 0),
+                "observed_at": pr.observed_at or datetime.now(timezone.utc).isoformat(),
+                "probe_reason": pr.reason,
+            }
+            self.resource_readings[host.id] = reading
+            from core.line import fleet_policy
+            decision = next((row for row in fleet_policy.effective_host_policy(
+                self._fleet_config, disabled_from_environment=os.environ.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(","),
+                readings={host.id: reading}, now=datetime.now(timezone.utc),
+            ) if row["host_id"] == host.id), None)
             if not pr.free:
                 note_unavailable_host(host, pr)
                 idle[host.id] = f"host_indisponivel:{pr.reason}"
+                continue
+            if decision is None or not decision["eligible"]:
+                idle[host.id] = f"host_indisponivel:{decision['reason'] if decision else 'policy_unavailable'}"
                 continue
             if not queue:
                 idle[host.id] = "sem_ticket_executavel"
@@ -1597,7 +1660,77 @@ class FleetDispatcher:
 
         return tick(PROJECT_ROOT)
 
+    def _load_cycle_fleet_config(self) -> None:
+        """Reload `.factory/config/line_fleet.json` (or synthesize config from `self.config.hosts`)."""
+        from core.line import fleet_policy
+
+        if self.config.policy_path is not None:
+            fleet_config = fleet_policy.load_fleet_config(self.config.policy_path)
+            self.config.hosts = [
+                HostSpec(h.id, h.priority, h.endpoint, h.enabled, h.model_dump(mode="json"))
+                for h in fleet_config.sorted_hosts()
+            ]
+            self._fleet_config = fleet_config
+            return
+        self._fleet_config = fleet_policy.FleetConfig(hosts=[
+            fleet_policy.HostConfig(
+                id=host.id, name=host.id, priority=host.priority, endpoint=host.worker_url,
+                enabled=host.enabled,
+                max_workers=int((host.config or {}).get("max_workers", 1)),
+                min_free_memory_gib=float((host.config or {}).get("min_free_memory_gib", 0)),
+            ) for host in self.config.hosts
+        ])
+
+    def _publish_cycle_policy(self, orphan_hosts: set[str]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Evaluate effective host policy against live readings/reservations and persist its snapshot."""
+        from core.line import fleet_policy
+
+        occupied = {host_id: job.ticket_id for host_id, job in self.in_flight.items()}
+        occupied.update({host_id: "orphan_run" for host_id in orphan_hosts if host_id not in occupied})
+        active_reservations = {
+            host_id: {"active": True, "ticket_id": job.ticket_id, "run_id": job.run_id}
+            for host_id, job in self.in_flight.items() if job.admission_token
+        }
+        policy_reservation_state = "available"
+        try:
+            for reservation in self.admission_store.active_host_reservations():
+                active_reservations.setdefault(reservation["host_id"], {
+                    "active": True, "expires_at": reservation["expires_at"], "source": "admission_store",
+                })
+        except Exception as exc:  # an unavailable canonical reservation ledger must fail closed
+            policy_reservation_state = "unavailable"
+            for host in self.config.hosts:
+                active_reservations.setdefault(host.id, {
+                    "active": True, "source": "admission_store_unavailable", "cause": type(exc).__name__,
+                })
+        disabled_env = os.environ.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(",")
+        host_policy = fleet_policy.effective_host_policy(
+            self._fleet_config,
+            disabled_from_environment=disabled_env,
+            readings=self.resource_readings,
+            occupied=occupied,
+            reservations=active_reservations,
+            now=datetime.now(timezone.utc),
+        )
+        policy_report = fleet_policy.policy_snapshot_report(
+            self._fleet_config,
+            host_policy,
+            now=datetime.now(timezone.utc),
+            config_source=self.config.policy_path or "dispatcher_config",
+            reservation_state=policy_reservation_state,
+            disabled_from_environment=disabled_env,
+        )
+        try:
+            snapshot = fleet_policy.write_effective_policy_snapshot(policy_report)
+            policy_snapshot = {"path": str(snapshot), "updated_at": policy_report["updated_at"]}
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("could not persist effective fleet policy snapshot: %s", exc)
+            policy_snapshot = {"error": type(exc).__name__, "updated_at": policy_report["updated_at"]}
+        return host_policy, policy_snapshot
+
     def run_cycle(self) -> dict[str, Any]:
+        self._load_cycle_fleet_config()
+        self.resource_readings = {}
         self._reap()
         from core.line.pending_delivery import acknowledge_deploy
         resumptions = self._resumptions()
@@ -1614,7 +1747,6 @@ class FleetDispatcher:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
                                        "resumptions": resumptions, "dispatched": [],
                                        "deployed": deployed_resume})
-        # USR-498: antes da fila, para o ticket reconciliado poder sair neste ciclo.
         reconciled = self._reconcile_stale_active()
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
@@ -1639,18 +1771,14 @@ class FleetDispatcher:
         self._pending_skip_reasons(resumptions, demands, skipped, now)
         terminal = {str(d.get("id")) for d in demands if d.get("status") in _TERMINAL_STATUSES}
         recovery_list = self._recovery_list_status(terminal, busy, queue, now)
-        list_live = bool(recovery_list.get("live"))
-        recovery_active = bool(self.recovery.get("active"))
-        delivery_in_flight = bool(self.in_flight) or any(
-            r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions
-        )
         queue, preempt_skips = order_fleet_queue(
-            queue,
-            demands,
+            queue, demands,
             recovery_tickets=self.config.recovery_tickets,
-            recovery_list_live=list_live,
-            recovery_active=recovery_active,
-            delivery_in_flight=delivery_in_flight,
+            recovery_list_live=bool(recovery_list.get("live")),
+            recovery_active=bool(self.recovery.get("active")),
+            delivery_in_flight=bool(self.in_flight) or any(
+                r["status"] in {"running", "merged_awaiting_deploy"} for r in resumptions
+            ),
         )
         skipped.update(preempt_skips)
         dispatched: list[dict[str, str]] = []
@@ -1663,24 +1791,28 @@ class FleetDispatcher:
         except Exception as exc:  # noqa: BLE001 - capacity cannot be announced from an unknown snapshot
             reservation_state["error"] = type(exc).__name__
             logger.error("canonical reservation snapshot failed (%s)", reservation_state["error"])
-        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now,
-                             reservation_state)
+        self._dispatch_hosts(queue, demands, idle, skipped, dispatched, orphan_hosts, now, reservation_state)
         idle.update(lock_busy)  # trava de linha recusada no ciclo anterior tem precedencia
+        host_policy, policy_snapshot = self._publish_cycle_policy(orphan_hosts)
         deployed = self._maybe_deploy()
         canonical_reservations = reservation_state["reservations"]
         reservation_error = reservation_state["error"]
         if reservation_error:
             for host in self.config.hosts:
                 idle[host.id] = "canonical_reservations_unavailable"
+        eligible_by_policy = {row["host_id"] for row in host_policy if row["eligible"]}
         return self._finish_cycle({
             "resumptions": resumptions,
             "ts": datetime.now(timezone.utc).isoformat(),
+            "policy_snapshot": policy_snapshot,
             "free_hosts": [] if reservation_error else [
                 h.id for h in self.config.hosts
-                if h.id not in self.in_flight and h.id not in orphan_hosts
+                if h.id in eligible_by_policy
+                and h.id not in self.in_flight and h.id not in orphan_hosts
                 and h.id not in canonical_reservations
                 and not idle.get(h.id, "").startswith("host_indisponivel:")
             ],
+            "host_policy": host_policy,
             "canonical_reservations": {
                 host_id: {
                     "ticket": reservation.ticket_id,
@@ -1918,10 +2050,12 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
+    from core.line.fleet_policy import DEFAULT_CONFIG_PATH
     d = FleetDispatcher(DispatcherConfig(cycle_sec=args.cycle_sec,
                                         progress_window_sec=max(0.0, args.progress_window_sec),
                                         resume_only=args.resume_only and not recovery,
-                                        recovery_tickets=recovery), dry_run=args.dry_run,
+                                        recovery_tickets=recovery,
+                                        policy_path=DEFAULT_CONFIG_PATH), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
                         orphan_worktree_cleanup_hook=lambda: maybe_run_scheduled(PROJECT_ROOT),

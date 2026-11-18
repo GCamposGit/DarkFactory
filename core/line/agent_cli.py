@@ -149,15 +149,15 @@ def supports(
     it is strictly read-only in headless, fleet, and background contexts.
     """
     h = harness.lower().strip()
+    from core.line.operating_harness import resolve_process_identity
+
+    identity = resolve_process_identity(execution_context=execution_context)
     if (
         h == "antigravity"
         and mode == "write"
-        and execution_context != "headless"
+        and identity.execution_context != "headless"
     ):
-        op = operating_harness or os.environ.get("DARKFAC_OPERATING_HARNESS")
-        if not op:
-            from core.line.operating_harness import detect_operating_harness
-            op = detect_operating_harness()
+        op = operating_harness or identity.harness
         if op == "antigravity":
             return True
     return mode in HARNESS_CAPABILITIES.get(h, frozenset())
@@ -190,6 +190,16 @@ class AgentResult(BaseModel):
     text: str
     harness: str
     model: Optional[str] = None
+    # `provider_reported` means the adapter extracted an identity from the executor's
+    # response/events. `explicit_request` means only that a model was passed to the
+    # harness; it must not be presented as independent provider confirmation.
+    model_source: Optional[str] = None
+    # Provider and execution parameters are captured from the selected adapter, not inferred
+    # later from the route. Timestamps bracket the actual adapter invocation.
+    provider: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    execution_parameters: dict[str, Any] = Field(default_factory=dict)
     # Effective reasoning effort: the value the CLI reported, or the one the request declared.
     effort: Optional[str] = None
     duration_s: float
@@ -845,6 +855,123 @@ def _kill_process_tree_once(pid: int) -> None:
             logger.debug("killpg failed for PID %s: %s", pid, exc)
 
 
+def _run_bounded_monkeypatched(
+    argv: list[str],
+    *,
+    start: float,
+    input_text: Optional[str],
+    cwd: Optional[Path | str],
+    timeout_s: float,
+    grace_s: float,
+    stdin: Optional[Any],
+    env: Optional[dict[str, str]],
+) -> BoundedProcessResult:
+    """Delegate to `subprocess.run` when tests monkeypatch `agent_cli.subprocess.run`."""
+    kwargs: dict[str, Any] = {
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "timeout": timeout_s,
+        "cwd": str(cwd) if cwd is not None else None,
+        **hidden_popen_kwargs(),
+    }
+    if stdin is not None:
+        kwargs["stdin"] = stdin
+    elif input_text is not None:
+        kwargs["input"] = input_text
+    if env is not None:
+        kwargs["env"] = env
+    try:
+        proc = subprocess.run(argv, **kwargs)
+        duration = round(time.perf_counter() - start, 3)
+        return BoundedProcessResult(
+            stdout=proc.stdout or "",
+            stderr=proc.stderr or "",
+            returncode=proc.returncode,
+            duration_s=duration,
+            timed_out=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        duration = round(min(time.perf_counter() - start, float(timeout_s + grace_s)), 3)
+        return BoundedProcessResult(
+            stdout=_partial_output(exc.stdout),
+            stderr=_partial_output(exc.stderr),
+            returncode=-1,
+            duration_s=duration,
+            timed_out=True,
+        )
+
+
+def _communicate_bounded(
+    proc: subprocess.Popen[str],
+    argv: list[str],
+    *,
+    input_text: Optional[str],
+    timeout_s: float,
+    grace_s: float,
+) -> tuple[str, str, int, bool, bool]:
+    """Wait on `proc` with cancellation polling and process-tree termination on timeout."""
+    stdout, stderr = "", ""
+    timed_out = False
+    returncode = 0
+    token = cancellation.current_token()
+    cancelled = False
+    try:
+        if token is None:
+            stdout, stderr = proc.communicate(input=input_text, timeout=timeout_s)
+        else:
+            deadline = time.monotonic() + float(timeout_s)
+            pending_input: Optional[str] = input_text
+            while True:
+                if token.is_cancelled():
+                    cancelled = True
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout_s)
+                try:
+                    stdout, stderr = proc.communicate(
+                        input=pending_input, timeout=min(cancellation.RUNNER_POLL_INTERVAL_S, remaining)
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    pending_input = None
+        if cancelled:
+            logger.warning("run %s cancelled: terminating agent process tree (pid %s)", token.run_id, proc.pid)
+            _kill_process_tree(proc.pid)
+            try:
+                stdout, stderr = proc.communicate(timeout=grace_s)
+            except (subprocess.TimeoutExpired, Exception):
+                for stream in (proc.stdout, proc.stderr):
+                    try:
+                        if stream:
+                            stream.close()
+                    except Exception:
+                        pass
+            returncode = proc.returncode if proc.returncode is not None else -1
+        else:
+            returncode = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        _kill_process_tree(proc.pid)
+        try:
+            extra_out, extra_err = proc.communicate(timeout=grace_s)
+            stdout = extra_out or _partial_output(exc.stdout)
+            stderr = extra_err or _partial_output(exc.stderr)
+        except (subprocess.TimeoutExpired, Exception):
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
+            stdout = _partial_output(exc.stdout)
+            stderr = _partial_output(exc.stderr)
+        returncode = proc.returncode if proc.returncode is not None else -1
+    return stdout, stderr, returncode, timed_out, cancelled
+
+
 def _run_bounded(
     argv: list[str],
     *,
@@ -856,6 +983,7 @@ def _run_bounded(
     env: Optional[dict[str, str]] = None,
     scrub_env: bool = True,
     capabilities: tuple[str, ...] = (),
+    process_harness: Optional[str] = None,
 ) -> BoundedProcessResult:
     """Execute `argv` with a hard timeout and tree termination (USR-114).
 
@@ -870,42 +998,25 @@ def _run_bounded(
         from core.line.agent_env import build_agent_env
         env = build_agent_env(env, capabilities=capabilities)
 
+    if process_harness is not None:
+        from core.line.operating_harness import harness_executor_env, resolve_process_identity
+
+        parent_env = os.environ if env is None else env
+        parent_identity = resolve_process_identity(environ=parent_env)
+        env = harness_executor_env(
+            parent_env,
+            process_harness=process_harness,
+            project_root=cwd or parent_identity.project_root,
+            state_root=parent_identity.state_root,
+            execution_context=parent_identity.execution_context,
+        )
+
     # Backwards-compatibility for existing tests monkeypatching agent_cli.subprocess.run:
     if subprocess.run is not _ORIGINAL_SUBPROCESS_RUN:
-        kwargs: dict[str, Any] = {
-            "capture_output": True,
-            "text": True,
-            "encoding": "utf-8",
-            "errors": "replace",
-            "timeout": timeout_s,
-            "cwd": str(cwd) if cwd is not None else None,
-            **hidden_popen_kwargs(),
-        }
-        if stdin is not None:
-            kwargs["stdin"] = stdin
-        elif input_text is not None:
-            kwargs["input"] = input_text
-        if env is not None:
-            kwargs["env"] = env
-        try:
-            proc = subprocess.run(argv, **kwargs)
-            duration = round(time.perf_counter() - start, 3)
-            return BoundedProcessResult(
-                stdout=proc.stdout or "",
-                stderr=proc.stderr or "",
-                returncode=proc.returncode,
-                duration_s=duration,
-                timed_out=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            duration = round(min(time.perf_counter() - start, float(timeout_s + grace_s)), 3)
-            return BoundedProcessResult(
-                stdout=_partial_output(exc.stdout),
-                stderr=_partial_output(exc.stderr),
-                returncode=-1,
-                duration_s=duration,
-                timed_out=True,
-            )
+        return _run_bounded_monkeypatched(
+            argv, start=start, input_text=input_text, cwd=cwd,
+            timeout_s=timeout_s, grace_s=grace_s, stdin=stdin, env=env,
+        )
 
     kwargs: dict[str, Any] = {
         "stdout": subprocess.PIPE,
@@ -929,68 +1040,9 @@ def _run_bounded(
         kwargs["stdin"] = subprocess.DEVNULL
 
     proc = subprocess.Popen(argv, **kwargs)
-    stdout, stderr = "", ""
-    timed_out = False
-    returncode = 0
-
-    token = cancellation.current_token()
-    cancelled = False
-    try:
-        if token is None:
-            stdout, stderr = proc.communicate(input=input_text, timeout=timeout_s)
-        else:
-            # USR-152: poll the run's cancel token while the agent runs, so cancelling the run kills
-            # the process tree within ~RUNNER_POLL_INTERVAL_S instead of letting it burn quota.
-            deadline = time.monotonic() + float(timeout_s)
-            pending_input: Optional[str] = input_text
-            while True:
-                if token.is_cancelled():
-                    cancelled = True
-                    break
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(argv, timeout_s)
-                try:
-                    stdout, stderr = proc.communicate(
-                        input=pending_input, timeout=min(cancellation.RUNNER_POLL_INTERVAL_S, remaining)
-                    )
-                    break
-                except subprocess.TimeoutExpired:
-                    pending_input = None  # communicate() refuses input after the first call
-        if cancelled:
-            logger.warning("run %s cancelled: terminating agent process tree (pid %s)", token.run_id, proc.pid)
-            _kill_process_tree(proc.pid)
-            try:
-                stdout, stderr = proc.communicate(timeout=grace_s)
-            except (subprocess.TimeoutExpired, Exception):
-                try:
-                    if proc.stdout:
-                        proc.stdout.close()
-                    if proc.stderr:
-                        proc.stderr.close()
-                except Exception:
-                    pass
-            returncode = proc.returncode if proc.returncode is not None else -1
-        else:
-            returncode = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        _kill_process_tree(proc.pid)
-        try:
-            extra_out, extra_err = proc.communicate(timeout=grace_s)
-            stdout = extra_out or _partial_output(exc.stdout)
-            stderr = extra_err or _partial_output(exc.stderr)
-        except (subprocess.TimeoutExpired, Exception):
-            try:
-                if proc.stdout:
-                    proc.stdout.close()
-                if proc.stderr:
-                    proc.stderr.close()
-            except Exception:
-                pass
-            stdout = _partial_output(exc.stdout)
-            stderr = _partial_output(exc.stderr)
-        returncode = proc.returncode if proc.returncode is not None else -1
+    stdout, stderr, returncode, timed_out, cancelled = _communicate_bounded(
+        proc, argv, input_text=input_text, timeout_s=timeout_s, grace_s=grace_s,
+    )
 
     elapsed = time.perf_counter() - start
     max_allowed = float(timeout_s + grace_s)
@@ -1037,6 +1089,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             cwd=req.cwd,
             timeout_s=req.timeout_s,
             capabilities=tuple(req.capabilities),
+            process_harness=req.harness,
         )
     except OSError as exc:
         return AgentResult(
@@ -1078,23 +1131,33 @@ def _run_claude(req: AgentRequest) -> AgentResult:
         else:
             result_text = str(parsed.get("result") or "")
         usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
+        reported_model = _string_field(parsed, _MODEL_KEYS)
+        if reported_model is None and isinstance(parsed.get("modelUsage"), dict):
+            reported_model = _grok_reported_identity(parsed)[0]
+        model = _prefer_reported(reported_model, req.model)
+        model_source = "provider_reported" if reported_model else ("explicit_request" if req.model else "harness_default")
         cost_raw = parsed.get("total_cost_usd")
         cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) else None
         if is_error or res.returncode != 0:
             combined = f"{result_text}\n{stderr}"
             return AgentResult(
-                ok=False, text=redact_secrets(result_text or stderr.strip()), harness="claude", model=req.model,
+                ok=False, text=redact_secrets(result_text or stderr.strip()), harness="claude", model=model,
+                model_source=model_source,
                 duration_s=duration, usage=usage, cost_usd=cost_usd,
                 error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
             )
         return AgentResult(
-            ok=True, text=result_text, harness="claude", model=req.model,
+            ok=True, text=result_text, harness="claude", model=model, model_source=model_source,
             duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
         )
 
     combined = f"{stdout}\n{stderr}"
     if res.returncode == 0 and stdout:
-        return AgentResult(ok=True, text=stdout, harness="claude", model=req.model, duration_s=duration, **diag)
+        return AgentResult(
+            ok=True, text=stdout, harness="claude", model=req.model,
+            model_source="explicit_request" if req.model else "harness_default",
+            duration_s=duration, **diag,
+        )
     return AgentResult(
         ok=False, text=redact_secrets(stdout or stderr.strip()), harness="claude", model=req.model,
         duration_s=duration,
@@ -1310,6 +1373,7 @@ def _run_codex(
             timeout_s=req.timeout_s,
             env=env,
             capabilities=tuple(req.capabilities),
+            process_harness=req.harness,
         )
     except OSError as exc:
         return AgentResult(
@@ -1365,6 +1429,7 @@ def _run_codex(
         reported_model = reported_model or rollout_model
         reported_effort = reported_effort or rollout_effort
     model = _prefer_reported(reported_model, req.model)
+    model_source = "provider_reported" if reported_model else ("explicit_request" if req.model else "harness_default")
     effort = _prefer_reported(reported_effort, req.effort)
 
     stderr = res.stderr
@@ -1375,17 +1440,20 @@ def _run_codex(
         # runs before the exit-code branch below and overrides whatever verdict the exit code implies.
         return AgentResult(
             ok=False, text=redact_secrets(output_text), harness="codex", model=model, effort=effort,
+            model_source=model_source,
             duration_s=duration, usage=usage, cost_usd=cost_usd,
             error_kind="harness_infra_error", **diag,
         )
     if res.returncode != 0:
         return AgentResult(
             ok=False, text=output_text, harness="codex", model=model, effort=effort, duration_s=duration,
+            model_source=model_source,
             usage=usage, cost_usd=cost_usd,
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
     return AgentResult(
         ok=True, text=output_text, harness="codex", model=model, effort=effort, duration_s=duration,
+        model_source=model_source,
         usage=usage, cost_usd=cost_usd, **diag,
     )
 
@@ -1434,6 +1502,7 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
                 cwd=req.cwd,
                 timeout_s=req.timeout_s,
                 capabilities=tuple(req.capabilities),
+                process_harness=req.harness,
             )
         except OSError as exc:
             return AgentResult(
@@ -1480,13 +1549,14 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
 
     reported_model, reported_effort = _grok_reported_identity(parsed) if isinstance(parsed, dict) else (None, None)
     model = _prefer_reported(reported_model, req.model)
+    model_source = "provider_reported" if reported_model else ("explicit_request" if req.model else "harness_default")
     effort = _prefer_reported(reported_effort, req.effort)
 
     if res.returncode != 0 or is_error:
         combined = f"{error_text}\n{stderr}"
         return AgentResult(
             ok=False, text=redact_secrets(result_text or stderr.strip()), harness="grok",
-            model=model, effort=effort,
+            model=model, model_source=model_source, effort=effort,
             duration_s=duration, usage=usage, cost_usd=cost_usd,
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
@@ -1516,14 +1586,16 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
             rows=rows,
         )
         return AgentResult(
-            ok=False, text=redact_secrets(diagnosis.text), harness="grok", model=model, effort=effort,
+            ok=False, text=redact_secrets(diagnosis.text), harness="grok", model=model,
+            model_source=model_source, effort=effort,
             duration_s=duration, usage=usage, cost_usd=cost_usd,
             error_kind=kind,  # type: ignore[arg-type]
             protected_path=diagnosis.protected_path,
             **diag,
         )
     return AgentResult(
-        ok=True, text=redact_secrets(result_text), harness="grok", model=model, effort=effort,
+        ok=True, text=redact_secrets(result_text), harness="grok", model=model,
+        model_source=model_source, effort=effort,
         duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
     )
 
@@ -1664,6 +1736,7 @@ def _run_grok(req: AgentRequest) -> AgentResult:
                     [*argv, "--prompt-file", str(prompt_file)],
                     cwd=req.cwd, timeout_s=req.timeout_s, env=env,
                     capabilities=tuple(req.capabilities),
+                    process_harness=req.harness,
                 )
         except OSError as exc:
             return AgentResult(
@@ -1723,6 +1796,7 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
             cwd=req.cwd,
             timeout_s=req.timeout_s,
             capabilities=tuple(req.capabilities),
+            process_harness=req.harness,
         )
     except OSError as exc:
         return AgentResult(
@@ -2012,6 +2086,9 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
         "total_tokens": response.total_tokens,
     }
     cost_usd = response.measured_cost if response.is_measured else response.estimated_cost
+    response_metadata = getattr(response, "metadata", None)
+    metadata = response_metadata if isinstance(response_metadata, dict) else {}
+    reported_effort = metadata.get("reasoning_effort") or metadata.get("effort")
     if not (response.text or "").strip():
         logger.warning(
             "openrouter empty content: model=%s completion_tokens=%s max_tokens=%s%s",
@@ -2028,9 +2105,16 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
             logger.warning("OpenRouter write mode produced no file edits and empty text")
     return AgentResult(
         ok=True, text=response.text or "", harness="openrouter", model=response.model,
+        model_source="provider_reported" if response.model else "gateway_request",
+        effort=str(reported_effort) if reported_effort else None,
         duration_s=duration, usage=usage, cost_usd=cost_usd,
         finish_reason=_finish_reason(response),
         truncated=_openrouter_truncated(response),
+        execution_parameters={
+            "gateway_model": model,
+            "max_tokens": _OPENROUTER_MAX_TOKENS,
+            "reasoning": reasoning or {},
+        },
     )
 
 
@@ -2040,6 +2124,14 @@ _HARNESS_RUNNERS: dict[str, Callable[[AgentRequest], AgentResult]] = {
     "grok": _run_grok,
     "antigravity": _run_antigravity,
     "openrouter": _run_openrouter,
+}
+
+_HARNESS_PROVIDER = {
+    "claude": "anthropic",
+    "codex": "openai",
+    "grok": "xai",
+    "antigravity": "google",
+    "openrouter": "openrouter",
 }
 
 
@@ -2080,11 +2172,13 @@ def run_agent(req: AgentRequest) -> AgentResult:
     token = cancellation.current_token()
     if token is not None and token.refresh():
         return _cancelled_result(req, 0.0)
+    started_at = datetime.now(timezone.utc)
     res = runner(req)
+    finished_at = datetime.now(timezone.utc)
     if token is not None and token.is_cancelled():
         # The runner's own verdict (partial output, a crash from the kill) is meaningless: the owner
         # cancelled the run, so the call is reported as `cancelled` and nothing downstream retries it.
-        return _cancelled_result(req, res.duration_s)
+        res = _cancelled_result(req, res.duration_s)
     # Read mode exists to *return text* (grill/planning/review answers), so an
     # "ok" result with none is a failure to retry, not a success to parse. Write
     # mode legitimately edits files and may print nothing.
@@ -2092,19 +2186,32 @@ def run_agent(req: AgentRequest) -> AgentResult:
         logger.warning("Harness %s returned no text for a successful read call; classifying as empty_output", harness)
         res = res.model_copy(update={"ok": False, "error_kind": "empty_output"})
 
+    execution_parameters = dict(res.execution_parameters)
+    execution_parameters.setdefault("requested_model", req.model)
+    execution_parameters.setdefault("requested_effort", req.effort)
+    execution_parameters.setdefault(
+        "reasoning", {"effort": req.effort} if req.effort else {},
+    )
+    model_source = res.model_source or (
+        "explicit_request" if req.model
+        else "harness_default" if harness == "antigravity"
+        else "provider_reported" if res.model
+        else "harness_default"
+    )
+    res = res.model_copy(update={
+        "provider": _HARNESS_PROVIDER.get(harness, harness),
+        "model_source": model_source,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "execution_parameters": execution_parameters,
+    })
+
     # Telemetria ponta a ponta: Registrar evento no ModelUsageLedger
     try:
         from core.usage.ledger import ModelUsageLedger, infer_model_tier
         from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 
-        provider_map = {
-            "claude": "anthropic",
-            "codex": "openai",
-            "grok": "xai",
-            "antigravity": "google",
-            "openrouter": "openrouter",
-        }
-        prov = provider_map.get(harness, harness)
+        prov = _HARNESS_PROVIDER.get(harness, harness)
         model_name = res.model or (req.model or "unknown")
         effort_name = res.effort or req.effort
         tier_val = infer_model_tier(prov, model_name)

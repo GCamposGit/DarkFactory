@@ -220,3 +220,15 @@ limites padronizados de `connect_timeout`/`statement_timeout`. Semantica de fila
 mudou; apenas a conexao passou a ser unica e consistente. `_connect()` resolve `raw_url` sob
 demanda quando `_resolved_database` nao foi preenchido (construcao manual em teste), em vez de
 tratar o store como desconfigurado.
+
+## Politica de frota e auditoria de modelos no Hub (USR-471)
+
+- `GET /line/fleet-policy` (`LineDemandsMixin.get_fleet_policy`) expoe o mesmo snapshot de
+  `python -m core.line.fleet_policy --effective` (`effective_policy_snapshot()`), com
+  configuracao por host, leituras vivas de recursos, exclusoes de configuracao/ambiente e
+  elegibilidade resultante. Falhas de leitura degradam por linha ou retornam snapshot vazio
+  com `error` sem HTTP 500.
+- `GET /line/model-audit` (`LineDemandsMixin.get_model_audit(ticket)`) recomputa a auditoria de
+  execucao real (`audit_recorded(ticket)`) a partir do ledger de `ExecutionSample`, nunca de
+  recibo em cache. Sem amostras ou em erro de leitura retorna HTTP 200 com `passed: false` e
+  `violations` explicitas (`audit_unavailable`).

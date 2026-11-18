@@ -61,7 +61,11 @@ from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.workflow import execution_registry
 from core.models.registry import QUOTA_FLOOR_MIN
-from core.line.operating_harness import detect_operating_harness
+from core.line.operating_harness import (
+    ProcessHarnessIdentity,
+    detect_operating_harness,
+    resolve_process_identity,
+)
 from core.line.routing import (
     _HARNESS_TO_PROVIDER,
     _default_quota_headroom,
@@ -1086,7 +1090,10 @@ def _invoke_fix_agent(
         logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
         return None
     harness, model = route
-    cli_model, cli_effort = harness_cli_pin(harness, model, stage="development", config=load_routing_config())
+    cli_model, cli_effort = harness_cli_pin(
+        harness, model, stage="development", config=load_routing_config(),
+        complexity=_routing_complexity(ticket),
+    )
     headroom = inspect_quotas().get(harness, {}).get("headroom")
     request = AgentRequest(
         prompt=headless_development_preamble(harness, headroom) + _build_gate_fix_prompt(ticket, stage_label, feedback),
@@ -3109,10 +3116,28 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
     return None
 
 
+def _execution_context(args: argparse.Namespace) -> str:
+    """Resolve this process role from its launch contract before legacy fleet signals."""
+    if getattr(args, "fleet", False) or line_lock.is_fleet_mode():
+        return "headless"
+    declared = os.environ.get("DARKFAC_EXECUTION_CONTEXT", "").strip().lower()
+    if declared:
+        return declared
+    return "interactive"
+
+
+def _process_identity(args: argparse.Namespace) -> ProcessHarnessIdentity:
+    """This run's harness identity (USR-471): the single path every headless/interactive stage
+    uses instead of calling ``detect_operating_harness`` directly. A fleet/``--fleet`` run never
+    inherits the parent chat's ``DARKFAC_OPERATING_HARNESS``/autodetection signals -- only an
+    explicit declaration passed to this very process would count, and none exists here yet."""
+    return resolve_process_identity(execution_context=_execution_context(args))
+
+
 def _stage_check_harness(args: argparse.Namespace) -> Optional[int]:
     if args.harness:
         requested = args.harness.lower().strip()
-        if getattr(args, "fleet", False) and requested == "antigravity":
+        if _execution_context(args) == "headless" and requested == "antigravity":
             print("[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.", file=sys.stderr)
             return 2
     # Fail before any side effect (quota probe, ticket creation, agent call) when the requested harness
@@ -3176,10 +3201,11 @@ def _stage_route(
     quotas: dict[str, Any],
     override_granted: bool,
     progress: ProgressPublisher,
-    operating_harness: Optional[str],
+    identity: ProcessHarnessIdentity,
 ) -> Any:
     """Routing decision. Returns (harness, model, reason) or an int exit code."""
-    execution_context = "headless" if getattr(args, "fleet", False) else "interactive"
+    execution_context = identity.execution_context
+    effective_operating = identity.harness
     caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
     if args.harness:
         target_harness = args.harness.lower().strip()
@@ -3217,11 +3243,12 @@ def _stage_route(
                 print(f"[+] Harness explicitamente selecionado: {target_harness}")
         return target_harness, None, "explicit_harness"
 
-    # Automatic router resolution via Dynamic Headroom, among harnesses that can write
-    if operating_harness and not args.json:
-        print(f"[+] Harness de operacao detectado: {operating_harness}")
+    # Automatic router resolution via Dynamic Headroom, among harnesses that can write.
+    # A fleet executor re-picks from the current quota. The parent chat's preference is not a route.
+    if effective_operating and not args.json:
+        print(f"[+] Harness de operacao detectado: {effective_operating}")
     route = pick(
-        "development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness,
+        "development", caps, mode=DEVELOPMENT_MODE, operating_harness=effective_operating,
         project_id=ticket.project_id, complexity=_routing_complexity(ticket),
         execution_context=execution_context,
     )
@@ -3233,7 +3260,7 @@ def _stage_route(
         )
         return 2
     selected_harness, selected_model = route
-    preferred_operating = operating_harness is not None and selected_harness == operating_harness
+    preferred_operating = effective_operating is not None and selected_harness == effective_operating
     if not args.json:
         print(
             f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} "
@@ -3290,7 +3317,8 @@ def _run_dev_agent(
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
         continuation = ticket_stages.continuation_prompt(workspace, LEDGER_RELATIVE)
         cli_model, cli_effort = harness_cli_pin(
-            harness, model, stage="development", config=load_routing_config()
+            harness, model, stage="development", config=load_routing_config(),
+            complexity=_routing_complexity(ticket),
         )
         return AgentRequest(
             prompt=headless_development_preamble(
@@ -3540,15 +3568,15 @@ def evaluate_admission(args: argparse.Namespace, ticket: UserTicket) -> admissio
 
     The allow decision is not stored and does not replace the ``pick`` each stage runs later.
     """
-    execution_context = "headless" if getattr(args, "fleet", False) else "interactive"
+    identity = _process_identity(args)
+    execution_context = identity.execution_context
     build_caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
     pinned = str(getattr(args, "harness", "") or "").strip() or None
-    operating = detect_operating_harness() if execution_context == "interactive" else None
     return admission.admit(
         build_caps=build_caps,
         read_caps=list(_DEV_CAPS),
         execution_context=execution_context,
-        operating_harness=operating,
+        operating_harness=identity.harness,
         project_id=ticket.project_id,
         complexity=_routing_complexity(ticket),
         pinned_harness=pinned,
@@ -3625,9 +3653,12 @@ def _stage_preflight(
 
     # 2. Routing Decision
     # The harness the owner operates the factory through is the preferred developer while its quota is
-    # above the critical floor (USR-109); None when no signal exists (pump, worker, cloud).
-    operating_harness = detect_operating_harness()
-    routed = _stage_route(args, ticket, quotas, override_granted, progress, operating_harness)
+    # above the critical floor (USR-109); None when no signal exists (pump, worker, cloud) or this run
+    # is headless (USR-471: a fleet executor never inherits the parent chat's preference). The RAW
+    # detection (ignoring execution_context) is kept only for the dry-run report below: audit visibility
+    # into what the environment carries, separate from what `_stage_route` actually used to pick.
+    identity = _process_identity(args)
+    routed = _stage_route(args, ticket, quotas, override_granted, progress, identity)
     if isinstance(routed, int):
         return routed
     selected_harness, selected_model, route_reason = routed
@@ -3636,7 +3667,7 @@ def _stage_preflight(
         progress.discard()
         result_payload = ticket_stages.dry_run_payload(
             ticket, ticket_size, size_reasons, selected_harness, selected_model, DEVELOPMENT_MODE,
-            override_granted, operating_harness, route_reason,
+            override_granted, detect_operating_harness(), route_reason,
         )
         if args.json:
             print(json.dumps(result_payload, indent=2))
@@ -4220,7 +4251,7 @@ def _quota_lookup_from_reading(quotas: dict[str, Any]) -> Any:
     return lookup
 
 
-def _development_harness_model(harness: str) -> Optional[str]:
+def _development_harness_model(harness: str, complexity: Optional[str] = None) -> Optional[str]:
     """Model the development stage declares for this harness.
 
     The pin wins, then that harness's own cascade entry. Never the model of a different harness
@@ -4235,7 +4266,9 @@ def _development_harness_model(harness: str) -> Optional[str]:
             if name == harness:
                 cascade_model = _resolve_role_ref(model)
                 break
-    cli_model, _effort = harness_cli_pin(harness, cascade_model, stage="development", config=cfg)
+    cli_model, _effort = harness_cli_pin(
+        harness, cascade_model, stage="development", config=cfg, complexity=complexity
+    )
     return _resolve_role_ref(cli_model)
 
 
@@ -4245,16 +4278,16 @@ def _fresh_development_pick(
     quotas: dict[str, Any],
 ) -> Optional[tuple[str, Optional[str]]]:
     """Development pick on this reading. No override flag and no previous route (USR-428)."""
-    execution_context = "headless" if getattr(args, "fleet", False) else "interactive"
-    caps = [cap for cap in _DEV_CAPS if execution_context != "headless" or cap != "harness:antigravity"]
+    identity = _process_identity(args)
+    caps = [cap for cap in _DEV_CAPS if identity.execution_context != "headless" or cap != "harness:antigravity"]
     return pick(
         "development",
         caps,
         mode=DEVELOPMENT_MODE,
-        operating_harness=detect_operating_harness(),
+        operating_harness=identity.harness,
         project_id=ticket.project_id,
         complexity=_routing_complexity(ticket),
-        execution_context=execution_context,
+        execution_context=identity.execution_context,
         quota_lookup=_quota_lookup_from_reading(quotas),
     )
 
@@ -4263,6 +4296,7 @@ def _development_route_after_plan(
     args: argparse.Namespace,
     quotas: dict[str, Any],
     fresh: Optional[tuple[str, Optional[str]]],
+    complexity: Optional[str] = None,
 ) -> Optional[tuple[str, Optional[str], bool]]:
     """`(harness, model, pinned)` for one development slice, or None to wait.
 
@@ -4276,7 +4310,7 @@ def _development_route_after_plan(
         info = quotas.get(pinned_name) or {}
         headroom = info.get("headroom") if isinstance(info, dict) else None
         if _quota_above_floor(headroom):
-            return pinned_name, _development_harness_model(pinned_name), True
+            return pinned_name, _development_harness_model(pinned_name, complexity), True
         logger.info(
             "pin %s descartado apos o PLAN (headroom=%s); o pick fresco decide",
             pinned_name, headroom,
@@ -4304,7 +4338,7 @@ def _resolve_development_slice(
     """
     quotas = inspect_quotas()
     fresh = _fresh_development_pick(args, ticket, quotas)
-    decided = _development_route_after_plan(args, quotas, fresh)
+    decided = _development_route_after_plan(args, quotas, fresh, _routing_complexity(ticket))
     if decided is None:
         return None
     harness, model, follow_pin = decided

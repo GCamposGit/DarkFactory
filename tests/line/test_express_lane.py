@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -270,7 +271,9 @@ def test_cancelled_edit_keeps_protected_path_and_a_plain_cancel() -> None:
 
 
 def _short_cwd() -> Path:
-    base = Path(os.environ.get("TEMP") or os.environ.get("TMP") or "C:/Temp") / "df494"
+    base = Path(
+        os.environ.get("TEMP") or os.environ.get("TMP") or os.environ.get("TMPDIR") or tempfile.gettempdir()
+    ) / "df494"
     base.mkdir(parents=True, exist_ok=True)
     path = base / uuid.uuid4().hex[:8]
     path.mkdir()

@@ -443,6 +443,12 @@ def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_
     # This stress test exercises routing; candidate binding has real-Git coverage in delivery tests.
     monkeypatch.setattr(run_ticket, "_stage_deliver", lambda *_args: (0, {"ok": True, "status": "delivered"}))
     monkeypatch.setattr(GitAutonomyManager, "get_current_sha", lambda self, cwd: "0" * 40)
+    # The scenario under test is routing/backoff determinism, not delivery. Without this, each of
+    # the 50 runs falls through to the real in-process delivery pipeline (docs_sync, review, git
+    # rebase/diff) against a plain tmp dir that is not a repository: dozens of real `git` subprocess
+    # spawns per run that add no coverage here and, under parallel load, pushed this test past the
+    # suite's per-test timeout and crashed the xdist worker.
+    monkeypatch.setattr(run_ticket, "resume_delivery", MagicMock(return_value={"exit_code": 0, "ok": True}))
     assert real_time.sleep.__module__ in {"time", "builtins"}  # the shared module is NOT patched
 
     stop = threading.Event()
@@ -731,6 +737,39 @@ def test_fleet_dry_run_never_routes_to_antigravity_operator(
     assert payload["operating_harness"] == "antigravity" and payload["route_reason"] == "headroom"
 
 
+def test_fleet_mode_env_repicks_by_quota_and_ignores_the_parent_preference(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DARKFAC_FLEET_MODE is headless context even without --fleet on this process."""
+    _real_router_with(monkeypatch, anthropic=90.0, openai=40.0, xai=80.0, google=95.0)
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "grok")
+    monkeypatch.setenv("GROK_SESSION_ID", "parent-session")
+    monkeypatch.setenv("DARKFAC_FLEET_MODE", "1")
+
+    assert main(["USR-99", "--dry-run", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_harness"] == "claude"
+    assert payload["selected_model"] == "sonnet"
+    assert payload["route_reason"] == "headroom"
+    assert payload["operating_harness"] == "grok"
+
+    fresh = run_ticket._fresh_development_pick(
+        argparse.Namespace(fleet=False), _TICKET, _quotas(claude=90.0, codex=40.0, grok=80.0, antigravity=95.0),
+    )
+    assert fresh == ("claude", "sonnet")
+
+
+def test_fleet_mode_env_rejects_explicit_antigravity(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DARKFAC_FLEET_MODE", "1")
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+
+    assert main(["USR-99", "--harness", "antigravity", "--dry-run"]) == 2
+    assert "nao e elegivel para desenvolvimento headless/frota" in capsys.readouterr().err
+
+
 def test_fleet_rejects_explicit_antigravity(
     env: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -985,3 +1024,17 @@ def test_evaluate_admission_forwards_fleet_context_pin_and_caps(monkeypatch: pyt
     ]
     assert captured["read_caps"] == captured["build_caps"]
     assert captured["pinned_harness"] is None
+
+
+def test_declared_headless_context_survives_resume_without_fleet_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
+    monkeypatch.setenv("DARKFAC_EXECUTION_CONTEXT", "headless")
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    args = argparse.Namespace(fleet=False)
+
+    assert run_ticket._execution_context(args) == "headless"
+    identity = run_ticket._process_identity(args)
+    assert identity.execution_context == "headless"
+    assert identity.harness is None

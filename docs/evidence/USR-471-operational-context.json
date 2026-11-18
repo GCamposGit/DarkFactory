@@ -1,0 +1,180 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-11-08T13:08:43.096276+00:00",
+  "identity": {
+    "harness": null,
+    "origin": "headless",
+    "execution_context": "headless",
+    "project_root": "C:\\dev\\DarkFac",
+    "state_root": "C:\\dev\\DarkFac\\.factory",
+    "mode": "write"
+  },
+  "hosts": [
+    {
+      "host_id": "grokbox",
+      "config": {
+        "id": "grokbox",
+        "name": "Grokbox",
+        "priority": 1,
+        "max_slots": 1,
+        "platform": "linux",
+        "tags": [
+          "remote",
+          "grokbox"
+        ],
+        "capabilities": [],
+        "enabled": true,
+        "endpoint": "http://100.77.130.5:8080",
+        "max_workers": 1,
+        "min_free_memory_gib": 0.0
+      },
+      "exclusion_sources": [
+        "DARKFAC_FLEET_DISABLED_HOSTS"
+      ],
+      "resource_reading": {},
+      "resource_age_seconds": null,
+      "workers_calculated": null,
+      "canonical_reservation": null,
+      "occupied_by": null,
+      "eligible": false,
+      "reason": "excluded"
+    },
+    {
+      "host_id": "notebook",
+      "config": {
+        "id": "notebook",
+        "name": "Notebook",
+        "priority": 2,
+        "max_slots": 1,
+        "platform": "windows",
+        "tags": [
+          "local",
+          "notebook"
+        ],
+        "capabilities": [],
+        "enabled": true,
+        "endpoint": null,
+        "max_workers": 1,
+        "min_free_memory_gib": 3.0
+      },
+      "exclusion_sources": [],
+      "resource_reading": {
+        "workers": 3,
+        "available_gib": 9.354389190673828,
+        "observed_at": "2026-11-08T13:08:43.097276+00:00"
+      },
+      "resource_age_seconds": 0.0,
+      "workers_calculated": 1,
+      "canonical_reservation": null,
+      "occupied_by": null,
+      "eligible": true,
+      "reason": "eligible"
+    },
+    {
+      "host_id": "desktop",
+      "config": {
+        "id": "desktop",
+        "name": "Desktop",
+        "priority": 3,
+        "max_slots": 1,
+        "platform": "windows",
+        "tags": [
+          "remote",
+          "desktop",
+          "test_worker"
+        ],
+        "capabilities": [],
+        "enabled": true,
+        "endpoint": "http://100.78.181.90:8080",
+        "max_workers": 1,
+        "min_free_memory_gib": 0.0
+      },
+      "exclusion_sources": [],
+      "resource_reading": {},
+      "resource_age_seconds": null,
+      "workers_calculated": null,
+      "canonical_reservation": null,
+      "occupied_by": null,
+      "eligible": false,
+      "reason": "resource_reading_missing_or_stale"
+    }
+  ],
+  "max_fleet_slots": 3,
+  "reservation_state": "unavailable",
+  "policy_observed_at": "2026-11-08T13:08:43.096276+00:00",
+  "model_audit": {
+    "audited_at": "2026-11-08T13:08:43.112477+00:00",
+    "passed": false,
+    "sample_count": 0,
+    "violations": [
+      "no_execution_samples"
+    ],
+    "divergences": [],
+    "by_route": {}
+  },
+  "reconciled_tickets": {
+    "USR-452": {
+      "status": "completed",
+      "title": "Portao completo excede 3000s no fallback Notebook e nao produz verdict utilizavel"
+    },
+    "USR-454": {
+      "status": "planned",
+      "title": "Despachante anuncia hosts livres com reservas ativas"
+    },
+    "USR-464": {
+      "status": "planned",
+      "title": "Remote test worker (grokbox) inacessivel do Notebook"
+    },
+    "USR-466": {
+      "status": "planned",
+      "title": "Reconciliar aceite e evidencia operacional do USR-461"
+    },
+    "USR-456": {
+      "status": "completed",
+      "title": "Launcher envia wake email sem autorizacao de comunicacao externa"
+    }
+  },
+  "provenance": {
+    "observed_now": [
+      "identity",
+      "hosts",
+      "model_audit",
+      "reconciled_tickets"
+    ],
+    "intake_reported": [
+      {
+        "claim": "Notebook had 2.89 GiB free memory and zero workers during the 06/11 audit.",
+        "source": "USR-471 intake, evidence dated 2026-11-06"
+      },
+      {
+        "claim": "Desktop was healthy and idle but explicitly excluded by fleet policy; Grokbox was offline.",
+        "source": "USR-471 intake, evidence dated 2026-11-06"
+      },
+      {
+        "claim": "Notebook and Desktop converged at SHA 11366cac.",
+        "source": "USR-471 intake, evidence dated 2026-11-06"
+      },
+      {
+        "claim": "A PT1M TimeTrigger with IgnoreNew recovered exit 15 from PID 13084 to PID 14520 while preserving queue and SHA.",
+        "source": "USR-471 intake, evidence dated 2026-11-07"
+      },
+      {
+        "claim": "Review through Grok took about 10 minutes without valid schema; Sonnet via OpenRouter completed reviews in 9–13 seconds after reasoning was corrected.",
+        "source": "USR-471 intake, evidence dated 2026-11-06"
+      },
+      {
+        "claim": "The model registry configured distinct Codex roles for development (development.codex) and planning (planning.codex) at the time of the audit.",
+        "source": "USR-471 intake, evidence dated 2026-11-06"
+      }
+    ],
+    "historical_evidence_unavailable": [
+      "docs/evidence/usr452-node-verify-20261106.json"
+    ],
+    "limits": [
+      "A zero-sample executor audit means no local execution samples were available; it is not evidence of a successful model delivery.",
+      "Current host readings describe the machine and policy visible to this process, not production hosts on another machine.",
+      "When fleet reservation state is unavailable, remote hosts are fail-closed by fleet policy; this receipt preserves that state explicitly.",
+      "Ticket status is the status returned by the demands store at receipt generation time; status alone does not prove each ticket's acceptance criteria."
+    ]
+  }
+}

@@ -10,7 +10,10 @@ User=darkfac
 Group=darkfac
 WorkingDirectory=/opt/darkfac
 EnvironmentFile=-/etc/darkfac/fleet-dispatcher.env
-ExecStart=/opt/darkfac/.venv/bin/python -m core.line.fleet_dispatcher --loop
+Environment=DARKFAC_OPERATING_HARNESS=
+Environment=PROJECT_ROOT=/opt/darkfac
+Environment=STATE_ROOT=/opt/darkfac/.factory
+ExecStart=/opt/darkfac/.venv/bin/python -m core.line.fleet_bootstrap --project-root /opt/darkfac --state-root /opt/darkfac/.factory --loop
 Restart=always
 RestartSec=10
 KillSignal=SIGTERM

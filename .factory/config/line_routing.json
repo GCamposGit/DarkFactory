@@ -22,7 +22,8 @@
         ]
       ],
       "openrouter_ok": true,
-      "openrouter_model": "distill.openrouter"
+      "openrouter_model": "distill.openrouter",
+      "effort": "low"
     },
     "planning": {
       "cascade": [
@@ -50,6 +51,7 @@
           "effort": "high"
         }
       },
+      "effort": "high",
       "openrouter_ok": true,
       "openrouter_model": "planning.openrouter"
     },
@@ -70,7 +72,8 @@
       ],
       "harness_pins": {
         "claude": {
-          "model": "sonnet"
+          "model": "development.claude",
+          "effort": "high"
         },
         "codex": {
           "model": "development.codex",
@@ -81,19 +84,48 @@
           "effort": "high"
         }
       },
+      "effort": "high",
+      "complexity_pins": {
+        "high": {
+          "claude": { "model": "development.high.claude", "effort": "high" },
+          "codex": { "model": "development.high.codex", "effort": "high" }
+        },
+        "critical": {
+          "claude": { "model": "development.high.claude", "effort": "high" },
+          "codex": { "model": "development.high.codex", "effort": "high" }
+        }
+      },
       "openrouter_ok": true,
       "openrouter_model": "review.openrouter"
     },
     "review": {
       "cascade": "other_family_than_development",
       "openrouter_ok": true,
-      "openrouter_model": "sonnet"
+      "openrouter_model": "sonnet",
+      "effort": "high",
+      "harness_pins": {
+        "claude": { "model": "development.high.claude", "effort": "high" },
+        "codex": { "model": "review.codex", "effort": "high" },
+        "grok": { "model": "review.grok", "effort": "high" },
+        "antigravity": { "model": "flash" }
+      },
+      "complexity_pins": {
+        "high": {
+          "claude": { "model": "development.high.claude", "effort": "high" },
+          "codex": { "model": "development.high.codex", "effort": "high" }
+        },
+        "critical": {
+          "claude": { "model": "development.high.claude", "effort": "high" },
+          "codex": { "model": "development.high.codex", "effort": "high" }
+        }
+      }
     },
     "distill": {
       "cascade": [],
       "openrouter_ok": true,
       "local_ok": true,
-      "openrouter_model": "distill.openrouter"
+      "openrouter_model": "distill.openrouter",
+      "effort": "low"
     }
   },
   "run_caps": {

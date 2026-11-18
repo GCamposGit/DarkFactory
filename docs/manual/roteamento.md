@@ -1,5 +1,19 @@
-<!-- covers: core/line/routing.py, core/line/operating_harness.py, core/router/token_budget.py -->
+<!-- covers: core/line/routing.py, core/line/operating_harness.py, core/router/token_budget.py, core/line/operational_context.py -->
 # Roteamento do estagio de desenvolvimento (USR-378)
+
+Os modelos/efforts por complexidade vivem no registro e na configuração de roteamento.
+O auditor `python -m core.models.audit --input <amostras.json> --receipt <recibo.json>`
+resolve a rota efetiva e reporta divergência entre stages do mesmo harness. O recibo
+inclui contexto configurado, modelo reportado, latência, schema e entrega real; quota
+desconhecida ou no piso, revisão da mesma família, timeout e teto de gasto reprovam.
+
+Essas amostras não precisam mais ser montadas manualmente (USR-471 T1): toda chamada real de
+executor em `core/line/stage_build.py` (stage `development`) e `core/line/stage_review.py`
+(stage `review`) grava um `ExecutionSample` via `core.models.audit.record_execution_sample`
+em `state_root()/runs/model_audit/<ticket_id>.jsonl` (append-only, uma linha por chamada, sem
+prompt/token/credencial). `quota_remaining_percent` vem de `core.line.routing.quota_remaining_percent`,
+a mesma leitura que `pick()` usa — nunca uma sonda nova. Falha ao gravar a amostra é só logada;
+nunca derruba o estágio.
 
 Regra operacional confirmada pelo owner em05/11/2026 (USR-473): esgotada a cota das
 assinaturas elegíveis, usar OpenRouter também para desenvolvimento, planejamento e
@@ -8,6 +22,22 @@ revisão, respeitando saldo, orçamento, capacidades e independência do revisor
 das assinaturas está desconhecida; não autoriza consumir a assinatura abaixo do piso.
 Se não houver crédito ou rota, persistir a espera e manter o dispatcher ativo para
 retomar automaticamente. Um `not_before` no log, sozinho, não é um agendamento.
+
+O recibo de auditoria do ledger (USR-471 T2) e recomputado a cada leitura, no mesmo
+contrato do snapshot de politica de frota (`core.line.fleet_policy.effective_policy_snapshot`):
+nem a CLI nem o endpoint leem o arquivo persistido para decidir, so o recalculam.
+
+```powershell
+python -m core.models.audit --from-runs --ticket USR-471 --latest
+```
+
+`--ticket` e opcional (sem ele, audita todas as ledgers `state_root()/runs/model_audit/*.jsonl`).
+Sai `0` quando o recibo passa e `1` quando ha divergencia/violacao; o recibo recomputado e
+persistido em `state_root()/runs/model_audit_receipt.json`. `--input`/`--receipt` continuam
+funcionando para auditar um lote de amostras manual, fora do ledger. `GET /line/model-audit`
+(query opcional `?ticket=`) devolve exatamente o mesmo recibo no Hub (`HubService.get_model_audit`,
+ao lado de `get_fleet_policy`); sem amostras gravadas, o recibo volta vazio com `passed=true`,
+nunca erro 500.
 
 `core/line/routing.pick` e o unico roteador de producao. Para o estagio `development`:
 
@@ -90,6 +120,24 @@ O OpenRouter atua na fabrica com duplo papel: **otimizacao continua de custo-ben
 4. **Enforcement de Orcamento e Alertas no Telegram**: O roteador e a telemetria de creditos (`ApiCreditsMonitor`) respeitam o teto por execucao (`run_caps.openrouter_usd`, default US$ 2.00) e o teto mensal (`run_caps.openrouter_monthly_cap_usd`, US$ 28.13 neste mes e US$ 10.00 a partir de 01/12/2026). Ao atingir o limiar de alerta (`openrouter_alert_threshold`, default 80% do teto), uma notificacao critica com categoria `AlertCategory.EXECUTION_BUDGET` e enviada via Telegram ao Owner.
 5. **Consulta Dinamica a Fronteira de Pareto sem Modelos Hard-coded (USR-444)**: Nenhum modelo de inferencia fica hard-coded em codigo ou instrucoes estaticas. O roteador invoca `resolve_pareto_openrouter_model`, consultando diariamente o ledger de benchmarks (`core.benchmarks.fetcher.ensure_daily_benchmark()`) gerado a partir de Artificial Analysis e OpenRouter. Para planejamento e arquitetura, a esteira exige alta inteligencia (score >= 85.0, classe Claude Opus `anthropic/claude-opus-5` e GPT Sol `openai/gpt-5-6-sol` / `gpt-sol`). Modelos proibidos para autonomia (`fable`, `astra`) sao excluidos por contrato. <!-- census: wire-id -->
 6. **Resolucao Automatica de Wire IDs e Dynamic Headroom (USR-440)**: Todo alias interno (`gpt-sol`, `opus`, `sonnet`) e traduzido transparentemente para o wire ID oficial do provedor (`gateway_id`, ex.: `openai/gpt-5.6-sol`), prevenindo erros HTTP 400 de API e garantindo despacho imediato sem atrito. <!-- census: wire-id -->
+
+## Auditoria das execucoes dos modelos (USR-471 T4)
+
+Cada chamada de development ou review grava uma amostra em
+`state_root()/runs/model_audit/<ticket>.jsonl`, com ticket, estágio, harness,
+complexidade declarada, modelo e esforço reportados, hash/tamanho do contexto,
+latência, timeout, custo, validade do schema e entrega real. O prompt não é
+gravado. A revisão aprovada também grava `review_execution.json` ligado ao
+digest do candidato, com latência medida, saída validada e evidência de família.
+
+`python -m core.models.audit --from-runs --latest --ticket USR-471` recompõe o
+recibo atual em `state_root()/runs/model_audit_receipt.json`. O auditor resolve
+modelo e esforço pela configuração de estágio e complexidade. A diferença entre
+planning e development só é informativa quando ambas correspondem aos pins
+configurados. Modelo divergente, esforço divergente, rota ausente, cota no piso,
+revisão da mesma família, teto excedido, timeout, schema inválido ou falta de
+entrega reprovam a amostra. Sem amostras, o recibo vazio é reprovado como
+`no_execution_samples`: ausência não comprova latência ou entrega.
 
 
 
@@ -197,3 +245,24 @@ evidencia divergente e familia de implementacao desconhecida permanecem bloquead
 `launcher_exit:1` preservado de USR-467 so entra nessa reabertura depois de candidato com
 digest, gate `passed` nesse digest e revisao ainda ausente. Sem a revisao ligada ao digest,
 nao ha publicacao, e o BUILD e o `validation.json` ficam como estavam.
+
+## Recibo unico de contexto operacional (USR-471 T3)
+
+`python -m core.line.operational_context --verify` compoe, so leitura, os tres
+fatos que a auditoria de 05-06/11 encontrou espalhados entre chat, config de
+host e registro de modelo: `resolve_process_identity` (harness, origin,
+execution_context, project_root, state_root, mode deste processo),
+`core.line.fleet_policy.effective_policy_snapshot` (elegibilidade e motivo por
+host, sem decidir rota nem admissao) e `core.models.audit.audit_recorded`
+(resumo passed/violacoes/divergencias e o modelo efetivo por rota stage.harness).
+Nenhuma decisao de rota, admissao ou host nasce nesse modulo; o comando nao
+registra fila, nao agenda tarefa e nao reinicia host — um host offline ou sem
+leitura so aparece com `reason` no recibo.
+
+O recibo tambem le, via `core.demands` (`build_default_demands_service().get_ticket`),
+o status atual de USR-452/454/464/466/456: confirma que esses subproblemas do
+intake do USR-471 ja tem ticket proprio, sem criar um novo que duplique escopo
+e sem reabrir ou alterar o status de um ticket concluido (leitura pura, nenhum
+`save_ticket`/`update_status` e chamado). `--ticket <ID>` limita a auditoria de
+modelo ao ledger desse ticket; `--out <caminho>` so troca o destino do recibo
+persistido (`docs/evidence/USR-471-operational-context.json` por padrao).

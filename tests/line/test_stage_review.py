@@ -12,6 +12,7 @@ import json
 import hashlib
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,41 @@ def test_review_uses_family_different_from_development(
     assert agent.calls[0].harness not in {"claude", "codex"}
     assert agent.calls[0].mode == "read"
     assert "Actual acceptance: persist recovery across restart" in agent.calls[0].prompt
+
+
+def test_high_complexity_review_passes_an_explicit_high_tier_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    ws = _prepare_run(tmp_path, monkeypatch, project, "USR-471", harness="claude")
+    ws_mod.write_context(
+        ws,
+        "tickets.json",
+        json.dumps([{
+            "id": "USR-471",
+            "complexity": "high",
+            "acceptance": ["o modelo do revisor deve ser observavel"],
+        }]),
+    )
+
+    picked: list[str | None] = []
+
+    def pick(_stage, _capabilities, **kwargs):
+        picked.append(kwargs.get("complexity"))
+        return "codex", None
+
+    agent = _ScriptedAgent([{"verdict": "approve", "blocking": [], "non_blocking": []}])
+    stage = ReviewStage(run_agent_func=agent, pick_func=pick, routing_config=load_routing_config())
+
+    result = stage.run(project, "USR-471")
+
+    from core.models.registry import resolve
+
+    assert result.outcome == "success"
+    assert picked == ["high"]
+    assert agent.calls[0].model == resolve("development.high.codex")
+    assert agent.calls[0].effort == "high"
 
 
 def test_changes_required_retries_then_fails_on_exhaustion_without_another_review(
@@ -1041,7 +1077,7 @@ def _install_paid_transport(
             self.estimated_cost = 0.0
             self.is_measured = True
             self.truncated = truncated
-            self.metadata = {"backend": "openrouter", "finish_reason": finish}
+            self.metadata = {"backend": "openrouter", "finish_reason": finish, "reasoning_effort": "medium"}
 
     class _Transport:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -1120,6 +1156,23 @@ def test_openrouter_generate_prompt_carries_sanitized_context_without_reading_di
     assert (ctx / "validation.json").read_bytes() == validation
     verdict = json.loads((ctx / "review_verdict.json").read_text(encoding="utf-8"))
     assert verdict["verdict"] == "approve"
+    attempts = json.loads((ctx / "review_attempts.json").read_text(encoding="utf-8"))
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    prompt_bytes = prompt.encode("utf-8")
+    assert attempt["ticket_id"] == "USR-474"
+    assert attempt["candidate_digest"] == json.loads(
+        (ctx / "review_state.json").read_text(encoding="utf-8")
+    )["rounds"][0]["candidate_digest"]
+    assert attempt["model"] == "paid-model"
+    assert attempt["effort"] == "medium"
+    assert attempt["duration_s"] >= 0
+    assert attempt["usage"] == {"prompt_tokens": 20, "completion_tokens": 12, "total_tokens": 32}
+    assert attempt["cost_usd"] == 0.0
+    assert attempt["context_sha256"] == hashlib.sha256(prompt_bytes).hexdigest()
+    assert attempt["context_bytes"] == len(prompt_bytes)
+    assert attempt["structured_result"]["verdict"] == "approve"
+    assert attempt["failure"] is None
 
 
 def test_openrouter_ticket_id_comes_from_the_env_when_run_id_is_not_a_ticket(
@@ -1199,6 +1252,10 @@ def test_truncated_openrouter_review_does_not_approve(
     assert result.outcome == "failed"
     assert result.cause_code == "review_output_truncated"
     assert not (ctx / "review_verdict.json").exists()
+    attempts = json.loads((ctx / "review_attempts.json").read_text(encoding="utf-8"))
+    assert len(attempts) == 1
+    assert attempts[0]["failure"] == "truncated_output"
+    assert attempts[0]["structured_result"] is None
     state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8")) if (ctx / "review_state.json").is_file() else {"rounds": []}
     assert not any(item.get("verdict") == "approve" for item in state.get("rounds", []))
     assert (ctx / "validation.json").read_bytes() == validation
@@ -1345,4 +1402,100 @@ def test_filesystem_review_keeps_the_full_diff_and_shows_the_spec_once(
     assert prompt.count("FRASE_FS_474_UNICA") == 1
     assert "Contexto verificavel da revisao" not in prompt
     assert not (ws.path / ".darkfac" / "runs" / "run-fs-once" / "candidate.diff").exists()
+
+
+def test_approved_grok_review_proves_latency_schema_family_and_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real approval is a receipt. No sample, and an empty delivery, are not success."""
+    from core.models.audit import audit_executions
+
+    tickets = json.dumps({
+        "tickets": [{"id": "USR-471", "complexity": "medium", "acceptance": ["entrega nao vazia"]}],
+    })
+    project, ws = _review_tree(
+        tmp_path, monkeypatch, "USR-471",
+        spec="Aceite da revisao medida.\n",
+        tickets=tickets,
+        source="def feature():\n    return 1\n",
+    )
+    monkeypatch.setattr("core.line.stage_review.quota_remaining_percent", lambda _harness: 50.0)
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr("core.models.review_benchmark.state_root", lambda: tmp_path)
+
+    def _agent(req: AgentRequest) -> AgentResult:
+        started_at = datetime.now(timezone.utc)
+        return AgentResult(
+            ok=True,
+            text=_APPROVE_TEXT,
+            harness=req.harness,
+            model=req.model,
+            model_source="provider_reported",
+            provider="xai",
+            started_at=started_at,
+            finished_at=started_at,
+            execution_parameters={
+                "requested_model": req.model,
+                "requested_effort": req.effort,
+                "reasoning": {"effort": req.effort},
+            },
+            effort="high",
+            duration_s=1.25,
+            usage={"total_tokens": 40},
+            cost_usd=0.0,
+        )
+
+    stage = ReviewStage(
+        run_agent_func=_agent,
+        pick_func=lambda *_args, **_kwargs: ("grok", "review.grok"),
+        routing_config=load_routing_config(),
+    )
+    result = stage.run(project, "USR-471")
+
+    assert result.outcome == "success"
+    receipt = json.loads((ws_mod.context_dir(ws) / "review_execution.json").read_text(encoding="utf-8"))
+    assert receipt["proven"] is True
+    assert receipt["latency_ms"] == 1250
+    assert receipt["schema_valid"] is True
+    assert receipt["real_delivery"] is True
+    assert receipt["delivery_nonempty"] is True
+    assert receipt["candidate_digest"]
+    assert receipt["implementer_family"] == "anthropic"
+    assert receipt["reviewer_family"] == "xai"
+    assert receipt["reviewer_family"] != receipt["implementer_family"]
+
+    ledger = tmp_path / "runs" / "model_audit" / "USR-471.jsonl"
+    rows = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    sample = rows[0]
+    assert sample["ticket_id"] == "USR-471"
+    assert sample["stage"] == "review"
+    assert sample["complexity"] == "medium"
+    assert sample["expected_model"] == "grok-4.6"
+    assert sample["reported_model"] == "grok-4.6"
+    assert sample["expected_effort"] == "high"
+    assert sample["reported_effort"] == "high"
+    assert sample["context_sha256"]
+    assert sample["context_bytes"] > 0
+    assert sample["latency_ms"] == 1250
+    assert sample["timeout_sec"] == 1800
+    assert sample["reported_context_tokens"] == 40
+    assert sample["cost_usd"] == 0.0
+    assert sample["candidate_digest"] == receipt["candidate_digest"]
+    audited = audit_executions(rows)
+    assert audited.passed, audited.violations
+
+    benchmark = [
+        json.loads(line)
+        for line in (tmp_path / "runs" / "review_benchmark.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert benchmark[-1]["source"] == "measured"
+    assert benchmark[-1]["label"] == "grok"
+    assert benchmark[-1]["latency_ms"] == 1250
+    assert benchmark[-1]["schema_valid"] is True
+    assert benchmark[-1]["delivery_nonempty"] is True
+
+    missing = audit_executions([])
+    assert missing.passed is False
+    assert missing.violations == ["no_execution_samples"]
 

@@ -67,6 +67,8 @@ Gerado de `.factory/config/model_registry.json` por `python scripts/generate_mod
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
+| `development.high.claude` | `claude-opus-5-5` | active |
+| `development.high.codex` | `gpt-sol` | active |
 | `development.openrouter` | `gpt-sol` | active |
 | `distill.openrouter` | `deepseek/deepseek-v4.1-flash` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
@@ -93,7 +95,7 @@ Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fabl
 | `claude-fable-5-1` | anthropic | claude | frontier | `fable` | candidate (proibido autonomo) | 3.0 | 15.0 | 200000 |
 | `claude-haiku-5-5` | anthropic | claude | low | `haiku` | active | - | - | - |
 | `claude-opus-5` | anthropic | claude | high | `opus-legacy` | deprecated | 5.0 | 25.0 | 200000 |
-| `claude-opus-5-5` | anthropic | claude | high | `opus` | active | - | - | - |
+| `claude-opus-5-5` | anthropic | claude | high | `opus` | active | - | - | 200000 |
 | `claude-sonnet-5-5` | anthropic | claude | mid | `sonnet` | active | 2.0 | 10.0 | - |
 | `deepseek-coder` | deepseek | deepseek | low | `coder-legacy` | deprecated | - | - | - |
 | `deepseek/deepseek-r1` | deepseek | deepseek | high | `deepseek-r1` | deprecated | - | - | 128000 |

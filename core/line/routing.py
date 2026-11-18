@@ -54,9 +54,22 @@ _DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS: list[str] = forbidden_markers()
 
 
 def _resolve_role_ref(value: Optional[str]) -> Optional[str]:
-    """Map a registry role reference (``development.codex``) to its model id; any other value is kept as is."""
+    """Map a registry role reference (``development.codex``) to its model id; aliases/other values stay intact."""
     if isinstance(value, str) and value.strip() in get_registry().roles:
         return resolve_model(value.strip())
+    return value
+
+
+def _resolve_cascade_model(value: Optional[str]) -> Optional[str]:
+    """Resolve registry role refs (e.g. ``planning.codex``) and validate aliases/model ids without flattening aliases."""
+    if isinstance(value, str) and value.strip() and value.strip().lower() not in {"dynamic", "pareto"}:
+        cleaned = value.strip()
+        if cleaned in get_registry().roles:
+            return resolve_model(cleaned)
+        from core.models.registry import id_of
+
+        id_of(cleaned)
+        return cleaned
     return value
 
 _HARNESS_TO_PROVIDER: dict[str, str] = {
@@ -120,6 +133,7 @@ class StageRoute(BaseModel):
     effort: Optional[str] = None
     local_ok: bool = False
     harness_pins: dict[str, HarnessPin] = Field(default_factory=dict)
+    complexity_pins: dict[str, dict[str, HarnessPin]] = Field(default_factory=dict)
 
     @field_validator("openrouter_model", mode="after")
     @classmethod
@@ -158,6 +172,7 @@ class RoutingConfig(BaseModel):
     )
     stages: dict[str, StageRoute] = Field(default_factory=dict)
     run_caps: RunCaps = Field(default_factory=RunCaps)
+    configuration_error: Optional[str] = None
 
 
 # --------------------------------------------------------------------------
@@ -269,6 +284,23 @@ def _default_routing_config() -> RoutingConfig:
                 cascade="other_family_than_development",
                 openrouter_ok=True,
                 openrouter_model=cheap_model,
+                effort="high",
+                harness_pins={
+                    "claude": HarnessPin(model=resolve_model("development.high.claude"), effort="high"),
+                    "codex": HarnessPin(model=resolve_model("review.codex"), effort="high"),
+                    "grok": HarnessPin(model=resolve_model("review.grok"), effort="high"),
+                    "antigravity": HarnessPin(model="flash"),
+                },
+                complexity_pins={
+                    "high": {
+                        "claude": HarnessPin(model=resolve_model("development.high.claude"), effort="high"),
+                        "codex": HarnessPin(model=resolve_model("development.high.codex"), effort="high"),
+                    },
+                    "critical": {
+                        "claude": HarnessPin(model=resolve_model("development.high.claude"), effort="high"),
+                        "codex": HarnessPin(model=resolve_model("development.high.codex"), effort="high"),
+                    },
+                },
             ),
             "distill": StageRoute(
                 cascade=[],
@@ -302,16 +334,19 @@ def validate_routing_config(config: RoutingConfig) -> list[str]:
 
 
 def load_routing_config(path: Optional[Path] = None) -> RoutingConfig:
-    """Load the routing config from JSON, falling back to v0 defaults when absent/invalid."""
+    """Load routing config; a missing file uses defaults, an invalid file fails closed."""
     target = path or default_config_path()
     if target.is_file():
         try:
             raw = json.loads(target.read_text(encoding="utf-8"))
             config = RoutingConfig.model_validate(raw)
+            violations = validate_routing_config(config)
         except Exception as exc:  # malformed file, wrong schema, etc.
-            logger.warning("Failed to load routing config %s (%s); using v0 defaults", target, exc)
+            cause = f"invalid_routing_config:{type(exc).__name__}"
+            logger.error("route_failed cause=%s path=%s", cause, target, extra={"route_failure": {"cause": cause, "path": str(target)}})
+            return RoutingConfig(stages={}, configuration_error=cause)
         else:
-            for violation in validate_routing_config(config):
+            for violation in violations:
                 logger.warning("Routing config %s: %s (pick() will skip it)", target, violation)
             return config
     return _default_routing_config()
@@ -323,6 +358,7 @@ def harness_cli_pin(
     *,
     stage: str = "development",
     config: Optional[RoutingConfig] = None,
+    complexity: Optional[str] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     """Model and effort the stage declares for `harness`'s CLI, plus the cascade model as fallback.
 
@@ -334,16 +370,33 @@ def harness_cli_pin(
     stage_cfg = cfg.stages.get(stage)
     if stage_cfg is None:
         return route_model, None
-    pin = stage_cfg.harness_pins.get(harness.strip().lower())
+    harness_key = harness.strip().lower()
+    pin = stage_cfg.harness_pins.get(harness_key)
+    complexity_pin_matched = False
+    if complexity:
+        complexity_pin = stage_cfg.complexity_pins.get(complexity.strip().lower(), {}).get(harness_key)
+        if complexity_pin is not None:
+            pin = complexity_pin
+            complexity_pin_matched = True
     if pin is None:
-        return route_model, None
+        if harness_key == "antigravity":
+            return route_model, None
+        return route_model, stage_cfg.effort
     forbidden = {item.lower().strip() for item in cfg.forbidden_autonomous_models}
     pinned_model = pin.model.strip() if isinstance(pin.model, str) and pin.model.strip() else None
     if pinned_model and pinned_model.lower() in forbidden:
         logger.warning("Ignoring forbidden pinned model %s for harness %s", pinned_model, harness)
         pinned_model = None
     pinned_effort = pin.effort.strip() if isinstance(pin.effort, str) and pin.effort.strip() else None
-    return pinned_model or route_model, pinned_effort
+    effective_model = (
+        route_model
+        if (stage == "review" and not complexity_pin_matched and route_model is not None)
+        else (pinned_model or route_model)
+    )
+    if harness_key == "antigravity":
+        # Its one-shot CLI accepts a model tier but has no reasoning-effort flag.
+        return effective_model, None
+    return effective_model, pinned_effort or stage_cfg.effort
 
 
 # --------------------------------------------------------------------------
@@ -650,6 +703,20 @@ def _default_quota_headroom(provider_id: str) -> Optional[float]:
     return _quota_headroom_diagnosis(provider_id)[0]
 
 
+def quota_remaining_percent(harness: str) -> Optional[float]:
+    """Public, read-only view of the same quota reading `pick()` uses to route `harness`.
+
+    Maps `harness` to its provider (`_HARNESS_TO_PROVIDER`) and reuses `_default_quota_headroom`
+    (OpenRouter has no subscription quota and always reads as `None`). Observability callers
+    (USR-471 T1: `core.models.audit.record_execution_sample`) must call this instead of standing
+    up a new probe, so a sample's `quota_remaining_percent` always matches what `pick()` actually
+    saw -- never a fresher or staler reading from a second probe.
+    """
+    if harness == "openrouter":
+        return None
+    return _default_quota_headroom(_HARNESS_TO_PROVIDER.get(harness, harness))
+
+
 # --------------------------------------------------------------------------
 # Cascade resolution + pick()
 # --------------------------------------------------------------------------
@@ -669,8 +736,8 @@ def _resolve_cascade(
         if implementing_harness == "antigravity":
             return [("claude", None), ("codex", None), ("grok", None)]
         return [("claude", None), ("codex", None), ("grok", None), ("antigravity", None)]
-    # Registry role references (`planning.codex`) become concrete model ids here.
-    return [(harness, _resolve_role_ref(model)) for harness, model in stage_cfg.cascade]
+    # Registry role references (`planning.codex`) and aliases become concrete model ids here.
+    return [(harness, _resolve_cascade_model(model)) for harness, model in stage_cfg.cascade]
 
 
 def _split_exclude(
@@ -806,29 +873,48 @@ def _slack_by_candidate(
     return {key: value for key, value in values.items() if value is not None}
 
 
+def _tier_model(
+    harness: str, model: Optional[str], *, stage: str, complexity: Optional[str], cfg: Optional["RoutingConfig"],
+) -> Optional[str]:
+    """`model`'s tier-relevant identity: the complexity/harness pin effective for `harness` when `cfg` is
+    given (a pin can raise a cascade entry into the high tier without changing the public route key —
+    `harness_cli_pin`'s own contract), else `model` unchanged."""
+    if cfg is None:
+        return model
+    effective, _effort = harness_cli_pin(harness, model, stage=stage, config=cfg, complexity=complexity)
+    return effective
+
+
 def _rank_eligible(
     stage: str,
     complexity: Optional[str],
     eligible: list[tuple[str, Optional[str], float]],
     slack: Optional[dict[tuple[str, Optional[str]], float]] = None,
+    cfg: Optional["RoutingConfig"] = None,
 ) -> tuple[str, Optional[str]]:
     """Winner among eligible `(harness, model, remaining)` candidates: complexity tier, then slack/headroom.
 
     `slack` (weekly remaining % / hours to reset, keyed by `(harness, model)`) orders the pool when EVERY
-    member has a value; otherwise the current headroom decides.
+    member has a value; otherwise the current headroom decides. Tier membership is evaluated on each
+    candidate's effective (pin-resolved) model (`_tier_model`); the pool itself still carries the raw
+    cascade model, which is what the winner tuple returns.
     """
     comp = (complexity or "").lower().strip()
+    tier_models = {
+        (harness, model): _tier_model(harness, model, stage=stage, complexity=complexity, cfg=cfg)
+        for harness, model, _remaining in eligible
+    }
     if comp in ("high", "critical") or stage in ("planning", "architecture"):
         # High Intelligence tier: prioritize Opus or Sol
         tier = [
             cand for cand in eligible
-            if cand[1] and any(m in cand[1].lower() for m in ("opus", "sol"))
+            if is_high_tier_model(tier_models[(cand[0], cand[1])])
         ]
     elif comp == "low":
         # Low complexity: prioritize Luna xhigh or Gemini Flash
         tier = [
             cand for cand in eligible
-            if (cand[1] and any(m in cand[1].lower() for m in ("luna", "gemini", "flash")))
+            if (not is_high_tier_model(tier_models[(cand[0], cand[1])]))
             or cand[0] == "antigravity"
         ]
     else:
@@ -847,10 +933,10 @@ _HIGH_TIERS = frozenset({"high", "frontier"})
 
 
 def is_high_tier_model(model: Optional[str]) -> bool:
-    """True when `model` is an explicit high-tier model (registry tier `high`/`frontier`).
+    """True when `model` resolves to a registry entry of tier `high`/`frontier` with a known context size.
 
-    A harness default (`None`) has no declared tier and is never high; unknown names fall back to
-    the historical opus/sol name hint.
+    A harness default (`None`), a name the registry does not know, or a registry lookup failure
+    is never high: the cheap door only opens for a model the registry can vouch for.
     """
     if not model:
         return False
@@ -866,10 +952,34 @@ def is_high_tier_model(model: Optional[str]) -> bool:
         for entry in get_registry().models:
             names = [entry.id, *entry.aliases, *entry.gateway_ids]
             if low in (n.strip().lower() for n in names):
-                return entry.tier in _HIGH_TIERS
+                return entry.tier in _HIGH_TIERS and entry.context_tokens is not None
     except Exception as exc:  # registry trouble must not open the cheap door
         logger.debug("tier lookup failed for %s: %s", model, exc)
-    return any(m in model.lower() for m in ("opus", "sol"))
+    return False
+
+
+def _log_route_decision(
+    *, stage: str, harness: str, model: Optional[str], complexity: Optional[str],
+    operating_harness: Optional[str], quota_source: str, reason: str, effort: Optional[str],
+) -> None:
+    """Emit an auditable, credential-free record of the effective route decision."""
+    logger.info(
+        "route_selected stage=%s harness=%s role=%s model=%s effort=%s complexity=%s quota_source=%s reason=%s",
+        stage, harness, f"{stage}.{harness}", model or "default", effort or "default",
+        complexity or "medium", quota_source, reason,
+        extra={"route": {
+            "stage": stage, "harness": harness, "role": f"{stage}.{harness}",
+            "model": model, "effort": effort, "complexity": complexity or "medium",
+            "quota_source": quota_source, "reason": reason,
+            "requested_harness": operating_harness, "effective_harness": harness,
+        }},
+    )
+
+
+def _log_route_failure(stage: str, cause: str, **details: Any) -> None:
+    """Emit a machine-readable fail-closed reason without exposing quota probe details."""
+    failure = {"stage": stage, "cause": cause, **details}
+    logger.warning("route_failed stage=%s cause=%s", stage, cause, extra={"route_failure": failure})
 
 
 def _policy_allows(project_id: str, harness: str) -> bool:
@@ -1141,10 +1251,11 @@ def _pick_winner(
     execution_context: ExecutionContext,
     unknown_quota_last_resort_ok: Optional[bool],
     quota_lookup: Optional[Callable[[str], Optional[float]]],
+    cfg: Optional[RoutingConfig] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     preferred = ([cand for cand in eligible if cand[0] == operating] or extra_eligible) if operating else []
     if preferred:
-        winner = _rank_eligible(stage, complexity, preferred)
+        winner = _rank_eligible(stage, complexity, preferred, cfg=cfg)
         logger.info(
             "operating_harness_preferred harness=%s remaining=%.1f stage=%s",
             winner[0], next(item[2] for item in preferred if (item[0], item[1]) == winner), stage,
@@ -1162,7 +1273,7 @@ def _pick_winner(
         )
         return winner
     if eligible:
-        return _rank_eligible(stage, complexity, eligible, _slack_by_candidate(stage, eligible, slack_fn))
+        return _rank_eligible(stage, complexity, eligible, _slack_by_candidate(stage, eligible, slack_fn), cfg=cfg)
 
     if stage == "development":
         allow_unknown = True  # degrade, do not refuse: try the subscription before OpenRouter
@@ -1306,6 +1417,123 @@ def _openrouter_fallback(
     return None
 
 
+def _evaluate_pick_candidates(
+    stage: str,
+    stage_cfg: Any,
+    cfg: RoutingConfig,
+    caps: set[str],
+    required_mode: str,
+    excluded_harnesses: set[str],
+    excluded_pairs: set[tuple[str, str]],
+    implementing_harness: Optional[str],
+    operating: Optional[str],
+    execution_context: ExecutionContext,
+    claude_or_codex_healthy: bool,
+    cooldowns: dict[str, Any],
+    lookup: Callable[[str], Optional[float]],
+    critical_threshold: float,
+    project_id: Optional[str],
+    extra_candidate: Optional[tuple[str, Optional[str]]],
+) -> tuple[
+    list[tuple[str, Optional[str], bool, bool, Optional[float]]],
+    list[tuple[str, Optional[str], float]],
+    list[tuple[str, Optional[str], float]],
+    list[tuple[str, Optional[str]]],
+    list[tuple[str, Optional[str]]],
+    _PolicyAudit,
+]:
+    """Evaluate all routable stage candidates against cooldown, policy, and quota thresholds."""
+    evaluated: list[tuple[str, Optional[str], bool, bool, Optional[float]]] = []
+    eligible: list[tuple[str, Optional[str], float]] = []
+    extra_eligible: list[tuple[str, Optional[str], float]] = []
+    preferred_unknown: list[tuple[str, Optional[str]]] = []
+    unknown_quota: list[tuple[str, Optional[str]]] = []
+    policy = _PolicyAudit()
+
+    for harness, model in _routable_candidates(
+        stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
+        operating, execution_context,
+    ):
+        # Degrade, do not refuse: with no healthy high-tier subscription, a mid-tier one plans before OpenRouter.
+        is_planning_contingency = stage == "planning" and not claude_or_codex_healthy and model is not None
+        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model) and not is_planning_contingency:
+            logger.info("pick: %s/%s skipped for stage %s (not a high-tier model)", harness, model, stage)
+            continue
+        cooling = _in_cooldown(harness, cooldowns)
+        provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
+        if project_id:
+            refusal = _policy_rejection(project_id, harness)
+            policy.record_candidate(refusal)
+            if refusal is not None:
+                continue  # USR-174: per-project data policy refuses this harness/provider
+        remaining = None if cooling else lookup(provider_id)
+        if cooling:
+            logger.info("pick: harness %s skipped for stage %s (in cooldown)", harness, stage)
+
+        is_critical = remaining is None or remaining <= critical_threshold
+        if is_critical and not cooling:
+            logger.info(
+                "pick: harness %s quota is %s for stage %s (remaining=%s, floor=%.1f)",
+                harness, "critical" if remaining is not None else "unknown", stage, remaining, critical_threshold,
+            )
+
+        if (harness, model) == extra_candidate:
+            if not cooling and not is_critical and remaining is not None:
+                extra_eligible.append((harness, model, remaining))
+            elif not cooling and remaining is None and harness == operating:
+                preferred_unknown.append((harness, model))
+            continue
+
+        evaluated.append((harness, model, cooling, is_critical, remaining))
+        if not cooling and not is_critical and remaining is not None:
+            eligible.append((harness, model, remaining))
+        elif not cooling and remaining is None:
+            unknown_quota.append((harness, model))
+            if harness == operating:
+                preferred_unknown.append((harness, model))
+
+    return evaluated, eligible, extra_eligible, preferred_unknown, unknown_quota, policy
+
+
+def _finalize_pick_winner(
+    stage: str,
+    winner: tuple[str, Optional[str]],
+    *,
+    complexity: Optional[str],
+    operating: Optional[str],
+    cfg: RoutingConfig,
+    reserve_quota: bool,
+    ticket_id: Optional[str],
+    quota_lookup: Optional[Callable[[str], Optional[float]]],
+) -> tuple[str, Optional[str]]:
+    """Log, optionally reserve quota for, and return the winning route key."""
+    if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(winner[1]):
+        logger.warning("planning_degraded=true harness=%s: no high-tier subscription available", winner[0])
+    if reserve_quota:
+        try:
+            from core.usage.reservation import QuotaReservationManager
+
+            prov = _HARNESS_TO_PROVIDER.get(winner[0], winner[0])
+            QuotaReservationManager().reserve(prov, winner[0], ticket_id=ticket_id)
+        except Exception as exc:
+            logger.debug("Failed reserving quota for %s: %s", winner, exc)
+    selected_model, selected_effort = harness_cli_pin(
+        winner[0], winner[1], stage=stage, config=cfg, complexity=complexity
+    )
+    reason = (
+        "operating_harness_preference" if operating and winner[0] == operating
+        else "complexity_tier" if (complexity or "").lower() in ("high", "critical") or stage in ("planning", "architecture")
+        else "dynamic_headroom"
+    )
+    _log_route_decision(
+        stage=stage, harness=winner[0], model=selected_model, effort=selected_effort,
+        complexity=complexity, operating_harness=operating,
+        quota_source="injected_lookup" if quota_lookup is not None else "live_usage_snapshot",
+        reason=reason,
+    )
+    return winner[0], winner[1]
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -1371,6 +1599,7 @@ def pick(
         policy_diagnostic.clear()
     stage_cfg = cfg.stages.get(stage)
     if stage_cfg is None:
+        _log_route_failure(stage, cfg.configuration_error or "stage_not_configured")
         return None
     required_mode = mode or stage_mode(stage)
 
@@ -1399,83 +1628,23 @@ def pick(
         else False
     )
 
-    # Candidate evaluation with fail-closed semantics
-    # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
-    evaluated: list[tuple[str, Optional[str], bool, bool, float]] = []
-    eligible: list[tuple[str, Optional[str], float]] = []
-    extra_eligible: list[tuple[str, Optional[str], float]] = []
-    preferred_unknown: list[tuple[str, Optional[str]]] = []
-    unknown_quota: list[tuple[str, Optional[str]]] = []
-    policy = _PolicyAudit()
-
-    for harness, model in _routable_candidates(
+    evaluated, eligible, extra_eligible, preferred_unknown, unknown_quota, policy = _evaluate_pick_candidates(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
-        operating, execution_context,
-    ):
-        # Degrade, do not refuse: with no healthy high-tier subscription, a mid-tier one plans before OpenRouter.
-        is_planning_contingency = stage == "planning" and not claude_or_codex_healthy and model is not None
-        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(model) and not is_planning_contingency:
-            logger.info("pick: %s/%s skipped for stage %s (not a high-tier model)", harness, model, stage)
-            continue
-        cooling = _in_cooldown(harness, cooldowns)
-        provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
-        if project_id:
-            refusal = _policy_rejection(project_id, harness)
-            policy.record_candidate(refusal)
-            if refusal is not None:
-                continue  # USR-174: per-project data policy refuses this harness/provider
-        remaining = None if cooling else lookup(provider_id)
-        if cooling:
-            logger.info("pick: harness %s skipped for stage %s (in cooldown)", harness, stage)
-
-        # Fail-closed: unknown quota or quota <= critical is strictly critical/ineligible
-        is_critical = remaining is None or remaining <= critical_threshold
-        if is_critical and not cooling:
-            # Distinguish, for observability only (never credentials/raw probe output): a known
-            # reading under the floor ("critical") from one with no current, verifiable evidence at
-            # all ("unknown" — stale snapshot, probe unavailable, or a suspicious reading; see
-            # `_quota_headroom_diagnosis` for the exact reason when the default lookup is in play).
-            logger.info(
-                "pick: harness %s quota is %s for stage %s (remaining=%s, floor=%.1f)",
-                harness, "critical" if remaining is not None else "unknown", stage, remaining, critical_threshold,
-            )
-
-        if (harness, model) == extra_candidate:
-            # Outside the cascade: electable only by the operating-harness preference below. It takes no
-            # part in the headroom ranking, the unknown-quota bootstrap or the "all exhausted" fallback.
-            if not cooling and not is_critical and remaining is not None:
-                extra_eligible.append((harness, model, remaining))
-            elif not cooling and remaining is None and harness == operating:
-                preferred_unknown.append((harness, model))
-            continue
-
-        evaluated.append((harness, model, cooling, is_critical, remaining))
-
-
-        if not cooling and not is_critical and remaining is not None:
-            eligible.append((harness, model, remaining))
-        elif not cooling and remaining is None:
-            unknown_quota.append((harness, model))
-            if harness == operating:
-                preferred_unknown.append((harness, model))
+        operating, execution_context, claude_or_codex_healthy, cooldowns, lookup, critical_threshold,
+        project_id, extra_candidate,
+    )
 
     winner = _pick_winner(
         stage, complexity, operating, eligible, extra_eligible, preferred_unknown,
         unknown_quota, slack_fn, execution_context, unknown_quota_last_resort_ok, quota_lookup,
+        cfg=cfg,
     )
 
     if winner is not None:
-        if stage in HIGH_TIER_ONLY_STAGES and not is_high_tier_model(winner[1]):
-            logger.warning("planning_degraded=true harness=%s: no high-tier subscription available", winner[0])
-        if reserve_quota:
-            try:
-                from core.usage.reservation import QuotaReservationManager
-
-                prov = _HARNESS_TO_PROVIDER.get(winner[0], winner[0])
-                QuotaReservationManager().reserve(prov, winner[0], ticket_id=ticket_id)
-            except Exception as exc:
-                logger.debug("Failed reserving quota for %s: %s", winner, exc)
-        return winner
+        return _finalize_pick_winner(
+            stage, winner, complexity=complexity, operating=operating, cfg=cfg,
+            reserve_quota=reserve_quota, ticket_id=ticket_id, quota_lookup=quota_lookup,
+        )
 
     all_exhausted = bool(evaluated) and all(
         cooling or (rem is not None and rem <= critical_threshold) for _, _, cooling, _, rem in evaluated

@@ -25,9 +25,14 @@ from core.line import agent_cli
 from core.line.operating_harness import (
     AUTODETECT_ENV_SIGNALS,
     KNOWN_HARNESSES,
+    KNOWN_PROCESS_HARNESSES,
     OPERATING_HARNESS_ENV,
     detect_operating_harness,
+    declare_headless_process,
+    harness_executor_env,
+    headless_executor_env,
     resolve_operating_harness,
+    resolve_process_identity,
 )
 from core.line.routing import (
     _HARNESS_TO_PROVIDER,
@@ -149,11 +154,11 @@ def test_the_explicit_variable_resolves_what_autodetection_finds_ambiguous() -> 
     assert detect_operating_harness(environ) == "codex"
 
 
-def test_an_invalid_variable_is_ignored_with_a_warning_and_autodetection_continues(
+def test_an_invalid_variable_fails_closed_with_a_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="core.line.operating_harness"):
-        assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini", "CLAUDECODE": "1"}) == "claude"
+        assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini", "CLAUDECODE": "1"}) is None
         assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini"}) is None
     assert sum("gemini" in record.getMessage() for record in caplog.records) == 2
 
@@ -274,7 +279,7 @@ def test_without_the_preference_the_same_quotas_elect_the_headroom_winner(
 
 
 def test_the_preferred_harness_uses_the_model_the_cascade_gives_it(tmp_path: Path) -> None:
-    config = _config([("claude", "haiku"), ("codex", "gpt-x")])
+    config = _config([("claude", "haiku"), ("codex", "luna")])
 
     assert _pick(tmp_path, _lookup(claude=30.0, codex=80.0), config=config, operating_harness="claude") == (
         "claude",
@@ -282,7 +287,7 @@ def test_the_preferred_harness_uses_the_model_the_cascade_gives_it(tmp_path: Pat
     )
     assert _pick(tmp_path, _lookup(claude=80.0, codex=30.0), config=config, operating_harness="codex") == (
         "codex",
-        "gpt-x",
+        "luna",
     )
 
 
@@ -344,7 +349,9 @@ def test_the_operating_harness_does_not_beat_the_low_complexity_luna_preference(
     lookup = _lookup(claude=30.0, codex=90.0, grok=25.0)
 
     assert _pick(tmp_path, lookup, config=config, complexity="low") == ("codex", "luna")  # control
-    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="claude") == ("claude", "sonnet")
+    assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="claude") == (
+        "claude", "sonnet",
+    )
     assert _pick(tmp_path, lookup, config=config, complexity="low", operating_harness="grok") == ("grok", None)
 
 
@@ -428,7 +435,9 @@ def test_an_excluded_operating_harness_falls_back_to_headroom(
     lookup = _lookup(claude=40.0, codex=95.0, grok=99.0)
 
     # A retry after a failure excludes the route that just failed: the preference must not bring it back.
-    assert _pick(tmp_path, lookup, operating_harness="claude", exclude=[("claude", "sonnet")]) == ("codex", None)
+    assert _pick(tmp_path, lookup, operating_harness="claude", exclude=[("claude", "sonnet")]) == (
+        "codex", None,
+    )
     assert _pick(tmp_path, lookup, operating_harness="claude", exclude=["claude"]) == ("codex", None)
     assert _pick(tmp_path, lookup, operating_harness="grok", exclude=[("grok", None)]) == ("codex", None)
     assert _pick(tmp_path, lookup, operating_harness="grok", exclude=["grok"]) == ("codex", None)
@@ -616,7 +625,9 @@ def test_without_any_signal_the_development_choice_is_the_headroom_winner(tmp_pa
     assert _pick(tmp_path, _lookup(claude=80.0, codex=60.0)) == ("claude", "sonnet")
     assert _pick(tmp_path, _lookup(claude=60.0, codex=80.0)) == ("codex", None)
     assert _pick(tmp_path, _lookup(claude=60.0, codex=60.0)) == ("claude", "sonnet")  # tie: cascade order
-    assert _pick(tmp_path, _lookup(claude=60.0, codex=80.0), caps=["harness:claude"]) == ("claude", "sonnet")
+    assert _pick(tmp_path, _lookup(claude=60.0, codex=80.0), caps=["harness:claude"]) == (
+        "claude", "sonnet",
+    )
 
 
 def test_without_any_signal_grok_and_antigravity_are_never_development_candidates(
@@ -675,3 +686,388 @@ def test_earliest_route_available_at_counts_the_operating_harness_outside_the_ca
         )
         == now + timedelta(minutes=45)  # other stages never look at it
     )
+
+
+# --------------------------------------------------------------------------
+# (i) resolve_process_identity (USR-471 T1): one resolver for every executor
+# --------------------------------------------------------------------------
+
+
+def test_headless_process_never_inherits_the_parent_chats_preference() -> None:
+    environ = {"DARKFAC_OPERATING_HARNESS": "antigravity", "CLAUDECODE": "1"}
+
+    identity = resolve_process_identity(environ=environ, execution_context="headless")
+
+    assert identity.harness is None
+    assert identity.origin == "headless"
+    assert identity.process_harness is None
+    assert identity.process_harness_origin == "headless"
+    assert identity.execution_context == "headless"
+    assert identity.mode == "write"
+    assert identity.write_capable is True
+
+
+def test_headless_process_honors_its_own_explicit_declaration() -> None:
+    identity = resolve_process_identity(
+        environ={"DARKFAC_OPERATING_HARNESS": "grok"}, execution_context="headless", explicit="codex",
+    )
+
+    assert identity.harness == "codex"
+    assert identity.origin == "explicit"
+
+
+def test_headless_process_with_an_invalid_explicit_declaration_falls_back_to_headless(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="core.line.operating_harness"):
+        identity = resolve_process_identity(environ={}, execution_context="headless", explicit="gemini")
+
+    assert identity.harness is None
+    assert identity.origin == "headless"
+    assert any("gemini" in record.getMessage() for record in caplog.records)
+
+
+def test_headless_antigravity_declared_explicitly_is_read_only() -> None:
+    identity = resolve_process_identity(environ={}, execution_context="headless", explicit="antigravity")
+
+    assert identity.harness == "antigravity"
+    assert identity.mode == "read"
+
+
+def test_headless_process_config_cannot_make_antigravity_a_writer() -> None:
+    identity = resolve_process_identity(environ={
+        "DARKFAC_EXECUTION_CONTEXT": "headless",
+        "DARKFAC_PROCESS_HARNESS": "antigravity",
+        "DARKFAC_WRITE_CAPABLE": "1",
+    })
+
+    assert identity.process_harness == "antigravity"
+    assert identity.mode == "read"
+    assert identity.write_capable is False
+
+
+def test_interactive_antigravity_is_write() -> None:
+    identity = resolve_process_identity(environ={}, execution_context="interactive", explicit="antigravity")
+
+    assert identity.harness == "antigravity"
+    assert identity.mode == "write"
+
+
+@pytest.mark.parametrize(
+    ("environ", "explicit", "harness", "origin"),
+    [
+        ({}, None, None, "none"),
+        ({"CLAUDECODE": "1"}, None, "claude", "autodetect"),
+        ({"DARKFAC_OPERATING_HARNESS": "codex"}, None, "codex", "explicit"),
+        ({"DARKFAC_OPERATING_HARNESS": "codex", "CLAUDECODE": "1"}, "grok", "grok", "explicit"),
+    ],
+)
+def test_interactive_process_keeps_the_usr_109_precedence(
+    environ: dict[str, str], explicit: Optional[str], harness: Optional[str], origin: str
+) -> None:
+    identity = resolve_process_identity(environ=environ, execution_context="interactive", explicit=explicit)
+
+    assert identity.harness == harness
+    assert identity.origin == origin
+
+
+def test_process_identity_is_separate_from_operating_preference() -> None:
+    identity = resolve_process_identity(
+        environ={
+            "DARKFAC_EXECUTION_CONTEXT": "interactive",
+            "DARKFAC_OPERATING_HARNESS": "antigravity",
+            "DARKFAC_PROCESS_HARNESS": "codex",
+        },
+    )
+
+    assert identity.harness == "antigravity"
+    assert identity.process_harness == "codex"
+    assert identity.process_harness_origin == "process_config"
+
+
+def test_invalid_process_harness_and_conflicting_roots_fail_closed(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="invalid DARKFAC_PROCESS_HARNESS"):
+        resolve_process_identity(environ={"DARKFAC_PROCESS_HARNESS": "antigravity-ish"})
+
+    with pytest.raises(ValueError, match="conflicting DARKFAC_PROJECT_ROOT and PROJECT_ROOT"):
+        resolve_process_identity(environ={
+            "DARKFAC_PROJECT_ROOT": str(tmp_path / "one"),
+            "PROJECT_ROOT": str(tmp_path / "two"),
+            "DARKFAC_STATE_ROOT": str(tmp_path / "state"),
+        })
+
+    with pytest.raises(ValueError, match="project root must be an absolute path"):
+        resolve_process_identity(environ={
+            "PROJECT_ROOT": "relative-project",
+            "STATE_ROOT": str(tmp_path / "state"),
+        })
+
+
+def test_invalid_interactive_override_does_not_infer_from_other_environment_signals(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="core.line.operating_harness"):
+        identity = resolve_process_identity(
+            environ={"DARKFAC_OPERATING_HARNESS": "antigravity-ish", "CODEX_THREAD_ID": "session"},
+            execution_context="interactive",
+        )
+
+    assert identity.harness is None
+    assert identity.origin == "none"
+    assert any("antigravity-ish" in record.getMessage() for record in caplog.records)
+
+
+def test_execution_context_defaults_from_fleet_mode_env() -> None:
+    assert resolve_process_identity(environ={}).execution_context == "interactive"
+    assert resolve_process_identity(environ={"DARKFAC_FLEET_MODE": "1"}).execution_context == "headless"
+    assert resolve_process_identity(environ={"DARKFAC_FLEET_MODE": "0"}).execution_context == "interactive"
+
+
+def test_declared_execution_context_is_authoritative_and_invalid_or_conflicting_context_fails_closed() -> None:
+    identity = resolve_process_identity(environ={"DARKFAC_EXECUTION_CONTEXT": "headless"})
+    assert identity.execution_context == "headless"
+    assert identity.harness is None
+
+    with pytest.raises(ValueError, match="invalid DARKFAC_EXECUTION_CONTEXT"):
+        resolve_process_identity(environ={"DARKFAC_EXECUTION_CONTEXT": "maybe"})
+    with pytest.raises(ValueError, match="execution context mismatch"):
+        resolve_process_identity(
+            environ={"DARKFAC_EXECUTION_CONTEXT": "interactive"}, execution_context="headless",
+        )
+
+
+def test_invalid_write_capability_fails_closed() -> None:
+    with pytest.raises(ValueError, match="invalid DARKFAC_WRITE_CAPABLE"):
+        resolve_process_identity(
+            environ={"DARKFAC_EXECUTION_CONTEXT": "headless", "DARKFAC_WRITE_CAPABLE": "sometimes"},
+        )
+
+
+def test_declaring_headless_process_replaces_inherited_interactive_contract(tmp_path: Path) -> None:
+    env = {
+        "DARKFAC_OPERATING_HARNESS": "antigravity",
+        "ANTIGRAVITY_AGENT": "1",
+        "DARKFAC_EXECUTION_CONTEXT": "interactive",
+        "DARKFAC_EXECUTOR_MODE": "read",
+        "DARKFAC_WRITE_CAPABLE": "0",
+        "DARKFAC_FLEET_MODE": "0",
+        "DARKFAC_PROCESS_HARNESS": "antigravity",
+    }
+
+    declare_headless_process(env, project_root=tmp_path, state_root=tmp_path / "state")
+
+    identity = resolve_process_identity(environ=env)
+    assert identity.harness is None
+    assert identity.execution_context == "headless"
+    assert identity.project_root == tmp_path.resolve()
+    assert identity.state_root == (tmp_path / "state").resolve()
+    assert identity.write_capable is True
+    assert identity.process_harness is None
+    assert identity.process_harness_origin == "declared_none"
+    assert env["DARKFAC_OPERATING_HARNESS"] == ""
+    assert "ANTIGRAVITY_AGENT" not in env
+    assert env["PROJECT_ROOT"] == str(tmp_path.resolve())
+    assert env["STATE_ROOT"] == str((tmp_path / "state").resolve())
+    assert env["DARKFAC_PROCESS_HARNESS"] == "none"
+
+
+def test_harness_child_environment_sets_process_identity_and_explicit_roots(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    shared_state = tmp_path / "state"
+    parent = {
+        "DARKFAC_EXECUTION_CONTEXT": "headless",
+        "DARKFAC_FLEET_MODE": "1",
+        "DARKFAC_OPERATING_HARNESS": "antigravity",
+        "ANTIGRAVITY_AGENT": "1",
+        "PROJECT_ROOT": str(tmp_path / "stale-project"),
+        "STATE_ROOT": str(tmp_path / "stale-state"),
+        "PATH": "preserved",
+    }
+
+    env = harness_executor_env(
+        parent,
+        process_harness="codex",
+        project_root=checkout,
+        state_root=shared_state,
+        execution_context="headless",
+    )
+
+    identity = resolve_process_identity(environ=env)
+    assert identity.process_harness == "codex"
+    assert identity.process_harness_origin == "process_config"
+    assert identity.execution_context == "headless"
+    assert identity.project_root == checkout.resolve()
+    assert identity.state_root == shared_state.resolve()
+    assert env["DARKFAC_OPERATING_HARNESS"] == ""
+    assert "ANTIGRAVITY_AGENT" not in env
+    assert env["PROJECT_ROOT"] == str(checkout.resolve())
+    assert env["STATE_ROOT"] == str(shared_state.resolve())
+    assert env["DARKFAC_FLEET_MODE"] == "1"
+
+
+@pytest.mark.parametrize("process_harness", KNOWN_PROCESS_HARNESSES)
+def test_each_headless_harness_gets_the_same_explicit_process_contract(
+    process_harness: str, tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "checkout"
+    shared_state = tmp_path / "state"
+    env = harness_executor_env(
+        {
+            "DARKFAC_EXECUTION_CONTEXT": "interactive",
+            "DARKFAC_OPERATING_HARNESS": "antigravity",
+            "ANTIGRAVITY_AGENT": "interactive-parent",
+            "PROJECT_ROOT": str(tmp_path / "stale-checkout"),
+            "STATE_ROOT": str(tmp_path / "stale-state"),
+        },
+        process_harness=process_harness,
+        project_root=checkout,
+        state_root=shared_state,
+        execution_context="headless",
+    )
+
+    identity = resolve_process_identity(environ=env)
+    assert identity.execution_context == "headless"
+    assert identity.harness is None
+    assert identity.process_harness == process_harness
+    assert identity.project_root == checkout.resolve()
+    assert identity.state_root == shared_state.resolve()
+    assert env["DARKFAC_OPERATING_HARNESS"] == ""
+    assert env["PROJECT_ROOT"] == str(checkout.resolve())
+    assert env["STATE_ROOT"] == str(shared_state.resolve())
+    assert "ANTIGRAVITY_AGENT" not in env
+    if process_harness == "antigravity":
+        assert identity.mode == "read"
+        assert identity.write_capable is False
+    else:
+        assert identity.mode == "write"
+        assert identity.write_capable is True
+
+
+def test_interactive_harness_child_preserves_preference_but_sets_process_identity(tmp_path: Path) -> None:
+    env = harness_executor_env(
+        {"DARKFAC_OPERATING_HARNESS": "antigravity", "DARKFAC_FLEET_MODE": "1"},
+        process_harness="codex",
+        project_root=tmp_path,
+        state_root=tmp_path / ".factory",
+        execution_context="interactive",
+    )
+
+    identity = resolve_process_identity(environ=env)
+    assert identity.harness == "antigravity"
+    assert identity.process_harness == "codex"
+    assert identity.execution_context == "interactive"
+    assert env["DARKFAC_OPERATING_HARNESS"] == "antigravity"
+    assert "DARKFAC_FLEET_MODE" not in env
+
+
+def test_agent_capability_check_uses_process_identity_not_parent_chat_preference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.line.agent_cli import supports
+
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("DARKFAC_FLEET_MODE", "1")
+    assert not supports("antigravity", "write")
+
+    monkeypatch.delenv("DARKFAC_FLEET_MODE")
+    assert supports("antigravity", "write")
+
+
+def test_roots_default_from_the_environment_and_can_be_overridden(tmp_path: Path) -> None:
+    identity = resolve_process_identity(
+        environ={"DARKFAC_PROJECT_ROOT": str(tmp_path), "DARKFAC_STATE_ROOT": str(tmp_path / "state")},
+    )
+
+    assert identity.project_root == tmp_path.resolve()
+    assert identity.state_root == (tmp_path / "state").resolve()
+
+    overridden = resolve_process_identity(
+        environ={}, project_root=tmp_path, state_root=tmp_path / "other-state",
+    )
+
+    assert overridden.project_root == tmp_path.resolve()
+    assert overridden.state_root == (tmp_path / "other-state").resolve()
+
+    generic_roots = resolve_process_identity(
+        environ={"PROJECT_ROOT": str(tmp_path), "STATE_ROOT": str(tmp_path / "generic-state")},
+    )
+    assert generic_roots.project_root == tmp_path.resolve()
+    assert generic_roots.state_root == (tmp_path / "generic-state").resolve()
+
+
+def test_roots_default_to_project_root_slash_factory_without_any_signal(tmp_path: Path) -> None:
+    identity = resolve_process_identity(environ={}, project_root=tmp_path)
+
+    assert identity.state_root == tmp_path / ".factory"
+
+
+def test_headless_executor_env_scrubs_parent_and_update_identity_and_foreign_run_markers(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "checkout"
+    state_root = tmp_path / "shared-state"
+    base = {
+        "DARKFAC_OPERATING_HARNESS": "antigravity",
+        "CODEX_THREAD_ID": "parent-chat",
+        "DARKFAC_TICKET_ID": "USR-OTHER",
+        "DARKFAC_RUN_ID": "foreign-run",
+        "DARKFAC_PROJECT_ROOT": "foreign-checkout",
+        "DARKFAC_STATE_ROOT": "foreign-state",
+        "DARKFAC_FLEET_MODE": "0",
+        "PATH": "preserved",
+    }
+    updates = {
+        "DARKFAC_OPERATING_HARNESS": "grok",
+        "ANTIGRAVITY_SESSION": "parent-session",
+        "DARKFAC_EXECUTION_ID": "foreign-execution",
+        "DARKFAC_PROJECT_ROOT": "wrong-checkout",
+        "DARKFAC_STATE_ROOT": "wrong-state",
+        "DARKFAC_FLEET_MODE": "0",
+        "DARKFAC_TEST_WORKERS": "http://worker.example",
+        "DARKFAC_CANDIDATE_DIGEST": "candidate-sha",
+    }
+
+    env = headless_executor_env(
+        base,
+        project_root=project_root,
+        state_root=state_root,
+        host_id="desktop",
+        run_id="owned-run",
+        updates=updates,
+    )
+
+    assert env["DARKFAC_OPERATING_HARNESS"] == ""
+    assert not any(name in env for name in (
+        "CODEX_THREAD_ID", "ANTIGRAVITY_SESSION", "DARKFAC_TICKET_ID",
+        "DARKFAC_EXECUTION_ID",
+    ))
+    assert env["DARKFAC_PROJECT_ROOT"] == str(project_root.resolve())
+    assert env["DARKFAC_STATE_ROOT"] == str(state_root.resolve())
+    assert env["PROJECT_ROOT"] == str(project_root.resolve())
+    assert env["STATE_ROOT"] == str(state_root.resolve())
+    assert env["DARKFAC_FLEET_MODE"] == "1"
+    assert env["DARKFAC_EXECUTION_CONTEXT"] == "headless"
+    assert env["DARKFAC_EXECUTOR_MODE"] == "write"
+    assert env["DARKFAC_WRITE_CAPABLE"] == "1"
+    assert env["DARKFAC_PROCESS_HARNESS"] == "none"
+    assert env["DARKFAC_HOST_ID"] == "desktop"
+    assert env["DARKFAC_RUN_ID"] == "owned-run"
+    assert env["DARKFAC_TEST_WORKERS"] == "http://worker.example"
+    assert env["DARKFAC_CANDIDATE_DIGEST"] == "candidate-sha"
+    assert env["PATH"] == "preserved"
+
+
+def test_non_fleet_executor_does_not_retain_fleet_or_host_identity_from_updates(tmp_path: Path) -> None:
+    env = headless_executor_env(
+        {"DARKFAC_FLEET_MODE": "1", "DARKFAC_HOST_ID": "foreign-host"},
+        project_root=tmp_path,
+        state_root=tmp_path / "state",
+        fleet=False,
+        updates={"DARKFAC_FLEET_MODE": "1", "DARKFAC_HOST_ID": "foreign-host"},
+    )
+
+    assert "DARKFAC_FLEET_MODE" not in env
+    assert env["DARKFAC_EXECUTION_CONTEXT"] == "headless"
+    assert env["DARKFAC_EXECUTOR_MODE"] == "write"
+    assert env["DARKFAC_WRITE_CAPABLE"] == "1"
+    assert "DARKFAC_HOST_ID" not in env

@@ -229,7 +229,15 @@ class RemoteRequiredError(RuntimeError):
     """``--remote-required``/``DARKFAC_REMOTE_HARNESS=required`` but no
     worker could run the job (never raised for the unconditional safety
     guards -- CI, worker-job re-entrancy -- which always fall back to local
-    silently, by design)."""
+    silently, by design). The structured fields let the fleet preserve and
+    retry this infrastructure wait without treating it as a test verdict."""
+
+    def __init__(self, message: str, *, cause_code: str = "remote_worker_unavailable", workers: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.error_code = "remote_required_unavailable"
+        self.cause_code = cause_code
+        self.resumable = True
+        self.details = {"workers": list(workers or []), "resumable": True, "cause_code": cause_code}
 
 
 class _WorkerUnavailable(Exception):
@@ -312,15 +320,212 @@ def _identifier_is_disabled(identifier: str, disabled: set[str]) -> bool:
     return any(candidate == item or item in candidate for item in normalized_disabled)
 
 
+def _configured_disabled_worker_values(config: Any) -> set[str]:
+    """Names and endpoint hosts for policy-disabled workers, including enabled=false."""
+    disabled = {str(host).strip().casefold() for host in config.disabled_hosts if str(host).strip()}
+    disabled_ids = set(disabled)
+    for host in config.hosts:
+        if not host.enabled or host.id.casefold() in disabled_ids:
+            disabled.add(host.id.casefold())
+            endpoint_host = urllib.parse.urlparse(host.endpoint or "").hostname
+            if endpoint_host:
+                disabled.add(endpoint_host.casefold())
+    return disabled
+
+
+def _configured_host_worker_urls(config: FleetConfig) -> list[str]:
+    """Resolve enabled worker URLs in priority order, using `HOST_WORKER_URLS` when endpoint is omitted."""
+    urls: list[str] = []
+    for host in config.sorted_hosts():
+        if not host.enabled:
+            continue
+        url = str(host.endpoint).strip() if host.endpoint else HOST_WORKER_URLS.get(host.id, "")
+        if url:
+            urls.append(url)
+    return urls
+
+
 def worker_urls(disabled: set[str] | None = None) -> list[str]:
-    """USR-430: Filter out worker URLs on disabled hosts (DARKFAC_FLEET_DISABLED_HOSTS)."""
-    raw = os.environ.get(ENV_TEST_WORKERS, DEFAULT_WORKERS)
+    """Return configured remote worker endpoints in fleet priority order.
+
+    An explicit DARKFAC_TEST_WORKERS remains an operator override. Otherwise
+    the persisted fleet topology is the source of truth, shared with the fleet
+    dispatcher. Both configuration and environment exclusions apply before
+    any health probe is made.
+    """
+    raw = os.environ.get(ENV_TEST_WORKERS, "").strip()
+    configured_disabled: set[str] = set()
+    try:
+        from core.line.fleet_policy import load_fleet_config
+
+        config = load_fleet_config(strict=True)
+        configured_disabled = _configured_disabled_worker_values(config)
+        if not raw:
+            raw = ",".join(_configured_host_worker_urls(config))
+    except Exception:
+        if not raw:
+            # A missing or invalid canonical topology must never resurrect the
+            # historical hard-coded host list.
+            return []
+    raw_disabled = configured_disabled | disabled_hosts()
+    if disabled is not None:
+        raw_disabled |= disabled
     all_urls = [url.strip() for url in raw.split(",") if url.strip()]
-    if disabled is None:
-        disabled = disabled_hosts()
-    if not disabled:
+    if not raw_disabled:
         return all_urls
-    return [url for url in all_urls if not is_worker_disabled(url, disabled)]
+    return [url for url in all_urls if not is_worker_disabled(url, raw_disabled)]
+
+
+def _policy_only_worker_urls(disabled: set[str] | None = None) -> list[str]:
+    """The fleet-policy-derived candidate list, ignoring ``DARKFAC_TEST_WORKERS`` entirely.
+
+    Same source and exclusions as :func:`worker_urls`'s own fallback branch, exposed on
+    its own so :func:`remote_worker_candidates` can offer it as a second chance when an
+    explicit override strands the fleet on a single offline/excluded host.
+    """
+    try:
+        from core.line.fleet_policy import load_fleet_config
+
+        config = load_fleet_config(strict=True)
+    except Exception:
+        return []
+    configured_disabled = _configured_disabled_worker_values(config)
+    raw_disabled = configured_disabled | disabled_hosts()
+    if disabled is not None:
+        raw_disabled |= disabled
+    all_urls = [str(host.endpoint).strip() for host in config.sorted_hosts() if host.endpoint and host.enabled]
+    if not raw_disabled:
+        return all_urls
+    return [url for url in all_urls if not is_worker_disabled(url, raw_disabled)]
+
+
+def remote_worker_candidates(disabled: set[str] | None = None) -> list[str]:
+    """Ordered dispatch candidates for :func:`maybe_dispatch_remote`'s own retry loop.
+
+    USR-471: ``DARKFAC_TEST_WORKERS`` remains an operator override and keeps selection
+    priority -- its targets are tried first, in the order given. But an override that
+    names only a single host that turns out offline/unreachable (or otherwise fails at
+    runtime -- busy, unstable, resource-ineligible) must not strand the fleet there
+    while another configured host (e.g. a healthy, idle Desktop) sits unused: any
+    other fleet-policy-eligible host not already covered by the override is appended,
+    so the existing per-URL loop below tries it before the run falls back to local.
+
+    An override whose targets are *all* statically excluded (disabled by config or by
+    ``DARKFAC_FLEET_DISABLED_HOSTS``) is left alone: that is an explicit, host-level
+    exclusion decision the override itself can never widen into probing hosts the
+    operator did not name -- :func:`worker_urls` already returns an empty list for it,
+    which is returned unchanged here (no host is probed, same as before this ticket).
+    """
+    primary = worker_urls(disabled)
+    override_set = bool(os.environ.get(ENV_TEST_WORKERS, "").strip())
+    if not override_set or not primary or len(primary) > 1 or _policy_host_for_url(primary[0]) is None:
+        return primary
+    fallback = _policy_only_worker_urls(disabled)
+    extra = [url for url in fallback if url not in primary]
+    return primary + extra
+
+
+def _record_preexcluded_workers(urls: list[str], disabled: set[str]) -> None:
+    """Record configured exclusions without probing those endpoints."""
+    try:
+        from core.line.fleet_policy import load_fleet_config
+
+        config = load_fleet_config()
+    except Exception:
+        return
+    explicit = {item.strip() for item in os.environ.get(ENV_TEST_WORKERS, "").split(",") if item.strip()}
+    for host in config.sorted_hosts():
+        if not host.endpoint or host.endpoint in urls or (explicit and host.endpoint not in explicit):
+            continue
+        reason = "excluded" if is_worker_disabled(host.endpoint, disabled | disabled_hosts()) else "disabled_by_config"
+        DISPATCH_ATTEMPTS.append({
+            "worker_url": host.endpoint,
+            "host_chosen": host.id,
+            "outcome": "discarded",
+            "discard_reason": reason,
+            "candidate_sha": "unresolved",
+            "elapsed_sec": 0.0,
+        })
+
+
+def _policy_host_for_url(
+    base_url: str,
+    health: dict[str, Any] | None = None,
+) -> tuple[Any, Any] | None:
+    """Resolve a configured URL to its persisted host policy, if it is known."""
+    try:
+        from core.line.fleet_policy import load_fleet_config
+
+        config = load_fleet_config(strict=True)
+        parsed = urllib.parse.urlparse(base_url)
+        endpoint_hostname = (parsed.hostname or "").casefold()
+        for host in config.hosts:
+            endpoint = urllib.parse.urlparse(host.endpoint or "")
+            if endpoint.hostname and endpoint.hostname.casefold() == endpoint_hostname:
+                return config, host
+        if health is not None:
+            reported = {
+                str(value).strip().casefold()
+                for value in (health.get("node_id"), health.get("hostname"))
+                if value is not None and str(value).strip()
+            }
+            for host in config.hosts:
+                identifiers = {
+                    host.id.casefold(),
+                    host.name.casefold(),
+                    *KNOWN_HOST_IDENTIFIERS.get(host.id.casefold(), frozenset()),
+                }
+                endpoint = urllib.parse.urlparse(host.endpoint or "")
+                if endpoint.hostname:
+                    identifiers.add(endpoint.hostname.casefold())
+                if identifiers & reported:
+                    return config, host
+    except Exception:
+        return None
+    return None
+
+
+def _configured_host_id(base_url: str) -> str | None:
+    resolved = _policy_host_for_url(base_url)
+    return resolved[1].id if resolved is not None else None
+
+
+def _policy_reject_reason(base_url: str, health: dict[str, Any]) -> str | None:
+    """Apply the same effective eligibility policy consumed by fleet admission."""
+    from datetime import datetime, timezone
+
+    resolved = _policy_host_for_url(base_url, health)
+    if resolved is None:
+        return None  # explicit custom workers are governed by their health contract
+    config, host = resolved
+    from core.line.fleet_policy import build_effective_policy_report
+
+    observed_at = health.get("observed_at") or health.get("resource_observed_at")
+    workers = health.get("workers")
+    minimal_health = (
+        observed_at is None
+        and "observed_at" not in health
+        and "resource_observed_at" not in health
+        and "workers" not in health
+    )
+    if minimal_health:
+        # A live /health response without resource telemetry fields (or minimal test fixture)
+        # reflects current liveness; keep explicit values fail-closed when telemetry is sent.
+        observed_at = datetime.now(timezone.utc).isoformat()
+        workers = 0 if health.get("busy") else int(host.max_workers)
+    reading = {
+        "workers": workers,
+        "available_gib": health.get("available_gib", 0),
+        "observed_at": observed_at,
+        "busy": bool(health.get("busy")),
+    }
+    decision = next(
+        row for row in build_effective_policy_report(config, readings={host.id: reading})["hosts"]
+        if row["host_id"] == host.id
+    )
+    if not decision["eligible"] and minimal_health and decision["reason"] == "reservation_state_unavailable":
+        return None
+    return None if decision["eligible"] else str(decision["reason"])
 
 
 def _effective_mode(*, remote_required: bool) -> str:
@@ -1383,36 +1588,44 @@ def _dispatch_with_restart_retry(
             health = stable
 
 
-def _probe_eligible_worker(base_url: str, disabled: set[str]) -> dict[str, Any] | None:
+def _probe_eligible_worker(base_url: str, disabled: set[str]) -> tuple[dict[str, Any] | None, str]:
     """Probe worker health and ensure it is not disabled or self-dispatching."""
     if is_worker_disabled(base_url, disabled):
         print(f"[REMOTE] {base_url} is on a disabled host (DARKFAC_FLEET_DISABLED_HOSTS); skipping")
-        return None
+        return None, "excluded"
     health = probe_health(base_url)
     if health is None:
         print(f"[REMOTE] {base_url} unreachable (worker offline or port blocked)")
-        return None
+        return None, "offline_or_health_timeout"
     if is_worker_node_disabled(health.get("node_id"), health.get("hostname"), disabled):
         print(f"[REMOTE] {base_url} reported disabled node (DARKFAC_FLEET_DISABLED_HOSTS); skipping")
-        return None
+        return None, "reported_host_excluded"
     if is_self_dispatch(base_url, health):
-        return None
-    return health
+        return None, "self_dispatch"
+    return health, ""
 
 
 def _dispatch_disabled(mode: str) -> bool:
     return mode == "off" or _unconditional_disable_reason() is not None
 
 
-def _record_lost_attempt(base_url: str, attempt_started: float, exc: _WorkerUnavailable) -> None:
+def _record_lost_attempt(
+    base_url: str,
+    health: dict[str, Any],
+    candidate_sha: str | None,
+    attempt_started: float,
+    exc: _WorkerUnavailable,
+) -> None:
     """Record a lost remote worker attempt and announce the fallback transition."""
     spent_sec = round(time.monotonic() - attempt_started, 1)
     error_code = str(exc.details.get("error_code") or "worker_unavailable")
     DISPATCH_ATTEMPTS.append(
         {
             "worker_url": base_url,
+            "host_chosen": _configured_host_id(base_url) or str(health.get("node_id") or base_url),
             "job_id": exc.details.get("job_id"),
             "outcome": "lost",
+            "candidate_sha": candidate_sha,
             "error_code": error_code,
             "elapsed_sec": spent_sec,
             "silent_for_sec": exc.details.get("silent_for_sec"),
@@ -1425,6 +1638,97 @@ def _record_lost_attempt(base_url: str, attempt_started: float, exc: _WorkerUnav
         f"code={error_code} remote_spent={spent_sec:.0f}s; the next option starts a fresh step clock "
         "(remote time and suite-lock queue time are not charged to any step timeout)"
     )
+
+
+def _append_discard_attempt(
+    base_url: str,
+    reason: str,
+    *,
+    candidate_sha: str | None,
+    probe_started: float,
+    outcome: str = "discarded",
+    precision: int = 3,
+) -> None:
+    DISPATCH_ATTEMPTS.append({
+        "worker_url": base_url,
+        "host_chosen": _configured_host_id(base_url) or base_url,
+        "outcome": outcome,
+        "discard_reason": reason,
+        "candidate_sha": candidate_sha or "unresolved",
+        "elapsed_sec": round(time.monotonic() - probe_started, precision),
+    })
+
+
+def _wait_while_worker_busy(
+    base_url: str,
+    health: dict[str, Any],
+    *,
+    candidate_sha: str | None,
+    probe_started: float,
+) -> dict[str, Any] | None:
+    """Wait briefly for a busy worker unless policy already rejects it as occupied."""
+    policy_reason = _policy_reject_reason(base_url, health)
+    if policy_reason:
+        _append_discard_attempt(base_url, policy_reason, candidate_sha=candidate_sha, probe_started=probe_started)
+        return None
+    busy_wait_started = time.monotonic()
+    worker_deadline = busy_wait_started + _busy_wait_sec()
+    current: dict[str, Any] | None = health
+    while current is not None and current.get("busy"):
+        if time.monotonic() > worker_deadline:
+            current = None
+            break
+        time.sleep(min(5.0, max(0.5, worker_deadline - time.monotonic())))
+        current = probe_health(base_url)
+        if current is not None and is_self_dispatch(base_url, current):
+            current = None
+    if current is None:
+        print(f"[REMOTE] {base_url} still busy after {_busy_wait_sec():.0f}s (or vanished)")
+        _append_discard_attempt(
+            base_url, "busy_timeout", candidate_sha=candidate_sha,
+            probe_started=busy_wait_started, outcome="busy_timeout", precision=1,
+        )
+    return current
+
+
+def _store_and_report_remote_outcome(
+    *,
+    base_url: str,
+    health: dict[str, Any],
+    candidate_sha: str,
+    probe_started: float,
+    outcome: tuple[bool, Any],
+    worker_key: str | None,
+    tree_hash: str | None,
+    config_hash: str,
+    worker_platform: str,
+    worker_python: str | None,
+    notify_hub_on_pass: Callable[[], None],
+) -> bool:
+    """Record remote outcome, cache verified verdict on pass, and return pass/fail."""
+    success, result = outcome
+    DISPATCH_ATTEMPTS.append({
+        "worker_url": base_url,
+        "host_chosen": _configured_host_id(base_url) or str(health.get("node_id") or health.get("hostname") or base_url),
+        "outcome": "passed" if success else "failed",
+        "candidate_sha": candidate_sha,
+        "elapsed_sec": round(time.monotonic() - probe_started, 3),
+    })
+    if success and result is not None:
+        if worker_key is not None and tree_hash:
+            record = harness_cache.build_record(
+                tree_hash=tree_hash,
+                candidate_sha=result.candidate_sha,
+                config_hash=config_hash,
+                result=result.model_dump(mode="json"),
+            )
+            record["host"] = str(health.get("hostname") or base_url)
+            record["os_family"] = worker_platform
+            if worker_python:
+                record["py_version"] = worker_python
+            harness_cache.store_verdict(worker_key, record)
+        notify_hub_on_pass()
+    return success
 
 
 def maybe_dispatch_remote(
@@ -1469,48 +1773,63 @@ def maybe_dispatch_remote(
         return None
 
     disabled = disabled_hosts()
-    urls = worker_urls(disabled)
+    urls = remote_worker_candidates(disabled)
+    _record_preexcluded_workers(urls, disabled)
     if not urls:
+        preexcluded_reasons = "; ".join(
+            f"{attempt.get('worker_url')}={attempt.get('discard_reason') or 'excluded'}"
+            for attempt in DISPATCH_ATTEMPTS
+        )
+        detail = f" ({preexcluded_reasons})" if preexcluded_reasons else " (no configured worker endpoints)"
         if remote_required:
             raise RemoteRequiredError(
-                "--remote-required: no eligible remote workers (all candidates disabled or DARKFAC_TEST_WORKERS is empty)"
+                "--remote-required: no eligible remote workers"
+                f" (all candidates disabled or DARKFAC_TEST_WORKERS is empty){detail}",
+                cause_code="no_eligible_workers",
+                workers=urls,
             )
+        print(f"[REMOTE] no eligible remote workers{detail}; running the suite locally on this host")
         return None
 
     tried_any_reachable = False
+    candidate_sha: str | None = None
 
     for base_url in urls:
-        health = _probe_eligible_worker(base_url, disabled)
+        probe_started = time.monotonic()
+        health, discard_reason = _probe_eligible_worker(base_url, disabled)
         if health is None:
+            _append_discard_attempt(base_url, discard_reason or "unreachable", candidate_sha=candidate_sha, probe_started=probe_started)
             continue
         tried_any_reachable = True
 
+        policy_reason = _policy_reject_reason(base_url, health)
+        if policy_reason and not (health.get("busy") and policy_reason == "occupied"):
+            _append_discard_attempt(base_url, policy_reason, candidate_sha=candidate_sha, probe_started=probe_started)
+            continue
+
         if health.get("busy"):
-            busy_wait_started = time.monotonic()
-            worker_deadline = busy_wait_started + _busy_wait_sec()
-            while health is not None and health.get("busy"):
-                if time.monotonic() > worker_deadline:
-                    health = None
-                    break
-                time.sleep(min(5.0, max(0.5, worker_deadline - time.monotonic())))
-                health = probe_health(base_url)
-                if health is not None and is_self_dispatch(base_url, health):
-                    health = None
+            health = _wait_while_worker_busy(base_url, health, candidate_sha=candidate_sha, probe_started=probe_started)
             if health is None:
-                print(f"[REMOTE] {base_url} still busy after {_busy_wait_sec():.0f}s (or vanished)")
-                DISPATCH_ATTEMPTS.append(
-                    {
-                        "worker_url": base_url,
-                        "outcome": "busy_timeout",
-                        "elapsed_sec": round(time.monotonic() - busy_wait_started, 1),
-                    }
-                )
-                continue  # next worker / local
+                continue
+
+        if candidate_sha is None:
+            try:
+                candidate_sha = _local_candidate_sha(project_root)
+            except RuntimeError:
+                return None  # let the existing local path produce the canonical error
+            for prior_attempt in DISPATCH_ATTEMPTS:
+                if prior_attempt.get("candidate_sha") == "unresolved":
+                    prior_attempt["candidate_sha"] = candidate_sha
+
+        policy_reason = _policy_reject_reason(base_url, health)
+        if policy_reason:
+            _append_discard_attempt(base_url, policy_reason, candidate_sha=candidate_sha, probe_started=probe_started)
+            continue
 
         stable_health = _await_worker_stable(base_url, health)
         if stable_health is None:
             print(f"[REMOTE] {base_url} did not stay stable across consecutive /health checks; trying next option")
-            DISPATCH_ATTEMPTS.append({"worker_url": base_url, "outcome": "unstable", "elapsed_sec": 0.0})
+            _append_discard_attempt(base_url, "unstable_health", candidate_sha=candidate_sha, probe_started=probe_started, outcome="unstable")
             continue
         health = stable_health
 
@@ -1533,11 +1852,6 @@ def maybe_dispatch_remote(
             if hit is not None:
                 return emit_cache_hit(hit, config_path=config_path)
 
-        try:
-            candidate_sha = _local_candidate_sha(project_root)
-        except RuntimeError:
-            return None  # let the existing local path produce the canonical error
-
         total_timeout_sec = float(sum(step.timeout_sec for step in steps)) + 120.0
         attempt_started = time.monotonic()
         try:
@@ -1554,39 +1868,33 @@ def maybe_dispatch_remote(
                 total_timeout_sec=total_timeout_sec,
             )
         except _WorkerUnavailable as exc:
-            _record_lost_attempt(base_url, attempt_started, exc)
+            _record_lost_attempt(base_url, health, candidate_sha, attempt_started, exc)
             continue
 
         if outcome is None:
-            DISPATCH_ATTEMPTS.append(
-                {
-                    "worker_url": base_url,
-                    "outcome": "not_dispatched",
-                    "elapsed_sec": round(time.monotonic() - attempt_started, 1),
-                }
-            )
+            _append_discard_attempt(base_url, "not_dispatched", candidate_sha=candidate_sha, probe_started=attempt_started, outcome="not_dispatched", precision=1)
             continue
 
-        success, result = outcome
-        if success and result is not None:
-            if worker_key is not None and tree_hash:
-                record = harness_cache.build_record(
-                    tree_hash=tree_hash,
-                    candidate_sha=result.candidate_sha,
-                    config_hash=config_hash,
-                    result=result.model_dump(mode="json"),
-                )
-                record["host"] = str(health.get("hostname") or base_url)
-                record["os_family"] = worker_platform
-                if worker_python:
-                    record["py_version"] = worker_python
-                harness_cache.store_verdict(worker_key, record)
-            notify_hub_on_pass()
-        return success
+        return _store_and_report_remote_outcome(
+            base_url=base_url, health=health, candidate_sha=candidate_sha, probe_started=probe_started,
+            outcome=outcome, worker_key=worker_key, tree_hash=tree_hash, config_hash=config_hash,
+            worker_platform=worker_platform, worker_python=worker_python, notify_hub_on_pass=notify_hub_on_pass,
+        )
 
+    per_candidate_reasons = "; ".join(
+        f"{attempt.get('worker_url')}={attempt.get('discard_reason') or attempt.get('outcome') or 'unknown'}"
+        for attempt in DISPATCH_ATTEMPTS
+    )
     if remote_required:
         reason = "no reachable, non-self worker" if not tried_any_reachable else "every worker busy/unavailable/failed"
-        raise RemoteRequiredError(f"--remote-required: {reason} among {urls}")
-    # Never fall back silently: a green local run must not hide a dead worker.
-    print("[REMOTE] no remote worker used; running the suite locally on this host")
+        detail = f" ({per_candidate_reasons})" if per_candidate_reasons else ""
+        raise RemoteRequiredError(
+            f"--remote-required: {reason} among {urls}{detail}",
+            cause_code="no_reachable_worker" if not tried_any_reachable else "all_workers_unavailable",
+            workers=urls,
+        )
+    if per_candidate_reasons:
+        print(f"[REMOTE] no eligible remote worker ({per_candidate_reasons}); running the suite locally on this host")
+    else:
+        print("[REMOTE] no remote worker used; running the suite locally on this host")
     return None

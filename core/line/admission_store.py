@@ -148,7 +148,8 @@ class AdmissionStore:
                             db.execute("DELETE FROM ticket_holds WHERE project_id=? AND ticket_id=?",
                                        (hold["project_id"], hold["ticket_id"]))
                     db.execute("""CREATE TABLE IF NOT EXISTS reservations (
-                        scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL
+                        scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL,
+                        host_id TEXT NOT NULL DEFAULT ''
                     )""")
                     db.execute("""CREATE TABLE IF NOT EXISTS ticket_budget (
                         project TEXT NOT NULL, ticket TEXT NOT NULL,
@@ -161,6 +162,9 @@ class AdmissionStore:
                         project TEXT NOT NULL, ticket TEXT NOT NULL, run_id TEXT NOT NULL,
                         PRIMARY KEY(project, ticket, run_id)
                     )""")
+                    reservation_columns = {row[1] for row in db.execute("PRAGMA table_info(reservations)")}
+                    if "host_id" not in reservation_columns:
+                        db.execute("ALTER TABLE reservations ADD COLUMN host_id TEXT NOT NULL DEFAULT ''")
                     db.execute("""CREATE TABLE IF NOT EXISTS dispatcher_recovery (
                         singleton INTEGER PRIMARY KEY CHECK(singleton=1), active INTEGER NOT NULL,
                         cause TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -445,7 +449,7 @@ class AdmissionStore:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def reserve(self, *, project_id: str, ticket_id: str, candidate_digest: str,
-                context_digest: str, resource_version: str) -> Optional[str]:
+                context_digest: str, resource_version: str, host_id: str = "") -> Optional[str]:
         """Acquire one durable attempt reservation, or return None if another process owns it."""
         scope = self._scope(project_id, ticket_id, candidate_digest, context_digest, resource_version)
         now = self.clock().astimezone(timezone.utc)
@@ -459,7 +463,8 @@ class AdmissionStore:
                     db.rollback()
                     return None
                 expiry = now + timedelta(seconds=self.reservation_ttl_sec)
-                db.execute("INSERT INTO reservations VALUES (?, ?, ?)", (scope, token, expiry.isoformat()))
+                db.execute("INSERT INTO reservations(scope, token, expires_at, host_id) VALUES (?, ?, ?, ?)",
+                           (scope, token, expiry.isoformat(), host_id))
                 db.commit()
                 return token
         except (sqlite3.Error, OSError) as exc:
@@ -478,7 +483,8 @@ class AdmissionStore:
                     db.rollback()
                     return None
                 expiry = now + timedelta(seconds=max(1, int(lease_duration_sec)))
-                db.execute("INSERT INTO reservations VALUES (?, ?, ?)", (scope, token, expiry.isoformat()))
+                db.execute("INSERT INTO reservations(scope, token, expires_at, host_id) VALUES (?, ?, ?, '')",
+                           (scope, token, expiry.isoformat()))
                 db.commit()
                 return token
         except (sqlite3.Error, OSError) as exc:
@@ -653,6 +659,19 @@ class AdmissionStore:
                     """SELECT fingerprint, project_id, ticket_id, candidate_digest,
                     context_digest, error_class, resource_version, recorded_at, next_probe_at,
                     backoff_sec, open, main_sha FROM failures ORDER BY recorded_at"""
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise AdmissionStoreError("admission_store_unavailable") from exc
+
+    def active_host_reservations(self) -> list[dict[str, str]]:
+        """Return current host claims; expired claims never block new admission."""
+        now = self.clock().astimezone(timezone.utc).isoformat()
+        try:
+            with self._connection() as db:
+                rows = db.execute(
+                    "SELECT host_id, expires_at FROM reservations WHERE host_id<>'' AND expires_at>? ORDER BY host_id",
+                    (now,),
                 ).fetchall()
                 return [dict(row) for row in rows]
         except sqlite3.Error as exc:

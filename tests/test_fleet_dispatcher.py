@@ -407,6 +407,101 @@ def test_new_main_releases_pending_infra_delay_without_erasing_candidate_debt(tm
     assert budget["candidate_failures"] == 1 and budget["infra_streak"] == 0
 
 
+def test_policy_config_is_reloaded_each_cycle_and_exclusion_is_published(tmp_path, monkeypatch):
+    import json
+    from core.line import fleet_policy
+
+    path = tmp_path / "line_fleet.json"
+    config = {
+        "max_fleet_slots": 3,
+        "disabled_hosts": [],
+        "hosts": [
+            {"id": "desktop", "name": "Desktop", "priority": 1, "endpoint": "http://worker", "enabled": True,
+             "max_workers": 1, "min_free_memory_gib": 0},
+        ],
+    }
+    path.write_text(json.dumps(config), encoding="utf-8")
+    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("STATE_ROOT", str(runtime_root))
+    cfg = fd.DispatcherConfig(hosts=[], policy_path=path, state_path=tmp_path / "published.json")
+    dispatcher = fd.FleetDispatcher(
+        cfg, demands_loader=lambda: [], probe=lambda _host: pytest.fail("excluded/idle policy must not probe"),
+        deploy=lambda: 0, admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+    )
+
+    dispatcher.run_cycle()
+    snapshot_path = fleet_policy.snapshot_path()
+    first_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert first_snapshot["origin"]["configuration"] == str(path)
+    assert first_snapshot["origin"]["resource_readings"] == "dispatcher_probe_results"
+    assert first_snapshot["updated_at"] == dispatcher.last_cycle["policy_snapshot"]["updated_at"]
+    assert dispatcher.last_cycle["host_policy"][0]["config"]["endpoint"] == "http://worker"
+    config["disabled_hosts"] = ["desktop"]
+    path.write_text(json.dumps(config), encoding="utf-8")
+    dispatcher.run_cycle()
+
+    row = dispatcher.last_cycle["host_policy"][0]
+    persisted_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert row["eligible"] is False
+    assert row["reason"] == "excluded"
+    assert row["exclusion_sources"] == ["config.disabled_hosts"]
+    assert persisted_snapshot["hosts"][0]["reason"] == "excluded"
+    assert persisted_snapshot["origin"]["exclusions"]["config"] == ["desktop"]
+    assert "desktop" not in dispatcher.last_cycle["free_hosts"]
+
+
+def test_dispatcher_does_not_probe_or_launch_a_persistently_excluded_host(tmp_path, monkeypatch):
+    import json
+
+    from core.line import fleet_policy
+
+    path = tmp_path / "line_fleet.json"
+    path.write_text(json.dumps({
+        "max_fleet_slots": 3,
+        "disabled_hosts": ["desktop"],
+        "hosts": [{
+            "id": "desktop", "name": "Desktop", "priority": 1,
+            "endpoint": "http://desktop", "enabled": True,
+            "max_workers": 1, "min_free_memory_gib": 0,
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setenv("STATE_ROOT", str(tmp_path / "state"))
+    launches: list[str] = []
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[], policy_path=path, state_path=tmp_path / "dispatcher.json",
+        ),
+        demands_loader=lambda: [_d("USR-91")],
+        probe=lambda _host: pytest.fail("an excluded host must not be probed"),
+        launch=lambda ticket, host, **_kwargs: launches.append(ticket),
+        deploy=lambda: 0,
+        admission_store=AdmissionStore(tmp_path / "admission.sqlite3"),
+    )
+
+    cycle = dispatcher.run_cycle()
+    snapshot = json.loads(fleet_policy.snapshot_path().read_text(encoding="utf-8"))
+
+    assert launches == []
+    assert cycle["idle_reasons"]["desktop"] == "excluded_by_config"
+    assert cycle["host_policy"][0]["reason"] == "excluded"
+    assert snapshot["hosts"][0]["reason"] == "excluded"
+
+
+def test_canonical_host_reservation_survives_restart_until_real_expiry(tmp_path):
+    from datetime import timedelta
+
+    now = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
+    store = AdmissionStore(tmp_path / "admission.sqlite3", clock=lambda: now, reservation_ttl_sec=30)
+    token = store.reserve(
+        project_id="darkfac", ticket_id="USR-471", candidate_digest="candidate",
+        context_digest="context", resource_version="resources", host_id="desktop",
+    )
+    assert token
+    assert store.active_host_reservations() == [{"host_id": "desktop", "expires_at": (now + timedelta(seconds=30)).isoformat()}]
+    restarted_store = AdmissionStore(tmp_path / "admission.sqlite3", clock=lambda: now + timedelta(seconds=31))
+    assert restarted_store.active_host_reservations() == []
+
+
 @pytest.mark.parametrize("loop_args", [[], ["--loop"]])
 def test_main_rejects_split_recovery_ticket_arguments_before_running(loop_args, monkeypatch):
     calls = []
@@ -1058,6 +1153,72 @@ def test_ci_recovery_with_merge_sha_keeps_the_deploy_evidence_trail(tmp_path: Pa
     assert pd.tick(tmp_path, directory=directory, now=row.next_check + 2)[0]["status"] == "merged_awaiting_deploy"
     assert calls == []
 
+
+
+def test_pending_delivery_resume_isolates_parent_interactive_env(tmp_path: Path, monkeypatch):
+    from core.line import pending_delivery as pd
+    monkeypatch.setattr(pd, "_children", {})
+    from types import SimpleNamespace
+    import json
+    from core.usage.models import ProviderAccountUsage, QuotaWindow
+    snapshot_root = tmp_path / "snapshots"
+    monkeypatch.setattr(pd, "state_root", lambda: snapshot_root)
+    provider_file = snapshot_root / "usage" / "providers" / "openai.json"
+    provider_file.parent.mkdir(parents=True)
+    usage = ProviderAccountUsage(provider_id="openai", provider_name="OpenAI", family="frontier",
+        status="connected", adapter="fixture", message="synthetic snapshot", quota_supported=True,
+        windows=[QuotaWindow(quota_id="codex:weekly", label="fixture", used_percent=58, remaining_percent=42)])
+    provider_file.write_text(usage.model_dump_json(), encoding="utf-8")
+    assert pd._cached_quota("openai") == 42
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    monkeypatch.setattr("core.line.ticket_engine.artifacts_root", lambda: tmp_path / "artifacts")
+    context = tmp_path / "artifacts" / "USR-99" / ".darkfac" / "runs" / "USR-99"
+    context.mkdir(parents=True)
+    (context / "progress.json").write_text('{"harness":"codex"}', encoding="utf-8")
+    directory = tmp_path / "pending"
+    row = pd.schedule("USR-99", candidate, "review", resume_delivery=True, directory=directory)
+    assert row.implementing_harness == "codex"
+    monkeypatch.setattr("core.line.line_lock.is_locked", lambda: False)
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: SimpleNamespace(
+        mock_mode=False, list_tickets=lambda: [{"id": "USR-99", "status": "planned"}]))
+    monkeypatch.setattr("core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(candidate)}])
+    monkeypatch.setattr(pd.run_outcome, "main_sha", lambda _repo: "")
+    monkeypatch.setattr(pd, "_route", lambda _row: None)
+    calls = []
+    handle = SimpleNamespace(pid=999999, poll=lambda: None)
+    monkeypatch.setattr(pd.subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw)) or handle)
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("CODEX_THREAD_ID", "parent-chat")
+    monkeypatch.setenv("DARKFAC_TICKET_ID", "USR-1")
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path / "interactive-checkout"))
+    monkeypatch.setenv("GH_TOKEN", "ghp_keep")
+    due = row.next_check + 1
+    assert pd.tick(tmp_path, directory=directory, now=due)[0]["status"] == "waiting_route"
+    assert not calls
+    monkeypatch.setattr(pd, "_route", lambda _row: ("openrouter", "distill.openrouter"))
+    assert pd.tick(tmp_path, directory=directory, now=due + 1)[0]["status"] == "waiting"
+    assert not calls  # persisted backoff also applies after restart
+    result = pd.tick(tmp_path, directory=directory, now=due + pd.RECHECK_SECONDS + 1)
+    assert result[0]["status"] == "running"
+    assert calls[0][0][2:] == ["--resume-delivery", "USR-99", "--worktree", str(candidate.resolve())]
+    assert "--fleet" not in calls[0][0]  # standalone launcher owns its canonical line lock
+    resumed_env = calls[0][1]["env"]
+    assert resumed_env["DARKFAC_PROJECT_ROOT"] == str(tmp_path.resolve())
+    assert resumed_env["DARKFAC_STATE_ROOT"] == str(snapshot_root.resolve())
+    assert "DARKFAC_FLEET_MODE" not in resumed_env
+    assert resumed_env["DARKFAC_OPERATING_HARNESS"] == ""
+    assert "CODEX_THREAD_ID" not in resumed_env
+    assert "DARKFAC_TICKET_ID" not in resumed_env
+    assert resumed_env["GH_TOKEN"] == "ghp_keep"
+    pd.tick(tmp_path, directory=directory, now=due + 2 * pd.RECHECK_SECONDS)
+    assert len(calls) == 1
+    # Lost parent process: live child remains the owner after a service restart.
+    pd._children.clear()
+    monkeypatch.setattr(pd, "_pid_running", lambda _row: True)
+    assert pd.tick(tmp_path, directory=directory, now=due + 3 * pd.RECHECK_SECONDS)[0]["status"] == "running"
+    assert len(calls) == 1
+    monkeypatch.setattr(pd, "_pid_running", lambda _row: False)
 
 def test_completed_ticket_with_another_cause_stays_blocked_without_deploy_proof(tmp_path: Path, monkeypatch):
     pd, directory, _context, _candidate, row, calls = _arm_completed_wait(
@@ -1748,11 +1909,14 @@ def test_control_store_queue_tickets_reach_the_dispatcher() -> None:
     assert merge_control_queue(ledger, unreachable) == ledger
 
 
-def test_disabled_hosts_env_removes_host(monkeypatch):
+def test_disabled_hosts_env_keeps_host_in_policy_for_published_exclusion(monkeypatch):
     monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "Desktop, ")
     hosts = fd.default_hosts()
-    assert [h.id for h in hosts] == ["notebook", "grokbox"]
-    assert [h.priority for h in hosts] == [1, 2]
+    assert [h.id for h in hosts] == ["notebook", "grokbox", "desktop"]
+    assert [h.priority for h in hosts] == [1, 2, 3]
+    from core.line.fleet_policy import effective_host_policy, load_fleet_config
+    decisions = effective_host_policy(load_fleet_config(), disabled_from_environment=["desktop"])
+    assert next(row for row in decisions if row["host_id"] == "desktop")["reason"] == "excluded"
 
 
 def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkeypatch):
@@ -1922,6 +2086,99 @@ def test_default_launch_notebook_does_not_replace_test_workers(tmp_path: Path, m
     assert env["DARKFAC_REMOTE_HARNESS"] == "off"
     assert "DARKFAC_TEST_WORKERS" not in env
     assert "DARKFAC_ADMISSION_WORKERS" not in env
+
+
+def test_fleet_child_gets_its_own_checkout_and_drops_the_parent_session(tmp_path: Path, monkeypatch):
+    """USR-471 T2: a fleet executor does not inherit the chat that started the service."""
+    from core.line.agent_cli import supports
+    from core.line.line_lock import ENV_INHERITED
+    from core.line.local_cancel import ENV_PARENT
+    from core.line.local_progress import ENV_RUN_ID as LOCAL_RUN_ID
+    from core.line.operating_harness import detect_operating_harness
+    from core.line.routing import harness_cli_pin, pick
+    from core.workflow.execution_registry import ENV_EXECUTION_ID
+
+    captured: dict[str, object] = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    checkout = tmp_path / "operational-checkout"
+    shared_state = tmp_path / "shared-state"
+    interactive = tmp_path / "interactive-worktree"
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(shared_state))
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(interactive))
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "grok")
+    monkeypatch.setenv("GROK_SESSION_ID", "parent-grok")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("ANTIGRAVITY_AGENT", "1")
+    monkeypatch.setenv("DARKFAC_TICKET_ID", "USR-1")
+    monkeypatch.setenv(ENV_INHERITED, "1")
+    monkeypatch.setenv(ENV_PARENT, "parent-run")
+    monkeypatch.setenv(LOCAL_RUN_ID, "local-parent")
+    monkeypatch.setenv(ENV_EXECUTION_ID, "exec-parent")
+    monkeypatch.setenv("DARKFAC_RUN_ID", "fleet-parent")
+    monkeypatch.setenv("DARKFAC_RECOVERY_MODE", "1")
+    monkeypatch.setenv("DARKFAC_HARNESS_WORKER_JOB", "1")
+    monkeypatch.setenv("GIT_DIR", str(interactive / ".git"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-keep")
+    monkeypatch.setenv("GH_TOKEN", "ghp_keep")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: checkout)
+    monkeypatch.setattr(
+        fd,
+        "subprocess",
+        type(
+            "Subprocess",
+            (),
+            {"Popen": staticmethod(lambda cmd, **kwargs: captured.update(cmd=cmd, cwd=kwargs["cwd"], env=kwargs["env"]) or Process()), "STDOUT": -2},
+        )(),
+    )
+
+    fd.default_launch("USR-471", fd.HostSpec("notebook", 1), {"id": "USR-471"}, candidate_digest="digest-471")
+
+    env = captured["env"]
+    assert captured["cwd"] == checkout
+    assert Path(captured["cmd"][1]).parent == checkout
+    assert "--fleet" in captured["cmd"]
+    assert "DARKFAC_PROJECT_ROOT" not in env
+    assert env["DARKFAC_STATE_ROOT"] == str(shared_state.resolve())
+    assert env["DARKFAC_FLEET_MODE"] == "1"
+    assert env["DARKFAC_HOST_ID"] == "notebook"
+    assert env["DARKFAC_CANDIDATE_DIGEST"] == "digest-471"
+    assert env["DARKFAC_REMOTE_HARNESS"] == "off"
+    assert "DARKFAC_RECOVERY_MODE" not in env
+    assert env["OPENAI_API_KEY"] == "sk-keep"
+    assert env["GH_TOKEN"] == "ghp_keep"
+    assert env["DARKFAC_FLEET_DISABLED_HOSTS"] == "desktop"
+    assert env["DARKFAC_OPERATING_HARNESS"] == ""
+    leaked = {
+        "GROK_SESSION_ID", "CLAUDECODE", "ANTIGRAVITY_AGENT",
+        "DARKFAC_TICKET_ID", ENV_INHERITED, ENV_PARENT, LOCAL_RUN_ID, ENV_EXECUTION_ID,
+        "DARKFAC_RUN_ID", "DARKFAC_HARNESS_WORKER_JOB", "GIT_DIR",
+    }
+    assert leaked.isdisjoint(env)
+    assert detect_operating_harness(env) is None
+    assert supports("antigravity", "write", execution_context="headless", operating_harness="antigravity") is False
+
+    def quota(provider: str) -> float:
+        return {"anthropic": 90.0, "openai": 40.0, "xai": 80.0, "google": 99.0}[provider]
+
+    route = pick(
+        "development",
+        ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"],
+        mode="write",
+        operating_harness=detect_operating_harness(env),
+        execution_context="headless",
+        quota_lookup=quota,
+        slack_lookup=lambda _provider: None,
+        cooldown_path=tmp_path / "no-cooldowns.json",
+    )
+    from core.models.registry import resolve
+    assert route == ("claude", "sonnet")
+    assert harness_cli_pin("claude", route[1], stage="development")[0] == resolve("sonnet")
 
 
 def test_running_fleet_tickets_reads_live_run_ticket_processes(monkeypatch):

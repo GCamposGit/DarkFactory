@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -253,6 +254,276 @@ def test_default_workers_from_fleet_falls_back_when_config_cannot_load() -> None
     assert remote_dispatch._default_workers_from_fleet(_BrokenFleetConfig()) == remote_dispatch._FALLBACK_DEFAULT_WORKERS
 
 
+def test_worker_urls_uses_persisted_fleet_exclusions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from core.line import fleet_policy
+
+    path = tmp_path / "fleet.json"
+    path.write_text(
+        '{"hosts":[{"id":"desktop","name":"Desktop","priority":1,'
+        '"endpoint":"http://desktop:8080","enabled":true}],"disabled_hosts":["desktop"]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fleet_policy, "DEFAULT_CONFIG_PATH", path)
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    assert remote_dispatch.worker_urls() == []
+
+
+def test_config_disabled_worker_override_is_filtered_before_health_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from core.line import fleet_policy
+
+    path = tmp_path / "fleet.json"
+    path.write_text(
+        '{"hosts":[{"id":"desktop","name":"Desktop","priority":1,'
+        '"endpoint":"http://desktop.internal:8080","enabled":false}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fleet_policy, "DEFAULT_CONFIG_PATH", path)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://desktop.internal:8080")
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    probed: list[str] = []
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda url, **_kwargs: probed.append(url))
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+
+    assert result is None
+    assert remote_dispatch.worker_urls() == []
+    assert probed == []
+    attempts = remote_dispatch.dispatch_attempts()
+    assert attempts[0]["discard_reason"] == "disabled_by_config"
+
+
+def test_custom_worker_url_cannot_bypass_persisted_host_exclusion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from core.line import fleet_policy
+    from core.line.admission_store import AdmissionStore
+
+    path = tmp_path / "fleet.json"
+    path.write_text(
+        '{"hosts":[{"id":"desktop","name":"Desktop","priority":1,'
+        '"endpoint":"http://desktop.internal:8080","enabled":true}],'
+        '"disabled_hosts":["desktop"]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fleet_policy, "DEFAULT_CONFIG_PATH", path)
+    monkeypatch.setattr("core.paths.state_root", lambda: tmp_path)
+    AdmissionStore(tmp_path / "admission.sqlite3")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://alternate-node:8080")
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    probed: list[str] = []
+    monkeypatch.setattr(
+        remote_dispatch, "probe_health",
+        lambda url, **_kwargs: probed.append(url) or {
+            "status": "ok", "node_id": "desktop", "hostname": "desktop-g45ipem",
+            "busy": False, "workers": 1, "available_gib": 16,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "c" * 40)
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        remote_dispatch, "_dispatch_with_restart_retry",
+        lambda url, **_kwargs: submitted.append(url),
+    )
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+
+    assert result is None
+    assert probed == ["http://alternate-node:8080"]
+    assert submitted == []
+    assert remote_dispatch.dispatch_attempts()[0]["discard_reason"] == "excluded"
+
+
+def test_offline_primary_worker_falls_through_to_next_eligible_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080,http://100.78.181.90:8080")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "probe_health",
+        lambda url, **_kwargs: None if "100.77.130.5" in url else {
+            "status": "ok", "node_id": "desktop", "hostname": "desktop-g45ipem",
+            "busy": False, "workers": 1, "available_gib": 8,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda _url, health, **_kwargs: health)
+    monkeypatch.setattr(remote_dispatch, "_policy_reject_reason", lambda _url, _health: None)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "c" * 40)
+    dispatched: list[str] = []
+
+    def _dispatch(url, **_kwargs):
+        dispatched.append(url)
+        return False, None
+
+    monkeypatch.setattr(remote_dispatch, "_dispatch_with_restart_retry", _dispatch)
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=True,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+    assert result is False
+    assert dispatched == ["http://100.78.181.90:8080"]
+    attempts = remote_dispatch.dispatch_attempts()
+    assert attempts[0]["discard_reason"] == "offline_or_health_timeout"
+    assert attempts[0]["candidate_sha"]
+    assert attempts[1]["host_chosen"] == "desktop"
+    assert all(row["candidate_sha"] for row in attempts)
+
+
+def test_remote_worker_candidates_appends_fleet_hosts_when_override_names_only_offline_grokbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-471: an operator DARKFAC_TEST_WORKERS override naming only an offline
+    Grokbox must not strand the fleet there while a healthy, idle Desktop (known to
+    the persisted fleet policy but not named in the override) sits unused."""
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080")
+    assert remote_dispatch.worker_urls() == ["http://100.77.130.5:8080"]
+    candidates = remote_dispatch.remote_worker_candidates()
+    assert candidates == ["http://100.77.130.5:8080", "http://100.78.181.90:8080"]
+
+
+def test_maybe_dispatch_remote_falls_through_when_override_names_only_offline_grokbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "probe_health",
+        lambda url, **_kwargs: None if "100.77.130.5" in url else {
+            "status": "ok", "node_id": "desktop", "hostname": "desktop-g45ipem",
+            "busy": False, "workers": 1, "available_gib": 8,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda _url, health, **_kwargs: health)
+    monkeypatch.setattr(remote_dispatch, "_policy_reject_reason", lambda _url, _health: None)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "c" * 40)
+    dispatched: list[str] = []
+
+    def _dispatch(url, **_kwargs):
+        dispatched.append(url)
+        return True, None
+
+    monkeypatch.setattr(remote_dispatch, "_dispatch_with_restart_retry", _dispatch)
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+    assert result is True
+    assert dispatched == ["http://100.78.181.90:8080"]
+    attempts = remote_dispatch.dispatch_attempts()
+    assert attempts[0]["worker_url"] == "http://100.77.130.5:8080"
+    assert attempts[0]["discard_reason"] == "offline_or_health_timeout"
+    assert attempts[1]["host_chosen"] == "desktop"
+
+
+def test_remote_dispatch_skips_healthy_endpoint_rejected_by_effective_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.78.181.90:8080")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "probe_health",
+        lambda _url, **_kwargs: {
+            "status": "ok", "node_id": "desktop", "busy": False,
+            "workers": 1, "available_gib": 8,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    monkeypatch.setattr(remote_dispatch, "_policy_reject_reason", lambda _url, _health: "reservation_active")
+    submitted: list[str] = []
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "c" * 40)
+    monkeypatch.setattr(remote_dispatch, "_dispatch_with_restart_retry", lambda url, **_kwargs: submitted.append(url))
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+
+    assert result is None
+    assert submitted == []
+    assert remote_dispatch.dispatch_attempts()[0]["discard_reason"] == "reservation_active"
+
+
+def test_remote_worker_candidates_does_not_widen_a_fully_excluded_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-host override naming a host disabled by policy is an explicit,
+    host-level exclusion decision -- it must stay empty rather than reach for other
+    fleet hosts the operator never named (USR-430 regression guard)."""
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.78.181.90:8080")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    assert remote_dispatch.worker_urls() == []
+    assert remote_dispatch.remote_worker_candidates() == []
+
+
+def test_maybe_dispatch_remote_names_reasons_per_candidate_when_none_eligible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-471: when no remote worker is eligible, the local fallback must name the
+    per-candidate reasons instead of silently vanishing into a bare local run."""
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080")
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda url, **_kwargs: None)
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+    assert result is None
+    attempts = remote_dispatch.dispatch_attempts()
+    reasons = {row["worker_url"]: row["discard_reason"] for row in attempts}
+    assert reasons == {
+        "http://100.77.130.5:8080": "offline_or_health_timeout",
+        "http://100.78.181.90:8080": "offline_or_health_timeout",
+    }
+
+
+def test_maybe_dispatch_remote_reports_when_policy_excludes_every_worker(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.78.181.90:8080")
+    monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "probe_health",
+        lambda *_args, **_kwargs: pytest.fail("excluded workers must not be probed"),
+    )
+
+    result = remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=False,
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    )
+
+    assert result is None
+    assert "no eligible remote workers" in capsys.readouterr().out
+    assert remote_dispatch.dispatch_attempts()[0]["discard_reason"] == "excluded"
+
+
 def test_worker_urls_filters_disabled_desktop_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
     monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
@@ -460,7 +731,7 @@ def test_offline_worker_with_remote_required_raises(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
     monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **k: None)
 
-    with pytest.raises(remote_dispatch.RemoteRequiredError):
+    with pytest.raises(remote_dispatch.RemoteRequiredError) as raised:
         remote_dispatch.maybe_dispatch_remote(
             steps=_minimal_steps(),
             config_hash="a" * 64,
@@ -474,6 +745,9 @@ def test_offline_worker_with_remote_required_raises(monkeypatch: pytest.MonkeyPa
             emit_cache_hit=_noop_emit_cache_hit,
             notify_hub_on_pass=lambda: None,
         )
+    assert raised.value.error_code == "remote_required_unavailable"
+    assert raised.value.cause_code == "no_reachable_worker"
+    assert raised.value.resumable is True
 
 
 def test_busy_worker_waits_then_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -528,6 +802,7 @@ def test_maybe_dispatch_remote_opportunistically_falls_through_fleet_order(monke
         return True, HarnessResult.model_validate(_valid_remote_result_json())
 
     monkeypatch.setattr(remote_dispatch, "probe_health", _probe)
+    monkeypatch.setattr(remote_dispatch, "_policy_reject_reason", lambda _url, _health: None)
     monkeypatch.setattr(remote_dispatch, "_dispatch_one_job", _fake_dispatch_one_job)
     monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "a" * 40)
 

@@ -1,12 +1,17 @@
 {
-  "_comment": "Topologia da frota de execucao distribuida com ate 3 demandas simultaneas (USR-277 / USR-280 / USR-492). Prioridade Notebook > Grokbox > Desktop.",
+  "_comment": "Topologia persistente da frota de execucao distribuida (USR-277 / USR-280 / USR-471 / USR-492). Prioridade Notebook > Grokbox > Desktop.",
   "max_fleet_slots": 3,
+  "disabled_hosts": [],
   "hosts": [
     {
       "id": "notebook",
       "name": "Notebook",
       "priority": 1,
       "max_slots": 1,
+      "enabled": true,
+      "endpoint": null,
+      "max_workers": 1,
+      "min_free_memory_gib": 1.5,
       "platform": "windows",
       "tags": ["local", "notebook"]
     },
@@ -15,6 +20,10 @@
       "name": "Grokbox",
       "priority": 2,
       "max_slots": 1,
+      "enabled": true,
+      "endpoint": "http://100.77.130.5:8080",
+      "max_workers": 1,
+      "min_free_memory_gib": 0,
       "platform": "linux",
       "tags": ["remote", "grokbox"]
     },
@@ -23,6 +32,10 @@
       "name": "Desktop",
       "priority": 3,
       "max_slots": 1,
+      "enabled": true,
+      "endpoint": "http://100.78.181.90:8080",
+      "max_workers": 1,
+      "min_free_memory_gib": 0,
       "platform": "windows",
       "tags": ["remote", "desktop", "test_worker"]
     }

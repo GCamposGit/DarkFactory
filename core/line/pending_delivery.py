@@ -748,6 +748,38 @@ def _reconcile_terminal_ticket(
     return None
 
 
+def _launch_resume_child(path: Path, row: PendingDelivery, repo_root: Path, worktree: Path) -> dict:
+    """Spawn a standalone resume child with isolated headless environment and persist state."""
+    from core.line.operating_harness import headless_executor_env
+
+    row.run_id = f"pending-{row.ticket_id}-{uuid.uuid4().hex}"
+    # Resume keeps the canonical line lock (no --fleet). It still must not inherit
+    # the interactive session that started the dispatcher, nor that session's checkout.
+    env = headless_executor_env(
+        os.environ,
+        project_root=repo_root,
+        state_root=state_root().resolve(),
+        fleet=False,
+    )
+    env["DARKFAC_RUN_ID"] = row.run_id
+    cmd = [sys.executable, str(repo_root / "run_ticket.py")]
+    if row.resume_delivery:
+        cmd += ["--resume-delivery", row.ticket_id, "--worktree", str(worktree)]
+    else:
+        cmd += [row.ticket_id]
+    log_path = path.with_suffix(".log")
+    env["DARKFAC_RUN_LOG"] = str(log_path)
+    with log_path.open("ab") as log:
+        child = subprocess.Popen(cmd, cwd=repo_root, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    row.pid, row.status = child.pid, "running"
+    row.started_at = time.time()
+    _children[child.pid] = child
+    _save(path, row)
+    return {"ticket": row.ticket_id, "status": "running", "pid": child.pid,
+            "stage": row.stage, "started_at": row.started_at, "heartbeat_epoch": row.started_at}
+
+
 def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     from core.demands.queue_store import control_store
     from core.git.ticket_workspace import list_worktrees
@@ -871,25 +903,7 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         row.resume_delivery = True
     if reopen:
         logger.info("reopening preserved review wait for %s cause=%s", row.ticket_id, row.cause)
-    row.run_id = f"pending-{row.ticket_id}-{uuid.uuid4().hex}"
-    env = dict(os.environ, DARKFAC_STATE_ROOT=str(state_root().resolve()), DARKFAC_RUN_ID=row.run_id)
-    env.pop("DARKFAC_OPERATING_HARNESS", None)
-    cmd = [sys.executable, str(repo_root / "run_ticket.py")]
-    if row.resume_delivery:
-        cmd += ["--resume-delivery", row.ticket_id, "--worktree", str(worktree)]
-    else:
-        cmd += [row.ticket_id]
-    log_path = path.with_suffix(".log")
-    env["DARKFAC_RUN_LOG"] = str(log_path)
-    with log_path.open("ab") as log:
-        child = subprocess.Popen(cmd, cwd=repo_root, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    row.pid, row.status = child.pid, "running"
-    row.started_at = time.time()
-    _children[child.pid] = child
-    _save(path, row)
-    return {"ticket": row.ticket_id, "status": "running", "pid": child.pid,
-            "stage": row.stage, "started_at": row.started_at, "heartbeat_epoch": row.started_at}
+    return _launch_resume_child(path, row, repo_root, worktree)
 
 
 def acknowledge_deploy(repo_root: Path, rows: list[dict]) -> None:
