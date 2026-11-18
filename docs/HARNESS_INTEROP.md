@@ -228,22 +228,34 @@ rodar qualquer coisa neste processo — via `core/harness/remote_dispatch.py`
 que dispare `runner.py` (Notebook interativo, VPS, outro agente) do custo
 de CPU/tempo da suíte, desde que o worker esteja disponível.
 
-### Workers de teste oficiais (14/10/2026)
+### Workers de teste oficiais (16/11/2026 — USR-492)
+
+A ordem default (`core.harness.remote_dispatch.DEFAULT_WORKERS`, sem
+`DARKFAC_TEST_WORKERS`) nunca mais é uma lista hardcoded: é derivada em
+tempo de import de `.factory/config/line_fleet.json` (a mesma fonte única
+usada pela admissão de tickets em `core.line.fleet_policy`), ordenando os
+hosts por `priority` e mapeando cada `host.id` para o endpoint Tailscale do
+seu worker opcional (`HOST_WORKER_URLS`). Hoje essa ordem é:
 
 | Ordem | Worker | URL | SO | Portao `--quick` | Observacao |
 | --- | --- | --- | --- | --- | --- |
-| 1 | grokbox (`grok-bot-vm-418374532`) | `http://100.77.130.5:8080` | Linux, Python 3.13 | ~143 s (4157 passed) | rota via relay DERP; sonda `/health` de 10 s (`DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=10`) |
-| 2 | Desktop (`darkfac-desktop`) | `http://100.78.181.90:8080` | Windows 10 | ~10 min | segundo da lista |
-| 3 | local (Notebook) | - | Windows 11 | 23-30 min | fallback quando nenhum worker responde |
+| 1 | Notebook (`ai-notebook`) | `http://100.81.84.124:8080` | Windows 11 | 23-30 min | máquina de dev interativa; quando o portão roda no próprio Notebook, a guarda de self-dispatch o remove da lista e o próximo da ordem (Grokbox) vira o primeiro candidato de fato |
+| 2 | grokbox (`grok-bot-vm-418374532`) | `http://100.77.130.5:8080` | Linux, Python 3.13 | ~143 s (4157 passed) | oportunista: tentado sempre que no ar; rota via relay DERP, sonda `/health` de 10 s (`DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=10`); queda é esperada e não bloqueia o ciclo |
+| 3 | Desktop (`darkfac-desktop`) | `http://100.78.181.90:8080` | Windows 10 | ~10 min | último da lista — índexação pesada, sujeito a quedas |
 
-Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
+Mudar a ordem é editar `.factory/config/line_fleet.json` (campo `priority`
+de cada host); nenhuma constante em `core/harness/remote_dispatch.py`
+precisa mudar. Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
 
 ### Topologia e decisão do owner (final)
 
-- **Desktop** (`darkfac-desktop`, Tailscale `100.78.181.90`, Windows 10,
-  i7-4790K 4C/8T, 16 GB) é **sempre** o worker primário de testes — decisão
-  do owner, para manter o **Notebook** (`100.81.84.124`, Windows 11, máquina
-  de dev interativa) livre.
+- Decisão do owner de 09/11 (USR-492): **Notebook** primeiro (dedicado, nunca
+  ocioso), **Grokbox** oportunista em segundo (tentado sempre que no ar — uma
+  queda é esperada, não gera alerta e é sondada de novo no ciclo seguinte) e
+  **Desktop** por último (indexação pesada, sujeito a quedas). A mesma ordem
+  vale tanto para a admissão de tickets (`.factory/config/line_fleet.json`
+  via `core.line.fleet_policy`) quanto para o portão remoto de testes
+  (`core.harness.remote_dispatch`) — uma única fonte de verdade.
 - **VPS** (`darkfac-vps-primary`, `100.83.176.60`, Linux Docker, 2 vCPU) é
   usada como fallback/adicional apenas se o owner adicionar seu endpoint a
   `DARKFAC_TEST_WORKERS` explicitamente — não é o padrão.
@@ -252,12 +264,15 @@ Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
 
 ### Fallback (regras do owner, não renegociar)
 
-1. Desktop offline (probe de `GET /health` falha) → roda localmente
-   imediatamente.
-2. Desktop ocupado (`busy: true` no `/health`, outro job já rodando —
+1. Worker da vez (na ordem Notebook > Grokbox > Desktop) offline (probe de
+   `GET /health` falha) → tenta o próximo da ordem sem avisar; só roda
+   localmente quando nenhum deles responde. Uma queda do Grokbox em
+   particular é esperada (owner, USR-492): nunca gera alerta nem bloqueia o
+   ciclo, e ele volta a ser sondado no ciclo seguinte.
+2. Worker da vez ocupado (`busy: true` no `/health`, outro job já rodando —
    single worker thread FIFO no worker) → aguarda até
    `DARKFAC_REMOTE_BUSY_WAIT_SEC` (padrão 300s) fazendo polling do health;
-   se continuar ocupado, roda localmente.
+   se continuar ocupado, tenta o próximo da ordem.
 3. Nenhum worker utilizável e `--remote-required`/
    `DARKFAC_REMOTE_HARNESS=required` **não** foi passado → roda localmente,
    silenciosamente (comportamento padrão, `auto`).
@@ -367,16 +382,18 @@ reporta), o que impede um loop worker→worker.
 Não existe opt-in por harness: **todo** `python core/harness/runner.py
 --quick` (Claude Code, Codex, Grok, Antigravity, CI local de um dev, ou o
 `core.harness.affected --run`) passa pelo mesmo `run_with_cache()`, que
-tenta o despacho remoto antes de cair para o caminho local de sempre. A VPS
-e o Notebook passam a rodar a suíte no Desktop sem nenhuma mudança de
-comando — só precisam conseguir alcançar `100.78.181.90:8080` pelo
-Tailscale (o que já é verdade para qualquer host no tailnet).
+tenta o despacho remoto antes de cair para o caminho local de sempre. Qualquer
+host do tailnet passa a rodar a suíte em outro host da frota (ordem Notebook >
+Grokbox > Desktop, com a guarda de self-dispatch removendo o próprio host da
+lista) sem nenhuma mudança de comando — só precisa conseguir alcançar a porta
+`8080` dos demais pelo Tailscale (o que já é verdade para qualquer host no
+tailnet).
 
 ### Variáveis de ambiente (remote dispatch)
 
 | Variável | Efeito | Default |
 | --- | --- | --- |
-| `DARKFAC_TEST_WORKERS` | Lista ordenada (vírgula) de base URLs de workers; o primeiro alcançável, não-ocupado e que não seja a própria máquina vence | `http://100.78.181.90:8080` (padrao no codigo; grokbox primeiro no deploy da VPS e, apos o patch `docs/proposals/GROKBOX-default-workers.md`, tambem no codigo) |
+| `DARKFAC_TEST_WORKERS` | Lista ordenada (vírgula) de base URLs de workers; o primeiro alcançável, não-ocupado e que não seja a própria máquina vence | Ausente -> derivado de `.factory/config/line_fleet.json` (Notebook > Grokbox > Desktop, USR-492); nunca mais hardcoded em `remote_dispatch.py` |
 | `DARKFAC_FLEET_DISABLED_HOSTS` | Lista ordenada (vírgula) de hosts desabilitados (ex.: desktop). O remote dispatch filtra automaticamente workers associados a esses hosts e nunca envia jobs nem sondas a eles (USR-430) | — |
 | `DARKFAC_WORKER_HEALTH_TIMEOUT_SEC` | Timeout da sonda `/health` de cada worker (segundos) | `2` no codigo hoje; `10` no deploy da VPS e apos o patch GROKBOX |
 | `DARKFAC_REMOTE_HARNESS` | `auto` (tenta remoto, cai para local), `off` (nunca despacha), `required` (exige remoto; falha em vez de cair para local) | `auto` |

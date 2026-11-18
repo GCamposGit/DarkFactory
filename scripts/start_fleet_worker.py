@@ -2,13 +2,13 @@
 
 Manages lifecycle (start, drain, stop, status, probe, rollback) for the three-host
 DarkFac fleet topology:
-- Grokbox (Linux, Priority 1, Capacity 1)
-- Notebook (Windows, Priority 2, Capacity 1)
+- Notebook (Windows, Priority 1, Capacity 1)
+- Grokbox (Linux, Priority 2, Capacity 1)
 - Desktop (Windows, Priority 3, Capacity 1)
 
 Key contracts:
 1. Exactly 1 cycle per host, maximum 3 cycles fleet-wide.
-2. Priority: Grokbox (1) > Notebook (2) > Desktop (3).
+2. Priority: Notebook (1) > Grokbox (2) > Desktop (3).
 3. Decoupled from model routing: does not pin harness or model.
 4. Idempotent bootstrap: safe to invoke repeatedly without duplicate processes.
 5. Graceful drain: stops claiming new cycles while letting in-flight work finish.
@@ -45,14 +45,14 @@ _PIDS_DIR = _REPO_ROOT / ".factory" / "pids"
 _FLEET_CONFIG_PATH = _REPO_ROOT / ".factory" / "config" / "line_fleet.json"
 
 FLEET_HOST_PRIORITIES: dict[str, int] = {
-    "grokbox": 1,
-    "notebook": 2,
+    "notebook": 1,
+    "grokbox": 2,
     "desktop": 3,
 }
 
 FLEET_PRIORITY_LABELS: dict[str, str] = {
-    "grokbox": "primary",
-    "notebook": "secondary",
+    "notebook": "primary",
+    "grokbox": "secondary",
     "desktop": "fallback",
 }
 
@@ -63,7 +63,7 @@ class HostInventory(BaseModel):
     host_id: str = Field(description="Logical host identifier: grokbox, notebook, desktop")
     hostname: str = Field(description="Host machine network name")
     platform: str = Field(description="OS platform: linux or windows")
-    priority: int = Field(ge=1, description="Host priority: 1=Grokbox, 2=Notebook, 3=Desktop")
+    priority: int = Field(ge=1, description="Host priority: 1=Notebook, 2=Grokbox, 3=Desktop")
     max_slots: int = Field(default=1, description="Capacity ceiling: 1 cycle per host")
     database_connected: bool = Field(default=False, description="Postgres control store connectivity")
     database_status: str = Field(default="unknown", description="Postgres probe status: ready, blocked, or error")

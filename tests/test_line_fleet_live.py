@@ -21,6 +21,7 @@ import pytest
 
 from core.line.bindings import LINE_STAGES
 from core.line.resource_lease import ResourceBusyError, ResourceLeaseCoordinator
+from scripts.start_fleet_worker import FLEET_HOST_PRIORITIES
 from core.workflow.line_live import (
     LineLiveSnapshot,
     LiveExecutableQueue,
@@ -128,6 +129,13 @@ def test_fleet_status_host_slot_projection() -> None:
     fleet = _build_fleet(DummyRaw(), now)  # type: ignore[arg-type]
     assert fleet.max_fleet_slots == 3
     assert fleet.active_slots == 2
+
+    assert [(h.host_id, h.priority, h.max_slots) for h in fleet.hosts] == [
+        ("notebook", 1, 1),
+        ("grokbox", 2, 1),
+        ("desktop", 3, 1),
+    ]
+    assert [h.priority for h in fleet.hosts] == [FLEET_HOST_PRIORITIES[h.host_id] for h in fleet.hosts]
 
     hosts_by_id = {h.host_id: h for h in fleet.hosts}
     assert "grokbox" in hosts_by_id

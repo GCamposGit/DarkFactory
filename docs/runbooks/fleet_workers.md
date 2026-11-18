@@ -6,13 +6,13 @@ A frota da Dark Factory opera com capacidade para até **3 ciclos simultâneos**
 
 | Host ID | Máquina | Sistema Operacional | Prioridade | Capacidade (MaxSlots) | Papel Típico |
 |---|---|---|---|---|---|
-| `grokbox` | Grokbox VM | Linux (Ubuntu) | 1 (Primary) | 1 | Runner de alta velocidade (testes em ~2-4 min) |
-| `notebook` | AI_Notebook | Windows 11 | 2 (Secondary) | 1 | Máquina de desenvolvimento e orquestração local |
+| `notebook` | AI_Notebook | Windows 11 | 1 (Primary) | 1 | Máquina de desenvolvimento e orquestração local |
+| `grokbox` | Grokbox VM | Linux (Ubuntu) | 2 (Secondary) | 1 | Runner de alta velocidade (testes em ~2-4 min), tentado quando está no ar |
 | `desktop` | DESKTOP-G45IPEM | Windows 10/11 | 3 (Fallback) | 1 | Test worker Windows, Docker, GPU local |
 
 ### Princípios Operacionais Inegociáveis
 1. **1 ciclo por host**: Cada máquina executa estritamente uma demanda completa por vez (preparação, desenvolvimento, validação, revisão, integração e release).
-2. **Prioridade não bloqueante**: Se Grokbox estiver livre, recebe a próxima demanda; se estiver ocupado ou em drain, o Notebook é admitido sem espera; se ambos ocupados, o Desktop é admitido.
+2. **Prioridade não bloqueante**: Se o Notebook estiver livre, recebe a próxima demanda; se estiver ocupado ou em drain, o Grokbox é admitido sem espera; se ambos ocupados, o Desktop é admitido.
 3. **Desacoplamento de Harness**: Máquina e Harness são decisões distintas. Não fixar Grok no Grokbox ou Codex no Notebook. A escolha de harness por estágio segue `core.line.routing.pick('development')` com piso de cota de 15.0%.
 4. **Isolamento de Worktrees**: Cada demanda roda em sua própria worktree isolada (`.worktrees/usr-XXX`).
 5. **Autonomia Git, Deploy e Backup (USR-57)**: Nunca solicitar comandos Git manuais (`commit`, `push`, `merge`), deploys ou rotinas de backup ao Owner.

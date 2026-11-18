@@ -136,7 +136,7 @@ def test_coordinator_admits_up_to_three_cycles_distinct_hosts(fleet_store: Postg
 
     assert len(admitted) == 3
     hosts = [r.host_id.lower() for r in admitted]
-    assert hosts == ["grokbox", "notebook", "desktop"]
+    assert hosts == ["notebook", "grokbox", "desktop"]
 
     active = fleet_store.list_active_reservations()
     assert len(active) == 3
@@ -160,7 +160,7 @@ def test_cycle_affinity_demand_remains_on_reserved_host_across_stages(fleet_stor
     )
     admitted = coordinator.admit_eligible_cycles(now=now)
     assert len(admitted) == 1
-    assert admitted[0].host_id == "grokbox"
+    assert admitted[0].host_id == "notebook"
 
     grill_handler = _TestStageHandler(outcome="success")
     planning_handler = _TestStageHandler(outcome="success")
@@ -174,26 +174,26 @@ def test_cycle_affinity_demand_remains_on_reserved_host_across_stages(fleet_stor
     worker_desktop = CloudWorker(worker_id="worker-desktop", host_id="desktop", store=fleet_store, registry=registry)
 
     # 1. Non-reserved workers attempt to claim stage grill -> rejected by host affinity
-    assert worker_notebook.poll_and_execute_once(now=now) is False
+    assert worker_grokbox.poll_and_execute_once(now=now) is False
     assert worker_desktop.poll_and_execute_once(now=now) is False
 
-    # 2. Reserved worker on grokbox claims and executes grill
-    assert worker_grokbox.poll_and_execute_once(now=now) is True
+    # 2. Reserved worker on notebook claims and executes grill
+    assert worker_notebook.poll_and_execute_once(now=now) is True
     assert grill_handler.call_count == 1
 
     # Stage successor (planning) is now pending
     # 3. Non-reserved workers attempt to claim stage planning -> still rejected by affinity!
-    assert worker_notebook.poll_and_execute_once(now=now) is False
+    assert worker_grokbox.poll_and_execute_once(now=now) is False
     assert worker_desktop.poll_and_execute_once(now=now) is False
 
     # 4. Reserved worker claims planning and executes
-    assert worker_grokbox.poll_and_execute_once(now=now) is True
+    assert worker_notebook.poll_and_execute_once(now=now) is True
     assert planning_handler.call_count == 1
 
     # Reservation remains active throughout
     res = fleet_store.get_active_reservation_for_run(run_id)
     assert res is not None
-    assert res.host_id == "grokbox"
+    assert res.host_id == "notebook"
     assert res.is_active is True
 
 
@@ -248,12 +248,12 @@ def test_simultaneous_replenishment_after_completions(fleet_store: PostgresContr
     assert len(admitted) == 3
     assert {r.host_id.lower() for r in admitted} == {"grokbox", "notebook", "desktop"}
 
-    res_grokbox = admitted[0]
-    res_notebook = admitted[1]
+    released = admitted[:2]
+    assert {r.host_id.lower() for r in released} == {"notebook", "grokbox"}
 
-    # Two cycles finish simultaneously (grokbox and notebook)
-    fleet_store.release_reservation(res_grokbox.reservation_id, res_grokbox.fencing_token, status="completed", now=now)
-    fleet_store.release_reservation(res_notebook.reservation_id, res_notebook.fencing_token, status="completed", now=now)
+    # Two cycles finish simultaneously (notebook and grokbox)
+    for res in released:
+        fleet_store.release_reservation(res.reservation_id, res.fencing_token, status="completed", now=now)
 
     active_before = fleet_store.list_active_reservations()
     assert len(active_before) == 1
@@ -290,7 +290,7 @@ def test_empty_queue_graceful_and_new_arrival_immediate(fleet_store: PostgresCon
     admitted = coordinator.admit_eligible_cycles(now=now)
     assert len(admitted) == 1
     assert admitted[0].ticket_id == "USR-NEW"
-    assert admitted[0].host_id.lower() == "grokbox"
+    assert admitted[0].host_id.lower() == "notebook"
 
 
 def test_waiting_human_parks_and_frees_slot_without_fourth_cycle(fleet_store: PostgresControlStore) -> None:
@@ -311,25 +311,25 @@ def test_waiting_human_parks_and_frees_slot_without_fourth_cycle(fleet_store: Po
 
     admitted = coordinator.admit_eligible_cycles(now=now)
     assert len(admitted) == 3
-    # T1 is on grokbox
+    # T1 is on notebook
 
     # T1 handler emits waiting_human
     human_handler = _TestStageHandler(outcome="waiting_human", cause_code="needs_clarification")
     registry = _build_test_registry({"grill": human_handler})
-    worker_grokbox = CloudWorker(worker_id="worker-grokbox", host_id="grokbox", store=fleet_store, registry=registry)
+    worker_notebook = CloudWorker(worker_id="worker-notebook", host_id="notebook", store=fleet_store, registry=registry)
 
-    worker_grokbox.poll_and_execute_once(now=now)
+    worker_notebook.poll_and_execute_once(now=now)
     assert human_handler.call_count == 1
 
-    # T1 reservation should now be released/parked so grokbox is free
+    # T1 reservation should now be released/parked so notebook is free
     res_t1 = fleet_store.get_active_reservation_for_run(run_t1)
     assert res_t1 is None
 
-    # T4 is admitted onto the freed grokbox slot!
+    # T4 is admitted onto the freed notebook slot
     admitted_second = coordinator.admit_eligible_cycles(now=now)
     assert len(admitted_second) == 1
     assert admitted_second[0].ticket_id == "T4"
-    assert admitted_second[0].host_id.lower() == "grokbox"
+    assert admitted_second[0].host_id.lower() == "notebook"
 
     # Active reservations count is 3 (T2, T3, T4)
     active = fleet_store.list_active_reservations()
@@ -346,16 +346,17 @@ def test_waiting_human_parks_and_frees_slot_without_fourth_cycle(fleet_store: Po
     admitted_blocked = coordinator.admit_eligible_cycles(now=now)
     assert len(admitted_blocked) == 0
 
-    # One active ticket completes (e.g. T2 on notebook)
+    # One active ticket completes (T2 on grokbox)
     res_t2 = fleet_store.get_active_reservation_for_ticket("darkfac", "T2")
     assert res_t2 is not None
+    assert res_t2.host_id.lower() == "grokbox"
     fleet_store.release_reservation(res_t2.reservation_id, res_t2.fencing_token, status="completed", now=now)
 
-    # Now T1 is readmitted onto notebook!
+    # T4 occupies notebook and T3 occupies desktop, so T1 returns on grokbox
     admitted_resumed = coordinator.admit_eligible_cycles(now=now)
     assert len(admitted_resumed) == 1
     assert admitted_resumed[0].ticket_id == "T1"
-    assert admitted_resumed[0].host_id.lower() == "notebook"
+    assert admitted_resumed[0].host_id.lower() == "grokbox"
 
 
 def test_host_offline_expiration_fencing_recovery(fleet_store: PostgresControlStore) -> None:
@@ -371,16 +372,16 @@ def test_host_offline_expiration_fencing_recovery(fleet_store: PostgresControlSt
     admitted = coordinator.admit_eligible_cycles(now=t0)
     assert len(admitted) == 1
     res_initial = admitted[0]
-    assert res_initial.host_id == "grokbox"
+    assert res_initial.host_id == "notebook"
     assert res_initial.fencing_token == 1
 
-    # Worker on grokbox claims the job
-    stale_claim = fleet_store.claim(worker="worker-grokbox", capabilities=["grill_engine"], now=t0)
+    # Worker on notebook claims the job
+    stale_claim = fleet_store.claim(worker="worker-notebook", capabilities=["grill_engine"], now=t0)
     assert stale_claim is not None
 
-    # Host grokbox goes offline for 60 seconds (lease_duration_sec is 30)
+    # Host notebook goes offline for 60 seconds (lease_duration_sec is 30)
     t_stale = t0 + timedelta(seconds=65)
-    coordinator.host_health_prober = lambda h: h.lower() != "grokbox"
+    coordinator.host_health_prober = lambda h: h.lower() != "notebook"
 
     # Sweep expired claims to return abandoned job to pending
     reconcile_portfolio_state(fleet_store, now=t_stale)
@@ -390,14 +391,14 @@ def test_host_offline_expiration_fencing_recovery(fleet_store: PostgresControlSt
     assert len(expired) == 1
     assert expired[0].reservation_id == res_initial.reservation_id
 
-    # The pending job is readmitted onto a healthy host (notebook) with a new reservation
+    # The pending job is readmitted onto the next healthy host (grokbox) with a new reservation
     re_admitted = coordinator.admit_eligible_cycles(now=t_stale)
     assert len(re_admitted) == 1
     res_new = re_admitted[0]
-    assert res_new.host_id.lower() == "notebook"
+    assert res_new.host_id.lower() == "grokbox"
     assert res_new.ticket_id == "USR-FAILOVER"
 
-    # Stale worker on grokbox attempts late finish -> rejected with StaleLeaseError!
+    # Stale worker on notebook attempts late finish -> rejected with StaleLeaseError!
     with pytest.raises(StaleLeaseError):
         fleet_store.finish(
             stale_claim,

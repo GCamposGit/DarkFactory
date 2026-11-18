@@ -14771,5 +14771,38 @@
     "dependencies": [],
     "created_at": "2026-11-08T14:43:24.779367Z",
     "updated_at": "2026-11-17T23:44:38.225042Z"
+  },
+  {
+    "id": "USR-492",
+    "project_id": "darkfac",
+    "title": "Prioridade de hosts Notebook, Grokbox oportunista e Desktop por ultimo",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "ticket/usr-492",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Decisao do owner em 09/11: ordem da frota 1) Notebook, dedicado e nunca ocioso; 2) Grokbox sempre tentado quando no ar, queda e esperada, a fabrica se recupera sem alerta e tenta de novo no ciclo seguinte; 3) Desktop por ultimo, em indexacao pesada e sujeito a quedas. Hoje .factory/config/line_fleet.json usa Grokbox 1, Notebook 2 e Desktop 3, e testes fixam essa ordem.",
+    "core_journey": [
+      "Decisao do owner em 09/11: ordem da frota 1) Notebook, dedicado e nunca ocioso; 2) Grokbox sempre tentado quando no ar, queda e esperada, a fabrica se recupera sem alerta e tenta de novo no ciclo seguinte; 3) Desktop por ultimo, em indexacao pesada e sujeito a quedas. Hoje .factory/config/line_fleet.json usa Grokbox 1, Notebook 2 e Desktop 3, e testes fixam essa ordem."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "line_fleet.json e fleet_policy aplicam Notebook, Grokbox, Desktop; docs e testes refletem a ordem",
+      "Com tickets elegiveis e rota, Notebook livre sempre recebe trabalho antes dos demais",
+      "Grokbox offline nao gera alerta, nao bloqueia o ciclo e e sondado de novo no ciclo seguinte; ticket em voo perdido volta a fila e retoma em outro host",
+      "Portao remoto respeita a mesma ordem oportunista e cai para o proximo host sem intervencao",
+      "Testes de comportamento cobrem ordem, Grokbox offline e retomada apos queda"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-09T08:41:16.764734Z",
+    "updated_at": "2026-11-17T14:19:06.069957Z"
   }
 ]

@@ -11,7 +11,10 @@ VPS) runs the suite.
 Topology and fallback rules (owner decision, not re-litigated here):
 
 - ``DARKFAC_TEST_WORKERS`` -- ordered, comma-separated base URLs; the first
-  reachable, non-self, non-busy worker wins.
+  reachable, non-self, non-busy worker wins. Unset -> the order derived from the
+  fleet's single source of truth (``.factory/config/line_fleet.json``, see
+  :func:`_default_workers_from_fleet`), today Notebook > Grokbox > Desktop
+  (USR-492) -- never a hardcoded grokbox-first list.
 - Worker offline -> next worker, or local immediately.
 - Worker busy -> poll its ``/health`` for up to
   ``DARKFAC_REMOTE_BUSY_WAIT_SEC`` (default 300s), then move on.
@@ -79,6 +82,7 @@ from core.harness.markers import (
 )
 from core.harness.models import HarnessResult, HarnessStepConfig
 from core.infra.host_identity import HOST_ALIASES, logical_host
+from core.line.fleet_policy import FleetConfig, load_fleet_config
 
 # --- env vars / constants ---------------------------------------------------
 
@@ -113,9 +117,39 @@ KNOWN_HOST_IDENTIFIERS: dict[str, frozenset[str]] = {
     host: aliases for host, aliases in HOST_ALIASES.items()
 }
 
-#: grokbox (Linux, Tailscale 100.77.130.5) first: it runs the official gate in ~143 s
-#: (4157 passed, 14/10/2026) versus 23-30 min on the Notebook; the Desktop is second.
-DEFAULT_WORKERS = "http://100.77.130.5:8080,http://100.78.181.90:8080"
+#: USR-492: Tailscale endpoint of each fleet host's optional on-prem worker service
+#: (``core.harness.remote_worker`` / ``scripts/start_fleet_worker.py``). Only a host
+#: listed here can appear in the derived default worker order below; a host without
+#: one (e.g. a laptop that never runs the service) is simply absent from it.
+HOST_WORKER_URLS: dict[str, str] = {
+    "notebook": "http://100.81.84.124:8080",
+    "grokbox": "http://100.77.130.5:8080",
+    "desktop": "http://100.78.181.90:8080",
+}
+
+#: Used only when the fleet config cannot be loaded (missing file, malformed JSON);
+#: mirrors load_fleet_config()'s own built-in defaults (Notebook > Grokbox > Desktop).
+_FALLBACK_DEFAULT_WORKERS = "http://100.81.84.124:8080,http://100.77.130.5:8080,http://100.78.181.90:8080"
+
+
+def _default_workers_from_fleet(fleet_config: FleetConfig | None = None) -> str:
+    """Ordered worker URL list derived from the fleet's single source of truth
+    (``.factory/config/line_fleet.json``), never a hardcoded grokbox-first order
+    (USR-492). Priority follows ``FleetConfig.sorted_hosts()`` (today Notebook >
+    Grokbox > Desktop); a host absent from :data:`HOST_WORKER_URLS` is skipped.
+    ``DARKFAC_TEST_WORKERS`` always overrides the result (see :func:`worker_urls`)."""
+
+    try:
+        hosts = (fleet_config or load_fleet_config()).sorted_hosts()
+    except Exception:
+        return _FALLBACK_DEFAULT_WORKERS
+    ordered = [HOST_WORKER_URLS[h.id] for h in hosts if h.id in HOST_WORKER_URLS]
+    return ",".join(ordered) if ordered else _FALLBACK_DEFAULT_WORKERS
+
+
+#: Snapshot of the fleet order at import time (USR-492). ``run_ticket.py`` and
+#: ``core.line.grokbox_wake`` read this as a plain string, same as before.
+DEFAULT_WORKERS = _default_workers_from_fleet()
 DEFAULT_BUSY_WAIT_SEC = 300.0
 #: Bound unreachable connections even on hosts configured with required remote dispatch.
 HEALTH_PROBE_TIMEOUT_SEC = 5.0

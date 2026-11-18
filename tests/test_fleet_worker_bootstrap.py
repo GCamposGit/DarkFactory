@@ -50,20 +50,20 @@ def test_inventory_verifies_three_hosts_topology(tmp_path: Path) -> None:
     """Inventário valida Grokbox Linux, Notebook Windows e Desktop Windows,
     com prioridade 1/2/3, capacidade 1/1/1 e sem fixação de harness/modelo."""
 
-    # 1. Grokbox (Linux, Priority 1, Cap 1)
-    grok_inv = probe_host_inventory(host_id="grokbox", repo_root=tmp_path)
-    assert grok_inv.host_id == "grokbox"
-    assert grok_inv.platform == "linux"
-    assert grok_inv.priority == 1
-    assert grok_inv.max_slots == 1
-    assert "remote_linux" in grok_inv.tags
-
-    # 2. Notebook (Windows, Priority 2, Cap 1)
+    # 1. Notebook (Windows, Priority 1, Cap 1)
     note_inv = probe_host_inventory(host_id="notebook", repo_root=tmp_path)
     assert note_inv.host_id == "notebook"
     assert note_inv.platform == "windows"
-    assert note_inv.priority == 2
+    assert note_inv.priority == 1
     assert note_inv.max_slots == 1
+
+    # 2. Grokbox (Linux, Priority 2, Cap 1)
+    grok_inv = probe_host_inventory(host_id="grokbox", repo_root=tmp_path)
+    assert grok_inv.host_id == "grokbox"
+    assert grok_inv.platform == "linux"
+    assert grok_inv.priority == 2
+    assert grok_inv.max_slots == 1
+    assert "remote_linux" in grok_inv.tags
 
     # 3. Desktop (Windows, Priority 3, Cap 1)
     desk_inv = probe_host_inventory(host_id="desktop", repo_root=tmp_path)
@@ -87,12 +87,12 @@ def test_inventory_verifies_three_hosts_topology(tmp_path: Path) -> None:
 
 def test_priority_labels_match_fleet_design() -> None:
     """Verifica mapeamento de prioridade para a fila de execução."""
-    assert FLEET_PRIORITY_LABELS["grokbox"] == "primary"
-    assert FLEET_PRIORITY_LABELS["notebook"] == "secondary"
+    assert FLEET_PRIORITY_LABELS["notebook"] == "primary"
+    assert FLEET_PRIORITY_LABELS["grokbox"] == "secondary"
     assert FLEET_PRIORITY_LABELS["desktop"] == "fallback"
 
-    assert FLEET_HOST_PRIORITIES["grokbox"] == 1
-    assert FLEET_HOST_PRIORITIES["notebook"] == 2
+    assert FLEET_HOST_PRIORITIES["notebook"] == 1
+    assert FLEET_HOST_PRIORITIES["grokbox"] == 2
     assert FLEET_HOST_PRIORITIES["desktop"] == 3
 
 
@@ -121,7 +121,7 @@ def test_bootstrap_idempotency_prevents_duplicate_workers(monkeypatch: pytest.Mo
     assert res["status"] == "already_running"
     assert res["pid"] == 99999
     assert res["max_slots"] == 1
-    assert res["priority"] == 2
+    assert res["priority"] == 1
 
 
 def test_drain_worker_creates_signal_and_preserves_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

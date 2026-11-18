@@ -1354,10 +1354,12 @@ def _reservation_heartbeat_fresh(res: Mapping[str, Any], now: datetime) -> bool:
 
 
 def _build_fleet(raw: _RawStore | None, now: datetime) -> LiveFleetStatus:
+    from core.line.fleet_policy import load_fleet_config
+
+    cfg = load_fleet_config()
     fleet_hosts = [
-        {"id": "grokbox", "name": "Grokbox", "priority": 1},
-        {"id": "notebook", "name": "Notebook", "priority": 2},
-        {"id": "desktop", "name": "Desktop", "priority": 3},
+        {"id": host.id, "name": host.name, "priority": host.priority, "max_slots": host.max_slots}
+        for host in cfg.sorted_hosts()
     ]
 
     active_by_host: dict[str, dict[str, Any]] = {}
@@ -1397,7 +1399,7 @@ def _build_fleet(raw: _RawStore | None, now: datetime) -> LiveFleetStatus:
                 host_id=hid,
                 name=fh["name"],
                 priority=fh["priority"],
-                max_slots=1,
+                max_slots=int(fh["max_slots"]),
                 status=status,
                 active_run_id=active_run_id,
                 active_ticket_id=active_ticket_id,
@@ -1406,7 +1408,7 @@ def _build_fleet(raw: _RawStore | None, now: datetime) -> LiveFleetStatus:
         )
 
     return LiveFleetStatus(
-        max_fleet_slots=3,
+        max_fleet_slots=cfg.max_fleet_slots,
         active_slots=active_count,
         hosts=hosts_output,
     )

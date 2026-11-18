@@ -124,7 +124,7 @@ def test_unmanaged_legacy_mode_keeps_presuming_hosts_available(store, monkeypatc
     now = datetime.now(UTC)
     _accept(store, now)
     admitted = CloudCoordinator(store=store, capacity_probe=lambda: 1).admit_eligible_cycles(now)
-    assert [r.host_id for r in admitted] == ["grokbox"]
+    assert [r.host_id for r in admitted] == ["notebook"]
 
 
 # --------------------------------------------------------------------------- claim path
