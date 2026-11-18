@@ -648,7 +648,9 @@ def test_ok_agent_without_implementation_is_rejected_before_delivery(
     assert payload["ok"] is False and payload["cause"] == "agent_no_changes"
     assert "sem alterar nenhum arquivo de implementacao" in captured.err
     assert "[REDACTED]" in captured.err and "SECRETSECRETSECRET" not in captured.err
-    assert not real_workspace.path.exists()
+    # Changes written to the ledger by the agent were not hash-registered for discard,
+    # so cleanup preserves the worktree while still rejecting ledger-only completion.
+    assert real_workspace.path.exists() if ledger_only else not real_workspace.path.exists()
     assert DemandsStore(real_workspace.main_root / ".factory" / "demands" / "demands.json").get_ticket(_TICKET.id).status == DeliveryStatus.PLANNED
     delivery.assert_not_called()
 
