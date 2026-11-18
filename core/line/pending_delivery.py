@@ -720,6 +720,31 @@ def _validate_pending_worktree(
     return worktree
 
 
+def _reconcile_terminal_ticket(
+    path: Path, row: PendingDelivery, release: Path, merge_path: Path, report: dict, ticket: dict, now: float,
+) -> dict | None:
+    """Resolve terminal ticket rows inside `_tick_row` without discarding active CI/delivery recovery."""
+    if ticket.get("status") == "completed" and _ci_recovery_without_merge(row, release, merge_path):
+        # The ledger was closed when the PR opened. CI is still red and nothing merged.
+        row.resume_delivery = True
+        return None
+    if (ticket.get("status") == "completed" and row.resume_delivery and row.child_failures
+            and not report.get("sha")):
+        # Preserve the failed-delivery retry path even when the ledger's status is terminal.
+        return None
+    if ticket.get("status") in {"cancelled", "canceled"}:
+        path.unlink(missing_ok=True)
+        return {"ticket": row.ticket_id, "status": "terminal", "proof": ticket["status"], "stage": row.stage}
+    if (ticket.get("status") == "completed" and report.get("deployed") and report.get("sha")
+            and not _evidence_incoherent(release, report)):
+        path.unlink(missing_ok=True)
+        return {"ticket": row.ticket_id, "status": "terminal", "proof": "deployed", "stage": row.stage}
+    if ticket.get("status") == "completed":
+        cause = _evidence_incoherent(release, report) or "deploy_evidence_missing"
+        return _block_wait(path, row, cause, _evidence_token(release, report, cause), now=now)
+    return None
+
+
 def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     from core.demands.queue_store import control_store
     from core.git.ticket_workspace import list_worktrees
@@ -815,23 +840,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     if deploy_wait is not None:
         return deploy_wait
     if ticket.get("status") in _TERMINAL_TICKET_STATUSES:
-        if ticket.get("status") == "completed" and _ci_recovery_without_merge(row, release, merge_path):
-            # The ledger was closed when the PR opened. CI is still red and nothing merged.
-            row.resume_delivery = True
-        elif (ticket.get("status") == "completed" and row.resume_delivery and row.child_failures
-              and not report.get("sha")):
-            # Preserve the failed-delivery retry path even when the ledger's status is terminal.
-            pass
-        elif ticket.get("status") in {"cancelled", "canceled"}:
-            path.unlink(missing_ok=True)
-            return {"ticket": row.ticket_id, "status": "terminal", "proof": ticket["status"], "stage": row.stage}
-        elif (ticket.get("status") == "completed" and report.get("deployed") and report.get("sha")
-              and not _evidence_incoherent(release, report)):
-            path.unlink(missing_ok=True)
-            return {"ticket": row.ticket_id, "status": "terminal", "proof": "deployed", "stage": row.stage}
-        elif ticket.get("status") == "completed":
-            cause = _evidence_incoherent(release, report) or "deploy_evidence_missing"
-            return _block_wait(path, row, cause, _evidence_token(release, report, cause), now=now)
+        terminal_outcome = _reconcile_terminal_ticket(path, row, release, merge_path, report, ticket, now)
+        if terminal_outcome is not None:
+            return terminal_outcome
     if ticket.get("status") == "waiting_human":
         return {"ticket": row.ticket_id, "status": "waiting_human"}
     checked_worktree = _validate_pending_worktree(path, row, repo_root, now)
