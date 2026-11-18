@@ -1284,7 +1284,7 @@ def test_exhausted_technical_ticket_stays_isolated_after_restart(tmp_path: Path)
     }]
     restarted = fd.FleetDispatcher(
         e.d.config, demands_loader=lambda: [_d("USR-01"), _d("USR-02")],
-        probe=lambda _host: fd.HostProbe(True, "ready"), launch=e._launch,
+        probe=e.d.probe, launch=e._launch,
         clock=lambda: e.now, admission_store=AdmissionStore(
             tmp_path / "admission.sqlite3",
             clock=lambda: datetime.fromtimestamp(e.now, timezone.utc),
@@ -1330,7 +1330,7 @@ def test_non_mapping_legacy_dispatcher_state_does_not_block_independent_tickets(
     restarted = fd.FleetDispatcher(
         e.d.config,
         demands_loader=lambda: [_d("USR-01"), _d("USR-02")],
-        probe=lambda _host: fd.HostProbe(True, "ready"),
+        probe=e.d.probe,
         launch=e._launch,
         clock=lambda: e.now,
         admission_store=e.d.admission_store,
@@ -3106,7 +3106,8 @@ def _bind_review_tick(monkeypatch, tmp_path: Path, worktree: Path, ticket_id: st
         mock_mode=False, list_tickets=lambda: [{"id": ticket_id, "status": "planned"}],
     ))
     monkeypatch.setattr(
-        "core.git.ticket_workspace.list_worktrees", lambda _root: [{"worktree": str(worktree)}],
+        "core.git.ticket_workspace.list_worktrees",
+        lambda _root: [{"worktree": str(worktree), "branch": f"refs/heads/ticket/{ticket_id.lower()}"}],
     )
     calls: list[list[str]] = []
     handle = SimpleNamespace(pid=515151, poll=lambda: None)

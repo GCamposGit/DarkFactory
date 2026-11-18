@@ -658,8 +658,11 @@ def _unmerged_files(cwd: Path) -> list[str]:
 def _reapply_ticket_row(ledger: Path, ticket: UserTicket) -> None:
     """Put the ticket's own row back after taking origin/main's ledger (USR-475)."""
     try:
+        parsed = json.loads(ledger.read_text(encoding="utf-8"))
+        if not isinstance(parsed, list):
+            return
         DemandsStore(ledger).save_ticket(ticket)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         logger.warning("Linha de %s nao reaplicada no ledger: %s", ticket.id, exc)
 
 

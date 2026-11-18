@@ -1398,9 +1398,14 @@ def _usr467_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_ticket.ticket_engine.write_research(
         rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix"),
     )
-    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
     candidate, policy = run_ticket._candidate_binding(rws, repo, run_ticket._review_base_branch(ticket))
     assert candidate
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", [ticket.id],
+        plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+        candidate_digest=run_ticket._build_candidate_digest(ticket.id, repo),
+        worktree=str(repo),
+    )
     run_ticket.ticket_engine.write_validation(
         rws, True, "core/harness/runner.py --quick", candidate_digest=candidate,
     )

@@ -796,6 +796,11 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             if reconciled is not None:
                 return reconciled
             return _child_finished(path, row, 1, repo_root, now)
+    # Archive long-closed evidence waits before terminal unlinking/reconciliation (USR-467 / USR-475).
+    if row.status == "blocked" and row.cause in _OBSOLETE_EVIDENCE_CAUSES:
+        archived = _archive_obsolete_wait(path, row, now)
+        if archived:
+            return archived
     # Terminal proof wins over a stale block or a future backoff.
     reconciled = _reconcile_terminal_wait(path, row, now)
     if reconciled is not None:
@@ -813,10 +818,6 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         row.next_check = float(admission.budget(row.project_id, row.ticket_id)["next_attempt_at"])
         _save(path, row)
         return {"ticket": row.ticket_id, "status": row.status, "cause": reason, "next_check": row.next_check}
-    if row.status == "blocked" and row.cause in _OBSOLETE_EVIDENCE_CAUSES:
-        archived = _archive_obsolete_wait(path, row, now)
-        if archived:
-            return archived
     reopen = _blocked_review_reopen(row)
     if (row.status == "blocked" and not reopen) or row.next_check > now or is_locked():
         result = {"ticket": row.ticket_id, "status": row.status, "next_check": row.next_check}
