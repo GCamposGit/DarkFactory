@@ -52,7 +52,15 @@ from core.git import ci_checks
 from core.line import agent_retry, base_probe, base_sync, cancellation, diagnostics, express_lane, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
-from core.line.routing import RoutingConfig, harness_cli_pin, load_routing_config, pick, record_result
+from core.line.routing import (
+    RoutingConfig,
+    harness_cli_pin,
+    load_routing_config,
+    pick,
+    quota_remaining_percent,
+    record_result,
+)
+from core.models.audit import ExecutionSample, record_execution_sample, reported_context_tokens
 from core.line.workspace import RunWorkspace, WorkspaceError
 from core.projects.models import ProjectCommands, ProjectDescriptor
 from core.projects.registry import normalize_repo_url, resolve_commands
@@ -69,6 +77,30 @@ _DEFAULT_HOST_CAPS: tuple[str, ...] = (
     "harness:grok",
     "harness:antigravity",
 )
+_DEV_DIFF_PATHSPEC = (".", ":(exclude).darkfac/runs")
+
+
+def _development_candidate_digest(ws: RunWorkspace, default_branch: str) -> Optional[str]:
+    """sha256 of the development candidate diff. An empty diff still hashes; git failure is None."""
+    proc = workspace._run_git(
+        ["diff", f"origin/{default_branch}...HEAD", "--", *_DEV_DIFF_PATHSPEC],
+        cwd=ws.path,
+        check=False,
+    )
+    if getattr(proc, "returncode", 0) != 0:
+        return None
+    stdout = getattr(proc, "stdout", None)
+    if stdout is None:
+        payload = b""
+    elif isinstance(stdout, str):
+        payload = stdout.encode("utf-8")
+    elif isinstance(stdout, bytes):
+        payload = stdout
+    elif isinstance(stdout, bytearray):
+        payload = bytes(stdout)
+    else:
+        return None
+    return hashlib.sha256(payload).hexdigest()
 
 _LOCKFILE_CANDIDATES: tuple[str, ...] = (
     "requirements.txt",
@@ -141,6 +173,7 @@ class TicketSpec(BaseModel):
     smoke: list[str] = Field(default_factory=list)
     # USR-370: env names the ticket explicitly grants to the agent (bypass the credential scrub).
     capabilities: list[str] = Field(default_factory=list)
+    complexity: Optional[str] = None
 
 
 class CommandRunResult(BaseModel):
@@ -512,42 +545,15 @@ class DevelopmentStage:
                 agent_result = AgentResult(ok=True, text="", harness=harness, model=model, duration_s=0.0)
                 self._clear_base_red_marker(ws, ticket.id)
             else:
-                route = self._pick_route(excluded)
-                if route is None:
-                    self._persist_diagnostics(ws, run_id, ticket.id)
-                    # No route is a matter of time (cooldown / quota reset), not of the owner (USR-87):
-                    # wait for it with `retry` + `not_before`; `waiting_human` only past the run budget.
-                    return self.route_waiter.no_route_result(
-                        "development", project, run_id,
-                        host_caps=self.host_caps, config=self.routing_config, mode="write",
-                    )
-                harness, model = route
-                cli_model, cli_effort = harness_cli_pin(
-                    harness, model, stage="development", config=self.routing_config
-                )
-                prompt = self._build_prompt(
-                    ticket,
-                    commands,
-                    extra_instruction=extra_instruction,
-                    last_validate_log=last_validate_log,
-                    last_review_log=last_review_log,
+                invoked = self._invoke_development_agent(
+                    ws, run_id=run_id, project=project, ticket=ticket, iteration=iteration,
+                    excluded=excluded, commands=commands, extra_instruction=extra_instruction,
+                    last_validate_log=last_validate_log, last_review_log=last_review_log,
                     spec_text=spec_text,
-                    harness=harness,
                 )
-
-                agent_result = self.run_agent_func(
-                    AgentRequest(
-                        prompt=prompt,
-                        cwd=ws.path,
-                        mode="write",
-                        harness=harness,
-                        model=cli_model,
-                        effort=cli_effort,
-                        timeout_s=self.agent_timeout_s,
-                        capabilities=list(ticket.capabilities),
-                    )
-                )
-                record_result(agent_result, config=self.routing_config)
+                if isinstance(invoked, StageResult):
+                    return invoked
+                harness, model, agent_result = invoked
                 # USR-152: a run cancelled while the agent worked must not validate, commit or push its output.
                 cancellation.ensure_not_cancelled(run_id)
 
@@ -794,11 +800,133 @@ class DevelopmentStage:
         except OSError:
             logger.debug("could not remove the base_red marker of %s", ticket_id)
 
-    def _pick_route(self, excluded: set[tuple[str, Optional[str]]]) -> Optional[tuple[str, Optional[str]]]:
+    def _pick_route(
+        self, excluded: set[tuple[str, Optional[str]]], *, complexity: Optional[str] = None
+    ) -> Optional[tuple[str, Optional[str]]]:
         """Next (harness, model), skipping pairs that crashed; falls back to them if nothing else is routable."""
         return agent_retry.pick_route(
-            self.pick_func, "development", self.host_caps, self.routing_config, excluded
+            self.pick_func, "development", self.host_caps, self.routing_config, excluded,
+            complexity=complexity,
         )
+
+    def _invoke_development_agent(
+        self,
+        ws: RunWorkspace,
+        *,
+        run_id: str,
+        project: ProjectDescriptor,
+        ticket: TicketSpec,
+        iteration: int,
+        excluded: set[tuple[str, Optional[str]]],
+        commands: ProjectCommands,
+        extra_instruction: str,
+        last_validate_log: Optional[str],
+        last_review_log: Optional[str],
+        spec_text: str,
+    ) -> StageResult | tuple[str, Optional[str], AgentResult]:
+        """Pick a write route, call the agent and record the execution sample."""
+        route = agent_retry.call_with_supported_kwargs(
+            self._pick_route, excluded, complexity=ticket.complexity,
+        )
+        if route is None:
+            self._persist_diagnostics(ws, run_id, ticket.id)
+            return self.route_waiter.no_route_result(
+                "development", project, run_id,
+                host_caps=self.host_caps, config=self.routing_config, mode="write",
+            )
+        harness, model = route
+        cli_model, cli_effort = harness_cli_pin(
+            harness, model, stage="development", config=self.routing_config,
+            complexity=ticket.complexity,
+        )
+        prompt = self._build_prompt(
+            ticket,
+            commands,
+            extra_instruction=extra_instruction,
+            last_validate_log=last_validate_log,
+            last_review_log=last_review_log,
+            spec_text=spec_text,
+            harness=harness,
+        )
+        agent_result = self.run_agent_func(
+            AgentRequest(
+                prompt=prompt,
+                cwd=ws.path,
+                mode="write",
+                harness=harness,
+                model=cli_model,
+                effort=cli_effort,
+                timeout_s=self.agent_timeout_s,
+                capabilities=list(ticket.capabilities),
+            )
+        )
+        record_result(agent_result, config=self.routing_config)
+        prompt_bytes = prompt.encode("utf-8")
+        self._record_execution_sample(
+            run_id=run_id, ticket_id=ticket.id, iteration=iteration,
+            harness=harness, complexity=ticket.complexity, result=agent_result,
+            context_sha256=hashlib.sha256(prompt_bytes).hexdigest(),
+            context_bytes=len(prompt_bytes),
+            expected_model=cli_model,
+            expected_effort=cli_effort,
+            candidate_digest=_development_candidate_digest(ws, project.default_branch or "main"),
+        )
+        return harness, model, agent_result
+
+    def _record_execution_sample(
+        self,
+        *,
+        run_id: str,
+        ticket_id: str,
+        iteration: int,
+        harness: str,
+        complexity: Optional[str],
+        result: AgentResult,
+        context_sha256: str,
+        context_bytes: int,
+        expected_model: Optional[str] = None,
+        expected_effort: Optional[str] = None,
+        candidate_digest: Optional[str] = None,
+    ) -> None:
+        """Observe a real development-agent call for the model-route auditor (USR-471 T1/T5).
+
+        Development has no output schema to validate (free-text diff/commit), so `schema_valid`
+        tracks only whether the call itself produced a real completion (`result.ok`); a write
+        failure here is logged and swallowed -- it must never fail the ticket's own iteration.
+        """
+        try:
+            sample = ExecutionSample(
+                execution_id=f"{run_id}:{ticket_id}:{iteration}",
+                ticket_id=ticket_id,
+                stage="development",
+                harness=harness,
+                provider=result.provider,
+                model_source=result.model_source,
+                started_at=result.started_at,
+                finished_at=result.finished_at,
+                execution_parameters=result.execution_parameters,
+                reported_model=result.model,
+                complexity=complexity,
+                quota_remaining_percent=quota_remaining_percent(harness),
+                latency_ms=max(0, round(result.duration_s * 1000)),
+                timeout_sec=float(self.agent_timeout_s),
+                timed_out=result.error_kind == "timeout",
+                cost_usd=result.cost_usd or 0.0,
+                reported_context_tokens=reported_context_tokens(result.usage),
+                context_sha256=context_sha256,
+                context_bytes=context_bytes,
+                reported_effort=result.effort,
+                expected_model=expected_model,
+                expected_effort=expected_effort,
+                candidate_digest=candidate_digest,
+                schema_valid=bool(result.ok),
+                real_delivery=bool(result.ok),
+                error_kind=result.error_kind,
+                finish_reason=result.finish_reason,
+            )
+            record_execution_sample(sample, ticket_id=ticket_id)
+        except Exception as exc:  # noqa: BLE001 - observation only, never blocks the stage
+            logger.warning("model_audit: failed to record execution sample for %s: %s", ticket_id, exc)
 
     def _persist_diagnostics(self, ws: RunWorkspace, run_id: str, ticket_id: str) -> None:
         """Commit + push the per-iteration logs (context dir only) so a failed run is debuggable remotely."""

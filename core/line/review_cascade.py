@@ -74,6 +74,16 @@ def _family(harness: str, model: Optional[str]) -> Optional[str]:
         return None
 
 
+def _resolve_role_model(model: Optional[str]) -> Optional[str]:
+    """Translate registry role keys (e.g. 'review.grok') to their configured model id."""
+    if not model:
+        return model
+    from core.models.registry import get_registry
+
+    roles = get_registry().roles
+    return roles.get(model.strip(), model)
+
+
 def _model_provider(model: Optional[str]) -> Optional[str]:
     """Return a registered model's provider; unknown local models fail closed."""
     if not model:
@@ -153,6 +163,8 @@ def select_review_route(
     )
     if route and route[0]:
         harness, model = route[0], (route[1] if len(route) > 1 else None)
+        if harness != "openrouter":
+            model = _resolve_role_model(model)
         if harness == "openrouter":
             model = _paid_independent(model, families, openrouter_fallbacks)
             if model:
@@ -175,6 +187,8 @@ def select_review_route(
         if not found or not found[0] or found[0] in tried:
             break
         harness, model = found[0], (found[1] if len(found) > 1 else None)
+        if harness != "openrouter":
+            model = _resolve_role_model(model)
         tried.append(harness)
         if harness == "openrouter":
             # Level 3 may use the paid route too: an independent family when known, else any other model.

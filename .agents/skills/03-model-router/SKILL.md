@@ -74,6 +74,8 @@ Tabela gerada de `.factory/config/model_registry.json` por `python scripts/gener
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
+| `development.high.claude` | `claude-opus-5-5` | active |
+| `development.high.codex` | `gpt-sol` | active |
 | `development.openrouter` | `gpt-sol` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
 | `planning.codex` | `gpt-sol` | active |

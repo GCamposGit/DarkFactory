@@ -87,6 +87,8 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_context_policy.py": "'eval-2026-09-07' e um identificador de versao de avaliacao, armazenado verbatim; nao e uma data lida do relogio",
     "tests/test_dokploy_real_api_transport.py": "createdAt dos deployments simulados so e comparado como string com o baseline (outro createdAt fixo) em deployment_adapter; sem leitura do relogio real nessa comparacao",
     "tests/test_waiting_human_consultation.py": "linhas de seed SQL para um teste de dashboard de waiting_human; sem filtro por idade",
+    "tests/line/test_operational_context.py": "campos 'generated_at' e 'audited_at' de payloads sinteticos comparados verbatim em test_operational_context; nao sao comparados ao relogio real",
+    "tests/test_model_execution_audit_usr471.py": "campos 'started_at'/'finished_at' de amostras sinteticas usados apenas para calcular latencia/ordenacao relativa; nunca comparados ao relogio real",
 }
 
 

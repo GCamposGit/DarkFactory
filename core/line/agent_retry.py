@@ -25,6 +25,7 @@ agents and no real waiting.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from pathlib import Path
@@ -144,6 +145,18 @@ def exclude_route(excluded: set[Route], harness: str, model: Optional[str]) -> N
     excluded.add((harness, model))
 
 
+def call_with_supported_kwargs(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Invoke ``func`` passing only the keyword arguments its signature accepts."""
+    try:
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return func(*args, **kwargs)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return func(*args, **kwargs)
+    supported = {key: value for key, value in kwargs.items() if key in params}
+    return func(*args, **supported)
+
+
 def pick_route(
     pick_func: Callable[..., Optional[Route]],
     stage: str,
@@ -160,13 +173,15 @@ def pick_route(
     rather than stopping; the launcher passes False and gives up instead.
     """
     if excluded:
-        route = pick_func(stage, host_caps, config=config, exclude=set(excluded), **pick_kwargs)
+        route = call_with_supported_kwargs(
+            pick_func, stage, host_caps, config=config, exclude=set(excluded), **pick_kwargs,
+        )
         if route is not None:
             return route
         if not retry_without_exclusions:
             return None
         logger.warning("Every %s route already failed for this ticket; retrying without exclusions", stage)
-    return pick_func(stage, host_caps, config=config, **pick_kwargs)
+    return call_with_supported_kwargs(pick_func, stage, host_caps, config=config, **pick_kwargs)
 
 
 # --------------------------------------------------------------------------

@@ -36,7 +36,7 @@
       "status": "active",
       "price_input_per_mtok": null,
       "price_output_per_mtok": null,
-      "context_tokens": null,
+      "context_tokens": 200000,
       "max_output_tokens": null,
       "capabilities": [
         "text",
@@ -580,7 +580,9 @@
     "subagent.sonnet": "claude-sonnet-5-5",
     "subagent.opus": "claude-opus-5-5",
     "development.claude": "claude-sonnet-5-5",
+    "development.high.claude": "claude-opus-5-5",
     "development.codex": "gpt-6-luna",
+    "development.high.codex": "gpt-sol",
     "development.grok": "grok-4.7",
     "planning.claude": "claude-opus-5-5",
     "planning.codex": "gpt-sol",

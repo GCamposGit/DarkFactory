@@ -14,6 +14,11 @@ de correção. `DARKFAC_GATE_SCOPE=full` restaura o caminho anterior com `--quic
 e despacho remoto estrito. A admissão prévia permanece regida pelo seu contrato.
 Detalhes de seleção, prazo e recuperação de crash em [portao.md](portao.md).
 
+O processo interativo identifica o harness do operador. Serviços headless criam seu próprio
+contexto de execução e não usam a preferência interativa como preferência de desenvolvimento.
+O pin de modelo e esforço é resolvido por stage, harness e complexidade; a auditoria compara
+o modelo esperado ao reportado e grava contexto efetivo, latência e entrega em recibo.
+
 Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
 confirmados, preservando revisão por outra família. `route_wait` fica persistido
 para o dispatcher retomar automaticamente; o operador não precisa voltar ao chat.

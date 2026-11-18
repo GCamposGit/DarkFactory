@@ -244,6 +244,7 @@ def test_effective_model_and_effort_are_read_from_model_usage_when_not_requested
     result = run_agent(_write_request(tmp_path))
 
     assert result.model == "grok-4.7-build"
+    assert result.model_source == "provider_reported"
     assert result.effort == "high"
 
 

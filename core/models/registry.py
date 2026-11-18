@@ -197,7 +197,7 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         "min_qualification_steps": DEFAULT_MIN_QUALIFICATION_STEPS,
     },
     "models": [
-        _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
+        _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"], context_tokens=200000),
         _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"], gateway_ids=["claude-sonnet"]),
         _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"], claude_cli_model_id="claude-haiku-5-5"),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
@@ -225,7 +225,9 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         "subagent.sonnet": "claude-sonnet-5-5",
         "subagent.opus": "claude-opus-5-5",
         "development.claude": "claude-sonnet-5-5",
+        "development.high.claude": "claude-opus-5-5",
         "development.codex": "gpt-6-luna",
+        "development.high.codex": "gpt-sol",
         "development.grok": "grok-4.7",
         "planning.claude": "claude-opus-5-5",
         "planning.codex": "gpt-sol",

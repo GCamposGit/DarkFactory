@@ -118,8 +118,17 @@ hub/data/owner_actions/
 .factory/owner_actions/OA-*.jsonl
 .factory/owner_actions/OA-*.ps1
 
-# Runtime do despachante da frota e do resumo diario (estado local; sujava o checkout compartilhado e o run_ticket recusava todo lancamento da frota)
-.factory/runs/fleet_dispatcher_logs/
+# Sidecars recomputaveis e logs operacionais; ledgers, benchmarks e outras
+# evidencias sob .factory/runs continuam visiveis ao gate.
+/.factory/runs/fleet_policy_snapshot.json
+/.factory/runs/model_audit_receipt.json
+/.factory/runs/.fleet_policy_snapshot.json.*.tmp
+/.factory/runs/.model_audit_receipt.json.*.tmp
+/.factory/runs/fleet_policy_snapshot.json.tmp
+/.factory/runs/model_audit_receipt.json.tmp
+/.factory/runs/fleet_policy_snapshot.tmp
+/.factory/runs/model_audit_receipt.tmp
+/.factory/runs/fleet_dispatcher_logs/
 .factory/runs/cleanup_pending/
 .factory/runs/fleet_dispatcher_state.json
 .factory/runs/orphan_worktree_cleanup.json

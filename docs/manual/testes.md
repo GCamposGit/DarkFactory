@@ -1,6 +1,13 @@
 <!-- covers: core/harness/remote_dispatch.py, core/harness/suite_lock.py, scripts/complexity_ratchet.py -->
 # Testes
 
+## Elegibilidade de worker remoto (USR-471)
+
+O dispatcher remoto consulta saúde e capacidade antes de escolher worker, respeita a lista
+persistida de hosts excluídos e ignora endpoints offline. A disponibilidade de uma máquina
+não a torna elegível quando a política a exclui; zero workers elegíveis continua bloqueando
+o despacho remoto.
+
 ## Capacidade e prazo do portão
 
 Ticket usa `python core/harness/runner.py --profile pr --local`: compileall,

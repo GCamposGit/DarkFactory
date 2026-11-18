@@ -12018,8 +12018,8 @@
     "project_id": "darkfac",
     "title": "Reconciliar contexto operacional entre chat servico e hosts sem herdar harness incorreto",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ticket/usr-471",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -12027,6 +12027,7 @@
       "user-demand",
       "stabilization-20261105"
     ],
+    "express_causes": [],
     "problem_statement": "Auditoria 05/11: chat Codex herda DARKFAC_OPERATING_HARNESS=antigravity, Desktop desabilitado no ambiente mas dispatcher anterior habilitava no processo; DARKFAC_TEST_WORKERS aponta somente ao Grokbox offline embora Desktop responda saudavel e ocioso. Notebook mede 2.89GiB livres e zero workers. Estado do processo nao sobrevive reboot. Reaproveitar USR452/454/464/466/456; nao enfraquecer guardas nem reiniciar host com trabalho ativo.",
     "core_journey": [],
     "non_goals": [],
@@ -12040,7 +12041,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-05T13:09:54.526155Z",
-    "updated_at": "2026-11-05T13:09:54.526155Z"
+    "updated_at": "2026-11-18T02:16:02.865544Z"
   },
   {
     "id": "USR-472",

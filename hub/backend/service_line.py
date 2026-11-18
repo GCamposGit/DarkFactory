@@ -244,6 +244,48 @@ class LineDemandsMixin:
             acceptance=acceptance_data,
         )
 
+    def get_fleet_policy(self) -> Dict[str, Any]:
+        """Effective fleet host policy (USR-471): same content as
+        `python -m core.line.fleet_policy --effective` -- host config, live resource readings,
+        config/environment exclusions and the resulting eligibility, one entry per host.
+        Never raises: an unreachable host or a measurement failure degrades individual rows
+        inside `effective_host_policy`'s own reasons, not the endpoint."""
+        from core.line.fleet_policy import effective_policy_snapshot
+
+        try:
+            return effective_policy_snapshot()
+        except Exception as exc:
+            logger.warning("fleet policy snapshot indisponivel: %s", exc)
+            return {
+                "schema_version": 1,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "max_fleet_slots": 0,
+                "hosts": [],
+                "error": str(exc),
+            }
+
+    def get_model_audit(self, ticket_id: Optional[str] = None) -> Dict[str, Any]:
+        """Effective model-route audit receipt (USR-471 T2): same content as
+        `python -m core.models.audit --from-runs [--ticket ...] --latest` -- recomputed from the
+        real `ExecutionSample` ledger on every call, never read from the persisted receipt file.
+        No recorded samples is a failing receipt. A read error stays HTTP 200 with
+        `passed` false and `audit_unavailable`, never a success and never a 500."""
+        from core.models.audit import audit_recorded
+
+        try:
+            return audit_recorded(ticket_id).model_dump(mode="json")
+        except Exception as exc:
+            logger.warning("model audit indisponivel: %s", exc)
+            return {
+                "schema_version": 1,
+                "audited_at": datetime.now(timezone.utc).isoformat(),
+                "passed": False,
+                "samples": [],
+                "divergences": [],
+                "violations": ["audit_unavailable"],
+                "error": str(exc),
+            }
+
     def get_v0_proof(self) -> Any:
         """Prova da V0 (USR-279 T3): report for the DarkHub /live 5-slot panel.
 

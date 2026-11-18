@@ -136,21 +136,63 @@ def build_receipt(ticket_id: str, run_id: str, repo_root: Path) -> dict[str, Any
 
 
 def record_review_execution(
-    ws: RunWorkspace, digest: str, implementer: str, reviewer: str, model: str | None,
+    ws: RunWorkspace,
+    digest: str,
+    implementer: str,
+    reviewer: str,
+    model: str | None,
+    *,
+    ticket_id: str | None = None,
+    latency_ms: int = 0,
+    schema_valid: bool = False,
+    real_delivery: bool = False,
+    delivery_nonempty: bool = False,
+    context_sha256: str = "",
+    context_bytes: int = 0,
     route: dict[str, Any] | None = None,
 ) -> None:
-    """Persist actual routing evidence alongside the bound review verdict."""
+    """Persist measured review evidence and routing metadata. ``proven`` requires real delivery."""
     from core.line import workspace
+    execution: dict[str, Any] = {
+        "candidate_digest": digest,
+        "ticket_id": ticket_id,
+        "model": model,
+        "latency_ms": latency_ms,
+        "schema_valid": schema_valid,
+        "real_delivery": real_delivery,
+        "delivery_nonempty": delivery_nonempty,
+        "context_sha256": context_sha256,
+        "context_bytes": context_bytes,
+    }
     try:
         path = workspace.context_dir(ws) / "implementation_families.json"
         families = json.loads(path.read_text(encoding="utf-8")) if path.exists() else [route_family(implementer, None)]
-        execution = {"candidate_digest": digest,
-                     "implementer_family": route_family(implementer, None),
-                     "reviewer_family": route_family(reviewer, model), "implementation_families": families}
+        implementer_family = route_family(implementer, None)
+        reviewer_family = route_family(reviewer, model)
+        execution.update(
+            implementer_family=implementer_family,
+            reviewer_family=reviewer_family,
+            implementation_families=families,
+            family_evidence_missing=False,
+        )
         if route:
             execution["review_route"] = route
             if route.get("level") in (3, 4):
                 execution["contingency"] = route
     except ValueError:
-        execution = {"candidate_digest": digest, "family_evidence_missing": True}
+        execution["family_evidence_missing"] = True
+        implementer_family = None
+        reviewer_family = None
+    families_differ = bool(
+        implementer_family and reviewer_family and reviewer_family != implementer_family
+    )
+    execution["proven"] = bool(
+        digest
+        and schema_valid
+        and real_delivery
+        and delivery_nonempty
+        and families_differ
+        and latency_ms >= 0
+        and not execution.get("family_evidence_missing")
+    )
     workspace.write_context(ws, "review_execution.json", json.dumps(execution))

@@ -15,13 +15,24 @@ Key contracts:
    explicit diagnostic reasons without halting search for eligible candidates.
 6. Decoupled from model routing: chooses host machines only; harness/model selection
    remains the sole responsibility of `core.line.routing.pick`.
+
+``effective_host_policy`` above is the pure evaluator (contract 1: no I/O). USR-471 adds the one
+impure entry point every caller outside the fleet dispatcher uses instead of re-deriving it:
+``effective_policy_snapshot`` gathers live resource readings (``measure_resource_readings``),
+combines them with ``line_fleet.json`` and ``DARKFAC_FLEET_DISABLED_HOSTS`` through
+``effective_host_policy``, and persists the result. A host excluded by configuration or by
+environment is never eligible regardless of health (exclusion precedes the health/resource
+checks in ``effective_host_policy`` itself). The persisted snapshot is regenerated on every
+read -- it is audit visibility, never a run's state.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+import os
+import urllib.parse
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional, Sequence
 
@@ -31,8 +42,60 @@ logger = logging.getLogger("darkfac.line.fleet_policy")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = _REPO_ROOT / ".factory" / "config" / "line_fleet.json"
+#: USR-471: schema of `build_effective_policy_report`'s output / the persisted snapshot.
+SNAPSHOT_SCHEMA_VERSION = 1
+ENV_FLEET_DISABLED_HOSTS = "DARKFAC_FLEET_DISABLED_HOSTS"
 
 HostStatus = Literal["online", "offline", "draining", "maintenance"]
+
+
+def _safe_host_config(host: "HostConfig") -> dict[str, Any]:
+    """Serialize configured host limits without exposing endpoint credentials or tokens."""
+    config = host.model_dump(mode="json")
+    endpoint = host.endpoint
+    if not endpoint:
+        config["endpoint"] = endpoint
+        return config
+    try:
+        parsed = urllib.parse.urlsplit(endpoint)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        hostname = None
+        port = None
+        parsed = None
+    if not hostname or parsed is None or not parsed.scheme:
+        config["endpoint"] = "<redacted-invalid-endpoint>"
+        return config
+    safe_hostname = f"[{hostname}]" if ":" in hostname else hostname
+    netloc = f"{safe_hostname}:{port}" if port is not None else safe_hostname
+    config["endpoint"] = urllib.parse.urlunsplit((parsed.scheme, netloc, "", "", ""))
+    return config
+
+
+def _safe_resource_reading(reading: dict[str, Any]) -> dict[str, Any]:
+    """Keep only typed capacity measurements in the public effective-policy report."""
+    safe: dict[str, Any] = {}
+    workers = reading.get("workers")
+    if isinstance(workers, int) and not isinstance(workers, bool):
+        safe["workers"] = workers
+    available = reading.get("available_gib")
+    if isinstance(available, (int, float)) and not isinstance(available, bool):
+        safe["available_gib"] = available
+    observed = reading.get("observed_at")
+    if observed is not None:
+        try:
+            stamp = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            observed = stamp.astimezone(timezone.utc).isoformat()
+        except (OverflowError, TypeError, ValueError):
+            observed = None
+    if isinstance(observed, str):
+        safe["observed_at"] = observed
+    if isinstance(reading.get("busy"), bool):
+        safe["busy"] = reading["busy"]
+    return safe
 
 
 class HostConfig(BaseModel):
@@ -45,6 +108,10 @@ class HostConfig(BaseModel):
     platform: str = Field(default="windows", description="OS platform: linux or windows")
     tags: list[str] = Field(default_factory=list, description="Descriptive tags (e.g. remote, local, worker)")
     capabilities: list[str] = Field(default_factory=list, description="Declared capabilities/harnesses available on host")
+    enabled: bool = True
+    endpoint: Optional[str] = None
+    max_workers: int = Field(default=1, ge=0)
+    min_free_memory_gib: float = Field(default=0, ge=0)
 
 
 class FleetConfig(BaseModel):
@@ -52,6 +119,7 @@ class FleetConfig(BaseModel):
 
     max_fleet_slots: int = Field(default=3, ge=1, description="Global ceiling of concurrent cycles across all hosts (default: 3)")
     hosts: list[HostConfig] = Field(default_factory=list, description="Ordered host configurations")
+    disabled_hosts: list[str] = Field(default_factory=list)
 
     def get_host(self, host_id: str) -> Optional[HostConfig]:
         """Lookup host configuration by ID."""
@@ -120,15 +188,19 @@ class FleetAdmissionResult(BaseModel):
     max_fleet_slots: int = 3
 
 
-def load_fleet_config(path: Optional[Path] = None) -> FleetConfig:
-    """Load FleetConfig from JSON file or return canonical defaults."""
+def load_fleet_config(path: Optional[Path] = None, *, strict: bool = False) -> FleetConfig:
+    """Load FleetConfig from JSON; optionally refuse missing or invalid canonical state."""
     cfg_path = path or DEFAULT_CONFIG_PATH
     if cfg_path.is_file():
         try:
             raw = json.loads(cfg_path.read_text(encoding="utf-8"))
             return FleetConfig.model_validate(raw)
         except Exception as exc:
+            if strict:
+                raise ValueError(f"fleet configuration is unavailable: {cfg_path}") from exc
             logger.warning("Failed to parse fleet config at %s: %s; using canonical defaults", cfg_path, exc)
+    elif strict:
+        raise FileNotFoundError(f"fleet configuration is unavailable: {cfg_path}")
 
     return FleetConfig(
         max_fleet_slots=3,
@@ -138,6 +210,84 @@ def load_fleet_config(path: Optional[Path] = None) -> FleetConfig:
             HostConfig(id="desktop", name="Desktop", priority=3, max_slots=1, platform="windows", tags=["remote", "desktop", "test_worker"]),
         ],
     )
+
+
+def effective_host_policy(
+    config: FleetConfig,
+    *,
+    disabled_from_environment: Iterable[str] = (),
+    readings: Optional[dict[str, dict[str, Any]]] = None,
+    occupied: Optional[dict[str, str]] = None,
+    reservations: Optional[dict[str, dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
+    max_reading_age: timedelta = timedelta(seconds=90),
+) -> list[dict[str, Any]]:
+    """Build the single auditable eligibility decision for every configured host."""
+    instant = now or datetime.now(timezone.utc)
+    readings, occupied, reservations = readings or {}, occupied or {}, reservations or {}
+    configured_exclusions = {host.casefold() for host in config.disabled_hosts}
+    environment_exclusions = {host.strip().casefold() for host in disabled_from_environment if host.strip()}
+    exclusions = configured_exclusions | environment_exclusions
+    decisions: list[dict[str, Any]] = []
+    for host in config.sorted_hosts():
+        reading = readings.get(host.id) or {}
+        reservation = reservations.get(host.id)
+        reservation_active = bool(reservation and reservation.get("active"))
+        if reservation_active and reservation and reservation.get("expires_at"):
+            try:
+                expiry = datetime.fromisoformat(str(reservation["expires_at"]).replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                reservation_active = expiry.astimezone(timezone.utc) > instant.astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                reservation_active = True
+        excluded = host.id.casefold() in exclusions
+        observed = reading.get("observed_at")
+        age_seconds: Optional[float] = None
+        if observed:
+            try:
+                stamp = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                age_seconds = max(0.0, (instant - stamp.astimezone(timezone.utc)).total_seconds())
+            except (TypeError, ValueError):
+                age_seconds = None
+        measured_workers = reading.get("workers")
+        workers = (
+            min(measured_workers, host.max_workers)
+            if isinstance(measured_workers, int) and not isinstance(measured_workers, bool)
+            else None
+        )
+        reason = "eligible"
+        if excluded:
+            reason = "excluded"
+        elif not host.enabled:
+            reason = "disabled_by_config"
+        elif host.id in occupied:
+            reason = "occupied"
+        elif reservation_active:
+            reason = "reservation_active"
+        elif age_seconds is None or age_seconds > max_reading_age.total_seconds():
+            reason = "resource_reading_missing_or_stale"
+        elif not isinstance(workers, int) or workers <= 0:
+            reason = "zero_workers"
+        elif float(reading.get("available_gib", 0)) < host.min_free_memory_gib:
+            reason = "insufficient_memory"
+        decisions.append({
+            "host_id": host.id,
+            "config": _safe_host_config(host),
+            "exclusion_sources": (["config.disabled_hosts"] if host.id.casefold() in configured_exclusions else [])
+                + (["config.hosts.enabled=false"] if not host.enabled else [])
+                + (["DARKFAC_FLEET_DISABLED_HOSTS"] if host.id.casefold() in environment_exclusions else []),
+            "resource_reading": _safe_resource_reading(reading),
+            "resource_age_seconds": age_seconds,
+            "workers_calculated": workers,
+            "canonical_reservation": {**reservation, "active": reservation_active} if reservation else None,
+            "occupied_by": occupied.get(host.id),
+            "eligible": reason == "eligible",
+            "reason": reason,
+        })
+    return decisions
 
 
 def sort_queue(tickets: Iterable[TicketCandidate]) -> list[TicketCandidate]:
@@ -345,3 +495,225 @@ def evaluate_admission(
         active_slots_total=total_active_slots,
         max_fleet_slots=max_slots,
     )
+
+
+# --- live effective policy (USR-471): the one impure entry point, isolated from the pure
+# evaluator above ------------------------------------------------------------------------------
+
+
+def measure_resource_readings(config: FleetConfig) -> dict[str, dict[str, Any]]:
+    """Current `{workers, available_gib, observed_at}` reading for every configured host.
+
+    The one host with no persisted `endpoint` is THIS machine (`.factory/config/line_fleet.json`'s
+    own convention, shared with `core.line.fleet_dispatcher.default_probe`): measured directly via
+    `core.line.gate_ram` (the same formula the official gate uses to size its own workers). Every
+    other host is probed over HTTP via `core.harness.remote_dispatch.probe_health`; an offline or
+    unreachable host yields no reading at all -- `effective_host_policy` already treats a missing
+    reading as `resource_reading_missing_or_stale` (fail-closed), so a dead Grokbox never needs a
+    special case here.
+    """
+    from core.harness import remote_dispatch as rd
+    from core.line import gate_ram
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    readings: dict[str, dict[str, Any]] = {}
+    excluded = {host.casefold() for host in config.disabled_hosts}
+    excluded.update(
+        host.strip().casefold()
+        for host in os.environ.get(ENV_FLEET_DISABLED_HOSTS, "").split(",")
+        if host.strip()
+    )
+    for host in config.hosts:
+        # Exclusion is authoritative: do not even probe a healthy endpoint the owner disabled.
+        if not host.enabled or host.id.casefold() in excluded or rd.is_worker_disabled(host.endpoint or host.id, excluded):
+            continue
+        if not host.endpoint:
+            try:
+                reading = gate_ram.measure_workers()
+            except Exception as exc:  # noqa: BLE001 - one host's measurement must not sink the rest
+                logger.warning("local resource measurement failed for host %s: %s", host.id, exc)
+                continue
+            readings[host.id] = {
+                "workers": reading.workers,
+                "available_gib": reading.available_gib,
+                "observed_at": now_iso,
+            }
+            continue
+        health = rd.probe_health(host.endpoint)
+        if health is None:
+            continue
+        readings[host.id] = {
+            "workers": health.get("workers"),
+            "available_gib": health.get("available_gib", 0),
+                # Missing timestamps are unknown freshness, not a fresh reading.
+                # effective_host_policy fails closed when observed_at is absent.
+                "observed_at": health.get("observed_at") or health.get("resource_observed_at"),
+            "busy": bool(health.get("busy")),
+            "node_id": health.get("node_id"),
+            "hostname": health.get("hostname"),
+        }
+    return readings
+
+
+def build_effective_policy_report(
+    config: Optional[FleetConfig] = None,
+    *,
+    disabled_from_environment: Optional[Iterable[str]] = None,
+    readings: Optional[dict[str, dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
+    config_source: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    """The single auditable effective fleet policy report: host config, live resource readings,
+    exclusions (config + environment) and the resulting eligibility, one entry per host."""
+    cfg = config if config is not None else load_fleet_config(strict=True)
+    instant = now or datetime.now(timezone.utc)
+    env_disabled = (
+        list(disabled_from_environment)
+        if disabled_from_environment is not None
+        else os.environ.get(ENV_FLEET_DISABLED_HOSTS, "").split(",")
+    )
+    measured = readings if readings is not None else measure_resource_readings(cfg)
+    reservations: dict[str, dict[str, Any]] = {}
+    reservation_store_available = True
+    try:
+        from core.line.admission_store import AdmissionStore
+        from core.paths import state_root
+
+        admission_path = state_root() / "admission.sqlite3"
+        if not admission_path.is_file():
+            raise FileNotFoundError("canonical admission store is unavailable")
+        for reservation in AdmissionStore(admission_path).active_host_reservations():
+            host_id = str(reservation.get("host_id") or "")
+            if host_id:
+                reservations[host_id] = {**reservation, "active": True}
+    except Exception as exc:  # noqa: BLE001 - unavailable reservation state must fail closed below
+        logger.warning("could not read active fleet reservations: %s", exc)
+        reservation_store_available = False
+    occupied = {
+        host_id: "remote_worker_busy"
+        for host_id, reading in measured.items()
+        if bool(reading.get("busy"))
+    }
+    hosts = effective_host_policy(
+        cfg, disabled_from_environment=env_disabled, readings=measured,
+        occupied=occupied, reservations=reservations, now=instant,
+    )
+    if not reservation_store_available:
+        for host in hosts:
+            if host["eligible"]:
+                host["eligible"] = False
+                host["reason"] = "reservation_state_unavailable"
+        reservation_state = "unavailable"
+    else:
+        reservation_state = "available"
+    return policy_snapshot_report(
+        cfg,
+        hosts,
+        now=instant,
+        config_source=config_source or DEFAULT_CONFIG_PATH,
+        reservation_state=reservation_state,
+        resource_source="live_health_and_gate_ram",
+        disabled_from_environment=env_disabled,
+    )
+
+
+def policy_snapshot_report(
+    config: FleetConfig,
+    hosts: list[dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+    config_source: str | Path,
+    reservation_state: str = "available",
+    resource_source: str = "dispatcher_probe_results",
+    disabled_from_environment: Optional[Iterable[str]] = None,
+) -> dict[str, Any]:
+    """Wrap effective host decisions in the durable, auditable policy envelope.
+
+    The dispatcher passes the exact decisions it used for admission, so writing the
+    operational snapshot does not probe hosts a second time or change active work.
+    """
+    instant = now or datetime.now(timezone.utc)
+    env_exclusions = (
+        list(disabled_from_environment)
+        if disabled_from_environment is not None
+        else os.environ.get(ENV_FLEET_DISABLED_HOSTS, "").split(",")
+    )
+    configured = {str(host).strip() for host in config.disabled_hosts if str(host).strip()}
+    configured.update(host.id for host in config.hosts if not host.enabled)
+    configured = sorted(configured)
+    environment = sorted({str(host).strip() for host in env_exclusions if str(host).strip()})
+    updated_at = instant.isoformat()
+    return {
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
+        "generated_at": updated_at,
+        "updated_at": updated_at,
+        "origin": {
+            "configuration": str(config_source),
+            "exclusions": {"config": configured, "environment": environment},
+            "resource_readings": resource_source,
+        },
+        "max_fleet_slots": config.max_fleet_slots,
+        "reservation_state": reservation_state,
+        "hosts": hosts,
+    }
+
+
+def snapshot_path(root: Optional[Path] = None) -> Path:
+    """Where the effective-policy snapshot is persisted, under the shared state root."""
+    from core.runtime_artifacts import runtime_sidecar_path
+
+    return runtime_sidecar_path(
+        "fleet_policy_snapshot.json",
+        state_root=root,
+    )
+
+
+def write_effective_policy_snapshot(report: dict[str, Any], *, path: Optional[Path] = None) -> Path:
+    """Persist `report` atomically, using a unique same-directory temporary file.
+
+    Same-directory replacement keeps readers from observing a partial JSON document and
+    unique temporary names allow the Hub and dispatcher to refresh concurrently.
+    """
+    from core.runtime_artifacts import atomic_write_json
+
+    target = path if path is not None else snapshot_path()
+    return atomic_write_json(target, report)
+
+
+def effective_policy_snapshot(
+    config: Optional[FleetConfig] = None,
+    *,
+    path: Optional[Path] = None,
+    config_source: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    """Build the effective fleet policy fresh (live resource readings, current exclusions) and
+    persist it. The single entry point the CLI (`--effective`) and the Hub endpoint both call --
+    neither ever reads the persisted file for a decision; both recompute it here, every time."""
+    report = build_effective_policy_report(config, config_source=config_source)
+    write_effective_policy_snapshot(report, path=path)
+    return report
+
+
+def _cli(argv: Optional[Sequence[str]] = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="DarkFac fleet policy (USR-471)")
+    parser.add_argument(
+        "--effective", action="store_true",
+        help="Print the current effective fleet host policy as JSON and persist its snapshot",
+    )
+    parser.add_argument("--config", type=Path, default=None, help="Override line_fleet.json path")
+    args = parser.parse_args(argv)
+    if not args.effective:
+        parser.print_help()
+        return 1
+    config = load_fleet_config(args.config) if args.config is not None else None
+    report = effective_policy_snapshot(config, config_source=args.config or DEFAULT_CONFIG_PATH)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(_cli())

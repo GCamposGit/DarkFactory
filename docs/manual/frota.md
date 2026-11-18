@@ -1,5 +1,6 @@
 <!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/line/admission_store.py, core/line/failure_taxonomy.py, core/line/run_outcome.py, core/line/failure_alerts.py, core/line/stale_active.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
+<!-- covers: core/line/fleet_policy.py, core/line/operational_context.py -->
 # Operação da frota
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
@@ -170,6 +171,34 @@ As reservas de outros processos não são renovadas nem liberadas; leases vencid
 pelo reconciliador e só então o host volta a ser elegível. Se qualquer consulta canônica falhar,
 o dispatcher não inicia trabalho e publica `free_hosts` vazio naquele ciclo.
 
+## Política efetiva de hosts e workers (USR-471 T2)
+
+A topologia persistente fica em `.factory/config/line_fleet.json`: cada host declara
+endpoint, prioridade, `max_workers` e `min_free_memory_gib`; `disabled_hosts` e
+`hosts[].enabled=false` são exclusões de política. `DARKFAC_FLEET_DISABLED_HOSTS`
+adiciona exclusões do processo. A exclusão é decidida antes da saúde, então uma resposta
+saudável do Desktop não o torna elegível quando ele está excluído.
+
+Consulte a decisão efetiva e atualize o snapshot compartilhado sem iniciar outro dispatcher:
+
+```powershell
+Set-Location C:\dev\DarkFac
+python -m core.line.fleet_policy --effective
+```
+
+O relatório registra a origem da configuração, as exclusões de configuração e ambiente,
+os limites e workers configurados, a leitura de recursos, a elegibilidade e o motivo por
+host. O snapshot fica em `STATE_ROOT\runs\fleet_policy_snapshot.json` (ou sob
+`DARKFAC_STATE_ROOT`); cada processo pode regenerá-lo atomicamente. Endpoints no relatório
+mostram somente esquema, host e porta; credenciais, caminho e query são removidos, e as
+leituras publicadas aceitam somente os campos tipados de capacidade.
+
+`DARKFAC_TEST_WORKERS` é uma lista de prioridade explícita. Se um worker nela estiver
+offline, a seleção tenta os demais endpoints configurados que não foram excluídos. Hosts
+excluídos não são sondados. Sem candidatos elegíveis, o modo automático informa os motivos
+e continua localmente; `--remote-required` termina com causa estruturada
+`no_eligible_workers`, sem criar dispatcher ou reiniciar host.
+
 Cada despacho inicia `run_ticket.py` em um worktree operacional limpo criado de `origin/main`.
 O despachante copia para esse checkout somente o registro do ticket selecionado; arquivos
 alterados no checkout compartilhado, inclusive estado de runtime, ficam preservados e fora
@@ -319,9 +348,13 @@ DarkFac-Fleet-Dispatcher > Propriedades`:
 - `Geral`: conta de serviço correta, “Executar estando o usuário conectado ou não” e
   “Executar com privilégios mais altos” desmarcado.
 - `Disparadores`: “Ao iniciar o sistema”.
-- `Ações`: Python completo, argumentos `-m core.line.fleet_dispatcher --loop` e
-  diretório de início igual ao checkout.
+- `Ações`: Python completo, argumentos `-m core.line.fleet_bootstrap --project-root <checkout>
+  --state-root <checkout>\.factory --loop` e diretório de início igual ao checkout.
 - `Configurações`: reinício após falha a cada minuto e instâncias simultâneas ignoradas.
+
+O instalador recusa reinstalar (código de saída 3) enquanto o `fleet_dispatcher_state.json`
+mostra um ticket em voo (`in_flight`) de ciclo recente; a fila e o SHA ficam intactos e basta
+repetir o comando depois que o run concluir (USR-471).
 
 Confira `Histórico` e `Último Resultado da Execução`. Para acompanhar tarefa e log:
 

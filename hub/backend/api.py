@@ -1477,6 +1477,26 @@ def get_v0_proof(service: HubService = Depends(get_hub_service)) -> V0ProofRepor
     return service.get_v0_proof()
 
 
+@router.get("/line/fleet-policy", response_model=dict)
+def get_fleet_policy(service: HubService = Depends(get_hub_service)) -> dict:
+    """Effective fleet host policy (USR-471): same content as
+    `python -m core.line.fleet_policy --effective` (host config, live resource readings,
+    exclusions and eligibility, one entry per host)."""
+    return service.get_fleet_policy()
+
+
+@router.get("/line/model-audit", response_model=dict)
+def get_model_audit(
+    ticket: Optional[str] = Query(None),
+    service: HubService = Depends(get_hub_service),
+) -> dict:
+    """Effective model-route audit receipt (USR-471 T2): same content as
+    `python -m core.models.audit --from-runs [--ticket ...] --latest` (effective model,
+    stage/harness divergence and policy violations, recomputed from the real executor
+    ledger on every call)."""
+    return service.get_model_audit(ticket)
+
+
 @router.get("/line/live/stream")
 async def stream_line_live(
     request: Request,

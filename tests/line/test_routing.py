@@ -18,6 +18,7 @@ from core.line.routing import (
     harness_cli_pin,
     load_routing_config,
     pick,
+    quota_remaining_percent,
     record_result,
     touch_coordinator_heartbeat,
     validate_routing_config,
@@ -26,6 +27,23 @@ from core.line.routing import (
 
 def _always_healthy(_provider_id: str) -> float | None:
     return 90.0
+
+
+def test_quota_remaining_percent_reuses_picks_own_lookup(monkeypatch):
+    """USR-471 T1: the observability helper must read the same provider mapping `pick()` uses,
+    never stand up a second probe. OpenRouter has no subscription quota and never calls it."""
+    seen: list[str] = []
+
+    def fake_headroom(provider_id: str) -> float | None:
+        seen.append(provider_id)
+        return 42.0
+
+    monkeypatch.setattr("core.line.routing._default_quota_headroom", fake_headroom)
+    assert quota_remaining_percent("claude") == 42.0
+    assert quota_remaining_percent("codex") == 42.0
+    assert seen == ["anthropic", "openai"]
+    assert quota_remaining_percent("openrouter") is None
+    assert seen == ["anthropic", "openai"]  # unchanged: no probe for openrouter
 
 
 def test_default_config_file_is_loadable():
@@ -572,6 +590,60 @@ def test_harness_cli_pin_returns_the_declared_model_and_effort():
 
     assert model == "gpt-6-luna"
     assert effort == "high"
+
+
+def test_stage_effort_is_reported_when_harness_has_no_specific_effort_pin():
+    cfg = load_routing_config(default_config_path())
+    assert harness_cli_pin("codex", None, stage="review", config=cfg) == ("gpt-6-luna", "high")
+
+
+def test_invalid_configured_model_fails_closed_with_structured_cause(tmp_path, caplog):
+    import logging
+
+    bad_config = tmp_path / "line_routing.json"
+    bad_config.write_text(
+        json.dumps({"stages": {"development": {"cascade": [["codex", "made-up-model"]]}}}),
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.ERROR, logger="core.line.routing"):
+        cfg = load_routing_config(bad_config)
+        assert cfg.configuration_error.startswith("invalid_routing_config:")
+        assert pick(
+            "development", ["harness:codex"], config=cfg, quota_lookup=_always_healthy,
+            cooldown_path=Path("does-not-exist.json"),
+        ) is None
+    assert any(getattr(record, "route_failure", {}).get("cause", "").startswith("invalid_routing_config:") for record in caplog.records)
+
+
+def test_complexity_specific_pins_are_resolved_for_the_selected_harness():
+    cfg = load_routing_config(default_config_path())
+
+    assert harness_cli_pin("codex", None, stage="development", config=cfg, complexity="medium") == (
+        "gpt-6-luna", "high"
+    )
+    assert harness_cli_pin("codex", None, stage="development", config=cfg, complexity="critical") == (
+        "gpt-sol", "high"
+    )
+    assert harness_cli_pin("claude", "claude-sonnet-5-5", stage="development", config=cfg, complexity="high") == (
+        "claude-opus-5-5", "high"
+    )
+
+
+def test_high_complexity_selects_only_registered_high_tier_models_and_logs_decision(tmp_path, caplog):
+    import logging
+
+    table = {"anthropic": 40.0, "openai": 80.0, "xai": 99.0}
+    with caplog.at_level(logging.INFO, logger="core.line.routing"):
+        route = _dev_pick(table, complexity="high")
+
+    assert route == ("codex", None)
+    record = next(record for record in caplog.records if record.message.startswith("route_selected"))
+    assert record.route == {
+        "stage": "development", "harness": "codex", "role": "development.codex",
+        "model": "gpt-sol", "effort": "high", "complexity": "high",
+        "quota_source": "injected_lookup", "reason": "complexity_tier",
+        "requested_harness": None, "effective_harness": "codex",
+    }
 
 
 def test_harness_cli_pin_falls_back_to_the_cascade_model_without_a_pin():

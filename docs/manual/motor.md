@@ -10,6 +10,14 @@ de correção. `DARKFAC_GATE_SCOPE=full` restaura o caminho anterior com `--quic
 e despacho remoto estrito. A admissão prévia permanece regida pelo seu contrato.
 Detalhes de seleção, prazo e recuperação de crash em [portao.md](portao.md).
 
+## Identidade headless e recibo de execução (USR-471)
+
+O launcher fixa o harness da execução por processo e encaminha identidade de projeto/estado
+para o bootstrap da frota. A preferência `DARKFAC_OPERATING_HARNESS` da sessão interativa
+não deve ser herdada por serviços headless. A etapa de revisão conserva no recibo o modelo,
+família, duração e o resultado validado; modelo divergente, schema inválido ou revisão da
+mesma família não contam como entrega real.
+
 O launcher prioriza o `[HARNESS_RESULT]` final ao classificar um gate falho
 (USR-452). Com testes descobertos e saída1 da suíte, mensagens de timeout ou
 worker indisponível citadas dentro de um traceback não autorizam repetir a suíte
