@@ -87,7 +87,7 @@ def merged(ticket: str, project: str) -> None:
 
 
 def record_failure(ticket: str, project: str, cause: str, detail: str, *, run_id: str | None = None,
-                   log_path: str = "", repo: Path | None = None) -> dict[str, Any]:
+                   log_path: str = "", repo: Path | None = None, phase: str = "unknown") -> dict[str, Any]:
     """Shared durable accounting, also used when a launcher dies without an outcome."""
     from core.line.admission_store import AdmissionStore
 
@@ -98,6 +98,7 @@ def record_failure(ticket: str, project: str, cause: str, detail: str, *, run_id
         project, ticket, cause, run_id=identity, main_sha=main_sha(root),
         detail=error_detail(detail, cause),
         log_path=log_path or os.environ.get("DARKFAC_RUN_LOG") or str(outcome_path(ticket).with_suffix(".log")),
+        phase=phase,
     )
 
 
@@ -164,7 +165,7 @@ class _Attempt:
             from core.line.agent_cli import redact_secrets
             path.with_suffix(".log").write_text(f"{cause}: {detail}\n" + redact_secrets(self.output), encoding="utf-8")
         if code:
-            record_failure(self.ticket, self.project, cause, detail, run_id=self.run_id)
+            record_failure(self.ticket, self.project, cause, detail, run_id=self.run_id, phase=outcome.stage)
         elif "[DELIVERY_MERGED]" in self.output or payload.get("status") == "merged_awaiting_deploy":
             from core.line.admission_store import AdmissionStore
             AdmissionStore(state_root() / "admission.sqlite3").reset_budget(self.project, self.ticket)

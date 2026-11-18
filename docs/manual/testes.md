@@ -239,3 +239,10 @@ O fingerprint de higiene inclui os arquivos ignorados de `.factory/`, mas normal
 Quando um host está temporariamente fora da frota ou com outra carga (configurado em `DARKFAC_FLEET_DISABLED_HOSTS`, ex.: `desktop`), o despachante resolve primeiro a identidade lógica de cada URL, `node_id` e `hostname`. Assim, `onprem-z97-server` e `darkfac-desktop` são descartados para `desktop`; `predator-neo-16` e `AI_Notebook` continuam elegíveis. Só identificadores desconhecidos usam a compatibilidade legada por substring. O filtro atua antes das requisições e sondas `/health`; se um worker com endereço arbitrário se identificar como host desabilitado, o runner descarta o candidato e tenta o próximo worker ou a execução local. A rotação de workers em falha (`_rotate_gate_workers` no `run_ticket.py`) também respeita essa lista e nunca reintroduz hosts desabilitados na suíte de tentativas.
 
 O worker resolve `node_id` pelo hostname local quando não recebe configuração explícita; `/health` informa o `node_id`, `hostname` e `node_id_source`. `scripts/install_test_worker.ps1` mantém esse padrão por default e aceita `-NodeId` como override explícito. O worker corrige um id conhecido que pertença a outro host quando o hostname local identifica a máquina, para que o `/health` represente o host que respondeu.
+
+## Cancelamento durável de jobs remotos (USR-475 T5)
+
+Antes de enviar `DELETE /harness/jobs/<job_id>`, `core/harness/remote_dispatch.py` grava a
+intenção em `cancel_intents/<job_id>.json` com chave determinística de idempotência (`durable_cancel_job`),
+trata `404` como terminal idempotente e emite `[REMOTE_JOB_CANCELLED]` sem vazar tokens. No início de
+`maybe_dispatch_remote`, `resume_pending_cancellations()` reenvia intenções não confirmadas após falha de rede ou reinício.

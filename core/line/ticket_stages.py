@@ -123,7 +123,7 @@ def rebase_conflict_result(
 ) -> Any:
     print("\n" + "=" * 68, file=sys.stderr)
     print(
-        f"[ERRO DE CONFLITO NO REBASE] Conflito ao rebasear a branch {current_branch} em origin/{base_branch}.",
+        f"[FALHA TÉCNICA DE REBASE] Conflito ao rebasear a branch {current_branch} em origin/{base_branch}.",
         file=sys.stderr,
     )
     if conflict_files:
@@ -132,15 +132,15 @@ def rebase_conflict_result(
             print(f"  - {cf}", file=sys.stderr)
     else:
         print(f"Detalhes do erro: {msg}", file=sys.stderr)
-    print(f"\nWorktree preservada para resolução manual em: {target_worktree}", file=sys.stderr)
-    print("Para retomar a entrega após resolver o conflito, execute:", file=sys.stderr)
+    print(f"\nWorktree e candidato preservados para recuperação técnica: {target_worktree}", file=sys.stderr)
+    print("A mesma evidência não dispara outra inferência. Após mudar a base, o candidato ou a evidência, retome com:", file=sys.stderr)
     print(f"  {resume_cmd}", file=sys.stderr)
     print("=" * 68 + "\n", file=sys.stderr)
 
     progress.phase(
         "gate",
         "failed",
-        f"conflito no rebase em origin/main: {', '.join(conflict_files[:5]) or msg}",
+        f"falha técnica de rebase em origin/{base_branch}: {', '.join(conflict_files[:5]) or msg}",
         cause="rebase_conflict",
     )
     conflict_payload = {

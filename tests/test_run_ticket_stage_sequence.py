@@ -284,6 +284,7 @@ def test_research_without_web_search_is_skipped_with_reason_and_never_invents_so
     research = json.loads((_context(line) / "research.json").read_text(encoding="utf-8"))
     assert research["kind"] == "research_skipped" and research["sources"] == []
     assert research["reason"] == "busca web indisponivel neste host"
+    run_ticket.ticket_engine.reset(run_ticket.ticket_engine.run_workspace(line.ticket))
     line.ticket = _ticket("small")
     assert run_ticket.main(["USR-990", "--harness", "codex", "--skip-validation"]) == 0
     research = json.loads((_context(line) / "research.json").read_text(encoding="utf-8"))

@@ -48,6 +48,7 @@ from __future__ import annotations
 import base64
 import collections
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -550,11 +551,141 @@ def _job_is_live(base_url: str, job_id: str | None) -> bool:
     return bool(job_id) and _job_status(base_url, str(job_id)) in ("queued", "running")
 
 
-def _cancel_job(base_url: str, job_id: str) -> None:
+#: USR-475 T5: subdirectory of cancellation intents, persisted BEFORE the authenticated
+#: DELETE is sent so an intent is never lost between "we decided to cancel" and "the
+#: worker confirmed it". Sibling of LOST_JOBS_SUBDIR.
+CANCEL_INTENTS_SUBDIR = "cancel_intents"
+MARKER_REMOTE_JOB_CANCELLED = "[REMOTE_JOB_CANCELLED]"
+
+
+def _cancel_intent_path(job_id: str) -> Path:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", str(job_id or "unknown"))[:80]
+    directory = harness_cache.state_dir() / CANCEL_INTENTS_SUBDIR
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{safe_id}.json"
+
+
+def _load_cancel_intent(job_id: str) -> dict[str, Any] | None:
+    try:
+        return json.loads(_cancel_intent_path(job_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _save_cancel_intent(record: dict[str, Any]) -> None:
+    """Atomic write (temp + replace), matching ``_record_lost_job``'s convention."""
+    path = _cancel_intent_path(str(record.get("job_id") or "unknown"))
+    tmp_path = path.with_suffix(".json.tmp")
+    with contextlib.suppress(Exception):
+        tmp_path.write_text(json.dumps(record, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        os.replace(tmp_path, path)
+
+
+def _cancel_idempotency_key(base_url: str, job_id: str, reason: str) -> str:
+    """Deterministic key for one (worker, job, reason) cancellation -- never includes
+    the auth token, so it is safe to persist and print."""
+    digest = hashlib.sha256(f"{base_url}|{job_id}|{reason}".encode("utf-8")).hexdigest()
+    return digest[:32]
+
+
+def _record_cancellation_event(record: dict[str, Any]) -> None:
+    """Prints the structured ``[REMOTE_JOB_CANCELLED]`` line; never raises. ``record``
+    only ever carries allow-listed, non-secret fields -- the DELETE auth header never
+    reaches this function."""
+    with contextlib.suppress(Exception):
+        print(f"{MARKER_REMOTE_JOB_CANCELLED} {json.dumps(record, sort_keys=True, default=str)}")
+
+
+def _cancel_request(base_url: str, job_id: str) -> dict[str, Any]:
+    """Raw authenticated DELETE against the worker. Never raises and never returns the
+    auth token; any HTTP/network error is sanitized into ``detail`` for safe persistence."""
     url = f"{base_url.rstrip('/')}/harness/jobs/{job_id}"
     req = urllib.request.Request(url, method="DELETE", headers=_auth_headers())
-    with contextlib.suppress(Exception):
-        urllib.request.urlopen(req, timeout=POLL_HTTP_TIMEOUT_SEC)
+    try:
+        with urllib.request.urlopen(req, timeout=POLL_HTTP_TIMEOUT_SEC) as resp:
+            return {"outcome": "confirmed", "status_code": resp.status}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            # The worker already has no record of this job: already terminal, treated
+            # idempotently as a successful cancellation (USR-475 T5).
+            return {"outcome": "already_terminal", "status_code": 404}
+        detail = ""
+        with contextlib.suppress(Exception):
+            detail = exc.read().decode("utf-8", errors="replace")
+        return {"outcome": "error", "status_code": exc.code, "detail": sanitize_child_output(detail)[:300]}
+    except Exception as exc:  # noqa: BLE001 - network failure; resumed by a later sweep
+        return {"outcome": "error", "status_code": None, "detail": sanitize_child_output(str(exc))[:300]}
+
+
+def durable_cancel_job(base_url: str, job_id: str, *, reason: str) -> bool:
+    """Cancel ``job_id`` on ``base_url``'s worker durably (USR-475 T5).
+
+    Persists a cancellation intent (job id, worker, reason, idempotency key) BEFORE
+    calling the network, so a crash between the two steps still leaves a record that
+    :func:`resume_pending_cancellations` can retry. A 404 (the worker has no record of
+    the job) counts as success idempotently. Returns ``True`` only once the worker has
+    confirmed the job is gone (cancelled or already terminal); a still-pending/failed
+    attempt returns ``False`` without raising, for the caller to retry or ignore.
+    """
+    existing = _load_cancel_intent(job_id)
+    if existing is not None and existing.get("confirmed"):
+        return True  # already confirmed for this job; never re-issue the DELETE
+    idempotency_key = _cancel_idempotency_key(base_url, job_id, reason)
+    record: dict[str, Any] = {
+        "job_id": job_id,
+        "worker_url": base_url,
+        "reason": reason,
+        "idempotency_key": idempotency_key,
+        "confirmed": False,
+        "attempts": int((existing or {}).get("attempts", 0)) + 1,
+        "created_at": (existing or {}).get("created_at") or time.time(),
+        "last_attempt_at": time.time(),
+    }
+    _save_cancel_intent(record)  # intent persisted BEFORE the DELETE is sent
+    outcome = _cancel_request(base_url, job_id)
+    record["remote_outcome"] = outcome.get("outcome")
+    record["last_error"] = outcome.get("detail")
+    record["confirmed"] = outcome.get("outcome") in ("confirmed", "already_terminal")
+    if record["confirmed"]:
+        record["confirmed_at"] = time.time()
+    _save_cancel_intent(record)
+    _record_cancellation_event(record)
+    return bool(record["confirmed"])
+
+
+def resume_pending_cancellations() -> int:
+    """Retry every unconfirmed cancellation intent left on disk (USR-475 T5).
+
+    Called at the start of a fresh dispatch so an intent persisted before a crash or
+    restart is retried until the worker confirms the job is gone, instead of staying
+    silently abandoned until someone issues the DELETE by hand. Never raises. Returns
+    the number of intents still unconfirmed after this sweep.
+    """
+    directory = harness_cache.state_dir() / CANCEL_INTENTS_SUBDIR
+    if not directory.is_dir():
+        return 0
+    pending = 0
+    for path in sorted(directory.glob("*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if record.get("confirmed"):
+            continue
+        job_id = str(record.get("job_id") or "")
+        base_url = str(record.get("worker_url") or "")
+        reason = str(record.get("reason") or "resumed_after_restart")
+        if not job_id or not base_url:
+            continue
+        if not durable_cancel_job(base_url, job_id, reason=reason):
+            pending += 1
+    return pending
+
+
+def _cancel_job(base_url: str, job_id: str, *, reason: str = "cancel_requested") -> None:
+    """Thin, void-returning wrapper over :func:`durable_cancel_job` kept for the
+    existing call sites (and tests that monkeypatch this exact name to a no-op)."""
+    durable_cancel_job(base_url, job_id, reason=reason)
 
 
 # --- bundle / git plumbing ----------------------------------------------------
@@ -795,14 +926,14 @@ def _stream_job(
         }
         _record_lost_job(details, "\n".join(log_tail))
         if error_code in CANCEL_ON_LOSS_ERROR_CODES:
-            # Free a half-alive worker before the local fallback starts; best effort.
-            _cancel_job(base_url, job_id)
+            # Free a half-alive worker before the local fallback starts.
+            _cancel_job(base_url, job_id, reason=error_code)
         return RemoteJobLost(full_message, details)
 
     while True:
         now = time.monotonic()
         if now > deadline:
-            _cancel_job(base_url, job_id)
+            _cancel_job(base_url, job_id, reason="client_deadline_exceeded")
             raise _give_up("client_deadline_exceeded", "client-side deadline exceeded")
         try:
             payload = _poll_job(base_url, job_id, offset)
@@ -1087,7 +1218,7 @@ def _stream_and_finalize(
         payload = _stream_job(base_url, job_id, deadline=deadline, submitted_instance_id=submitted_instance_id)
     except KeyboardInterrupt:
         print(f"[REMOTE] interrupted; cancelling job {job_id} on {base_url}")
-        _cancel_job(base_url, job_id)
+        _cancel_job(base_url, job_id, reason="keyboard_interrupt")
         raise
 
     return _finalize_remote_result(
@@ -1273,6 +1404,29 @@ def _dispatch_disabled(mode: str) -> bool:
     return mode == "off" or _unconditional_disable_reason() is not None
 
 
+def _record_lost_attempt(base_url: str, attempt_started: float, exc: _WorkerUnavailable) -> None:
+    """Record a lost remote worker attempt and announce the fallback transition."""
+    spent_sec = round(time.monotonic() - attempt_started, 1)
+    error_code = str(exc.details.get("error_code") or "worker_unavailable")
+    DISPATCH_ATTEMPTS.append(
+        {
+            "worker_url": base_url,
+            "job_id": exc.details.get("job_id"),
+            "outcome": "lost",
+            "error_code": error_code,
+            "elapsed_sec": spent_sec,
+            "silent_for_sec": exc.details.get("silent_for_sec"),
+            "last_step_started": exc.details.get("last_step_started"),
+        }
+    )
+    print(f"[REMOTE] {base_url} unavailable ({exc}); trying next option")
+    print(
+        f"{MARKER_REMOTE_FALLBACK} worker={base_url} job={exc.details.get('job_id')} "
+        f"code={error_code} remote_spent={spent_sec:.0f}s; the next option starts a fresh step clock "
+        "(remote time and suite-lock queue time are not charged to any step timeout)"
+    )
+
+
 def maybe_dispatch_remote(
     *,
     steps: list[HarnessStepConfig],
@@ -1301,6 +1455,11 @@ def maybe_dispatch_remote(
     """
 
     DISPATCH_ATTEMPTS.clear()
+    # USR-475 T5: retry any cancellation intent a previous run left unconfirmed
+    # (crash/restart between persisting the intent and the worker's answer) before
+    # dispatching new work; never blocks or raises on failure.
+    with contextlib.suppress(Exception):
+        resume_pending_cancellations()
     if local_only:
         return None
 
@@ -1395,25 +1554,7 @@ def maybe_dispatch_remote(
                 total_timeout_sec=total_timeout_sec,
             )
         except _WorkerUnavailable as exc:
-            spent_sec = round(time.monotonic() - attempt_started, 1)
-            error_code = str(exc.details.get("error_code") or "worker_unavailable")
-            DISPATCH_ATTEMPTS.append(
-                {
-                    "worker_url": base_url,
-                    "job_id": exc.details.get("job_id"),
-                    "outcome": "lost",
-                    "error_code": error_code,
-                    "elapsed_sec": spent_sec,
-                    "silent_for_sec": exc.details.get("silent_for_sec"),
-                    "last_step_started": exc.details.get("last_step_started"),
-                }
-            )
-            print(f"[REMOTE] {base_url} unavailable ({exc}); trying next option")
-            print(
-                f"{MARKER_REMOTE_FALLBACK} worker={base_url} job={exc.details.get('job_id')} "
-                f"code={error_code} remote_spent={spent_sec:.0f}s; the next option starts a fresh step clock "
-                "(remote time and suite-lock queue time are not charged to any step timeout)"
-            )
+            _record_lost_attempt(base_url, attempt_started, exc)
             continue
 
         if outcome is None:

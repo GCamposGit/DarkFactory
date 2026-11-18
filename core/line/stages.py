@@ -63,10 +63,22 @@ class TextArtifact(BaseModel):
 
 
 class BuildReport(BaseModel):
-    """`progress.json` written by BUILD."""
+    """`progress.json` written by BUILD, once per finished slice (USR-475 T1).
+
+    ``plan_digest``, ``candidate_digest`` and ``worktree`` are empty on an artifact written
+    before USR-475. A new checkpoint may have an empty ``tickets_done`` while BUILD is
+    starting its first slice; ``ticket_id`` and ``completed_slice_count`` bind its scope and
+    position. Legacy artifacts are migrated only when every planned slice is already listed
+    in order.
+    """
 
     harness: Optional[str] = None
-    tickets_done: list[str] = Field(min_length=1)
+    ticket_id: str = ""
+    tickets_done: list[str] = Field(default_factory=list)
+    completed_slice_count: int = Field(default=0, ge=0)
+    plan_digest: str = ""
+    candidate_digest: str = ""
+    worktree: str = ""
 
 
 class ValidationReport(BaseModel):

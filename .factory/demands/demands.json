@@ -12136,16 +12136,18 @@
     "project_id": "darkfac",
     "title": "Conflito tecnico nao pode deixar recuperacao bloqueada e fila ociosa",
     "origin": "user",
-    "status": "implementing",
-    "delivery_evidence": "BUILD preservado em c13d4357; gate_remote_unavailable por worker ocupado. Retomar mesma worktree sem novo BUILD. USR-473 git add corrigido em d6338ed4 com prova real de commit e regressao consolidada.",
+    "status": "completed",
+    "delivery_evidence": "ticket/usr-475",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
-      "stabilization-20261105"
+      "stabilization-20261105",
+      "owner-decision:OA-087=allow"
     ],
-    "problem_statement": "USR473 ficou parado de14:38 ate18:49 em05/11: rebase_conflict motor.md marcou waiting_human; pending_delivery bloqueou launcher_exit:1 permanentemente; dispatcher resume_only permaneceu vivo sem executar trabalho e handoff aguardou merge. Conflito foi resolvido tecnicamente preservando ambas secoes e ledger atual. Falha nao exigia decisao do owner. Evidencias .factory/pending_delivery/USR473.log e estado fleet_dispatcher_state.json.",
+    "express_causes": [],
+    "problem_statement": "USR473 ficou parado de14:38 ate18:49 em05/11: rebase_conflict motor.md marcou waiting_human; pending_delivery bloqueou launcher_exit:1 permanentemente; dispatcher resume_only permaneceu vivo sem executar trabalho e handoff aguardou merge. Conflito foi resolvido tecnicamente preservando ambas secoes e ledger atual. Falha nao exigia decisao do owner. Evidencias .factory/pending_delivery/USR473.log e estado fleet_dispatcher_state.json.\nAuditoria noite06/11 08hBRT: pending_delivery USR473,475,476 permaneceu blocked launcher_exit:1; USR468 foi marcado waiting_human apos ci_red_twice/docs-sync, sem decisao de negocio identificada. Implementacoes preservadas, zero novo deploy. Relatorio .factory/reports/noite-20261106.md.\n\n[Decisao do owner OA-087] Autorizar dados tecnicos privados DarkFac no OpenRouter -> opcao allow (Autorizar dados tecnicos DarkFac no OpenRouter), em 2026-11-06T16:03:34Z. Nota do owner: Owner autorizou explicitamente no chat codigo privado, SPECs, diffs e logs tecnicos internos DarkFac no OpenRouter; sem segredos/clientes, tetos preservados.\n\nEvidencia adicional06/11: pending_delivery executa ticket novo para espera BUILD; _stage_workspace faz reset(rws) e _stage_build inicializa tickets_done vazio, persistindo BUILD somente ao terminar todas fatias. Assim uma retomada apos falta de cota pode repetir PLAN e fatias concluidas. Tambem status blocked e verificado antes de terminal, impedindo retirar esperas antigas ja encerradas.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -12153,13 +12155,17 @@
       "Conflito tecnico conhecido aciona recuperacao concreta limitada com harness elegivel, preservando trabalho e sem converter erro em decisao material do owner",
       "Erro deterministico nao repete inferencia sem mudanca verificavel; esgotada recuperacao, outros tickets independentes continuam e falha acionavel e registrada e notificada uma vez por mudanca",
       "Teste comportamental cobre conflito real, reinicio e trabalho independente; controlador vivo sem progresso nao e reportado como esteira em execucao",
-      "Validar entrega real com gate oficial revisao cruzada CI merge deploy e smoke; atualizar manual fase e learning pack"
+      "Validar entrega real com gate oficial revisao cruzada CI merge deploy e smoke; atualizar manual fase e learning pack",
+      "Retomada de BUILD persiste cada fatia concluida com candidato/plano e continua somente fatias restantes na mesma worktree, sem resetar PLAN; divergencia de evidencia falha fechada com causa",
+      "Esperas antigas terminais sao reconciliadas por prova; blocked tecnico nao torna tickets independentes permanentemente inelegiveis",
+      "Controller default_deploy subprocess has no timeout; cancellation left remote gate job43bbad3fd0564b92ad6ffc7e2a2b2c6f running and required authenticated DELETE. Bound deploy waits and propagate remote cancellation durably.",
+      "Observed 2026-11-06 22:07 BRT: USR-470 failed delivery at17:52BRT and USR-474 failed delivery at20:13BRT; dispatcher relaunched USR-470 at20:13BRT with fresh PLAN and six BUILD slices, overwriting canonical artifacts. At22:07 it is still slice5/6. No new production SHA beyond85cd33c7833949f5f1b3d1f4c430cdd933eb2048; canary remains2026-10-25. Preserve completed BUILD/worktrees and persist structured delivery-child errors BEFORE retry; failed delivery must resume delivery rather than new PLAN/BUILD."
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-05T21:55:48.885297Z",
-    "updated_at": "2026-11-05T21:55:48.885297Z"
+    "updated_at": "2026-11-17T13:39:44.660456Z"
   },
   {
     "id": "USR-476",

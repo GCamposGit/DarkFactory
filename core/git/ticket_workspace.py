@@ -1208,8 +1208,9 @@ class PreservedWorkspace:
 class PreservedLookup:
     """Outcome of :func:`find_preserved_workspaces`.
 
-    ``chosen`` is the worktree to resume (most recent one with work); ``others`` are the remaining ones
-    with work (reported, never touched); ``notes`` explain every candidate that was left out.
+    ``chosen`` is the explicitly preferred eligible worktree when available, otherwise the most
+    recent one with work; ``others`` are the remaining candidates (reported, never touched);
+    ``notes`` explain every candidate that was left out.
     """
 
     chosen: Optional[PreservedWorkspace] = None
@@ -1242,6 +1243,7 @@ def find_preserved_workspaces(
     remote: str = "origin",
     fetch: bool = True,
     ignore_paths: Sequence[str] = (),
+    preferred_path: Optional[Path | str] = None,
     run_git: Optional[GitRunner] = None,
 ) -> PreservedLookup:
     """Worktrees of ``ticket_id`` that an interrupted attempt preserved and that can be resumed (USR-225).
@@ -1250,8 +1252,10 @@ def find_preserved_workspaces(
     names :func:`create_workspace` hands out) on branch ``ticket/<id>`` or ``ticket/<dir name>``, whose
     directory exists, that is neither ``git worktree lock``-ed / prunable nor holding a git ``index.lock``
     (another session is using it), and that has work: changed paths other than ``ignore_paths`` or commits
-    ahead of ``<remote>/<base>``. The most recent one by name stamp is ``chosen``. Nothing is modified or
-    deleted: worktrees of other tickets are never looked at.
+    ahead of ``<remote>/<base>``. The most recent one by name stamp is ``chosen`` unless ``preferred_path``
+    names an eligible registered worktree. That exact worktree is eligible even while clean, so a BUILD
+    checkpoint written before its first slice resumes in the same place. Nothing is modified or deleted:
+    worktrees of other tickets are never looked at.
     """
     runner = run_git or _git
     lookup = PreservedLookup()
@@ -1266,7 +1270,8 @@ def find_preserved_workspaces(
     name_pattern = re.compile(rf"^{re.escape(slug)}-(\d{{8}}T\d{{6}}Z)(?:-(\d+))?$")
     worktrees_dir = main_root / WORKTREES_DIRNAME
     ignored = set(ignore_paths)
-    ranked: list[tuple[tuple[str, int], PreservedWorkspace]] = []
+    preferred_key = _norm(preferred_path) if preferred_path is not None else None
+    ranked: list[tuple[tuple[bool, str, int], PreservedWorkspace]] = []
 
     for entry in list_worktrees(main_root, runner)[1:]:  # [0] is the primary checkout
         path = Path(entry["worktree"])
@@ -1297,7 +1302,8 @@ def find_preserved_workspaces(
         changed = tuple(p for p in _status_paths(status.stdout) if p not in ignored)
         ahead_res = runner(["rev-list", "--count", f"{base_ref}..HEAD"], path)
         ahead = int(ahead_res.stdout.strip()) if ahead_res.returncode == 0 and ahead_res.stdout.strip().isdigit() else 0
-        if not changed and ahead == 0:
+        is_preferred = preferred_key is not None and _norm(path) == preferred_key
+        if not changed and ahead == 0 and not is_preferred:
             lookup.notes.append(f"{path} (sem alteracoes nem commits fora da base; ignorada)")
             continue
         base_sha_res = runner(["merge-base", base_ref, "HEAD"], path)
@@ -1308,7 +1314,7 @@ def find_preserved_workspaces(
             ticket_id=ticket_id, path=path, branch=branch, main_root=main_root, base_ref=base_ref, base_sha=base_sha
         )
         ranked.append(
-            ((match.group(1), int(match.group(2) or 1)), PreservedWorkspace(workspace, changed, ahead))
+            ((is_preferred, match.group(1), int(match.group(2) or 1)), PreservedWorkspace(workspace, changed, ahead))
         )
 
     ranked.sort(key=lambda item: item[0], reverse=True)

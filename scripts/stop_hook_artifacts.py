@@ -28,6 +28,10 @@ def _git(cwd: Path, *args: str) -> str:
 
 def missing_artifact(cwd: Path) -> str | None:
     """Retorna o motivo do bloqueio ou None se a sessao pode encerrar (USR-431)."""
+    # The shared guard treats unreadable Git output as an empty diff. This CLI
+    # must surface that as an unexpected hook failure so the fail-open warning
+    # is visible, instead of silently treating a non-repository as clean.
+    _git(cwd, "rev-parse", "--show-toplevel")
     try:
         from core.ops.turn_guard import check_learning_pack
         return check_learning_pack(cwd)

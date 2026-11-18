@@ -143,6 +143,7 @@ def test_resume_delivery_rebase_conflict_cli_output(
     # skip that compatibility path and stop before the rebase conflict.
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
     monkeypatch.delenv("DARKFAC_LOCAL_CANCEL_PARENT", raising=False)
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
     # Exercise the unresolved-conflict CLI path without launching a real agent
     # from an xdist worker (which may cancel or outlive that worker).
     monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *args, **kwargs: None)
@@ -185,7 +186,7 @@ def test_resume_delivery_rebase_conflict_cli_output(
         assert code == 1
 
     captured = capsys.readouterr()
-    assert "[ERRO DE CONFLITO NO REBASE]" in captured.err
+    assert "[FALHA TÉCNICA DE REBASE]" in captured.err
     assert "conflict.txt" in captured.err
     assert "--resume-delivery USR-116" in captured.err
     assert repo.exists()
@@ -484,12 +485,18 @@ def test_merge_blocked_and_rebase_conflict_are_named_causes_not_unknown() -> Non
         progress.set_outcome.assert_called_once_with("x", cause)
 
 
-def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(tmp_path: Path) -> None:
+def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
     repo = _conflict_repo(tmp_path, {"mod.py": ("a = 1\n", "a = 2\n")})
     ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
     assert ok is False
 
-    def fake_agent(worktree: Path, ticket: UserTicket, stage: str, feedback: str) -> None:
+    def fake_agent(
+        worktree: Path, ticket: UserTicket, stage: str, feedback: str, *, route: tuple[str, str],
+    ) -> None:
+        assert route == ("codex", "test-model")
         assert stage == "rebase-conflito" and "mod.py" in feedback
         (worktree / "mod.py").write_text("a = 3\n", encoding="utf-8")
         _git(worktree, "add", "mod.py")
@@ -501,17 +508,298 @@ def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(tm
     assert (repo / "mod.py").read_text(encoding="utf-8") == "a = 3\n"
 
 
-def test_unresolved_rebase_conflict_preserves_technical_failure_with_rc_1(tmp_path: Path) -> None:
+def test_unresolved_rebase_conflict_preserves_technical_failure_with_rc_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
     repo = _conflict_repo(tmp_path, {"mod.py": ("a = 1\n", "a = 2\n")})
     ledger = repo / ".factory" / "demands" / "demands.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
     DemandsStore(ledger).save_ticket(_TICKET_412)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
     with patch.object(run_ticket, "PROJECT_ROOT", repo), \
             patch.object(run_ticket, "_invoke_fix_agent", return_value=None) as agent:
         code = run_ticket.resume_delivery("USR-412", worktree_path=repo, skip_validation=True)
-    assert code == 1 and agent.call_count == 1
-    assert DemandsStore(ledger).get_ticket("USR-412").status == DeliveryStatus.VALIDATING
+        # The status write lands on PROJECT_ROOT. This test points that root at the worktree,
+        # so discard it before the second resume; otherwise the new commit would be a new candidate.
+        subprocess.run(
+            ["git", "checkout", "--", ".factory/demands/demands.json"],
+            cwd=repo, check=True, capture_output=True,
+        )
+        again = run_ticket.resume_delivery("USR-412", worktree_path=repo, skip_validation=True)
+    assert code == 1 and again == 1 and agent.call_count == 1
+    saved = DemandsStore(ledger).get_ticket("USR-412")
+    assert saved is not None
+    assert saved.status == DeliveryStatus.VALIDATING
+    assert saved.status != DeliveryStatus.WAITING_HUMAN
+    assert (saved.delivery_evidence or "").startswith("technical_hold: rebase_conflict")
+    assert "waiting_human" not in (saved.delivery_evidence or "")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", candidate, "HEAD"], cwd=repo, capture_output=True,
+    )
+    assert ancestor.returncode == 0
+    assert (repo / "mod.py").read_text(encoding="utf-8") == "a = 1\n"
+    assert repo.exists() and not _rebase_in_progress(repo)
+    from core.line.admission_store import AdmissionStore
+    from core.line.failure_taxonomy import classify
+    from core.paths import state_root
+
+    assert classify("rebase_conflict") == "candidate"
+    assert classify("rebase_conflict: mod.py") == "candidate"
+    store = AdmissionStore(state_root() / "admission.sqlite3")
+    assert store.ticket_hold(project_id="darkfac", ticket_id="USR-412") is None
+    rows = store.rebase_recovery_rows(project_id="darkfac", ticket_id="USR-412")
+    assert len(rows) == 1 and rows[0]["inferred"] == 1 and rows[0]["cause"] == "rebase_conflict"
+    assert "--resume-delivery USR-412" in rows[0]["resume_command"]
+
+
+def _conflict_repo_from_base(tmp_path: Path, base: dict[str, str], files: dict[str, tuple[str, str]]) -> Path:
+    """Like ``_conflict_repo``, but ``base`` is the common ancestor of every conflict."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    for name, text in base.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+        _git(repo, "add", name)
+    if base:
+        _git(repo, "commit", "-m", "shared base")
+    _git(repo, "checkout", "-b", "ticket/usr-412")
+    for side, idx in (("ticket/usr-412", 0), ("main", 1)):
+        if side == "main":
+            _git(repo, "checkout", "main")
+        for name, texts in files.items():
+            (repo / name).parent.mkdir(parents=True, exist_ok=True)
+            (repo / name).write_text(texts[idx], encoding="utf-8")
+            _git(repo, "add", name)
+        _git(repo, "commit", "-m", f"{side} change")
+    _git(repo, "checkout", "ticket/usr-412")
+    return repo
+
+
+def test_compatible_rebase_keeps_both_sections_and_continues_without_waiting_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    base = "# Motor\n\n## Base\ntexto comum\n"
+    ledger = ".factory/demands/demands.json"
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"docs/manual/motor.md": base, ledger: "ancestor\n"},
+        {
+            "docs/manual/motor.md": (base + "\n## Ticket\nsecao do ticket\n", base + "\n## Main\nsecao do main\n"),
+            ledger: ("branch\n", "main\n"),
+        },
+    )
+    parked: list[object] = []
+    monkeypatch.setattr(run_ticket, "_park_waiting_human", lambda *args, **kwargs: parked.append(args))
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("agent")))
+    finished, _sha = run_ticket._deliver_sync(
+        GitAutonomyManager(repo), _TICKET_412, repo, "ticket/usr-412",
+        f"python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery USR-412 --worktree {repo}",
+        True, True, False, MagicMock(), lambda: None, False, "main",
+    )
+    assert finished is False and parked == []
+    text = (repo / "docs/manual/motor.md").read_text(encoding="utf-8")
+    assert "secao do ticket" in text and "secao do main" in text and "texto comum" in text
+    assert "<<<<<<<" not in text
+    assert (repo / ledger).read_text(encoding="utf-8").strip() == "main"
     assert not _rebase_in_progress(repo)
+
+
+def test_protected_conflict_is_not_auto_merged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    base = "# Regras\n\n## Base\ntexto comum\n"
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"AGENTS.md": base},
+        {"AGENTS.md": (base + "\n## Ticket\nsecao do ticket\n", base + "\n## Main\nsecao do main\n")},
+    )
+    ok, _files, _msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False
+    with patch.object(run_ticket, "_invoke_fix_agent") as agent:
+        ok, _files, _msg = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, ["AGENTS.md"], "conflict")
+    assert ok is False
+    agent.assert_not_called()
+    assert not _rebase_in_progress(repo)
+    assert (repo / "AGENTS.md").read_text(encoding="utf-8") == base + "\n## Ticket\nsecao do ticket\n"
+
+
+def test_rebase_inference_is_once_until_head_or_content_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"mod.py": "a = 0\n"},
+        {"mod.py": ("a = 1\n", "a = 2\n")},
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    calls = {"n": 0}
+
+    def fake(*_args: object, **_kwargs: object) -> None:
+        calls["n"] += 1
+
+    def resolve_again() -> bool:
+        ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+        assert ok is False and "mod.py" in files
+        done, _files, _msg = run_ticket.resolve_rebase_conflict(
+            _TICKET_412, repo, files, msg, resume_command="python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery USR-412 --worktree X",
+        )
+        return done
+
+    with patch.object(run_ticket, "_invoke_fix_agent", side_effect=fake):
+        assert resolve_again() is False
+        assert calls["n"] == 1
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        assert head == candidate and repo.exists() and not _rebase_in_progress(repo)
+        assert resolve_again() is False
+        assert calls["n"] == 1
+        _git(repo, "checkout", "main")
+        (repo / "README.md").write_text("# Test Repo\n\nmain moved\n", encoding="utf-8")
+        _git(repo, "add", "README.md")
+        _git(repo, "commit", "-m", "main moves")
+        _git(repo, "checkout", "ticket/usr-412")
+        assert resolve_again() is False
+        assert calls["n"] == 2
+        (repo / "mod.py").write_text("a = 4\n", encoding="utf-8")
+        _git(repo, "add", "mod.py")
+        _git(repo, "commit", "-m", "ticket content moves")
+        assert resolve_again() is False
+        assert calls["n"] == 3
+
+
+def test_missing_rebase_route_does_not_spend_the_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"mod.py": "a = 0\n"},
+        {"mod.py": ("a = 1\n", "a = 2\n")},
+    )
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run_ticket, "run_agent", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("agent")))
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False
+    done, _files, _msg = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert done is False and not _rebase_in_progress(repo)
+    from core.line.admission_store import AdmissionStore
+    from core.paths import state_root
+
+    store = AdmissionStore(state_root() / "admission.sqlite3")
+    rows = store.rebase_recovery_rows(project_id="darkfac", ticket_id="USR-412")
+    assert len(rows) == 1 and rows[0]["recovery_result"] == "route_wait" and rows[0]["inferred"] == 0
+    calls = {"n": 0}
+
+    def fake(*_args: object, **_kwargs: object) -> None:
+        calls["n"] += 1
+
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", fake)
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files
+    done, _files, _msg = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert done is False and calls["n"] == 1
+    rows = store.rebase_recovery_rows(project_id="darkfac", ticket_id="USR-412")
+    assert len(rows) == 1 and rows[0]["recovery_result"] == "technical_hold" and rows[0]["inferred"] == 1
+
+
+def test_interrupted_rebase_recovery_is_reconciled_after_restart_without_repeating_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"mod.py": "value = 0\n"},
+        {"mod.py": ("value = 1\n", "value = 2\n")},
+    )
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    ok, files, msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == ["mod.py"]
+
+    from core.line import rebase_recovery
+    from core.line.admission_store import AdmissionStore
+    from core.paths import state_root
+
+    attempts = {"n": 0}
+
+    def stop_after_reservation(_cwd: Path) -> list[str]:
+        attempts["n"] += 1
+        raise SystemExit("simulated process stop")
+
+    monkeypatch.setattr(rebase_recovery, "repair_compatible_conflicts", stop_after_reservation)
+    with pytest.raises(SystemExit, match="simulated process stop"):
+        run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
+    assert _rebase_in_progress(repo)
+
+    # A fresh launcher recognizes the persisted rebase instead of trying another `git rebase`.
+    ok, restarted_files, restarted_msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and restarted_files == ["mod.py"]
+    monkeypatch.setattr(rebase_recovery, "repair_compatible_conflicts", lambda _cwd: pytest.fail("recovery repeated"))
+    done, _files, reason = run_ticket.resolve_rebase_conflict(
+        _TICKET_412, repo, restarted_files, restarted_msg,
+    )
+    assert done is False and reason.startswith("rebase_conflict_recovery_interrupted:")
+    assert attempts["n"] == 1
+    assert not _rebase_in_progress(repo)
+    assert subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip() == candidate
+
+    store = AdmissionStore(state_root() / "admission.sqlite3")
+    rows = store.rebase_recovery_rows(project_id="darkfac", ticket_id="USR-412")
+    assert len(rows) == 1
+    assert rows[0]["recovery_started"] == 1 and rows[0]["recovery_result"] == "technical_hold"
+    assert rows[0]["inferred"] == 0
+
+
+def test_fingerprint_changes_when_recovery_evidence_changes(tmp_path: Path) -> None:
+    from core.line.rebase_recovery import conflict_fingerprint
+
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"mod.py": "value = 0\n"},
+        {"mod.py": ("value = 1\n", "value = 2\n")},
+    )
+    ok, files, _msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False
+
+    first = conflict_fingerprint(_TICKET_412, repo, files, evidence={"diagnostic_digest": "evidence-a"})
+    changed = conflict_fingerprint(_TICKET_412, repo, files, evidence={"diagnostic_digest": "evidence-b"})
+    assert first.sha256 != changed.sha256
+    assert first.context_digest != changed.context_digest
+    run_ticket._abort_rebase(repo)
+
+
+def test_conflicting_values_with_substring_overlap_are_not_treated_as_compatible(tmp_path: Path) -> None:
+    from core.line.rebase_recovery import repair_compatible_conflicts
+
+    repo = _conflict_repo_from_base(
+        tmp_path,
+        {"mod.py": "value = 0\n"},
+        {"mod.py": ("value = 1\n", "value = 10\n")},
+    )
+    ok, files, _msg = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == ["mod.py"]
+
+    remaining = repair_compatible_conflicts(repo)
+
+    assert remaining == ["mod.py"]
+    content = (repo / "mod.py").read_text(encoding="utf-8")
+    assert "<<<<<<<" in content and "value = 1" in content and "value = 10" in content
+    run_ticket._abort_rebase(repo)
 
 
 def _forbid_next_ticket_id(self: DemandsStore, project_id: str = "darkfac") -> str:
@@ -714,7 +1002,12 @@ def _candidate_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
     run_ticket.ticket_engine.write_research(
         rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix")
     )
-    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", [ticket.id],
+        plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+        candidate_digest=run_ticket._build_candidate_digest(ticket.id, repo),
+        worktree=str(repo),
+    )
     candidate, policy = run_ticket._candidate_binding(rws, repo, run_ticket._review_base_branch(ticket))
     assert candidate
     return repo, ticket, rws, candidate, policy
@@ -1105,9 +1398,14 @@ def _usr467_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_ticket.ticket_engine.write_research(
         rws, ResearchArtifact(kind="research_skipped", ticket_id=ticket.id, reason="small fix"),
     )
-    run_ticket.ticket_engine.write_build(rws, "grok", [ticket.id])
     candidate, policy = run_ticket._candidate_binding(rws, repo, run_ticket._review_base_branch(ticket))
     assert candidate
+    run_ticket.ticket_engine.write_build(
+        rws, "grok", [ticket.id],
+        plan_digest=run_ticket.ticket_engine.plan_digest(rws),
+        candidate_digest=run_ticket._build_candidate_digest(ticket.id, repo),
+        worktree=str(repo),
+    )
     run_ticket.ticket_engine.write_validation(
         rws, True, "core/harness/runner.py --quick", candidate_digest=candidate,
     )
@@ -1160,7 +1458,7 @@ def test_usr467_preserved_exit_reopens_without_another_build(
 
     with patch("core.line.line_lock.is_locked", return_value=False), \
             patch("core.demands.queue_store.control_store", return_value=store), \
-            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree}]), \
+            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree, "branch": "refs/heads/ticket/usr-467"}]), \
             patch.object(pending, "_route", return_value=None), \
             patch.object(pending.subprocess, "Popen", side_effect=popen):
         held = pending.tick(tmp_path, directory=directory, now=50)[0]
@@ -1173,7 +1471,7 @@ def test_usr467_preserved_exit_reopens_without_another_build(
     saved = pending.PendingDelivery.model_validate_json((directory / "USR-467.json").read_text(encoding="utf-8"))
     with patch("core.line.line_lock.is_locked", return_value=False), \
             patch("core.demands.queue_store.control_store", return_value=store), \
-            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree}]), \
+            patch("core.git.ticket_workspace.list_worktrees", return_value=[{"worktree": worktree, "branch": "refs/heads/ticket/usr-467"}]), \
             patch.object(pending, "_route", return_value=("claude", "claude-sonnet")), \
             patch.object(pending.subprocess, "Popen", side_effect=popen):
         opened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]
