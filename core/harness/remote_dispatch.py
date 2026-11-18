@@ -1404,6 +1404,29 @@ def _dispatch_disabled(mode: str) -> bool:
     return mode == "off" or _unconditional_disable_reason() is not None
 
 
+def _record_lost_attempt(base_url: str, attempt_started: float, exc: _WorkerUnavailable) -> None:
+    """Record a lost remote worker attempt and announce the fallback transition."""
+    spent_sec = round(time.monotonic() - attempt_started, 1)
+    error_code = str(exc.details.get("error_code") or "worker_unavailable")
+    DISPATCH_ATTEMPTS.append(
+        {
+            "worker_url": base_url,
+            "job_id": exc.details.get("job_id"),
+            "outcome": "lost",
+            "error_code": error_code,
+            "elapsed_sec": spent_sec,
+            "silent_for_sec": exc.details.get("silent_for_sec"),
+            "last_step_started": exc.details.get("last_step_started"),
+        }
+    )
+    print(f"[REMOTE] {base_url} unavailable ({exc}); trying next option")
+    print(
+        f"{MARKER_REMOTE_FALLBACK} worker={base_url} job={exc.details.get('job_id')} "
+        f"code={error_code} remote_spent={spent_sec:.0f}s; the next option starts a fresh step clock "
+        "(remote time and suite-lock queue time are not charged to any step timeout)"
+    )
+
+
 def maybe_dispatch_remote(
     *,
     steps: list[HarnessStepConfig],
@@ -1531,25 +1554,7 @@ def maybe_dispatch_remote(
                 total_timeout_sec=total_timeout_sec,
             )
         except _WorkerUnavailable as exc:
-            spent_sec = round(time.monotonic() - attempt_started, 1)
-            error_code = str(exc.details.get("error_code") or "worker_unavailable")
-            DISPATCH_ATTEMPTS.append(
-                {
-                    "worker_url": base_url,
-                    "job_id": exc.details.get("job_id"),
-                    "outcome": "lost",
-                    "error_code": error_code,
-                    "elapsed_sec": spent_sec,
-                    "silent_for_sec": exc.details.get("silent_for_sec"),
-                    "last_step_started": exc.details.get("last_step_started"),
-                }
-            )
-            print(f"[REMOTE] {base_url} unavailable ({exc}); trying next option")
-            print(
-                f"{MARKER_REMOTE_FALLBACK} worker={base_url} job={exc.details.get('job_id')} "
-                f"code={error_code} remote_spent={spent_sec:.0f}s; the next option starts a fresh step clock "
-                "(remote time and suite-lock queue time are not charged to any step timeout)"
-            )
+            _record_lost_attempt(base_url, attempt_started, exc)
             continue
 
         if outcome is None:

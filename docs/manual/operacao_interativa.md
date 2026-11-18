@@ -227,3 +227,11 @@ O preflight do Claude consulta os servidores opcionais em `~/.claude.json`. Arqu
 ou inacessivel, inclusive quando a consulta de existencia recebe `PermissionError`, e tratado
 como configuracao opcional indisponivel e nao interrompe a execucao do ticket. Para exigir o
 modo MCP estrito explicitamente, use `DARKFAC_STRICT_MCP_CONFIG=1`.
+
+## Checkpoint de BUILD e recuperacao de rebase (USR-475)
+
+Na operacao interativa e na retomada pelo launcher, `run_ticket.py` vincula `progress.json` ao
+digest de plano, candidato e worktree (`build_evidence_mismatch` preserva os artefatos sem
+resetar plano ou fatias). Em conflito tecnico de rebase na entrega, `core/line/rebase_recovery.py`
+aplica primeiro ajuste deterministico e limita a inferencia pelo fingerprint antes de registrar
+`technical_hold`, preservando arquivos protegidos e a worktree para retomada.

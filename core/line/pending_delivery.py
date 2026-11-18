@@ -649,6 +649,77 @@ def _reconcile_terminal_wait(path: Path, row: PendingDelivery, now: float) -> di
     return {"ticket": row.ticket_id, "status": "terminal", "proof": "deployed", "stage": row.stage}
 
 
+def _check_completed_deploy_evidence(
+    path: Path, row: PendingDelivery, release: Path, ticket: dict,
+) -> tuple[dict, dict | None]:
+    """Validate coherent deploy artifacts for a pending row once a release SHA exists."""
+    report = json.loads(release.read_text(encoding="utf-8")) if release.is_file() else {}
+    merge_path = release.with_name("merge.json")
+    if not report and ticket.get("status") == "completed" and merge_path.is_file():
+        report = {"sha": json.loads(merge_path.read_text(encoding="utf-8")).get("merge_sha"), "deployed": False}
+    if report.get("sha") and not report.get("deployed"):
+        try:
+            merge = json.loads(merge_path.read_text(encoding="utf-8"))
+            validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
+            review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
+            execution = json.loads(release.with_name("review_execution.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            row.status, row.cause = "blocked", "deploy_evidence_missing"
+            _save(path, row)
+            return report, {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
+        if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
+                or not validation.get("candidate_digest")
+                or review.get("candidate_digest") != validation["candidate_digest"]
+                or merge.get("candidate_digest") != validation["candidate_digest"]
+                or execution.get("candidate_digest") != validation["candidate_digest"]
+                or not execution.get("reviewer_family") or not execution.get("implementer_family")
+                or execution["reviewer_family"] in execution.get("implementation_families", [execution["implementer_family"]])
+                or review.get("verdict") != "approve" or review.get("forced")):
+            row.status, row.cause = "blocked", "deploy_evidence_mismatch"
+            _save(path, row)
+            return report, {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
+        return report, {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
+    return report, None
+
+
+def _validate_pending_worktree(
+    path: Path, row: PendingDelivery, repo_root: Path, now: float,
+) -> Path | dict:
+    """Confirm the pending row's worktree is registered under the ticket's branch."""
+    from core.git.ticket_workspace import list_worktrees
+
+    worktree = Path(row.worktree).resolve()
+    entries = list_worktrees(repo_root)
+    registered = [entry for entry in entries if entry.get("worktree")
+                  and Path(entry["worktree"]).resolve() == worktree]
+    if not registered:
+        return _block_wait(
+            path, row, "pending_worktree_unregistered",
+            f"ticket:{row.ticket_id};worktree:{worktree};registered:false", now=now,
+            reason="pending worktree is absent from the Git worktree registry",
+            next_step="Restore or re-register the recorded ticket worktree, then resume this pending delivery.",
+        )
+    slug = row.ticket_id.lower()
+    branch_ok = any(
+        (branch := str(entry.get("branch", "")).removeprefix("refs/heads/").lower())
+        == f"ticket/{slug}" or branch.startswith(f"ticket/{slug}-")
+        for entry in registered
+    )
+    if not worktree.is_dir() or not branch_ok:
+        branches = ",".join(sorted(
+            str(entry.get("branch", "")).removeprefix("refs/heads/") or "detached"
+            for entry in registered
+        ))
+        return _block_wait(
+            path, row, "pending_worktree_mismatch",
+            f"ticket:{row.ticket_id};worktree:{worktree};branches:{branches};directory_exists:{worktree.is_dir()}",
+            now=now,
+            reason="pending worktree is registered under a different ticket branch or is missing",
+            next_step="Restore the same ticket branch and worktree recorded by the BUILD checkpoint, then resume delivery.",
+        )
+    return worktree
+
+
 def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     from core.demands.queue_store import control_store
     from core.git.ticket_workspace import list_worktrees
@@ -739,32 +810,10 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         raise RuntimeError(f"Ticket {row.ticket_id} absent from durable queue")
     from core.line.ticket_engine import artifacts_root
     release = artifacts_root() / row.ticket_id / ".darkfac" / "runs" / row.ticket_id / "deploy_report.json"
-    report = json.loads(release.read_text(encoding="utf-8")) if release.is_file() else {}
     merge_path = release.with_name("merge.json")
-    if not report and ticket.get("status") == "completed" and merge_path.is_file():
-        report = {"sha": json.loads(merge_path.read_text(encoding="utf-8")).get("merge_sha"), "deployed": False}
-    if report.get("sha") and not report.get("deployed"):
-        try:
-            merge = json.loads(release.with_name("merge.json").read_text(encoding="utf-8"))
-            validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
-            review = json.loads(release.with_name("review_state.json").read_text(encoding="utf-8"))["rounds"][-1]
-            execution = json.loads(release.with_name("review_execution.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError, KeyError, IndexError, TypeError):
-            row.status, row.cause = "blocked", "deploy_evidence_missing"
-            _save(path, row)
-            return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
-        if (merge.get("merge_sha") != report["sha"] or not validation.get("passed")
-                or not validation.get("candidate_digest")
-                or review.get("candidate_digest") != validation["candidate_digest"]
-                or merge.get("candidate_digest") != validation["candidate_digest"]
-                or execution.get("candidate_digest") != validation["candidate_digest"]
-                or not execution.get("reviewer_family") or not execution.get("implementer_family")
-                or execution["reviewer_family"] in execution.get("implementation_families", [execution["implementer_family"]])
-                or review.get("verdict") != "approve" or review.get("forced")):
-            row.status, row.cause = "blocked", "deploy_evidence_mismatch"
-            _save(path, row)
-            return {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
-        return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
+    report, deploy_wait = _check_completed_deploy_evidence(path, row, release, ticket)
+    if deploy_wait is not None:
+        return deploy_wait
     if ticket.get("status") in _TERMINAL_TICKET_STATUSES:
         if ticket.get("status") == "completed" and _ci_recovery_without_merge(row, release, merge_path):
             # The ledger was closed when the PR opened. CI is still red and nothing merged.
@@ -785,35 +834,10 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
             return _block_wait(path, row, cause, _evidence_token(release, report, cause), now=now)
     if ticket.get("status") == "waiting_human":
         return {"ticket": row.ticket_id, "status": "waiting_human"}
-    worktree = Path(row.worktree).resolve()
-    entries = list_worktrees(repo_root)
-    registered = [entry for entry in entries if entry.get("worktree")
-                  and Path(entry["worktree"]).resolve() == worktree]
-    if not registered:
-        return _block_wait(
-            path, row, "pending_worktree_unregistered",
-            f"ticket:{row.ticket_id};worktree:{worktree};registered:false", now=now,
-            reason="pending worktree is absent from the Git worktree registry",
-            next_step="Restore or re-register the recorded ticket worktree, then resume this pending delivery.",
-        )
-    slug = row.ticket_id.lower()
-    branch_ok = any(
-        (branch := str(entry.get("branch", "")).removeprefix("refs/heads/").lower())
-        == f"ticket/{slug}" or branch.startswith(f"ticket/{slug}-")
-        for entry in registered
-    )
-    if not worktree.is_dir() or not branch_ok:
-        branches = ",".join(sorted(
-            str(entry.get("branch", "")).removeprefix("refs/heads/") or "detached"
-            for entry in registered
-        ))
-        return _block_wait(
-            path, row, "pending_worktree_mismatch",
-            f"ticket:{row.ticket_id};worktree:{worktree};branches:{branches};directory_exists:{worktree.is_dir()}",
-            now=now,
-            reason="pending worktree is registered under a different ticket branch or is missing",
-            next_step="Restore the same ticket branch and worktree recorded by the BUILD checkpoint, then resume delivery.",
-        )
+    checked_worktree = _validate_pending_worktree(path, row, repo_root, now)
+    if isinstance(checked_worktree, dict):
+        return checked_worktree
+    worktree = checked_worktree
     row.next_check = now + RECHECK_SECONDS
     _save(path, row)  # Backoff survives network/probe errors and service restart.
     if _route(row) is None:
