@@ -1455,7 +1455,7 @@ def test_default_launch_admission_uses_fleet_default_when_worker_list_is_empty(
 ):
     from core.harness.remote_dispatch import DEFAULT_WORKERS
 
-    assert DEFAULT_WORKERS == "http://100.77.130.5:8080,http://100.78.181.90:8080"
+    assert DEFAULT_WORKERS == "http://100.81.84.124:8080,http://100.77.130.5:8080,http://100.78.181.90:8080"
     if previous is None:
         monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
     else:
