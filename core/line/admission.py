@@ -261,7 +261,7 @@ def admit(
     *,
     build_caps: Iterable[str],
     read_caps: Iterable[str],
-    execution_context: str = "interactive",
+    execution_context: Optional[str] = None,
     operating_harness: Optional[str] = None,
     project_id: Optional[str] = None,
     complexity: Optional[str] = None,
@@ -279,13 +279,20 @@ def admit(
     ``reserve_quota`` is always false. The returned allow does not replace the ``pick`` each stage
     runs later.
     """
-    if execution_context not in ("interactive", "headless"):
-        raise ValueError(f"Unknown execution_context: {execution_context}")
+    from core.line.operating_harness import resolve_process_identity
+
+    explicit_context = execution_context
+    if explicit_context is not None:
+        if explicit_context not in ("interactive", "headless"):
+            raise ValueError(f"Unknown execution_context: {explicit_context}")
+        effective_context = resolve_process_identity(execution_context=explicit_context).execution_context
+    else:
+        effective_context = resolve_process_identity().execution_context
     now = _as_utc(clock())
-    operating = operating_harness if execution_context == "interactive" else None
+    operating = operating_harness if effective_context == "interactive" else None
     common: dict[str, Any] = {
         "project_id": project_id,
-        "execution_context": execution_context,
+        "execution_context": explicit_context,
         "config": config,
     }
     planning_diagnostic: dict[str, Any] = {}
@@ -314,6 +321,7 @@ def admit(
             now=now,
             mode="write" if routing_stage == "development" else "read",
             operating_harness=operating if routing_stage == "development" else None,
+            execution_context=explicit_context,
         )
 
     return decide(planning=planning, build=build, now=now, not_before_for=not_before_for)

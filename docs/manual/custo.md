@@ -50,9 +50,9 @@ remove o diretorio de forma sincrona, dentro do `with`, e uma falha de remocao e
 limpeza nunca altera o veredito de cota: o resultado da sonda (janela lida ou `None`/fail-closed)
 depende só da saída do subprocesso, nunca do sucesso da remoção do diretório.
 
-## Medidor Antigravity RPC (USR-433)
+## Medidor Antigravity RPC (USR-433 / USR-529)
 
-`GeminiAccountAdapter` coleta quotas locais via Language Server local (`antigravity_rpc`). Quando a coleta remota ou as credenciais falham, o adaptador persiste um `ProbeFailure` estruturado com categoria (`unavailable`, `invalid_response`, `protocol`, etc.) e código do erro, mantendo o estado rastreável no relatório sem expor segredos.
+`GeminiAccountAdapter` coleta quotas locais via Language Server local (`antigravity_rpc`). Cada bucket retornado em `RetrieveUserQuotaSummary` recebe um `quota_id` único derivado de `bucketId` (evitando colisão e falsos alertas de plausibilidade entre o pool principal `Gemini Models` e pools específicos de modelo, como `Gemini 4 Argon`, marcados com `metric="model_specific_pool"` para não bloquearem os demais modelos Gemini). Quando a coleta remota ou as credenciais falham, o adaptador persiste um `ProbeFailure` estruturado com categoria (`unavailable`, `invalid_response`, `protocol`, etc.) e código do erro, mantendo o estado rastreável no relatório sem expor segredos.
 
 
 

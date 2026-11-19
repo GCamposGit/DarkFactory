@@ -45,7 +45,7 @@ python -m pip install -r requirements-audio.txt
 
 ## Antigravity
 
-Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte canônica das 17 skills do projeto. Atua como harness de operacao interativo via chat (`DARKFAC_OPERATING_HARNESS=antigravity`), iniciando com `python -m core.ops.briefing`. Quando o harness do Antigravity for usado, adotar o **Gemini 4 Argon High** como modelo de alta inteligência para planejamento e coordenação da fábrica e o **Gemini 4 Hydrogen High** para tarefas simples de codificação, testes e subagentes.
+Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte canônica das 17 skills do projeto. Atua como harness de operacao interativo via chat (`DARKFAC_OPERATING_HARNESS=antigravity`), iniciando com `python -m core.ops.briefing`. Quando o harness do Antigravity for usado, adotar o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes.
 
 ## Codex
 

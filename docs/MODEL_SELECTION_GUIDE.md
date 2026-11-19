@@ -64,19 +64,25 @@ Gerado de `.factory/config/model_registry.json` por `python scripts/generate_mod
 <!-- BEGIN model-registry:roles -->
 | Papel | Modelo (id) | Status |
 | --- | --- | --- |
+| `coordination.antigravity` | `gemini-4-neon` | active |
+| `development.antigravity` | `gemini-4-hydrogen-high` | active |
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
+| `development.high.antigravity` | `gemini-4-neon` | active |
 | `development.high.claude` | `claude-opus-5-5` | active |
 | `development.high.codex` | `gpt-sol` | active |
 | `development.openrouter` | `gpt-sol` | active |
 | `distill.openrouter` | `deepseek/deepseek-v4.1-flash` | active |
+| `planning.antigravity` | `gemini-4-neon` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
 | `planning.codex` | `gpt-sol` | active |
 | `planning.openrouter` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `review.openrouter` | `gpt-6-luna` | active |
+| `subagent.antigravity.simple` | `gemini-4-hydrogen-high` | active |
+| `subagent.antigravity.specific` | `gemini-4-argon-high` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |
 | `subagent.opus` | `claude-opus-5-5` | active |
 | `subagent.sonnet` | `claude-sonnet-5-5` | active |
@@ -105,6 +111,9 @@ Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fabl
 | `gemini-3.1-flash-lite-image` | google | gemini | low | `gemini-image-fast` | candidate | - | - | - |
 | `gemini-3.1-pro` | google | gemini | high | `gemini-pro` | candidate | - | - | 1048576 |
 | `gemini-3.8-flash` | google | gemini | low | `flash` | active | 0.75 | 3.75 | 1000000 |
+| `gemini-4-argon-high` | google | gemini | high | `argon`, `argon-high` | active | - | - | 1000000 |
+| `gemini-4-hydrogen-high` | google | gemini | mid | `hydrogen`, `hydrogen-high` | active | - | - | 1000000 |
+| `gemini-4-neon` | google | gemini | high | `neon`, `neon-orchestrator` | active | - | - | 1000000 |
 | `gpt-6-astra` | openai | openai | frontier | `astra` | candidate (proibido autonomo) | 10.0 | 50.0 | 1050000 |
 | `gpt-6-luna` | openai | openai | mid | `luna` | active | 0.2 | 1.2 | 1050000 |
 | `gpt-image-2` | openai | openai | high | `gpt-image` | candidate | - | - | - |

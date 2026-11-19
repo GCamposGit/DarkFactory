@@ -36,7 +36,7 @@ python -m core.ops.briefing
 
 O briefing e UTF-8 e somente leitura. Mostra a fila do control store, acoes abertas do backlog e fontes dinamicas, estado dos workers sem executar atualizacao/convergencia, PRs abertos, snapshots de quota e o handoff versionado em `docs/operacao/HANDOFF.md`. Cada secao tem fallback independente: falha do banco usa a fila local em memoria; `gh` ausente, sem autenticacao, com erro ou timeout informa que PRs estao indisponiveis. Falha de uma secao nao interrompe as demais. O briefing nao executa probes de quota.
 
-Com `DARKFAC_OPERATING_HARNESS=antigravity`, o roteador pode eleger Antigravity para `development` somente nesta interface interativa e somente quando a cota conhecida excede o piso de 15%. Quando o harness do Antigravity for usado, adota-se o **Gemini 4 Argon High** como modelo de alta inteligencia para planejamento e coordenacao da fabrica e o **Gemini 4 Hydrogen High** para tarefas simples de codificacao, testes e subagentes. Se eleito, implemente no proprio chat. Quando outro harness for eleito, encaminhe o ticket ao fluxo canonico:
+Com `DARKFAC_OPERATING_HARNESS=antigravity`, o roteador pode eleger Antigravity para `development` somente nesta interface interativa e somente quando a cota conhecida excede o piso de 15%. Quando o harness do Antigravity for usado, adota-se o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes. Se eleito, implemente no proprio chat. Quando outro harness for eleito, encaminhe o ticket ao fluxo canonico:
 
 ```powershell
 python C:\dev\DarkFac\run_ticket.py USR-XXX

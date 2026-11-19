@@ -49,9 +49,11 @@
         "codex": {
           "model": "planning.codex",
           "effort": "high"
+        },
+        "antigravity": {
+          "model": "planning.antigravity"
         }
       },
-      "effort": "high",
       "openrouter_ok": true,
       "openrouter_model": "planning.openrouter"
     },
@@ -82,17 +84,22 @@
         "grok": {
           "model": "development.grok",
           "effort": "high"
+        },
+        "antigravity": {
+          "model": "development.antigravity"
         }
       },
       "effort": "high",
       "complexity_pins": {
         "high": {
           "claude": { "model": "development.high.claude", "effort": "high" },
-          "codex": { "model": "development.high.codex", "effort": "high" }
+          "codex": { "model": "development.high.codex", "effort": "high" },
+          "antigravity": { "model": "development.high.antigravity" }
         },
         "critical": {
           "claude": { "model": "development.high.claude", "effort": "high" },
-          "codex": { "model": "development.high.codex", "effort": "high" }
+          "codex": { "model": "development.high.codex", "effort": "high" },
+          "antigravity": { "model": "development.high.antigravity" }
         }
       },
       "openrouter_ok": true,

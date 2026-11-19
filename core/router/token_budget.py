@@ -143,7 +143,8 @@ def _quota_headroom(account: ProviderAccountUsage) -> Optional[float]:
     window (or vice versa), so routing must respect both horizons.
     """
     status = account.status.value
-    known = [float(w.remaining_percent) for w in account.windows if w.remaining_percent is not None]
+    routing_windows = [w for w in account.windows if w.metric != "model_specific_pool"] or list(account.windows)
+    known = [float(w.remaining_percent) for w in routing_windows if w.remaining_percent is not None]
     if status == "degraded":
         # A degraded probe with filled windows (younger than 6 h) is read pessimistically, not ignored.
         age = snapshot_age_seconds(account.checked_at)

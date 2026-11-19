@@ -52,8 +52,8 @@ A fonte única e canônica de modelos, provedores, timeouts e cascatas para a es
 
 | Tipo de Tarefa | Complexidade | Perfil Típico | Provedor / Endpoint |
 | :--- | :--- | :--- | :--- |
-| **Planejamento & Coordenação (Antigravity)** | Alta / Crítica | Gemini 4 Argon High | Antigravity / Google |
-| **Codificação Simples, Testes & Subagentes (Antigravity)** | Baixa / Média | Gemini 4 Hydrogen High | Antigravity / Google |
+| **Planejamento, Orquestração & Coordenação (Antigravity)** | Alta / Crítica | Gemini 4 Neon (idealmente Orchestrator (Neon)) | Antigravity / Google |
+| **Tarefas Específicas, Codificação Simples & Subagentes (Antigravity)** | Baixa / Média / Específica | Gemini 4 Hydrogen High / Gemini 4 Argon High | Antigravity / Google |
 | **Ingestão & Mapeamento** | Qualquer | Gemini 3.8 Flash | Antigravity / Google |
 | **Pesquisa Web & Docs Vivos** | Média / Alta | Grok 4.6 | xAI |
 | **Arquitetura & PRD** | Alta / Crítica | Claude 3.7 Sonnet / Opus | Anthropic |
@@ -71,18 +71,24 @@ Tabela gerada de `.factory/config/model_registry.json` por `python scripts/gener
 <!-- BEGIN model-registry:roles_skill -->
 | Papel | Modelo (id) | Status |
 | --- | --- | --- |
+| `coordination.antigravity` | `gemini-4-neon` | active |
+| `development.antigravity` | `gemini-4-hydrogen-high` | active |
 | `development.claude` | `claude-sonnet-5-5` | active |
 | `development.codex` | `gpt-6-luna` | active |
 | `development.grok` | `grok-4.7` | active |
+| `development.high.antigravity` | `gemini-4-neon` | active |
 | `development.high.claude` | `claude-opus-5-5` | active |
 | `development.high.codex` | `gpt-sol` | active |
 | `development.openrouter` | `gpt-sol` | active |
+| `planning.antigravity` | `gemini-4-neon` | active |
 | `planning.claude` | `claude-opus-5-5` | active |
 | `planning.codex` | `gpt-sol` | active |
 | `planning.openrouter` | `gpt-sol` | active |
 | `review.codex` | `gpt-6-luna` | active |
 | `review.grok` | `grok-4.6` | active |
 | `review.openrouter` | `gpt-6-luna` | active |
+| `subagent.antigravity.simple` | `gemini-4-hydrogen-high` | active |
+| `subagent.antigravity.specific` | `gemini-4-argon-high` | active |
 | `subagent.haiku` | `claude-haiku-5-5` | active |
 | `subagent.opus` | `claude-opus-5-5` | active |
 | `subagent.sonnet` | `claude-sonnet-5-5` | active |

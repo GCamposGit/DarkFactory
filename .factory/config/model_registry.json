@@ -315,6 +315,87 @@
       }
     },
     {
+      "id": "gemini-4-neon",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "high",
+      "aliases": [
+        "neon",
+        "neon-orchestrator"
+      ],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning",
+        "orchestration"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null,
+      "gateway_ids": [],
+      "qualification": {
+        "status": "grandfathered"
+      }
+    },
+    {
+      "id": "gemini-4-argon-high",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "high",
+      "aliases": [
+        "argon",
+        "argon-high"
+      ],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null,
+      "gateway_ids": [],
+      "qualification": {
+        "status": "grandfathered"
+      }
+    },
+    {
+      "id": "gemini-4-hydrogen-high",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "mid",
+      "aliases": [
+        "hydrogen",
+        "hydrogen-high"
+      ],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null,
+      "gateway_ids": [],
+      "qualification": {
+        "status": "grandfathered"
+      }
+    },
+    {
       "id": "deepseek/deepseek-v4.1-flash",
       "provider": "deepseek",
       "family": "deepseek",
@@ -579,13 +660,19 @@
     "subagent.haiku": "claude-haiku-5-5",
     "subagent.sonnet": "claude-sonnet-5-5",
     "subagent.opus": "claude-opus-5-5",
+    "subagent.antigravity.simple": "gemini-4-hydrogen-high",
+    "subagent.antigravity.specific": "gemini-4-argon-high",
+    "coordination.antigravity": "gemini-4-neon",
     "development.claude": "claude-sonnet-5-5",
     "development.high.claude": "claude-opus-5-5",
     "development.codex": "gpt-6-luna",
     "development.high.codex": "gpt-sol",
     "development.grok": "grok-4.7",
+    "development.antigravity": "gemini-4-hydrogen-high",
+    "development.high.antigravity": "gemini-4-neon",
     "planning.claude": "claude-opus-5-5",
     "planning.codex": "gpt-sol",
+    "planning.antigravity": "gemini-4-neon",
     "planning.openrouter": "gpt-sol",
     "development.openrouter": "gpt-sol",
     "review.codex": "gpt-6-luna",

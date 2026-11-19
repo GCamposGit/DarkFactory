@@ -602,3 +602,90 @@ def test_degraded_reading_with_filled_windows_is_read_with_a_margin_until_six_ho
 
     assert _quota_headroom(reading(1)) == 50.0
     assert _quota_headroom(reading(7)) is None
+
+
+def test_antigravity_separates_weekly_pool_buckets_without_collision_or_argon_poisoning(tmp_path, monkeypatch):
+    from core.usage.adapters import GeminiAccountAdapter
+
+    payload = {
+        "response": {
+            "groups": [
+                {
+                    "displayName": "Gemini Models",
+                    "buckets": [
+                        {
+                            "bucketId": "gemini-weekly",
+                            "window": "weekly",
+                            "remainingFraction": 0.6924,
+                            "resetTime": "2026-11-24T23:32:14Z",
+                        },
+                        {
+                            "bucketId": "gemini-5h",
+                            "window": "5h",
+                            "remainingFraction": 0.9825,
+                            "resetTime": "2026-11-19T21:09:38Z",
+                        },
+                    ],
+                },
+                {
+                    "displayName": "Claude and GPT models",
+                    "buckets": [
+                        {
+                            "bucketId": "3p-weekly",
+                            "window": "weekly",
+                            "remainingFraction": 1.0,
+                            "resetTime": "2026-11-26T16:14:18Z",
+                        },
+                    ],
+                },
+                {
+                    "displayName": "Gemini 4 Argon",
+                    "buckets": [
+                        {
+                            "bucketId": "gemini-argon-wtu-weekly",
+                            "window": "weekly",
+                            "remainingFraction": 0.0066,
+                            "resetTime": "2026-11-24T23:28:21Z",
+                        },
+                    ],
+                },
+            ]
+        }
+    }
+
+    class SummaryResponse:
+        status = 200
+
+        def __init__(self, doc):
+            self._doc = doc
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps(self._doc).encode("utf-8")
+
+    adapter = GeminiAccountAdapter(
+        ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://one.google.com/"),
+        tmp_path / "providers",
+    )
+    monkeypatch.setattr(GeminiAccountAdapter, "_find_live_ls_credentials", lambda self: ("fixture-csrf", [12345]))
+    monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", lambda *a, **k: SummaryResponse(payload))
+
+    usage = adapter._probe_language_server()
+    assert usage is not None
+    assert usage.status == AccountConnectionStatus.CONNECTED
+    assert not usage.plausibility_flags
+    qids = [w.quota_id for w in usage.windows]
+    assert len(qids) == len(set(qids))
+    assert set(qids) == {
+        "antigravity:gemini-weekly",
+        "antigravity:gemini-5h",
+        "antigravity:gemini-argon-wtu-weekly",
+    }
+    argon_win = next(w for w in usage.windows if w.quota_id == "antigravity:gemini-argon-wtu-weekly")
+    assert argon_win.metric == "model_specific_pool"
+    assert _quota_headroom(usage) == pytest.approx(69.24)

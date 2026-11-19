@@ -14,7 +14,10 @@ Detalhes de seleção, prazo e recuperação de crash em [portao.md](portao.md).
 
 O launcher fixa o harness da execução por processo e encaminha identidade de projeto/estado
 para o bootstrap da frota. A preferência `DARKFAC_OPERATING_HARNESS` da sessão interativa
-não deve ser herdada por serviços headless. A etapa de revisão conserva no recibo o modelo,
+não deve ser herdada por serviços headless; quando `admit()` e `pick()` são chamados sem
+`execution_context` explícito, assumem `resolve_process_identity().execution_context` (em vez
+de forçar `"interactive"`), mantendo o erro `execution context mismatch` apenas quando o
+chamador exige explicitamente um contexto incompatível com o ambiente. A etapa de revisão conserva no recibo o modelo,
 família, duração e o resultado validado; modelo divergente, schema inválido ou revisão da
 mesma família não contam como entrega real.
 

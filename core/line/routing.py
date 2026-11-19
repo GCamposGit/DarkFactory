@@ -33,7 +33,7 @@ from typing import Any, Callable, Iterable, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
-from core.line.operating_harness import detect_operating_harness, resolve_operating_harness
+from core.line.operating_harness import detect_operating_harness, resolve_operating_harness, resolve_process_identity
 from core.models.registry import QUOTA_FLOOR_MIN, forbidden_markers, get_registry, resolve as resolve_model
 from core.paths import project_root, state_root
 
@@ -267,6 +267,10 @@ def _default_routing_config() -> RoutingConfig:
                     ("antigravity", None),
                 ],
                 effort="high",
+                harness_pins={
+                    "codex": HarnessPin(model=resolve_model("planning.codex"), effort="high"),
+                    "antigravity": HarnessPin(model=resolve_model("planning.antigravity")),
+                },
                 openrouter_ok=True,
                 openrouter_model=resolve_model("planning.openrouter"),
             ),
@@ -278,6 +282,19 @@ def _default_routing_config() -> RoutingConfig:
                     "claude": HarnessPin(model="sonnet"),
                     "codex": HarnessPin(model=resolve_model("development.codex"), effort="high"),
                     "grok": HarnessPin(model=resolve_model("development.grok"), effort="high"),
+                    "antigravity": HarnessPin(model=resolve_model("development.antigravity")),
+                },
+                complexity_pins={
+                    "high": {
+                        "claude": HarnessPin(model=resolve_model("development.high.claude"), effort="high"),
+                        "codex": HarnessPin(model=resolve_model("development.high.codex"), effort="high"),
+                        "antigravity": HarnessPin(model=resolve_model("development.high.antigravity")),
+                    },
+                    "critical": {
+                        "claude": HarnessPin(model=resolve_model("development.high.claude"), effort="high"),
+                        "codex": HarnessPin(model=resolve_model("development.high.codex"), effort="high"),
+                        "antigravity": HarnessPin(model=resolve_model("development.high.antigravity")),
+                    },
                 },
             ),
             "review": StageRoute(
@@ -589,7 +606,8 @@ def _stale_until_reset_headroom(snapshot_file: Path, now: datetime) -> Optional[
         checked = _parse_iso_utc(data.get("checked_at")) if data.get("checked_at") else None
         if checked is not None and (now - checked).total_seconds() > _STALE_HOLD_MAX_SECONDS:
             return None
-        windows = [w for w in data.get("windows", []) if isinstance(w, dict)]
+        all_windows = [w for w in data.get("windows", []) if isinstance(w, dict)]
+        windows = [w for w in all_windows if w.get("metric") != "model_specific_pool"] or all_windows
         resets = [r for r in (_parse_iso_utc(w.get("resets_at")) for w in windows if w.get("resets_at")) if r is not None]
         if not resets or min(resets) <= now:
             return None
@@ -775,6 +793,18 @@ def codex_headless_blocked() -> bool:
     return os.environ.get("DARKFAC_CODEX_HEADLESS_ALLOWED", "").strip().lower() in ("0", "false", "no", "off")
 
 
+def _resolve_execution_context(
+    execution_context: Optional[ExecutionContext],
+) -> tuple[Optional[ExecutionContext], ExecutionContext]:
+    """Resolve effective execution context while preserving explicit mismatch checks."""
+    if execution_context is None:
+        return None, resolve_process_identity().execution_context  # type: ignore[return-value]
+    if execution_context not in ("interactive", "headless"):
+        raise ValueError(f"Unknown execution_context: {execution_context}")
+    effective = resolve_process_identity(execution_context=execution_context).execution_context
+    return execution_context, effective  # type: ignore[return-value]
+
+
 def _routable_candidates(
     stage: str,
     stage_cfg: StageRoute,
@@ -785,7 +815,7 @@ def _routable_candidates(
     excluded_pairs: set[tuple[str, Optional[str]]],
     implementing_harness: Optional[str],
     operating_harness: Optional[str] = None,
-    execution_context: ExecutionContext = "interactive",
+    execution_context: Optional[ExecutionContext] = None,
 ) -> list[tuple[str, Optional[str]]]:
     """Cascade candidates that could serve `stage` on this host, before cooldown/quota (pick() steps 0-1).
 
@@ -797,12 +827,13 @@ def _routable_candidates(
     (model None) after the cascade ones, through the very same filters; callers must treat it as electable
     by the operating-harness preference only (`_extra_operating_candidate`), never as a ranked cascade member.
     """
+    explicit_context, effective_context = _resolve_execution_context(execution_context)
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
     candidates: list[tuple[str, Optional[str]]] = []
     cascade = _resolve_cascade(stage_cfg, implementing_harness)
     extra = _extra_operating_candidate(cascade, operating_harness)
     for harness, model in cascade + ([extra] if extra is not None else []):
-        if stage == "development" and execution_context == "headless" and harness == "antigravity":
+        if stage == "development" and effective_context == "headless" and harness == "antigravity":
             logger.info("Skipping harness antigravity for stage development (headless_context)")
             continue
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
@@ -820,7 +851,7 @@ def _routable_candidates(
         if not supports(
             harness,
             required_mode,
-            execution_context=execution_context,
+            execution_context=explicit_context,
             operating_harness=operating_harness,
         ):
             logger.info(
@@ -838,6 +869,12 @@ _WEEKLY_WINDOW_MINUTES = 7 * 24 * 60
 _MIN_HOURS_TO_RESET = 1.0  # avoids dividing by ~0 right before a reset
 
 
+def _routing_windows(windows: Iterable[Any]) -> list[Any]:
+    """Ignore model-specific quota pools when general subscription windows are present."""
+    all_windows = list(windows)
+    return [w for w in all_windows if getattr(w, "metric", None) != "model_specific_pool"] or all_windows
+
+
 def _default_weekly_slack(provider_id: str) -> Optional[float]:
     """Weekly slack of `provider_id`: remaining % of its weekly window / hours until that window resets.
 
@@ -851,7 +888,7 @@ def _default_weekly_slack(provider_id: str) -> Optional[float]:
             if adapter.spec.provider_id != provider_id:
                 continue
             now = datetime.now(timezone.utc)
-            for window in adapter.inspect().windows:
+            for window in _routing_windows(adapter.inspect().windows):
                 weekly = (window.window_duration_minutes or 0) >= _WEEKLY_WINDOW_MINUTES or "weekly" in window.quota_id.lower()
                 reset = _parse_until(window.resets_at) if window.resets_at else None
                 if not weekly or window.remaining_percent is None or reset is None:
@@ -1427,7 +1464,7 @@ def _evaluate_pick_candidates(
     excluded_pairs: set[tuple[str, str]],
     implementing_harness: Optional[str],
     operating: Optional[str],
-    execution_context: ExecutionContext,
+    execution_context: Optional[ExecutionContext],
     claude_or_codex_healthy: bool,
     cooldowns: dict[str, Any],
     lookup: Callable[[str], Optional[float]],
@@ -1553,7 +1590,7 @@ def pick(
     operating_harness: Optional[str] = None,
     project_id: Optional[str] = None,
     slack_lookup: Optional[Callable[[str], Optional[float]]] = None,
-    execution_context: ExecutionContext = "interactive",
+    execution_context: Optional[ExecutionContext] = None,
     coordinator_heartbeat_path: Optional[Path] = None,
     policy_diagnostic: Optional[dict[str, Any]] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
@@ -1603,18 +1640,17 @@ def pick(
         return None
     required_mode = mode or stage_mode(stage)
 
+    explicit_context, effective_context = _resolve_execution_context(execution_context)
     caps = set(host_caps)
     excluded_harnesses, excluded_pairs = _split_exclude(exclude)
     cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
-    lookup = _with_coordinator_reserve(quota_lookup or _default_quota_headroom, cfg, execution_context, cooldown_path, coordinator_heartbeat_path)
+    lookup = _with_coordinator_reserve(quota_lookup or _default_quota_headroom, cfg, effective_context, cooldown_path, coordinator_heartbeat_path)
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
-    if execution_context not in ("interactive", "headless"):
-        raise ValueError(f"Unknown execution_context: {execution_context}")
     operating = (
         resolve_operating_harness(operating_harness)
-        if stage == "development" and execution_context == "interactive"
+        if stage == "development" and effective_context == "interactive"
         else None
     )
     extra_candidate = _extra_operating_candidate(_resolve_cascade(stage_cfg, implementing_harness), operating)
@@ -1630,13 +1666,13 @@ def pick(
 
     evaluated, eligible, extra_eligible, preferred_unknown, unknown_quota, policy = _evaluate_pick_candidates(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
-        operating, execution_context, claude_or_codex_healthy, cooldowns, lookup, critical_threshold,
+        operating, explicit_context, claude_or_codex_healthy, cooldowns, lookup, critical_threshold,
         project_id, extra_candidate,
     )
 
     winner = _pick_winner(
         stage, complexity, operating, eligible, extra_eligible, preferred_unknown,
-        unknown_quota, slack_fn, execution_context, unknown_quota_last_resort_ok, quota_lookup,
+        unknown_quota, slack_fn, effective_context, unknown_quota_last_resort_ok, quota_lookup,
         cfg=cfg,
     )
 
@@ -1689,7 +1725,7 @@ def _default_quota_reset(provider_id: str, critical_threshold: float = QUOTA_FLO
                 continue
             exhausted = [
                 window
-                for window in adapter.inspect().windows
+                for window in _routing_windows(adapter.inspect().windows)
                 if window.remaining_percent is not None and window.remaining_percent <= critical_threshold
             ]
             resets = [_parse_until(window.resets_at) for window in exhausted]
@@ -1713,6 +1749,7 @@ def earliest_route_available_at(
     cooldown_path: Optional[Path] = None,
     reset_lookup: Optional[ResetLookup] = None,
     operating_harness: Optional[str] = None,
+    execution_context: Optional[ExecutionContext] = None,
 ) -> datetime:
     """When to look for a route again after `pick(stage, ...)` found none (timezone-aware UTC).
 
@@ -1741,11 +1778,17 @@ def earliest_route_available_at(
     if stage_cfg is None:
         return max(fallback, floor)
 
+    explicit_context, effective_context = _resolve_execution_context(execution_context)
     excluded_harnesses, excluded_pairs = _split_exclude(exclude)
-    operating = resolve_operating_harness(operating_harness) if stage == "development" else None
+    operating = (
+        resolve_operating_harness(operating_harness)
+        if stage == "development" and effective_context == "interactive"
+        else None
+    )
     candidates = _routable_candidates(
         stage, stage_cfg, cfg, set(host_caps), mode or stage_mode(stage),
         excluded_harnesses, excluded_pairs, implementing_harness, operating,
+        execution_context=explicit_context,
     )
     cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
     critical = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
