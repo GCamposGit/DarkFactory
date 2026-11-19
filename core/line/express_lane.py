@@ -332,10 +332,21 @@ class HostGap:
     detail: str
 
 
-def express_run_command(ticket_id: str) -> str:
-    """O unico comando da acao do owner para este ticket."""
+def _express_checkout_root(checkout_root: Path | None = None) -> Path:
+    from core.paths import project_root
 
-    return f"python -m core.line.express_lane run --ticket {ticket_id.strip()}"
+    root = Path(checkout_root).expanduser().resolve() if checkout_root is not None else project_root().resolve()
+    if root.parent.name == ".worktrees":
+        return root.parent.parent
+    return root
+
+
+def express_run_command(ticket_id: str, *, checkout_root: Path | None = None) -> str:
+    """O unico comando da acao do owner para este ticket (independente do CWD)."""
+
+    root = _express_checkout_root(checkout_root)
+    quoted = f'"{root}"' if " " in str(root) else str(root)
+    return f"Set-Location {quoted}; python -m core.line.express_lane run --ticket {ticket_id.strip()}"
 
 
 def quota_floor_gap() -> HostGap | None:
@@ -407,7 +418,7 @@ def register_express_owner_action(
         steps=[
             ActionStep(
                 text=(
-                    "No PowerShell, no checkout da fabrica, rode o comando abaixo. "
+                    "No PowerShell (em qualquer diretorio), rode o comando abaixo. "
                     "Ele lista todas as falhas do host. Com o host valido, executa o ticket uma vez. "
                     "Se o ticket ja estiver em voo ou terminal, termina sem criar outro processo."
                 ),
@@ -557,7 +568,8 @@ def _is_express_action(action: Any, ticket_id: str, command: str) -> bool:
     if ticket_id not in list(getattr(action, "blocks", []) or []):
         return False
     commands = [step.command for step in action.steps if getattr(step, "command", None)]
-    return commands == [command]
+    legacy = f"python -m core.line.express_lane run --ticket {ticket_id.strip()}"
+    return commands == [command] or commands == [legacy]
 
 
 def _spawn_ticket(argv: list[str]) -> None:

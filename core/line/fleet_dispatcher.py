@@ -2046,7 +2046,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
     from core.usage.sync_task import publish_once
-    from scripts.cleanup_orphan_worktrees import maybe_run_scheduled
+    from core.git.orphan_worktree_cleanup import maybe_run_scheduled
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())

@@ -568,3 +568,12 @@ reserva, fechando sem `--delete-branch`), bloqueia novas tentativas no mesmo dia
 falhas estruturais nao retentaveis e deduplica alertas entre dias enquanto persistir
 a mesma assinatura estrutural (detalhes operacionais em
 [canary runbook](../runbooks/canary.md)).
+
+## Isolamento de `state_root` no digest e filtro de revisao headless (USR-531 / USR-519)
+
+- `_non_git_candidate_digest` em `run_ticket.py` ignora caminhos sob `state_root().resolve()`, evitando que
+  um `DARKFAC_STATE_ROOT` temporario criado dentro do diretorio de sandbox altere o `candidate_digest` entre
+  `_stage_plan` e `_stage_build`.
+- `_review_candidate` em `run_ticket.py` remove `"harness:antigravity"` de `host_caps` quando o processo
+  executa em contexto `"headless"` sem `ANTIGRAVITY_LS_ADDRESS` configurado, impedindo acionamento de rota
+  incompativel durante a revisao independente da frota.

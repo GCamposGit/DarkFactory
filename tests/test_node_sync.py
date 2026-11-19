@@ -1291,3 +1291,30 @@ def test_verify_accepts_proven_empty_diff_between_deployed_and_target_sha(tmp_pa
     )
     failed_vps = next(node for node in failed.nodes if node.name == "VPS")
     assert failed_vps.state == "divergent"
+
+
+def test_stash_and_reset_generated_ledgers_cover_learning_ledger(tmp_path: Path) -> None:
+    rel = ".factory/learning/learning_ledger.json"
+    assert rel in mod.GENERATED_LEDGER_FILES
+    ledger = tmp_path / rel
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_bytes(b'{"local": true}\n')
+
+    calls: list[list[str]] = []
+
+    def fake_git(_root: Path, args: list[str]) -> str:
+        calls.append(args)
+        if args == ["status", "--porcelain", "--", rel]:
+            return f" M {rel}"
+        if args == ["rev-parse", f"HEAD:{rel}"]:
+            return "deadbeef"
+        return ""
+
+    saved = mod.stash_runtime_state(tmp_path, git=fake_git)
+    assert rel in saved and saved[rel] == (b'{"local": true}\n', "deadbeef")
+    assert ["checkout", "--", rel] in calls
+
+    backup_dir = tmp_path / "backups"
+    reset = mod.reset_generated_ledgers(tmp_path, git=fake_git, backup_dir=backup_dir)
+    assert rel in reset
+    assert list(backup_dir.glob("learning_ledger.json.*.bak"))

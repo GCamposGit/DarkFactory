@@ -227,11 +227,17 @@
     "GET /api/learning-packs/{pack_id}/html": {
       "surface": "learning-drawer"
     },
+    "GET /api/line/fleet-policy": {
+      "machine": "Snapshot headless efetivo da politica de frota (USR-471), consumido pelo despachante, scripts e diagnostico; sem superficie propria no Hub."
+    },
     "GET /api/line/live": {
       "surface": "line-live-board"
     },
     "GET /api/line/live/stream": {
       "surface": "line-live-board"
+    },
+    "GET /api/line/model-audit": {
+      "machine": "Auditoria deterministica de aderencia de modelos a partir dos recibos reais de execucao (USR-471); endpoint headless sem superficie propria no Hub."
     },
     "GET /api/line/status": {
       "surface": "line-status-card"
@@ -510,6 +516,9 @@
     },
     "router": {
       "surface": "benchmarks-modal"
+    },
+    "runtime_artifacts": {
+      "internal": "Helpers de escrita atomica de sidecars operacionais sob STATE_ROOT/runs (USR-471); utilitario interno sem superficie propria no Hub."
     },
     "telemetry": {
       "surface": "telemetry-drawer"

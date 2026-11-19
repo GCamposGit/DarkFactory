@@ -2815,7 +2815,13 @@ def _delivery_route_wait(
 
 def _review_candidate(ticket: UserTicket, target_worktree: Path, rws: Any) -> Any:
     """One `stage_review.ReviewStage` round over the ticket diff; writes `review_verdict.json` on approve."""
-    return stage_review.ReviewStage().run(
+    review_caps = list(stage_review._DEFAULT_HOST_CAPS)
+    if (
+        resolve_process_identity().execution_context == "headless"
+        and not os.environ.get("ANTIGRAVITY_LS_ADDRESS", "").strip()
+    ):
+        review_caps = [c for c in review_caps if c != "harness:antigravity"]
+    return stage_review.ReviewStage(host_caps=review_caps).run(
         _resolve_project(ticket), ticket.id, ws=rws, repo_dir=target_worktree, publish=False
     )
 
@@ -3808,10 +3814,14 @@ def _non_git_candidate_digest(ticket_id: str, root: Path) -> str:
     import hashlib
 
     from core.line.admission_store import safe_digest
+    from core.paths import state_root
 
+    resolved_state_root = state_root().resolve()
     files: list[tuple[str, str]] = []
     for source_path in sorted(root.rglob("*")):
         if not source_path.is_file():
+            continue
+        if source_path.resolve().is_relative_to(resolved_state_root):
             continue
         rel = source_path.relative_to(root).as_posix()
         if rel == LEDGER_RELATIVE or rel.startswith(".darkfac/"):

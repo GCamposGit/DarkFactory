@@ -753,3 +753,34 @@ def test_dedupe_and_store_are_fast_and_quiet_without_origin(tmp_path: Path) -> N
     assert OwnerActionStore(oa_path).next_id() == "OA-003"  # default remote_ref, missing ref: ignored
     assert OwnerActionStore(tmp_path / "nowhere" / "x.json").next_id() == "OA-001"  # not even a directory
     assert time.monotonic() - started < 5.0
+
+
+def test_owner_action_draft_requires_absolute_paths_or_set_location() -> None:
+    with pytest.raises(ValueError, match="Set-Location"):
+        _draft(steps=[{
+            "text": "Assinar",
+            "command": r"python -m core.governance.keys sign C:\dev\DarkFac\.factory\governance\authorizations\AUTH-OA097-AGENTS.json",
+        }])
+
+    with pytest.raises(ValueError, match="absolute"):
+        _draft(steps=[{"text": "Executar", "command": "python scripts/owner_action.py done OA-097"}])
+
+    with pytest.raises(ValueError, match="-C <absolute_path>"):
+        _draft(steps=[{"text": "Commitar", "command": "git add .factory/governance/authorizations/a.json"}])
+
+    accepted = _draft(steps=[
+        {"text": "Assinar", "command": r"Set-Location C:\dev\DarkFac; python -m core.governance.keys sign C:\dev\DarkFac\a.json"},
+        {"text": "Executar", "command": r"python C:\dev\DarkFac\scripts\owner_action.py done OA-097"},
+        {"text": "Commitar", "command": r"git -C C:\dev\DarkFac status -sb"},
+        {"text": "Ver PR", "command": "gh pr view 230 -R GCamposGit/DarkFactory"},
+        {"text": "Eco", "command": "echo ok"},
+    ])
+    assert len(accepted.steps) == 5
+
+    # Historical OwnerAction records with relative commands remain readable.
+    legacy = OwnerAction(
+        id="OA-001",
+        title="Historico",
+        steps=[{"text": "Rodar", "command": "python scripts/legacy.py"}],
+    )
+    assert legacy.id == "OA-001"
