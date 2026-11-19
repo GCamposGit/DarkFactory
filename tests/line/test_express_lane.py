@@ -35,6 +35,7 @@ from core.line.express_lane import (
     cancelled_edit_kind,
     classify_engine_denial,
     collect_host_gaps,
+    express_run_command,
     main as express_main,
     notify_repeated_self_modification,
     official_cause_line,
@@ -558,7 +559,7 @@ def test_development_stage_records_the_denial_and_does_not_edit_again(
     assert stored.express_causes == [CAUSE_SELF_MODIFICATION]
     opened = OwnerActionStore(actions, remote_ref=None, control=False).list_actions(include_done=False)
     assert len(opened) == 1
-    assert _commands(opened[0]) == [f"python -m core.line.express_lane run --ticket {_TICKET}"]
+    assert _commands(opened[0]) == [express_run_command(_TICKET)]
     stamped = stored.updated_at
     again = record_self_modification(_TICKET, project_id=project.id)
     reread = get_ticket(_TICKET)
@@ -599,7 +600,7 @@ def test_stage_stops_even_when_the_store_write_fails(
     assert TAG_LINE_BLOCK not in port.ticket.tags
     opened = OwnerActionStore(actions, remote_ref=None, control=False).list_actions(include_done=False)
     assert len(opened) == 1
-    assert _commands(opened[0]) == [f"python -m core.line.express_lane run --ticket {_TICKET}"]
+    assert _commands(opened[0]) == [express_run_command(_TICKET)]
 
 
 def test_finish_prints_the_official_line_and_marks_once(
@@ -664,7 +665,7 @@ def test_finish_prints_the_official_line_and_marks_once(
     opened = OwnerActionStore(actions, remote_ref=None, control=False).list_actions(include_done=False)
     assert len(opened) == 1
     assert opened[0].status.value == "open"
-    assert _commands(opened[0]) == [f"python -m core.line.express_lane run --ticket {_TICKET}"]
+    assert _commands(opened[0]) == [express_run_command(_TICKET)]
 
 
 # --------------------------------------------------------------------------
@@ -689,7 +690,10 @@ def _spawn_recorder() -> tuple[list[list[str]], Any]:
 def test_owner_action_has_one_command_and_repeat_returns_the_same(tmp_path: Path) -> None:
     store = _owner_store(tmp_path)
     notes: list[str] = []
-    command = f"python -m core.line.express_lane run --ticket {_TICKET}"
+    command = express_run_command(_TICKET)
+    assert command.startswith("Set-Location ")
+    assert command.endswith(f"; python -m core.line.express_lane run --ticket {_TICKET}")
+    assert ".worktrees" not in command
     first = register_express_owner_action(
         _TICKET, store=store, notifier=lambda action: notes.append(action.id),
     )
@@ -994,7 +998,7 @@ def _deliver(dispatcher: FleetDispatcher, ticket_id: str, tmp_path: Path) -> Non
 def test_the_second_occurrence_alerts_once_and_a_restart_stays_quiet(tmp_path: Path) -> None:
     alerts: list[ExpressRepeatAlert] = []
     dispatcher, _store = _lane_dispatcher(tmp_path, alerts)
-    command = f"python -m core.line.express_lane run --ticket {_TICKET}"
+    command = express_run_command(_TICKET)
 
     _record_cause(dispatcher, _TICKET, 1)
     stored = _episodes(tmp_path)
@@ -1064,7 +1068,7 @@ def test_success_or_another_cause_closes_the_episode(tmp_path: Path) -> None:
 
     _record_cause(dispatcher, _TICKET, 3)
     assert len(alerts) == 1
-    assert alerts[0].command == f"python -m core.line.express_lane run --ticket {_TICKET}"
+    assert alerts[0].command == express_run_command(_TICKET)
 
     _deliver(dispatcher, _TICKET, tmp_path)
     assert key not in _episodes(tmp_path)
@@ -1142,7 +1146,7 @@ def test_owner_failure_holds_immediately_without_consuming_candidate_budget(
 
 def test_repeat_alert_names_the_cause_and_the_command_on_channel_all() -> None:
     service = _AlertService()
-    command = f"python -m core.line.express_lane run --ticket {_TICKET}"
+    command = express_run_command(_TICKET)
     alert = ExpressRepeatAlert(
         ticket_id=_TICKET, cause=CAUSE_SELF_MODIFICATION, command=command,
     )
@@ -1173,7 +1177,7 @@ def test_dispatcher_sends_the_default_alert_on_the_second_occurrence(
     _record_cause(dispatcher, _TICKET, 2)
     assert len(seen) == 1
     assert seen[0].cause == CAUSE_SELF_MODIFICATION
-    assert seen[0].command == f"python -m core.line.express_lane run --ticket {_TICKET}"
+    assert seen[0].command == express_run_command(_TICKET)
     _record_cause(dispatcher, _TICKET, 3)
     assert len(seen) == 1
 
