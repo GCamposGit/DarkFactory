@@ -269,6 +269,7 @@ services:
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
       - DARKFAC_CANARY_BASE_URL=${DARKFAC_CANARY_BASE_URL:-}
       - DARKFAC_CANARY_REPORTS_DIR=/app/.factory/reports/canary
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       # HF-27-10 review item 4b: dogfood wiring stays off unless explicitly
       # turned on here (or standalone via `python -m core.line.dogfood run`
       # on its own cron entry -- see docs/runbooks/canary.md section 5).

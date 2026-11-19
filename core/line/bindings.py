@@ -18,11 +18,14 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable, Optional, Protocol
 
 from core.git import ci_checks
+from core.git.safe_show import safe_show
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
 from core.line.active_pull_request import PullRequestLookupError, find_active_pull_request
@@ -517,6 +520,86 @@ class IntegrationStageAdapter:
 MERGE_PREREQUISITES: tuple[line_stages.Stage, ...] = (line_stages.Stage.PLAN, line_stages.Stage.REVIEW)
 
 
+def _find_latest_strip_sha(
+    project: ProjectDescriptor, ws: line_workspace.RunWorkspace, run_id: str
+) -> Optional[str]:
+    log = line_workspace._run_git(
+        ["log", "--format=%H", "-F", f"--grep=DarkFac-Job: {run_id}:integration:strip_context", "-n", "1", "HEAD"],
+        cwd=ws.path,
+        repo_url=getattr(project, "repo_url", None),
+        check=False,
+    )
+    if log.returncode != 0:
+        return None
+    sha = (log.stdout or "").strip()
+    return sha or None
+
+
+def _restore_prestrip_context(
+    project: ProjectDescriptor, ws: line_workspace.RunWorkspace, run_id: str, strip_sha: str, dest: Path
+) -> bool:
+    prefix = f".darkfac/runs/{run_id}/"
+    repo_url = getattr(project, "repo_url", None)
+    listing = line_workspace._run_git(
+        ["ls-tree", "-r", "--name-only", f"{strip_sha}^", "--", prefix],
+        cwd=ws.path,
+        repo_url=repo_url,
+        check=False,
+    )
+    names = [n.strip() for n in (listing.stdout or "").splitlines() if n.strip().startswith(prefix)]
+    if listing.returncode != 0 or not names:
+        return False
+    for rel_path in names:
+        shown = safe_show(
+            f"{strip_sha}^",
+            rel_path,
+            cwd=ws.path,
+            runner=lambda args, _cwd: line_workspace._run_git(
+                list(args), cwd=ws.path, repo_url=repo_url, check=False
+            ),
+        )
+        if shown.returncode != 0:
+            continue
+        target = dest / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(shown.stdout or "", encoding="utf-8")
+    return True
+
+
+def _validate_stripped_merge_artifacts(
+    project: ProjectDescriptor, ws: line_workspace.RunWorkspace, run_id: str
+) -> bool:
+    if not ws.path.is_dir():
+        return False
+    strip_sha = _find_latest_strip_sha(project, ws, run_id)
+    if not strip_sha:
+        return False
+    diff = line_workspace._run_git(
+        ["diff", "--name-only", f"{strip_sha}..HEAD"],
+        cwd=ws.path,
+        repo_url=getattr(project, "repo_url", None),
+        check=False,
+    )
+    if diff.returncode != 0 or (diff.stdout or "").strip():
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        if not _restore_prestrip_context(project, ws, run_id, strip_sha, Path(tmp)):
+            return False
+        tmp_ws = line_workspace.RunWorkspace(
+            project_id=ws.project_id,
+            run_id=ws.run_id,
+            branch=ws.branch,
+            path=Path(tmp),
+            base_sha=ws.base_sha,
+        )
+        for stage in MERGE_PREREQUISITES:
+            try:
+                line_stages.require_artifact(stage, tmp_ws)
+            except line_stages.StageArtifactMissing:
+                return False
+        return True
+
+
 def require_merge_artifacts(project: ProjectDescriptor, run_id: str) -> Optional[StageResult]:
     """None when the run may merge; otherwise a `failed` result naming the missing stage artifact."""
     try:
@@ -527,6 +610,9 @@ def require_merge_artifacts(project: ProjectDescriptor, run_id: str) -> Optional
         try:
             line_stages.require_artifact(stage, ws)
         except line_stages.StageArtifactMissing as exc:
+            if _validate_stripped_merge_artifacts(project, ws, run_id):
+                logger.info("run %s merge prerequisites verified against pre-strip commit", run_id)
+                return None
             logger.warning("run %s refused before integration: %s", run_id, exc)
             return StageResult(outcome="failed", cause_code=f"stage_artifact_missing:{exc.stage.value}:{exc.reason}")
     return None

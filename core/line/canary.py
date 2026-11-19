@@ -54,6 +54,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -108,6 +109,20 @@ DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60  # 6 hours
 DEFAULT_MAX_ATTEMPTS_PER_DAY = 4
 MAX_ATTEMPTS_ENV = "DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY"
 _TERMINAL_FAILURE_OUTCOMES = ("failed", "timeout")
+_NON_RETRYABLE_CAUSE_PREFIXES: tuple[str, ...] = (
+    "active_pull_request",
+    "stage_artifact_missing",
+    "canary_base_url_missing",
+    "idempotency_conflict",
+    "release_identity_missing",
+    "legacy_smoke_unverified",
+)
+
+
+def _is_retryable_failure(cause_code: str | None) -> bool:
+    if not cause_code:
+        return True
+    return not any(cause_code.startswith(prefix) for prefix in _NON_RETRYABLE_CAUSE_PREFIXES)
 
 CanaryScenario = Literal["normal", "initial_test_fail", "smoke_rollback"]
 CanaryOutcome = Literal["passed", "failed", "in_progress", "timeout", "dry_run"]
@@ -262,6 +277,8 @@ class NotifiedAlert(BaseModel):
     outcome: str
     failing_stage: str | None = None
     at: str
+    cause_code: str | None = None
+    signature: str | None = None
 
 
 class CanaryAttempt(BaseModel):
@@ -650,23 +667,33 @@ def _load_day_report(reports_dir: Path, day: date) -> CanaryReport | None:
     return report
 
 
+def _structural_alert_signature(report: CanaryReport) -> str | None:
+    if report.outcome not in _TERMINAL_FAILURE_OUTCOMES or _is_retryable_failure(report.cause_code):
+        return None
+    return f"{report.failing_stage or ''}|{report.cause_code or ''}|{report.notes or ''}"
+
+
+def _load_latest_prior_report(reports_dir: Path, today: date) -> CanaryReport | None:
+    today_iso = today.isoformat()
+    prior = [r for r in load_reports(reports_dir) if r.date < today_iso]
+    return prior[-1] if prior else None
+
+
 def _notify_failure_once(
     report: CanaryReport,
     sender: Optional[NotifySender],
     previous: NotifiedAlert | None,
     now: datetime,
+    *,
+    prior_day_notified: NotifiedAlert | None = None,
 ) -> None:
     """Send the failure alert only when the state changed since the last one sent.
 
-    "Same state" = same run_id + outcome + failing_stage for this report's day.
-    The state is stored in `report.notified` (persisted with the report), and is
-    carried forward unchanged while nothing new was sent -- including through
-    in_progress/passed iterations, so failed -> in_progress -> failed (same stage)
-    does not re-alert. A send that did not go out (`False`) is NOT recorded, so
-    it is retried on the next iteration.
+    "Same state" = same run_id + outcome + failing_stage for this report's day, OR
+    an unchanged structural failure signature across consecutive failing days.
     """
     report.notified = previous
-    if report.outcome not in ("failed", "timeout"):
+    if report.outcome not in _TERMINAL_FAILURE_OUTCOMES:
         return
     if (
         previous is not None
@@ -679,12 +706,22 @@ def _notify_failure_once(
             report.date, report.outcome, report.failing_stage, previous.at,
         )
         return
+    sig = _structural_alert_signature(report)
+    if sig is not None and prior_day_notified is not None and prior_day_notified.signature == sig:
+        report.notified = prior_day_notified
+        logger.info(
+            "Canary structural alert for %s (%s) already sent on prior day at %s; not re-sending",
+            report.date, sig, prior_day_notified.at,
+        )
+        return
     if _notify_failure(report, sender):
         report.notified = NotifiedAlert(
             run_id=report.run_id,
             outcome=report.outcome,
             failing_stage=report.failing_stage,
             at=now.isoformat(),
+            cause_code=report.cause_code,
+            signature=sig,
         )
 
 
@@ -977,6 +1014,223 @@ def sweep_stale_canaries(
     return closed
 
 
+def _active_canary_run_ids(store: Any, *, exclude_run_id: str | None = None) -> list[str]:
+    lister = getattr(store, "list_active_run_ids", None)
+    getter = getattr(store, "get_run_status", None)
+    if lister is None or getter is None:
+        return []
+    try:
+        run_ids = list(lister())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Canary preflight could not list active runs: %s", exc)
+        return []
+    active: list[str] = []
+    for rid in run_ids:
+        if exclude_run_id and rid == exclude_run_id:
+            continue
+        try:
+            status = getter(rid) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Canary preflight could not inspect run %s: %s", rid, exc)
+            continue
+        if status.get("project_id") == CANARY_PROJECT_ID:
+            active.append(rid)
+    return active
+
+
+def _resolve_canary_repo_slug(project_registry: Any | None = None) -> str | None:
+    if project_registry is None:
+        from core.projects.registry import ProjectRegistry
+
+        project_registry = ProjectRegistry()
+    project = project_registry.get_project(CANARY_PROJECT_ID)
+    repo_url = getattr(project, "repo_url", None) if project is not None else None
+    if not repo_url:
+        return None
+    try:
+        from core.line.active_pull_request import PullRequestLookupError, _repo_slug
+
+        return _repo_slug(str(repo_url))
+    except PullRequestLookupError:
+        return None
+
+
+def _extract_canary_pr_run_id(head_ref: str, body: str) -> str | None:
+    head_match = re.fullmatch(r"df/(run-[0-9a-f]+)", head_ref.strip())
+    if head_match:
+        return head_match.group(1)
+    body_match = re.search(r"\b(run-[0-9a-f]{6,})\b", body)
+    return body_match.group(1) if body_match else None
+
+
+def _is_terminal_unreserved_run(store: Any, run_id: str) -> bool:
+    getter = getattr(store, "get_run_status", None)
+    if getter is None:
+        return False
+    status = getter(run_id)
+    if not isinstance(status, dict) or not status:
+        return False
+    if status.get("project_id") not in (None, CANARY_PROJECT_ID):
+        return False
+    res_getter = getattr(store, "get_active_reservation_for_run", None)
+    if callable(res_getter) and res_getter(run_id) is not None:
+        return False
+    statuses = [str(j.get("status") or "") for j in status.get("jobs", []) if isinstance(j, dict)]
+    if any(s in ("pending", "claimed", "waiting_human") for s in statuses):
+        return False
+    return any(s in ("failed", "cancelled") for s in statuses)
+
+
+def _try_close_stale_canary_pr(run: Callable[..., Any], slug: str, number: int, run_id: str) -> bool:
+    comment = f"Canary preflight: closing stale PR from terminal run {run_id} (branch preserved)."
+    try:
+        closed = run(
+            ["gh", "pr", "close", str(number), "--repo", slug, "--comment", comment],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Canary preflight failed closing stale PR #%d (%s): %s", number, run_id, exc)
+        return False
+    return getattr(closed, "returncode", 1) == 0
+
+
+def _reconcile_canary_open_prs(
+    store: Any,
+    *,
+    project_registry: Any | None = None,
+    run: Callable[..., Any] = subprocess.run,
+) -> list[dict[str, Any]]:
+    slug = _resolve_canary_repo_slug(project_registry)
+    if not slug:
+        return []
+    try:
+        listed = run(
+            ["gh", "pr", "list", "--state", "open", "--repo", slug,
+             "--json", "number,url,title,headRefName,body", "--limit", "100"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Canary PR preflight lookup failed: %s", exc)
+        return []
+    if getattr(listed, "returncode", 1) != 0:
+        logger.warning("Canary PR preflight lookup exited %s", getattr(listed, "returncode", None))
+        return []
+    try:
+        entries = json.loads(listed.stdout or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(entries, list):
+        return []
+    blocking: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("number") is None:
+            continue
+        number = int(entry["number"])
+        head_ref = str(entry.get("headRefName") or "")
+        url = str(entry.get("url") or "")
+        title = str(entry.get("title") or "")
+        body = str(entry.get("body") or "")
+        run_id = _extract_canary_pr_run_id(head_ref, body)
+        if run_id and _is_terminal_unreserved_run(store, run_id):
+            if _try_close_stale_canary_pr(run, slug, number, run_id):
+                continue
+        blocking.append({"number": number, "head_ref": head_ref, "url": url, "title": title})
+    return blocking
+
+
+def _run_preflight(
+    *,
+    today: date,
+    scenario: CanaryScenario,
+    number: int,
+    store: Any,
+    pr_reconciler: Callable[[Any], list[dict[str, Any]]] | None,
+    exclude_run_id: str | None,
+) -> CanaryReport | None:
+    ext_id = attempt_external_id(today, number)
+    in_flight = _active_canary_run_ids(store, exclude_run_id=exclude_run_id)
+    if in_flight:
+        return CanaryReport(
+            date=today.isoformat(),
+            scenario=scenario,
+            external_id=ext_id,
+            outcome="in_progress",
+            failing_stage="preflight",
+            notes=f"canary_run_in_flight:{in_flight[0]}",
+            attempt=number,
+        )
+    reconciler = pr_reconciler if pr_reconciler is not None else _reconcile_canary_open_prs
+    blocking = reconciler(store)
+    if blocking:
+        first = blocking[0]
+        return CanaryReport(
+            date=today.isoformat(),
+            scenario=scenario,
+            external_id=ext_id,
+            outcome="failed",
+            failing_stage="preflight",
+            cause_code="active_pull_request",
+            notes=f"blocked_pr=#{first['number']}:{first['head_ref']}",
+            attempt=number,
+        )
+    return None
+
+
+def _advance_daily_attempts(
+    *,
+    today: date,
+    scenario: CanaryScenario,
+    last: CanaryAttempt | None,
+    attempts: list[CanaryAttempt],
+    max_attempts: int,
+    store: Any,
+    pr_reconciler: Callable[[Any], list[dict[str, Any]]] | None,
+    evaluate: Callable[[int], CanaryReport],
+    notify: Callable[[CanaryReport], None],
+) -> tuple[CanaryReport, list[CanaryAttempt]]:
+    number = last.attempt if last is not None else 1
+    if last is None or (last.failing_stage == "preflight" and last.run_id is None):
+        preflight = _run_preflight(
+            today=today,
+            scenario=scenario,
+            number=number,
+            store=store,
+            pr_reconciler=pr_reconciler,
+            exclude_run_id=None,
+        )
+        report = preflight if preflight is not None else evaluate(number)
+    else:
+        report = evaluate(number)
+    notify(report)
+    if (
+        last is not None
+        and last.run_id is not None
+        and last.outcome in _TERMINAL_FAILURE_OUTCOMES
+        and report.outcome in _TERMINAL_FAILURE_OUTCOMES
+        and _is_retryable_failure(report.cause_code)
+        and number < max_attempts
+    ):
+        attempts = _upsert_attempt(attempts, _attempt_record(report))
+        number += 1
+        logger.info(
+            "Canary %s attempt %d ended %s (%s); submitting attempt %d/%d",
+            today, number - 1, report.outcome, report.cause_code, number, max_attempts,
+        )
+        preflight = _run_preflight(
+            today=today,
+            scenario=scenario,
+            number=number,
+            store=store,
+            pr_reconciler=pr_reconciler,
+            exclude_run_id=last.run_id,
+        )
+        report = preflight if preflight is not None else evaluate(number)
+        notify(report)
+    attempts = _upsert_attempt(attempts, _attempt_record(report))
+    report.attempts = attempts
+    return report, attempts
+
+
 def run_daily(
     *,
     day: date | None = None,
@@ -994,6 +1248,7 @@ def run_daily(
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     run_dogfood: bool | None = None,
     max_attempts_per_day: int | None = None,
+    pr_reconciler: Callable[[Any], list[dict[str, Any]]] | None = None,
 ) -> CanaryReport:
     """Submit (or resume observing) today's canary demand and write a report.
 
@@ -1057,36 +1312,35 @@ def run_daily(
             base_url=base_url, timeout_seconds=timeout_seconds,
         )
 
+    prior_day = _load_latest_prior_report(reports_dir, today)
+    prior_day_notified = (
+        prior_day.notified if prior_day and prior_day.outcome in _TERMINAL_FAILURE_OUTCOMES else None
+    )
+
     def notify(candidate: CanaryReport) -> None:
         _notify_failure_once(
-            candidate, failure_sender, _previous_notified(attempts, candidate.attempt), clock.now()
+            candidate,
+            failure_sender,
+            _previous_notified(attempts, candidate.attempt),
+            clock.now(),
+            prior_day_notified=prior_day_notified,
         )
 
     if last is not None and last.outcome == "passed" and prior is not None:
         # The day is already green (any attempt passed): sticky, nothing to submit or re-observe.
         report = prior
     else:
-        number = last.attempt if last is not None else 1
-        report = evaluate(number)
-        notify(report)
-        if (
-            last is not None
-            and last.outcome in _TERMINAL_FAILURE_OUTCOMES
-            and report.outcome in _TERMINAL_FAILURE_OUTCOMES
-            and number < max_attempts
-        ):
-            # Persist the (possibly just-delivered) alert marker of the failed attempt, then start
-            # the next attempt. Nothing is in flight: the failed one is terminal.
-            attempts = _upsert_attempt(attempts, _attempt_record(report))
-            number += 1
-            logger.info(
-                "Canary %s attempt %d ended %s (%s); submitting attempt %d/%d",
-                today, number - 1, report.outcome, report.cause_code, number, max_attempts,
-            )
-            report = evaluate(number)
-            notify(report)
-        attempts = _upsert_attempt(attempts, _attempt_record(report))
-        report.attempts = attempts
+        report, attempts = _advance_daily_attempts(
+            today=today,
+            scenario=scenario,
+            last=last,
+            attempts=attempts,
+            max_attempts=max_attempts,
+            store=store,
+            pr_reconciler=pr_reconciler,
+            evaluate=evaluate,
+            notify=notify,
+        )
         report.weekly_summary_sent_at = weekly_sent_at
         _write_report(reports_dir, today, report)
 
