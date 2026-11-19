@@ -987,7 +987,7 @@ def is_high_tier_model(model: Optional[str]) -> bool:
 
         low = resolved.strip().lower()
         for entry in get_registry().models:
-            names = [entry.id, *entry.aliases, *entry.gateway_ids]
+            names = [entry.id, *entry.aliases, *entry.gateway_ids, *entry.cli_ids]
             if low in (n.strip().lower() for n in names):
                 return entry.tier in _HIGH_TIERS and entry.context_tokens is not None
     except Exception as exc:  # registry trouble must not open the cheap door
@@ -1199,7 +1199,7 @@ def _independent_openrouter(route: Optional[tuple[str, str]], implementing_harne
     impl = next((m for m in registry.models if m.id == impl_id), None)
     reviewer_id = _resolve_role_ref(route[1])
     reviewer = next((m for m in registry.models
-                     if reviewer_id in [m.id, *m.aliases, *m.gateway_ids]), None)
+                     if reviewer_id in [m.id, *m.aliases, *m.gateway_ids, *m.cli_ids]), None)
     if impl is not None and reviewer is not None and impl.family == reviewer.family:
         for role in ("review.openrouter", "distill.openrouter"):
             fallback = next((m for m in registry.models if m.id == registry.roles.get(role)), None)

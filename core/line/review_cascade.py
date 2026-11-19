@@ -92,7 +92,7 @@ def _model_provider(model: Optional[str]) -> Optional[str]:
 
     needle = model.strip().lower()
     for entry in get_registry().models:
-        if needle in {value.lower() for value in (entry.id, *entry.aliases, *entry.gateway_ids)}:
+        if needle in {value.lower() for value in (entry.id, *entry.aliases, *entry.gateway_ids, *entry.cli_ids)}:
             return entry.provider.lower()
     return None
 
