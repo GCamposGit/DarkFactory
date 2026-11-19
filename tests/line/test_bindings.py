@@ -5,7 +5,10 @@ No network, no real git remote, no real agent CLI.
 
 from __future__ import annotations
 
+import json
+import subprocess
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -229,3 +232,98 @@ def test_grill_handler_first_attempt_has_no_adoption_candidates(monkeypatch) -> 
     _grill_handler(store).handle(_ctx("grill", ticket_id="acme", run_id="run-a1"))
 
     assert seen["adopt_from_runs"] == []
+
+
+# --------------------------------------------------------------------------
+# Integration preflight: post-strip_context retry support (USR-470)
+# --------------------------------------------------------------------------
+
+
+def _git(repo: Path, *args: str) -> str:
+    res = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, check=True)
+    return res.stdout.strip()
+
+
+def _init_stripped_run_repo(
+    tmp_path: Path,
+    *,
+    run_id: str = "run-strip",
+    verdict: str = "approve",
+    commit_after_strip: bool = False,
+) -> tuple[ProjectDescriptor, bindings.line_workspace.RunWorkspace]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.name", "DarkFac Test")
+    _git(repo, "config", "user.email", "test@example.invalid")
+    (repo / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD")
+
+    ctx = repo / ".darkfac" / "runs" / run_id
+    ctx.mkdir(parents=True)
+    (ctx / "SPEC.md").write_text("# Spec\nDeliver feature cleanly.\n", encoding="utf-8")
+    (ctx / "tickets.json").write_text(
+        json.dumps([{"id": "T1", "title": "Feature", "goal": "Add x", "acceptance": ["passes"]}]),
+        encoding="utf-8",
+    )
+    (ctx / "review_verdict.json").write_text(
+        json.dumps({"verdict": verdict, "blocking": [], "non_blocking": []}),
+        encoding="utf-8",
+    )
+    (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "feat: implement feature")
+
+    _git(repo, "rm", "-rf", str(Path(".darkfac") / "runs" / run_id))
+    _git(
+        repo,
+        "commit",
+        "-m",
+        "chore(line): drop run context",
+        "-m",
+        f"DarkFac-Job: {run_id}:integration:strip_context",
+    )
+
+    if commit_after_strip:
+        (repo / "app.py").write_text("x = 3\n", encoding="utf-8")
+        _git(repo, "add", "app.py")
+        _git(repo, "commit", "-m", "unreviewed edit after strip")
+
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url="https://example.invalid/acme.git")
+    ws = bindings.line_workspace.RunWorkspace(
+        project_id="acme", run_id=run_id, branch=f"df/{run_id}", path=repo, base_sha=base_sha
+    )
+    return project, ws
+
+
+def test_require_merge_artifacts_accepts_post_strip_retry_when_no_diff_after_strip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, ws = _init_stripped_run_repo(tmp_path)
+    monkeypatch.setattr(bindings.line_workspace, "checkout", lambda _p, _r: ws)
+
+    assert bindings.require_merge_artifacts(project, ws.run_id) is None
+
+
+def test_require_merge_artifacts_fails_closed_when_branch_changed_after_strip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, ws = _init_stripped_run_repo(tmp_path, commit_after_strip=True)
+    monkeypatch.setattr(bindings.line_workspace, "checkout", lambda _p, _r: ws)
+
+    res = bindings.require_merge_artifacts(project, ws.run_id)
+    assert res is not None and res.outcome == "failed"
+    assert res.cause_code and res.cause_code.startswith("stage_artifact_missing:PLAN:")
+
+
+def test_require_merge_artifacts_fails_closed_when_prestrip_review_not_approved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, ws = _init_stripped_run_repo(tmp_path, verdict="changes_required")
+    monkeypatch.setattr(bindings.line_workspace, "checkout", lambda _p, _r: ws)
+
+    res = bindings.require_merge_artifacts(project, ws.run_id)
+    assert res is not None and res.outcome == "failed"
+    assert res.cause_code and res.cause_code.startswith(("stage_artifact_missing:PLAN:", "stage_artifact_missing:REVIEW:"))

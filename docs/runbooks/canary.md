@@ -154,6 +154,11 @@ provisionar as variaveis de ambiente do servico, depois que
      semanal silenciosamente nao saem (apenas um `logger.warning` local).
      Veja a secao "Owner notifications" em `env.cloud.example` para como
      obter o token/ids pelo @BotFather.
+   - `GITHUB_TOKEN` — passado no bloco `environment` de `darkfac-canary`
+     em `deploy/dokploy/docker-compose.cloud.yml` (`GITHUB_TOKEN=${GITHUB_TOKEN:-}`)
+     para o preflight (`gh pr list` / `gh pr close` sem `--delete-branch`)
+     inspecionar e reconciliar PRs orfaos de runs terminais antes de abrir
+     novas demandas do canario.
 2. Confirme que o volume `darkfac-canary-reports-v2` existe (Dokploy cria
    automaticamente a partir do compose na primeira vez que o servico sobe;
    sem ele, o container perderia os relatorios anteriores a cada restart e o
@@ -202,18 +207,36 @@ provisionar as variaveis de ambiente do servico, depois que
 - [ ] Depois de 7 dias corridos com relatorio `outcome: "passed"`,
       `python -m core.line.canary status` mostra `"v2_met": true`.
 
-### Retentativa no mesmo dia e dogfood configuravel
+### Retentativa no mesmo dia, preflight e circuit-breaker (USR-470)
 
-- Quando a tentativa do dia termina em falha terminal (`failed`/`timeout`), a
+- Antes de abrir uma tentativa nova, `run_daily` executa o **preflight**:
+  1. **Single-flight cross-day**: se existe run ativo de `darkfac-canary` no
+     `ControlStore` (que ainda nao venceu `sweep_stale_canaries` de 24h), o
+     canario retorna `outcome="in_progress"` em `failing_stage="preflight"`
+     sem chamar `AutonomousIntakeService.accept`.
+  2. **Reconciliacao de PRs abertos**: consulta PRs abertos no repo do
+     `darkfac-canary`; se o PR pertence a um `run_id` ja terminal
+     (`failed`/`cancelled` sem jobs ativos nem reserva), o preflight fecha o PR
+     **sem `--delete-branch`** (preservando a branch para inspecao). Se ainda
+     restar PR aberto bloqueando `T1`, aborta antes do intake com
+     `failing_stage="preflight"`, `cause_code="active_pull_request"` e
+     `notes="blocked_pr=#<N>:<head_ref>"` sem queimar planejamento/tokens.
+- Falhas estruturais/nao retentaveis (`active_pull_request`,
+  `stage_artifact_missing`, `canary_base_url_missing`, `idempotency_conflict`,
+  `release_identity_missing`, `legacy_smoke_unverified`) **nao** disparam
+  novas tentativas `:a2/:a3/:a4` no mesmo dia.
+- Quando a tentativa do dia termina em falha terminal retentavel (`failed`/`timeout`), a
   iteracao seguinte do loop (15 min depois) submete uma **nova tentativa** para o
   mesmo dia: `external_id` `canary:<data>:a2`, `:a3`... (a tentativa 1 mantem o id
   historico `canary:<data>`). Nunca ha duas tentativas em voo, e o limite e
   `DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY` (padrao 4; valor invalido volta para 4).
 - O relatorio do dia (`<data>.json`) lista as tentativas em `attempts`; o dia e
   verde se qualquer tentativa passou (`passed=true`), o que mantem o
-  `green_streak` inalterado. O alerta de falha e deduplicado **por tentativa**:
-  uma nova tentativa que falha do mesmo jeito alerta uma vez. O resumo semanal
-  (segunda-feira) e enviado uma unica vez por dia.
+  `green_streak` inalterado. O alerta de falha e deduplicado por tentativa no
+  mesmo dia e **entre dias consecutivos** quando a assinatura estrutural
+  (`failing_stage|cause_code|notes`) e a mesma (reativa apos dia `passed` ou
+  mudanca de bloqueio). O resumo semanal (segunda-feira) e enviado uma unica
+  vez por dia.
 - `DARKFAC_DOGFOOD_MIN_STREAK` (padrao de codigo 7; o compose passa `1`) define
   quantos dias verdes liberam o dogfood. `DARKFAC_DOGFOOD_ENABLED` continua
   `false` por padrao.

@@ -548,3 +548,23 @@ e a unica alteracao local. O ledger e passado como caminho descartavel explicito
 so o restaura se for a unica alteracao rastreada. Qualquer outra alteracao, processo ativo,
 lock ou estado de processo que nao possa ser verificado preserva a worktree para diagnostico.
 Espera por falta de rota continua preservada para retomada e nao entra nesse descarte.
+
+## Integracao apos strip de contexto e preflight do canario (USR-470)
+
+Em `core/line/bindings.py`, `require_merge_artifacts` valida os prerequisitos
+(`Stage.PLAN` e `Stage.REVIEW`) antes de chamar `IntegrationStageHandler`. Quando
+uma tentativa anterior da integracao ja executou `strip_context` (`DarkFac-Job:
+<run_id>:integration:strip_context`), `.darkfac/runs/<run_id>/` nao existe mais na
+arvore de trabalho ao retomar a observacao do PR/CI; nesse caso, se nao houver
+alteracoes em `git diff --name-only <strip_sha>..HEAD`, a verificacao restaura os
+artefatos de `<strip_sha>^` em diretorio temporario para validar `MERGE_PREREQUISITES`,
+mantendo falha fechada (`stage_artifact_missing`) caso haja commits pos-strip ou os
+artefatos originais nao estejam integros.
+
+No canario diario (`core/line/canary.py`), `run_daily` executa preflight antes de
+submeter novas tentativas: impede concorrencia com runs ativos de `darkfac-canary`,
+reconcilia PRs abertos de runs terminais (`failed`/`cancelled` sem jobs ativos ou
+reserva, fechando sem `--delete-branch`), bloqueia novas tentativas no mesmo dia em
+falhas estruturais nao retentaveis e deduplica alertas entre dias enquanto persistir
+a mesma assinatura estrutural (detalhes operacionais em
+[canary runbook](../runbooks/canary.md)).
