@@ -98,7 +98,7 @@ Ligada à seção 2b: a preferência pelo harness de operação decide QUEM escr
 <!-- BEGIN model-registry:dev_subagent_models -->
 - **Padrao**: subagente Sonnet (`claude-sonnet-5-5`) para todo codigo; planning usa Opus (`claude-opus-5-5`).
 <!-- END model-registry:dev_subagent_models -->
-- **Quando o harness do Antigravity for usado**: adotar o **Gemini 4 Argon High** como modelo de alta inteligência para planejamento e coordenação da fábrica e o **Gemini 4 Hydrogen High** para tarefas simples de codificação, testes e subagentes.
+- **Quando o harness do Antigravity for usado**: adotar o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes.
 
 ---
 

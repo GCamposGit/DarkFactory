@@ -1315,6 +1315,81 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                 self._probe_failure = self._failure_for_exception(exc)
         return windows, raw_quota, active_port, None
 
+    def _parse_quota_summary_groups(
+        self, groups: list[Any],
+    ) -> tuple[List[QuotaWindow], Dict[str, Any], Optional[ProviderAccountUsage]]:
+        """Parse RetrieveUserQuotaSummary groups into distinct QuotaWindows without quota_id collisions."""
+        windows: List[QuotaWindow] = []
+        raw_quota: Dict[str, Any] = {}
+        seen_qids: set[str] = set()
+        has_gemini_group = any(
+            isinstance(g, dict) and "gemini" in str(g.get("displayName", "")).casefold()
+            for g in groups
+        )
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            group_name = str(group.get("displayName", "")).strip()
+            if has_gemini_group and "gemini" not in group_name.casefold():
+                continue
+            if not has_gemini_group and "Gemini" not in group_name and windows:
+                continue
+            is_primary_group = group_name.casefold() in {"", "gemini models"}
+            group_slug = re.sub(r"[^a-z0-9._-]+", "-", group_name.casefold()).strip("-") or "gemini"
+            for b in group.get("buckets", []):
+                if not isinstance(b, dict):
+                    continue
+                rem_frac = b.get("remainingFraction")
+                if rem_frac is None:
+                    logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
+                    failure = ProbeFailure(category="invalid_response", code="remaining_fraction_missing",
+                                           message="Campo remainingFraction ausente no bucket de quota.")
+                    self._probe_failure = failure
+                    return [], {}, self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
+                if type(rem_frac) not in (float, int) or not 0 <= rem_frac <= 1:
+                    logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
+                    failure = ProbeFailure(category="invalid_response", code="remaining_fraction_invalid",
+                                           message="Campo remainingFraction fora do intervalo válido.")
+                    self._probe_failure = failure
+                    return [], {}, self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
+                raw_quota = sanitize_raw("google", b)
+                rem_pct = _clamp_percent(rem_frac * 100.0)
+                used_pct = round(100.0 - rem_pct, 2) if rem_pct is not None else None
+                raw_bucket_id = str(b.get("bucketId") or "").strip().lower()
+                bucket_win = str(b.get("window", "")).lower()
+                is_weekly = bucket_win == "weekly" or "weekly" in raw_bucket_id
+                dur = 10080 if is_weekly else 300
+                base_lbl = "Limite Semanal (1 semana)" if is_weekly else "Janela Móvel (5h)"
+                safe_bucket_id = re.sub(r"[^a-z0-9._-]+", "-", raw_bucket_id).strip("-")
+                if safe_bucket_id:
+                    base_qid = f"antigravity:{safe_bucket_id}"
+                elif is_primary_group:
+                    base_qid = "antigravity:gemini-weekly" if is_weekly else "antigravity:gemini-5h"  # census: wire-id
+                else:
+                    win_suffix = "weekly" if is_weekly else "5h"
+                    base_qid = f"antigravity:{group_slug}-{win_suffix}"
+                qid = base_qid
+                suffix_idx = 2
+                while qid in seen_qids:
+                    qid = f"{base_qid}-{suffix_idx}"
+                    suffix_idx += 1
+                seen_qids.add(qid)
+                pool_primary = is_primary_group or raw_bucket_id in {"gemini-weekly", "gemini-5h"}  # census: wire-id
+                lbl = base_lbl if pool_primary or not group_name else f"{base_lbl} ({group_name})"
+                metric = "subscription" if pool_primary else "model_specific_pool"
+                windows.append(
+                    QuotaWindow(
+                        quota_id=qid,
+                        label=lbl,
+                        used_percent=used_pct,
+                        remaining_percent=rem_pct,
+                        window_duration_minutes=dur,
+                        resets_at=_timestamp_to_iso(b.get("resetTime")),
+                        metric=metric,
+                    )
+                )
+        return windows, raw_quota, None
+
     def _probe_language_server(self) -> Optional[ProviderAccountUsage]:
         csrf_token, candidate_ports = self._find_live_ls_credentials()
         if not csrf_token or not candidate_ports:
@@ -1373,52 +1448,9 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                                        message="Campo groups ausente ou inválido no resumo de quota.")
                 self._probe_failure = failure
                 return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
-            for group in groups:
-                if not isinstance(group, dict):
-                    continue
-                group_name = str(group.get("displayName", ""))
-                # Focus on primary Gemini models group
-                if "Gemini" not in group_name and windows:
-                    continue
-                for b in group.get("buckets", []):
-                    if not isinstance(b, dict):
-                        continue
-                    rem_frac = b.get("remainingFraction")
-                    if rem_frac is None:
-                        logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
-                        failure = ProbeFailure(category="invalid_response", code="remaining_fraction_missing",
-                                               message="Campo remainingFraction ausente no bucket de quota.")
-                        self._probe_failure = failure
-                        return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
-                    if type(rem_frac) not in (float, int) or not 0 <= rem_frac <= 1:
-                        logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
-                        failure = ProbeFailure(category="invalid_response", code="remaining_fraction_invalid",
-                                               message="Campo remainingFraction fora do intervalo válido.")
-                        self._probe_failure = failure
-                        return self.degraded(failure.message, "antigravity_rpc").model_copy(update={"probe_failure": failure})
-                    raw_quota = sanitize_raw("google", b)
-                    rem_pct = _clamp_percent(rem_frac * 100.0)
-                    used_pct = round(100.0 - rem_pct, 2) if rem_pct is not None else None
-                    bucket_win = str(b.get("window", "")).lower()
-                    if bucket_win == "weekly" or "weekly" in str(b.get("bucketId", "")).lower():
-                        dur = 10080
-                        lbl = "Limite Semanal (1 semana)"
-                        qid = "antigravity:gemini-weekly"  # census: wire-id (protocol/telemetry identifier, not a model choice)
-                    else:
-                        dur = 300
-                        lbl = "Janela Móvel (5h)"
-                        qid = "antigravity:gemini-5h"  # census: wire-id (protocol/telemetry identifier, not a model choice)
-                    windows.append(
-                        QuotaWindow(
-                            quota_id=qid,
-                            label=lbl,
-                            used_percent=used_pct,
-                            remaining_percent=rem_pct,
-                            window_duration_minutes=dur,
-                            resets_at=_timestamp_to_iso(b.get("resetTime")),
-                            metric="subscription",
-                        )
-                    )
+            windows, raw_quota, early_exit = self._parse_quota_summary_groups(groups)
+            if early_exit is not None:
+                return early_exit
 
         # 2. Fallback to GetAvailableModels if RetrieveUserQuotaSummary did not return windows
         if not windows:
@@ -1460,7 +1492,8 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             except Exception:
                 pass
 
-        limited = any(w.used_percent is not None and w.used_percent >= 100.0 for w in windows)
+        primary_windows = [w for w in windows if w.metric != "model_specific_pool"] or windows
+        limited = any(w.used_percent is not None and w.used_percent >= 100.0 for w in primary_windows)
         usage = ProviderAccountUsage(
             provider_id=self.spec.provider_id,
             provider_name=self.spec.provider_name,

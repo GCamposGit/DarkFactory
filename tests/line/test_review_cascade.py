@@ -36,7 +36,10 @@ def test_level_two_openrouter_uses_openai_for_a_claude_writer_and_sonnet_otherwi
     assert codex.level == 2 and codex.model == "sonnet"
 
 
-@pytest.mark.parametrize("writer,family", [("claude", "anthropic"), ("codex", "openai"), ("grok", "xai")])
+@pytest.mark.parametrize(
+    "writer,family",
+    [("claude", "anthropic"), ("codex", "openai"), ("grok", "xai"), ("antigravity", "google")],
+)
 def test_level_three_same_family_other_model(writer: str, family: str) -> None:
     from core.models.registry import resolve
 
@@ -45,7 +48,10 @@ def test_level_three_same_family_other_model(writer: str, family: str) -> None:
     assert route.model != resolve(f"development.{writer}")
 
 
-def test_level_four_same_model_adversarial_persona_records_unsupported_temperature() -> None:
+def test_level_four_same_model_adversarial_persona_records_unsupported_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("core.line.review_cascade._other_model", lambda _harness, _writer: None)
     route = _select("antigravity", "google", None, ("antigravity", None))
     assert route.level == 4 and route.persona == "adversarial_distinct"
     assert route.temperature["applied"] is False and route.reason

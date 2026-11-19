@@ -16,6 +16,7 @@ from core.line.routing import (
     _quota_headroom_diagnosis,
     default_config_path,
     harness_cli_pin,
+    is_high_tier_model,
     load_routing_config,
     pick,
     quota_remaining_percent,
@@ -994,3 +995,62 @@ def test_stale_reading_is_held_with_a_margin_for_every_provider_until_reset_or_s
         assert _stale_until_reset_headroom(snapshot(provider, 2, 3), now) == 50.0  # 100 - (40 + 10)
     assert _stale_until_reset_headroom(snapshot("openai", 7, 3), now) is None  # older than 6 h
     assert _stale_until_reset_headroom(snapshot("openai", 1, -1), now) is None  # window already reset
+
+
+def test_pick_defaults_to_environment_headless_context_without_mismatch_and_routes_neon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DARKFAC_EXECUTION_CONTEXT", "headless")
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
+    cfg = load_routing_config(default_config_path())
+
+    plan_pick = pick(
+        "planning",
+        caps,
+        config=cfg,
+        quota_lookup=lambda p: 85.0 if p in ("google", "openai") else 10.0,
+        cooldown_path=tmp_path / "cd1.json",
+    )
+    assert plan_pick == ("codex", "gpt-sol")
+
+    review_pick = pick(
+        "review",
+        caps,
+        implementing_harness="codex",
+        config=cfg,
+        quota_lookup=lambda p: 85.0 if p == "google" else 10.0,
+        cooldown_path=tmp_path / "cd2.json",
+    )
+    assert review_pick == ("antigravity", None)
+
+    dev_pick = pick(
+        "development",
+        caps,
+        config=cfg,
+        quota_lookup=lambda p: 85.0 if p in ("google", "openai") else 10.0,
+        cooldown_path=tmp_path / "cd3.json",
+    )
+    assert dev_pick == ("codex", None)
+
+    with pytest.raises(ValueError, match="execution context mismatch"):
+        pick(
+            "planning",
+            caps,
+            config=cfg,
+            quota_lookup=lambda _p: 80.0,
+            execution_context="interactive",
+            cooldown_path=tmp_path / "cd4.json",
+        )
+
+
+def test_antigravity_neon_and_hydrogen_pins_resolve_for_planning_and_development() -> None:
+    cfg = load_routing_config(default_config_path())
+    assert is_high_tier_model("planning.antigravity") is True
+    assert harness_cli_pin("antigravity", None, stage="planning", config=cfg) == ("gemini-4-neon", None)
+    assert harness_cli_pin("antigravity", None, stage="development", config=cfg, complexity="high") == (
+        "gemini-4-neon", None
+    )
+    assert harness_cli_pin("antigravity", None, stage="development", config=cfg, complexity="low") == (
+        "gemini-4-hydrogen-high", None
+    )
