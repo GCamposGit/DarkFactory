@@ -14,8 +14,10 @@ Two kinds exist:
 from __future__ import annotations
 
 import re
+import shlex
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
@@ -235,6 +237,147 @@ class OwnerAction(BaseModel):
         return record
 
 
+_OWNER_ABS_PATH_PREFIX_RE = re.compile(r"^(?:[A-Za-z]:[/\\]|/)")
+_OWNER_SET_CWD_VERBS = frozenset({"set-location", "sl", "cd", "chdir", "push-location", "pushd"})
+_OWNER_PYTHON_EXES = frozenset({"python", "python.exe", "python3", "python3.exe", "pythonw", "pythonw.exe", "py", "py.exe"})
+_OWNER_GIT_SUBCMDS = frozenset({
+    "add", "commit", "push", "pull", "fetch", "merge", "rebase",
+    "checkout", "status", "diff", "switch", "reset", "restore", "worktree",
+})
+
+
+def _unquote_token(token: str) -> str:
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+        return token[1:-1]
+    return token
+
+
+def _split_command_statements(command: str) -> list[str]:
+    statements: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote is not None:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+        elif ch in (";", "\n", "\r"):
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+        elif ch == "&" and i + 1 < len(command) and command[i + 1] == "&":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+            i += 1
+        else:
+            buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def _tokenize_statement(stmt: str) -> list[str]:
+    try:
+        tokens = shlex.split(stmt, posix=False)
+    except ValueError:
+        tokens = stmt.split()
+    if tokens and tokens[0] == "&":
+        tokens = tokens[1:]
+    return tokens
+
+
+def _statement_sets_abs_cwd(tokens: list[str]) -> bool:
+    if not tokens or _unquote_token(tokens[0]).lower() not in _OWNER_SET_CWD_VERBS:
+        return False
+    for tok in tokens[1:]:
+        clean = _unquote_token(tok)
+        if clean.startswith("-"):
+            continue
+        return bool(_OWNER_ABS_PATH_PREFIX_RE.match(clean))
+    return False
+
+
+def _validate_git_tokens(tokens: list[str]) -> None:
+    has_c_abs = False
+    i = 1
+    while i < len(tokens):
+        clean = _unquote_token(tokens[i])
+        if clean == "-C" and i + 1 < len(tokens):
+            if _OWNER_ABS_PATH_PREFIX_RE.match(_unquote_token(tokens[i + 1])):
+                has_c_abs = True
+            i += 2
+            continue
+        if clean.startswith("-C") and _OWNER_ABS_PATH_PREFIX_RE.match(clean[2:]):
+            has_c_abs = True
+            i += 1
+            continue
+        if clean in ("-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix"):
+            i += 2
+            continue
+        if clean.startswith("-"):
+            i += 1
+            continue
+        if clean.lower() in _OWNER_GIT_SUBCMDS and not has_c_abs:
+            raise ValueError(
+                f"git command for owner must include '-C <absolute_path>' or follow 'Set-Location <absolute_path>': {' '.join(tokens)}"
+            )
+        return
+
+
+def _validate_python_tokens(tokens: list[str]) -> None:
+    i = 1
+    while i < len(tokens):
+        clean = _unquote_token(tokens[i])
+        if clean == "-m" and i + 1 < len(tokens):
+            mod = _unquote_token(tokens[i + 1])
+            if mod == "core" or mod.startswith("core."):
+                raise ValueError(
+                    f"python -m {mod} command for owner must follow 'Set-Location <absolute_path>'"
+                )
+            return
+        if clean == "-c":
+            return
+        if clean in ("-W", "-X", "-Q"):
+            i += 2
+            continue
+        if clean.startswith("-"):
+            i += 1
+            continue
+        if clean.lower().endswith(".py") and not _OWNER_ABS_PATH_PREFIX_RE.match(clean):
+            raise ValueError(
+                f"python script path for owner must be absolute (got {clean!r})"
+            )
+        return
+
+
+def _validate_owner_command_paths(command: str) -> None:
+    has_abs_cwd = False
+    for stmt in _split_command_statements(command):
+        tokens = _tokenize_statement(stmt)
+        if not tokens:
+            continue
+        if _statement_sets_abs_cwd(tokens):
+            has_abs_cwd = True
+            continue
+        if has_abs_cwd:
+            continue
+        exe = Path(_unquote_token(tokens[0]).replace("\\", "/")).name.lower()
+        if exe in ("git", "git.exe"):
+            _validate_git_tokens(tokens)
+        elif exe in _OWNER_PYTHON_EXES:
+            _validate_python_tokens(tokens)
+
+
 class OwnerActionDraft(BaseModel):
     """Input for ``add``: everything the author provides; id and timestamps are assigned."""
 
@@ -251,6 +394,13 @@ class OwnerActionDraft(BaseModel):
     verify: str = ""
     created_by: str = "claude-code"
     id: str | None = None
+
+    @model_validator(mode="after")
+    def _enforce_absolute_owner_commands(self) -> "OwnerActionDraft":
+        for step in self.steps:
+            if step.command:
+                _validate_owner_command_paths(step.command)
+        return self
 
     def build(self, action_id: str) -> OwnerAction:
         return OwnerAction(

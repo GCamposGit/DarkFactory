@@ -265,6 +265,19 @@
       "status": "active",
       "verification_gate_id": null,
       "active": true
+    },
+    {
+      "preference_id": "pref_22b3333b",
+      "category": "communication",
+      "rule": "Sempre instruir comandos para o owner em PowerShell com caminhos absolutos executaveis de qualquer diretorio (incluindo Set-Location <abs> antes de python -m e git -C <abs>).",
+      "context_or_example": "Set-Location C:\\dev\\DarkFac; python -m core.governance.keys sign C:\\dev\\DarkFac\\.factory\\governance\\authorizations\\AUTH-OA097-AGENTS.json",
+      "confidence": 1.0,
+      "created_at": "2026-11-19T19:30:02.581712+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
     }
   ],
   "mistakes": [
@@ -1077,6 +1090,21 @@
       "origin": "rca",
       "status": "active",
       "active": true
+    },
+    {
+      "rca_id": "rca_c8b24712",
+      "timestamp": "2026-11-19T19:30:02.789758+00:00",
+      "category": "tool_misuse",
+      "symptom": "Comando python -m core.governance.keys instruido ao owner em OA-097 dependia do CWD",
+      "mechanism": "OwnerActionDraft nao validava caminhos relativos nem Set-Location antes de python -m core.*",
+      "root_cause": "Regra de caminhos absolutos existia apenas em prosa (AGENTS.md secao 8), sem guard deterministico em OwnerActionDraft nem regra global persistente no Antigravity",
+      "patch_description": "Adicionado guard em OwnerActionDraft (core/owner_actions/models.py) e regra global no plugin owner-preferences do Antigravity",
+      "preventative_rule": "Todo comando instruido ao owner deve ser executavel de qualquer diretorio com caminhos absolutos ou Set-Location <abs>",
+      "regression_test_file": "tests/test_owner_actions_core.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -1761,5 +1789,5 @@
       "executed_at": "2026-11-17T10:38:48.686341+00:00"
     }
   ],
-  "last_updated": "2026-11-17T10:38:48.689349+00:00"
+  "last_updated": "2026-11-19T19:30:02.789758+00:00"
 }

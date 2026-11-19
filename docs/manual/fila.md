@@ -232,3 +232,14 @@ tratar o store como desconfigurado.
   execucao real (`audit_recorded(ticket)`) a partir do ledger de `ExecutionSample`, nunca de
   recibo em cache. Sem amostras ou em erro de leitura retorna HTTP 200 com `passed: false` e
   `violations` explicitas (`audit_unavailable`).
+
+## Higiene de `node_sync` e caminhos absolutos em `OwnerActionDraft` (USR-532)
+
+- `GENERATED_LEDGER_FILES` em `core/infra/node_sync.py` inclui `.factory/learning/learning_ledger.json`
+  (alem de `.factory/demands/demands.json` e `.factory/owner_actions/owner_actions.json`), garantindo que
+  alteracoes locais de aprendizagem nao travem `git pull --ff-only` nos nos secundarios (`USR-394`);
+  `.factory/runs/model_audit/` e `.factory/runs/review_benchmark.jsonl` ficam registrados em
+  `FLEET_RUNTIME_UNTRACKED_*` (fora do `.gitignore`, preservando a visibilidade exigida por USR-471 T6).
+- `OwnerActionDraft` (`core/owner_actions/models.py`) valida comandos em passos destinados ao owner para
+  rejeitar invocacoes relativas dependentes de `CWD` (`git <subcmd>` sem `-C <abs>`, script `.py` relativo
+  ou `python -m core.*` sem `Set-Location <abs>`), mantendo leitura retrocompatível de `OwnerAction` historicas.

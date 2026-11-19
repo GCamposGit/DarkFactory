@@ -24,6 +24,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import run_ticket
+_REAL_REVIEW_CANDIDATE = run_ticket._review_candidate
 from core.line import admission, agent_retry, routing
 from core.git.autonomy import GitAutonomyManager, SweepReport, TicketCompletionReport
 from core.demands.store import DemandsStore
@@ -1038,3 +1039,28 @@ def test_declared_headless_context_survives_resume_without_fleet_flag(
     identity = run_ticket._process_identity(args)
     assert identity.execution_context == "headless"
     assert identity.harness is None
+
+
+def test_review_candidate_filters_antigravity_in_headless_without_ls_address(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen_caps: list[list[str]] = []
+
+    class _FakeReviewStage:
+        def __init__(self, *, host_caps: list[str] | tuple[str, ...] = (), **_kw: Any) -> None:
+            seen_caps.append(list(host_caps))
+
+        def run(self, *_a: Any, **_kw: Any) -> dict[str, Any]:
+            return {"ok": True}
+
+    monkeypatch.setattr(run_ticket.stage_review, "ReviewStage", _FakeReviewStage)
+    monkeypatch.setattr(run_ticket, "_resolve_project", lambda _t: SimpleNamespace(id="darkfac"))
+    monkeypatch.setenv("DARKFAC_EXECUTION_CONTEXT", "headless")
+    monkeypatch.delenv("ANTIGRAVITY_LS_ADDRESS", raising=False)
+
+    _REAL_REVIEW_CANDIDATE(_TICKET, tmp_path, SimpleNamespace())
+    assert "harness:antigravity" not in seen_caps[-1]
+
+    monkeypatch.setenv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:5387")
+    _REAL_REVIEW_CANDIDATE(_TICKET, tmp_path, SimpleNamespace())
+    assert "harness:antigravity" in seen_caps[-1]

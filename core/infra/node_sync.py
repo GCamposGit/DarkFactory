@@ -277,6 +277,7 @@ FLEET_RUNTIME_UNTRACKED_FILES = frozenset(
         ".factory/runs/fleet_policy_snapshot.json",  # Generated snapshot consumed by fleet policy routing.
         ".factory/runs/model_audit_receipt.json",  # Generated receipt from model and quota auditing.
         ".factory/runs/recovery_list_state.json",  # Checkpoint for the recovery-list worker.
+        ".factory/runs/review_benchmark.jsonl",  # Local review benchmark observations written during runs.
     }
 )
 FLEET_RUNTIME_UNTRACKED_DIRECTORIES = (
@@ -284,14 +285,16 @@ FLEET_RUNTIME_UNTRACKED_DIRECTORIES = (
     ".factory/runs/outcomes",  # Results emitted by fleet runs.
     ".factory/runs/ci_recovery",  # Persisted CI recovery queue and execution state.
     ".factory/runs/node_sync_conflicts",  # Local copies preserved when runtime state conflicts upstream.
+    ".factory/runs/model_audit",  # Per-run model audit sidecar files generated locally.
 )
 
 
-# USR-343 S4b / USR-374: these ledgers are generated snapshots (scripts/snapshot_queue.py); a local edit is
-# never authoritative, so a node resets them (keeping a backup) instead of refusing to pull.
+# USR-343 S4b / USR-374: these ledgers are generated snapshots (scripts/snapshot_queue.py) or local
+# continuous-learning state; a node resets/stashes them (keeping a backup) instead of refusing to pull.
 GENERATED_LEDGER_FILES = (
     ".factory/demands/demands.json",
     ".factory/owner_actions/owner_actions.json",
+    ".factory/learning/learning_ledger.json",
 )
 
 

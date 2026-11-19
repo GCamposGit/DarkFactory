@@ -239,4 +239,8 @@ Na operacao interativa e na retomada pelo launcher, `run_ticket.py` vincula `pro
 digest de plano, candidato e worktree (`build_evidence_mismatch` preserva os artefatos sem
 resetar plano ou fatias). Em conflito tecnico de rebase na entrega, `core/line/rebase_recovery.py`
 aplica primeiro ajuste deterministico e limita a inferencia pelo fingerprint antes de registrar
-`technical_hold`, preservando arquivos protegidos e a worktree para retomada.
+`technical_hold`, preservando arquivos protegidos e a worktree para retomada. No calculo
+de digest sem Git (`_non_git_candidate_digest`), arquivos dentro de `state_root()` sao
+ignorados para que artefatos de stage nao alterem `candidate_digest`. Na etapa `REVIEW`,
+`run_ticket.py` remove `harness:antigravity` das caps em contexto `headless` sem
+`ANTIGRAVITY_LS_ADDRESS` configurado (USR-519, USR-531).
