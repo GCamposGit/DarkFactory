@@ -1,0 +1,12 @@
+{
+  "id": "AUTH-OA094-AGENTS",
+  "ticket_id": "OA-094",
+  "approver": "owner",
+  "paths": [
+    "AGENTS.md"
+  ],
+  "candidate_kind": "commit",
+  "candidate": "46260f60d6a729b6a7e3f38619764cfd355c7569",
+  "expires_at": "2026-11-22T23:59:00Z",
+  "signature": "HKDgwJnJeBw/GJib0TUgjAI7oN+YLzBZcsmmJiC2KXZzwFgak0SWJ2POxgSihOgPV7s3E+HvKhF98ea8xHMDCg=="
+}
