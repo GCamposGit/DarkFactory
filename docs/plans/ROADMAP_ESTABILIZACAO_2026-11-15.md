@@ -73,7 +73,7 @@ Abertos, em ordem de impacto (cada um cabe em um PR pequeno):
 | E6 Dieta do pipeline de entrega | USR-499, USR-500 | Parcial (USR-499 entregue no PR #870; prompt de validação no PR #874) | ver abaixo |
 | E7 Custo e contingência | USR-445, USR-512 | Parcial (agente via OpenRouter no PR #872; USR-512 no PR #873) | ver abaixo |
 | E8 Hosts e reconciliação | USR-498, USR-492 | Parcial (USR-498 entregue no PR #871) | ver abaixo |
-| E9 Poda da suíte | (sem ticket) | Auditoria incompleta | ver abaixo |
+| E9 Poda da suíte | (sem ticket) | **Entregue** | `main` (3.926 testes coletados <= 4.000; `tests/shape/` e suites não-motor removidas) |
 
 Como entregar cada frente restante: worktree nova a partir de `origin/main`, rodar só os arquivos de teste alterados (`python -m pytest <arquivos> -q -n 0 -p no:cacheprovider`), depois `lint-imports`, `python scripts/complexity_ratchet.py`, commitar, `python -m core.harness.docs_sync --base origin/main --head HEAD`, `git push` e `gh pr create`. O CI do PR roda a suíte em Linux em cerca de 3 minutos; mesclar com squash quando verde. Não rodar `runner.py --quick` no Notebook.
 
@@ -123,7 +123,7 @@ Aceite: teste de comportamento em que falha de portão seguida de relançamento 
 - Menores, reavaliar depois de E2: USR-454, USR-455, USR-457, USR-463, USR-471, USR-485, USR-487, USR-491, USR-448 (remover a tarefa agendada que aponta para módulo inexistente; fechar PR #822), USR-486 (PR #847), USR-496 (PR #840), USR-516.
 
 ### E9 Poda da suíte
-A auditoria de testes não terminou. Roteiro: (1) `python -m pytest --collect-only -q` para contar por arquivo; (2) `--durations=50` no CI para achar os lentos; (3) apagar testes de forma (presença de texto em script ou doc, como o que quebrou no PR #859) e testes de módulos que o motor não importa (`core/benchmarks`, `core/visual`, `core/content`, `core/archetypes`: confirmar com `lint-imports` e grep antes); (4) meta da fase: até 4.000 testes.
+Entregue (`<= 4.000` testes coletados): removidos `tests/shape/*` (8 arquivos de forma) e 189 arquivos de testes legados/não-motor não referenciados (~1.863 testes removidos), mantendo `3.926` testes coletados em `tests/`, `tests/line/` e suites canônicas do motor/infra.
 
 ## Fila em 15/11
 
