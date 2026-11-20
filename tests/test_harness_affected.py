@@ -1052,3 +1052,47 @@ def test_pr_subset_always_adds_contract_tests_for_docs_only_diff(tmp_path):
     _write(repo, "docs/manual/custo.md", "b\n")
     selection = affected.select_pr_tests(repo)
     assert "tests/test_model_id_ratchet_usr185.py" in selection.tests
+
+
+def test_demands_ledger_change_selects_only_hygiene_tests(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, ".factory/demands/demands.json", '{"tickets": []}\n')
+    _write(repo, "tests/test_demands_hygiene.py", "def test_hygiene(): assert True\n")
+    _write(repo, "tests/test_ledger_hygiene.py", "def test_ledger(): assert True\n")
+    _write(repo, "tests/test_unrelated_fixture.py", 'PATH = ".factory/demands/demands.json"\ndef test_u(): assert True\n')
+    _commit_all(repo, "baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, ".factory/demands/demands.json", '{"tickets": [{"id": "USR-1"}]}\n')
+
+    selection = affected.select_pr_tests(repo)
+    assert "tests/test_demands_hygiene.py" in selection.tests
+    assert "tests/test_ledger_hygiene.py" in selection.tests
+    assert "tests/test_unrelated_fixture.py" not in selection.tests
+
+
+def test_pr_fallback_caps_hot_module_cited_explosion_while_keeping_changed_tests(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "core/hot_mod.py", "X = 1\n")
+    _write(repo, "core/focused_mod.py", "Y = 1\n")
+    for idx in range(35):
+        _write(repo, f"tests/test_hot_{idx:02d}.py", "def test_h():\n    ref = 'core.hot_mod'\n")
+    _write(repo, "tests/test_focused.py", "def test_f():\n    ref = 'core.focused_mod'\n")
+    _write(repo, "tests/test_direct_edit.py", "def test_d(): assert True\n")
+    _write(repo, "tests/test_model_id_ratchet_usr185.py", "def test_r(): assert True\n")
+    _commit_all(repo, "baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "tests/conftest.py", "# global\n")
+    _write(repo, "core/hot_mod.py", "X = 2\n")
+    _write(repo, "core/focused_mod.py", "Y = 2\n")
+    _write(repo, "tests/test_direct_edit.py", "def test_d(): assert 1 == 1\n")
+
+    selection = affected.select_pr_tests(repo)
+    assert selection.mode == "affected_fallback"
+    assert "tests/test_direct_edit.py" in selection.tests
+    assert "tests/test_focused.py" in selection.tests
+    assert "tests/test_model_id_ratchet_usr185.py" in selection.tests
+    assert any(item.startswith("fallback_cited_capped:") for item in selection.escalations)
+    hot_selected = [t for t in selection.tests if t.startswith("tests/test_hot_")]
+    assert len(hot_selected) == affected.PR_FALLBACK_MAX_CITED_FILES - 1

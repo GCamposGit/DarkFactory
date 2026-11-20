@@ -102,3 +102,49 @@ def test_maybe_dispatch_remote_without_mocks_never_touches_network(
         notify_hub_on_pass=lambda: None,
     )
     assert result is None
+
+
+def test_child_pytest_scrubs_inherited_headless_execution_context(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "test_probe_ctx.py"
+    probe.write_text(
+        "import os\n"
+        "from core.line.operating_harness import resolve_process_identity\n"
+        "def test_execution_context_is_scrubbed():\n"
+        "    assert 'DARKFAC_EXECUTION_CONTEXT' not in os.environ\n"
+        "    assert 'DARKFAC_FLEET_MODE' not in os.environ\n"
+        "    assert 'STATE_ROOT' not in os.environ\n"
+        "    assert resolve_process_identity().execution_context == 'interactive'\n",
+        encoding="utf-8",
+    )
+    polluted_env = {
+        **os.environ,
+        "DARKFAC_EXECUTION_CONTEXT": "headless",
+        "DARKFAC_FLEET_MODE": "1",
+        "STATE_ROOT": "C:/bogus",
+        "DARKFAC_SUITE_LOCK": "0",
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-n",
+            "0",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "tests.conftest",
+            "--rootdir",
+            str(tmp_path),
+            str(probe),
+        ],
+        cwd=ROOT,
+        env=polluted_env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

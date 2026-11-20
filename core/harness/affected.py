@@ -27,6 +27,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -122,6 +123,15 @@ WORKFLOW_DIR_PREFIX = ".github/workflows/"
 CI_POLICY_TEST = "tests/test_ci_policy.py"
 
 NON_PYTHON_MATCHABLE_ROOTS = ("core/", "hub/")
+
+#: Generated ledger snapshots whose data edits must validate ledger/demand hygiene
+#: rather than substring-matching dozens of unrelated fixture tests.
+LEDGER_DATA_FILES: dict[str, tuple[str, ...]] = {
+    ".factory/demands/demands.json": ("tests/test_demands_hygiene.py", "tests/test_ledger_hygiene.py"),
+    ".factory/owner_actions/owner_actions.json": ("tests/test_ledger_hygiene.py",),
+    ".factory/learning/learning_ledger.json": (),
+}
+PR_FALLBACK_MAX_CITED_FILES = 25
 
 #: Source roots for which a changed .py file selecting zero tests is worth
 #: flagging explicitly (``uncovered``) rather than silently reporting mode
@@ -665,6 +675,13 @@ def _select_tests_for_non_python_change(
     if changed_path.startswith("docs/"):
         return selected, reasons, escalation
 
+    if changed_path in LEDGER_DATA_FILES:
+        for hygiene_test in LEDGER_DATA_FILES[changed_path]:
+            if hygiene_test in graph.files:
+                selected.add(hygiene_test)
+                reasons.setdefault(hygiene_test, []).append(f"ledger_data_change: {changed_path}")
+        return selected, reasons, escalation
+
     basename_is_generic = (
         basename.lower() in GENERIC_BASENAMES or len(basename) < GENERIC_BASENAME_MIN_LEN
     )
@@ -850,19 +867,73 @@ def _test_sources(repo_root: Path) -> dict[str, str]:
     return _TEST_TEXT_CACHE[key]
 
 
+def _leaf_import_patterns(dotted_by_path: dict[str, str]) -> dict[str, re.Pattern[str]]:
+    patterns: dict[str, re.Pattern[str]] = {}
+    for changed, dotted in dotted_by_path.items():
+        parent, _, leaf = dotted.rpartition(".")
+        if parent and leaf:
+            patterns[changed] = re.compile(
+                rf"from\s+{re.escape(parent)}\s+import\s+(?:\([^)]*\b{re.escape(leaf)}\b[^)]*\)|[^\n]*\b{re.escape(leaf)}\b)"
+            )
+    return patterns
+
+
 def tests_citing_modules(repo_root: Path, changed_files: Iterable[str]) -> dict[str, list[str]]:
     """Testes cujo texto cita (core.x.y) ou importa direto um modulo .py alterado."""
     dotted_by_path = {
         p: dotted for p in changed_files
         if p.endswith(".py") and (dotted := _changed_module_identity(p)[0])
     }
+    leaf_patterns = _leaf_import_patterns(dotted_by_path)
     out: dict[str, list[str]] = {}
     for test_path, source in _test_sources(repo_root).items():
         for changed, dotted in dotted_by_path.items():
-            parent, _, leaf = dotted.rpartition(".")
-            imports_leaf = bool(parent) and f"from {parent} import" in source and leaf in source
-            if dotted in source or imports_leaf:
+            pat = leaf_patterns.get(changed)
+            if dotted in source or (pat is not None and bool(pat.search(source))):
                 out.setdefault(test_path, []).append(f"cites_module: {changed}")
+    return out
+
+
+def _bound_fallback_cited(
+    cited: dict[str, list[str]], fixed: set[str], limit: int
+) -> tuple[dict[str, list[str]], str | None]:
+    """Keep all fixed targets and at most `limit` lowest-fanout cited tests in PR fallback."""
+    extra = [t for t in cited if t not in fixed]
+    if len(extra) <= limit:
+        return cited, None
+    fanout: dict[str, int] = {}
+    for rs in cited.values():
+        for r in rs:
+            fanout[r] = fanout.get(r, 0) + 1
+    extra.sort(key=lambda t: (min(fanout[r] for r in cited[t]), -len(cited[t]), t))
+    keep = set(extra[:limit])
+    filtered = {t: list(rs) for t, rs in cited.items() if t in fixed or t in keep}
+    return filtered, f"fallback_cited_capped: {len(extra)}->{limit}"
+
+
+def _changed_test_files(repo_root: Path, changed_files: Sequence[str]) -> set[str]:
+    return {
+        p for p in changed_files
+        if p.startswith("tests/") and Path(p).name.startswith("test_") and (repo_root / p).is_file()
+    }
+
+
+def _fallback_reasons(
+    tests: list[str],
+    cited: dict[str, list[str]],
+    contracts: list[str],
+    changed_tests: set[str],
+) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    contract_set = set(contracts)
+    for t in tests:
+        reasons = list(cited.get(t, []))
+        if t in contract_set:
+            reasons.append("pr_contract")
+        if t in changed_tests:
+            reasons.append("changed_test_file")
+        if reasons:
+            out[t] = sorted(set(reasons))
     return out
 
 
@@ -887,13 +958,25 @@ def select_pr_tests(repo_root: Path, base_ref: str = "origin/main") -> Selection
                       or p in ("AGENTS.md", "MISSION.md", "FACTORY_RULES.md")]
     contracts = _pr_contract_tests(repo_root)
     if selection.mode == "full" or selection.uncovered or global_changes:
-        cited = tests_citing_modules(repo_root, selection.changed_files)
-        tests = sorted({*PR_SMOKE_TESTS, *contracts, *cited})
+        changed_tests = _changed_test_files(repo_root, selection.changed_files)
+        fixed = {*PR_SMOKE_TESTS, *contracts, *changed_tests}
+        cited, cap_note = _bound_fallback_cited(
+            tests_citing_modules(repo_root, selection.changed_files),
+            fixed,
+            PR_FALLBACK_MAX_CITED_FILES,
+        )
+        tests = sorted({*fixed, *cited})
+        escalations = [
+            *selection.escalations,
+            *(f"global_change: {p}" for p in global_changes),
+            *(f"uncovered: {p}" for p in selection.uncovered),
+        ]
+        if cap_note is not None:
+            escalations.append(cap_note)
         return Selection(
             "affected_fallback", tests,
-            {t: sorted(set(cited.get(t, []) + (["pr_contract"] if t in contracts else []))) for t in tests if t in cited or t in contracts},
-            [*selection.escalations, *(f"global_change: {p}" for p in global_changes),
-             *(f"uncovered: {p}" for p in selection.uncovered)],
+            _fallback_reasons(tests, cited, contracts, changed_tests),
+            escalations,
             selection.changed_files, selection.uncovered,
         )
     missing = [t for t in contracts if t not in selection.tests]

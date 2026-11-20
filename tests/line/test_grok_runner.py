@@ -576,6 +576,52 @@ def test_read_mode_nonzero_exit_without_output_is_classified(install_fake, tmp_p
     assert result.ok is False and result.error_kind == "rate_limited"
 
 
+def test_read_mode_with_output_schema_uses_json_and_extracts_structured_output(
+    install_fake, tmp_path: Path, _hermetic_grok: Path
+) -> None:
+    payload = {
+        "text": "I reviewed the files first.\n{\"verdict\":\"approve\",\"blocking\":[],\"non_blocking\":[]}",
+        "structuredOutput": {"verdict": "approve", "blocking": [], "non_blocking": []},
+        "usage": {"input_tokens": 1200, "output_tokens": 45},
+        "total_cost_usd": 0.042,
+        "modelUsage": {"grok-4.6": {"inputTokens": 1200, "outputTokens": 45, "costUSD": 0.042}},
+    }
+    fake = install_fake(stdout=json.dumps(payload))
+    schema = {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}
+    req = AgentRequest(
+        prompt="review this", cwd=tmp_path, mode="read", harness="grok",
+        model="grok-4.6", effort="high", output_schema=schema, timeout_s=30,
+    )
+
+    result = run_agent(req)
+
+    assert "--output-format" in fake.argv and fake.argv[fake.argv.index("--output-format") + 1] == "json"
+    assert "--json-schema" in fake.argv
+    assert "--reasoning-effort" in fake.argv and fake.argv[fake.argv.index("--reasoning-effort") + 1] == "high"
+    assert "--permission-mode" not in fake.argv
+    assert result.ok is True
+    assert json.loads(result.text) == {"blocking": [], "non_blocking": [], "verdict": "approve"}
+    assert result.usage == {"input_tokens": 1200, "output_tokens": 45}
+    assert result.cost_usd == pytest.approx(0.042)
+    assert result.model == "grok-4.6" and result.model_source == "provider_reported"
+
+
+def test_read_mode_with_output_schema_classifies_json_error_object(
+    install_fake, tmp_path: Path
+) -> None:
+    install_fake(stdout=json.dumps({"type": "error", "message": "rate limit reached"}))
+    schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+    req = AgentRequest(
+        prompt="review this", cwd=tmp_path, mode="read", harness="grok",
+        model="grok-4.6", output_schema=schema,
+    )
+
+    result = run_agent(req)
+
+    assert result.ok is False
+    assert result.error_kind == "rate_limited"
+
+
 # --------------------------------------------------------------------------
 # Real smoke test (opt-in): DARKFAC_LIVE_GROK_TEST=1 python -m pytest tests/line/test_grok_runner.py -k live
 # --------------------------------------------------------------------------
