@@ -47,6 +47,8 @@ for _test_control_env_name in (
     "DARKFAC_LOCAL_CANCEL_PARENT",
     "DARKFAC_LOCAL_RUN_ID",
     "DARKFAC_RUN_ID",
+    "DARKFAC_EXECUTION_CONTEXT",
+    "STATE_ROOT",
 ):
     os.environ.pop(_test_control_env_name, None)
 
@@ -693,7 +695,7 @@ def _isolate_fleet_env() -> Iterator[None]:
     explicitly because ``monkeypatch.delenv`` does not undo a value set later outside monkeypatch.
     """
 
-    names = ("DARKFAC_FLEET_MODE", "DARKFAC_HOST_ID")
+    names = ("DARKFAC_FLEET_MODE", "DARKFAC_HOST_ID", "DARKFAC_EXECUTION_CONTEXT")
     saved = {name: os.environ.pop(name) for name in names if name in os.environ}
     yield
     for name in names:

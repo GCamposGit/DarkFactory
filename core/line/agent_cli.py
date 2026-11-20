@@ -1702,6 +1702,70 @@ def prepare_isolated_grok_home(drop: list[str], dest: Path, source: Optional[Pat
     return dest
 
 
+def _build_grok_read_argv(executable: str, req: AgentRequest) -> list[str]:
+    """Build Grok Build argv for read mode; structured JSON mode avoids prose/JSON mixups."""
+    if req.output_schema is not None:
+        schema_json = json.dumps(req.output_schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        argv = [executable, "--output-format", "json", "--json-schema", schema_json]
+    else:
+        argv = [executable, "--output-format", "plain"]
+    if req.model:
+        argv += ["-m", req.model]
+    if req.output_schema is not None:
+        effort = _effort_cli_token(req.effort)
+        if effort:
+            argv += ["--reasoning-effort", effort]
+    return argv
+
+
+def _parse_grok_structured_read(
+    req: AgentRequest,
+    output_text: str,
+    stderr: str,
+    returncode: int,
+    duration: float,
+    diag: dict[str, Any],
+) -> AgentResult:
+    """Extract schema-constrained JSON output and telemetry from `grok --output-format json`."""
+    parsed = _parse_json_object(output_text)
+    if parsed is None:
+        if returncode != 0:
+            combined = f"{output_text}\n{stderr}"
+            return AgentResult(
+                ok=False, text=redact_secrets(output_text or stderr.strip()), harness="grok",
+                model=req.model, duration_s=duration,
+                error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
+            )
+        return AgentResult(ok=True, text=output_text, harness="grok", model=req.model, duration_s=duration, **diag)
+
+    is_error = parsed.get("type") == "error"
+    structured = parsed.get("structuredOutput") if "structuredOutput" in parsed else parsed.get("structured_output")
+    if structured is not None and not is_error:
+        result_text = json.dumps(structured, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    else:
+        result_text = str(parsed.get("message" if is_error else "text") or "")
+    usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
+    cost_raw = parsed.get("total_cost_usd")
+    cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) and not isinstance(cost_raw, bool) else None
+    reported_model, reported_effort = _grok_reported_identity(parsed)
+    model = _prefer_reported(reported_model, req.model)
+    model_source = "provider_reported" if reported_model else ("explicit_request" if req.model else "harness_default")
+    effort = _prefer_reported(reported_effort, req.effort)
+    if returncode != 0 or is_error:
+        combined = f"{result_text if is_error else ''}\n{stderr}"
+        return AgentResult(
+            ok=False, text=redact_secrets(result_text or stderr.strip()), harness="grok",
+            model=model, model_source=model_source, effort=effort,
+            duration_s=duration, usage=usage, cost_usd=cost_usd,
+            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
+        )
+    return AgentResult(
+        ok=True, text=redact_secrets(result_text), harness="grok",
+        model=model, model_source=model_source, effort=effort,
+        duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
+    )
+
+
 def _run_grok(req: AgentRequest) -> AgentResult:
     executable = find_grok_binary()
     if not executable:
@@ -1711,11 +1775,9 @@ def _run_grok(req: AgentRequest) -> AgentResult:
         )
     if req.mode == "write":
         return _run_grok_write(req, executable)
-    # Read mode: one-shot prompt-file call returning plain text (USR-322). USR-271: optional MCP servers
-    # that are down are left out of a throwaway $GROK_HOME so the handshake cannot eat the timeout.
-    argv = [executable, "--output-format", "plain"]
-    if req.model:
-        argv += ["-m", req.model]
+    # Read mode: one-shot prompt-file call (plain text by default, or JSON schema when requested).
+    # USR-271: optional MCP servers that are down are left out of a throwaway $GROK_HOME.
+    argv = _build_grok_read_argv(executable, req)
     dropped, mcp_reasons = check_grok_optional_mcp_servers()
     env: Optional[dict[str, str]] = None
     isolated: Optional[Path] = None
@@ -1767,6 +1829,8 @@ def _run_grok(req: AgentRequest) -> AgentResult:
             ok=False, text="mcp_unavailable: " + redact_secrets(stderr.strip() or output_text)[:500],
             harness="grok", model=req.model, duration_s=duration, error_kind="harness_infra_error", **diag,
         )
+    if req.output_schema is not None:
+        return _parse_grok_structured_read(req, output_text, stderr, res.returncode, duration, diag)
     if res.returncode != 0 and not output_text:
         combined = f"{output_text}\n{stderr}"
         return AgentResult(
