@@ -577,3 +577,7 @@ a mesma assinatura estrutural (detalhes operacionais em
 - `_review_candidate` em `run_ticket.py` remove `"harness:antigravity"` de `host_caps` quando o processo
   executa em contexto `"headless"` sem `ANTIGRAVITY_LS_ADDRESS` configurado, impedindo acionamento de rota
   incompativel durante a revisao independente da frota.
+- Em retomada direta (`--resume-delivery` / `_deliver_worktree` com `progress.owns_run`),
+  `_publish_resumed_prior_phases` emite `preflight`, `workspace` e `agent` como `succeeded` depois de
+  validar `PLAN`, `RESEARCH` e `BUILD`; quando `reuse_validation` reaproveita o portao vigente, a
+  entrega emite `gate` como `succeeded` (USR-533).
