@@ -14877,5 +14877,46 @@
     "dependencies": [],
     "created_at": "2026-11-10T21:56:52.263658Z",
     "updated_at": "2026-11-20T04:36:00.312076Z"
+  },
+  {
+    "id": "USR-483",
+    "project_id": "darkfac",
+    "title": "Troca de harness ou PC operador deve ser operacao normal, sem configuracao fixa",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "83f480ec659dd38032e5dbd1e1d83ea8bd4afd10",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Decisao do owner em 08/11: a cada mudanca de saldo de cotas ele pode retomar a coordenacao por outro harness ou PC; isso e feature. Hoje core/line/operating_harness.py da precedencia a DARKFAC_OPERATING_HARNESS sobre a autodeteccao, entao um valor persistido no ambiente do usuario fica colado: em 08/11, numa sessao Claude Code, o preflight elegeu antigravity com cota STALE ha 155h. A autodeteccao de Codex e Antigravity consta como NOT CONFIRMED no modulo. docs/manual/operacao_interativa.md, docs/operacao/HANDOFF.md, docs/FASE_ATUAL.md e docs/HARNESS_INTEROP.md descrevem operadores especificos e mandam fixar a variavel, sem procedimento de troca; o HANDOFF esta parado desde 31/10 apesar de trocas de operador. Complemento do owner em 08/11: varias sessoes, harnesses, modelos e PCs podem trabalhar em paralelo na fabrica ou em projetos feitos por ela (planejar feature, resolver pendencia humana, analisar, diagnosticar); isso e comportamento esperado. Apenas uma sessao coordena a fabrica, conforme orientacao do owner e, na falta dela, por interpretacao da propria fabrica. Hoje nao ha distincao entre sessao ativa e coordenador.",
+    "core_journey": [
+      "Decisao do owner em 08/11: a cada mudanca de saldo de cotas ele pode retomar a coordenacao por outro harness ou PC; isso e feature. Hoje core/line/operating_harness.py da precedencia a DARKFAC_OPERATING_HARNESS sobre a autodeteccao, entao um valor persistido no ambiente do usuario fica colado: em 08/11, numa sessao Claude Code, o preflight elegeu antigravity com cota STALE ha 155h. A autodeteccao de Codex e Antigravity consta como NOT CONFIRMED no modulo. docs/manual/operacao_interativa.md, docs/operacao/HANDOFF.md, docs/FASE_ATUAL.md e docs/HARNESS_INTEROP.md descrevem operadores especificos e mandam fixar a variavel, sem procedimento de troca; o HANDOFF esta parado desde 31/10 apesar de trocas de operador. Complemento do owner em 08/11: varias sessoes, harnesses, modelos e PCs podem trabalhar em paralelo na fabrica ou em projetos feitos por ela (planejar feature, resolver pendencia humana, analisar, diagnosticar); isso e comportamento esperado. Apenas uma sessao coordena a fabrica, conforme orientacao do owner e, na falta dela, por interpretacao da propria fabrica. Hoje nao ha distincao entre sessao ativa e coordenador."
+    ],
+    "non_goals": [
+      "Permitir Antigravity em headless ou frota, ou alterar piso de 15% e revisao cruzada"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identidade da sessao e papel de coordenador sao conceitos separados: detectar o harness de uma sessao nao a torna coordenadora",
+      "Sessao de qualquer harness suportado e reconhecida pelo proprio harness que a executa; valor persistido antigo nao vence o sinal real da sessao, e override explicito fica restrito a sessao atual",
+      "Sinais de autodeteccao de Codex e Antigravity confirmados em sessao real; sem sinal confiavel o roteador nao prefere harness nem usa valor antigo",
+      "Existe no maximo um coordenador por vez, em registro compartilhado com sessao, harness, modelo, host, horario, origem da decisao e heartbeat, valido entre PCs",
+      "Orientacao explicita do owner define ou troca o coordenador de imediato, de qualquer harness, PC ou sessao, sem editar variavel de ambiente e sem aprovacao extra",
+      "Sem orientacao do owner a fabrica aplica regra deterministica e auditavel: mantem o coordenador com heartbeat vigente e, se expirado, elege por regra documentada ou segue sem coordenador com causa registrada, sem interromper frota",
+      "Sessoes nao coordenadoras em paralelo (mesmo ou outro harness, modelo ou PC) trabalham sem aviso de erro, bloqueio ou pedido de confirmacao em planejamento, tickets com pendencia humana, analise, diagnostico e projetos feitos pela fabrica",
+      "Acoes exclusivas da coordenacao (operar despachante e fila global, alterar politica da frota, publicar handoff de coordenacao) ficam reservadas ao coordenador; sessoes paralelas seguem o caminho normal de ticket, worktree propria, suite_lock e reservas",
+      "Operador assume ou consulta com um unico comando agnostico de briefing, vendo coordenador atual, sessoes paralelas, fila, cotas, runs vivos e PRs a partir do estado compartilhado e nao so de snapshots locais",
+      "Manual, FASE_ATUAL, HARNESS_INTEROP e HANDOFF tratam troca e paralelismo como feature e nao nomeiam operador fixo; fatos correntes vem do estado gerado",
+      "Testes de comportamento cobrem variavel antiga presente, troca de coordenador por ordem do owner, coordenador expirado, sessao sem sinal e sessoes paralelas nao coordenadoras"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-08T10:33:02.087387Z",
+    "updated_at": "2026-11-20T08:19:09.670620Z"
   }
 ]

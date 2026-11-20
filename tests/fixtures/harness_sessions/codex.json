@@ -1,0 +1,12 @@
+{
+  "description": "Sanitized signals observed in a Codex CLI session",
+  "environment": {
+    "CODEX_THREAD_ID": "01900000-0000-7000-8000-000000000001",
+    "CODEX_SANDBOX": "workspace-write",
+    "CODEX_SANDBOX_NETWORK_DISABLED": "1",
+    "CODEX_MODEL": "codex-test-model",
+    "DARKFAC_OPERATING_HARNESS": "antigravity"
+  },
+  "expected_harness": "codex",
+  "expected_signal": "CODEX_THREAD_ID"
+}
