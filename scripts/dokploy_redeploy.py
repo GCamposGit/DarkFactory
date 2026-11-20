@@ -469,6 +469,14 @@ def verify_cloud_runtime_containers(payload: Any, image_sha: str) -> Tuple[bool,
     return valid, evidence, reason
 
 
+def _missing_cloud_runtime_evidence() -> List[Dict[str, str]]:
+    """Return safe per-service diagnostics when the runtime API gives no usable proof."""
+    return [
+        {"service": service_name, "image": "missing", "state": "missing", "health": "unknown"}
+        for service_name in sorted(RUNTIME_REQUIRED_CLOUD_SERVICES)
+    ]
+
+
 def detect_disk_space_failure(deployment: Optional[Deployment]) -> Optional[str]:
     """Inspects deployment error fields for VPS disk space exhaustion signatures (USR-122)."""
     if not deployment:
@@ -1971,7 +1979,9 @@ def _run_main(
         if svc.name.lower() in CODE_BEARING_SERVICES:
             service_sha = image_sha or expected_sha
             if not service_sha:
-                runtime_ok, runtime_evidence, runtime_reason = False, [], "no immutable image SHA"
+                runtime_ok, runtime_evidence, runtime_reason = (
+                    False, _missing_cloud_runtime_evidence(), "no immutable image SHA"
+                )
             else:
                 try:
                     container_payload = transport("GET", "/api/docker.getContainers", None)
@@ -1979,7 +1989,11 @@ def _run_main(
                         container_payload, service_sha
                     )
                 except Exception:
-                    runtime_ok, runtime_evidence, runtime_reason = False, [], "docker.getContainers request failed"
+                    runtime_ok, runtime_evidence, runtime_reason = (
+                        False, _missing_cloud_runtime_evidence(), "docker.getContainers request failed"
+                    )
+                if not runtime_evidence:
+                    runtime_evidence = _missing_cloud_runtime_evidence()
             for item in runtime_evidence:
                 print(
                     f"[RUNTIME IMAGE] service={item['service']} container={item.get('container', item['service'])} "
