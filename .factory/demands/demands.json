@@ -14883,8 +14883,8 @@
     "project_id": "darkfac",
     "title": "Troca de harness ou PC operador deve ser operacao normal, sem configuracao fixa",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "83f480ec659dd38032e5dbd1e1d83ea8bd4afd10",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14917,6 +14917,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-08T10:33:02.087387Z",
-    "updated_at": "2026-11-08T10:33:02.087387Z"
+    "updated_at": "2026-11-20T08:19:09.670620Z"
   }
 ]
