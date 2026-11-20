@@ -14913,8 +14913,8 @@
     "project_id": "darkfac",
     "title": "Verificar imagem em execucao no darkfac-cloud apos deploy no Dokploy",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "fb135186ac4944a6c33511c250f8e1b3bb077db2",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14935,6 +14935,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-15T09:21:33.547955Z",
-    "updated_at": "2026-11-15T09:21:33.547955Z"
+    "updated_at": "2026-11-20T11:24:13.918480Z"
   }
 ]
