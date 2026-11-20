@@ -147,7 +147,7 @@ def _effective_gateway_ids(name: str, record: Mapping[str, Any]) -> list[str]:
     ``cli_ids`` are never wire ids. A slash-free canonical id is not an OpenRouter
     gateway. The slash fallback matches ``registry.gateway_id`` only for an active
     model whose canonical id is already a provider/model id (for example
-    ``deepseek/deepseek-v4.1-flash``). A non-active model with no ``gateway_ids``
+    a canonical provider/model id). A non-active model with no ``gateway_ids``
     does not claim that canonical id.
     """
 
