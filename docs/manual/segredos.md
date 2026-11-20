@@ -1,13 +1,70 @@
 <!-- covers: scripts/bootstrap_secrets.py, core/line/pilot_secrets.py -->
 # Segredos: cofre SOPS + age (passo a passo, Windows)
 
-1. Instale as ferramentas no PowerShell: `winget install FiloSottile.age` e `winget install Mozilla.SOPS`. Feche e reabra o PowerShell.
-2. Gere sua chave: `New-Item -ItemType Directory -Force $env:APPDATA\sops\age; age-keygen -o $env:APPDATA\sops\age\keys.txt`. O comando imprime `Public key: age1...`; copie esse valor.
-3. Aponte o SOPS para a chave (uma vez por maquina): `setx SOPS_AGE_KEY_FILE "$env:APPDATA\sops\age\keys.txt"` e reabra o PowerShell.
-4. Abra `C:\dev\DarkFac\.sops.yaml` e coloque a chave publica em `age: "age1..."` (varias maquinas: separe por virgula).
-5. Cadastre os segredos: `python C:\dev\DarkFac\scripts\bootstrap_secrets.py`. Ele pergunta, sem eco, so as chaves que faltam (lista em `.factory/config/secrets_required.json`) e grava `secrets\factory.enc.yaml` cifrado.
-6. Confira: `python C:\dev\DarkFac\scripts\bootstrap_secrets.py --check` (codigo 0 = tudo cadastrado).
-7. Em outra maquina: instale as ferramentas, gere a chave dela, adicione a chave publica ao `.sops.yaml` e rode `sops updatekeys C:\dev\DarkFac\secrets\factory.enc.yaml` numa maquina que ja le o cofre.
+1. Instale os pacotes atuais no PowerShell, informando os IDs exatos:
+   ```powershell
+   winget install --exact --id SecretsOPerationS.SOPS
+   winget install --exact --id FiloSottile.age
+   ```
+   A instalação pelo WinGet e a resolução dos comandos pelo `PATH` são etapas separadas. Feche e reabra o PowerShell e confira a instalação:
+   ```powershell
+   winget list --exact --id SecretsOPerationS.SOPS
+   winget list --exact --id FiloSottile.age
+   Get-Command sops, age, age-keygen -ErrorAction SilentlyContinue | Select-Object Name, Source
+   sops --version
+   age --version
+   age-keygen --version
+   ```
+   Os três comandos devem aparecer no `Get-Command` e cada comando `--version` deve imprimir a versão instalada. Essas verificações nao leem nem gravam credenciais ou arquivos de chave.
+2. Se o WinGet listar os pacotes, mas `Get-Command` nao encontrar algum executavel ou os comandos de versao falharem, procure as instalacoes nos diretorios de pacotes do WinGet para o usuario e para a maquina:
+   ```powershell
+   $wingetPackageRoots = @(
+       (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'),
+       (Join-Path $env:ProgramFiles 'WinGet\Packages')
+   )
+   $executables = foreach ($package in @('SecretsOPerationS.SOPS_*', 'FiloSottile.age_*')) {
+       foreach ($root in $wingetPackageRoots) {
+           if (Test-Path $root) {
+               Get-ChildItem $root -Directory -Filter $package -ErrorAction SilentlyContinue |
+                   Get-ChildItem -Recurse -File -Include sops.exe, age.exe, age-keygen.exe -ErrorAction SilentlyContinue
+           }
+       }
+   }
+   $executables = @($executables | Sort-Object FullName -Unique)
+   $executables | Select-Object FullName
+   foreach ($exe in $executables) {
+       & $exe.FullName --version
+   }
+   ```
+   Se nenhum executavel aparecer, confira `winget list` e reinstale o pacote ausente. Se algum caminho completo nao imprimir a versao, corrija essa instalacao antes de continuar.
+   ```powershell
+   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+   $userPathEntries = @($userPath -split ';' | Where-Object { $_ })
+   $directoriesToAdd = @(
+       $executables.DirectoryName |
+           Sort-Object -Unique |
+           Where-Object { $directory = $_; -not ($userPathEntries | Where-Object { $_.TrimEnd('\') -ieq $directory.TrimEnd('\') }) }
+   )
+   if ($directoriesToAdd.Count -gt 0) {
+       $newUserPath = (@($userPathEntries) + $directoriesToAdd) -join ';'
+       [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+   }
+   # Feche e reabra o PowerShell para carregar o PATH atualizado do usuario.
+   ```
+   Depois de reabrir o PowerShell, confira novamente os comandos e as versoes:
+   ```powershell
+   Get-Command sops, age, age-keygen -ErrorAction SilentlyContinue | Select-Object Name, Source
+   sops --version
+   age --version
+   age-keygen --version
+   ```
+   O bloco so acrescenta ao `PATH` do usuario os diretorios descobertos que ainda nao constam nele; nao use `setx PATH`.
+3. Gere sua chave somente depois de confirmar os comandos: `New-Item -ItemType Directory -Force "$env:APPDATA\sops\age"; age-keygen -o "$env:APPDATA\sops\age\keys.txt"`. O comando imprime `Public key: age1...`; copie esse valor.
+4. Aponte o SOPS para a chave (uma vez por maquina): `setx SOPS_AGE_KEY_FILE "$env:APPDATA\sops\age\keys.txt"` e reabra o PowerShell.
+5. Abra `C:\dev\DarkFac\.sops.yaml` e coloque a chave publica em `age: "age1..."` (varias maquinas: separe por virgula).
+6. Cadastre os segredos: `python C:\dev\DarkFac\scripts\bootstrap_secrets.py`. Ele pergunta, sem eco, so as chaves que faltam (lista em `.factory/config/secrets_required.json`) e grava `secrets\factory.enc.yaml` cifrado.
+7. Confira: `python C:\dev\DarkFac\scripts\bootstrap_secrets.py --check` (codigo 0 = tudo cadastrado).
+8. Em outra maquina: instale as ferramentas, confirme que `sops`, `age` e `age-keygen` resolvem pelo `PATH`, gere a chave dela, adicione a chave publica ao `.sops.yaml` e rode `sops updatekeys C:\dev\DarkFac\secrets\factory.enc.yaml` numa maquina que ja le o cofre.
 
 Nunca copie `keys.txt` para o repositorio. Agentes de codigo nao recebem `SOPS_*` nem `AGE_*`; so os processos da fabrica (broker, Hub, despachante) leem o cofre via `core.infra.secrets_vault.load_into_env()`.
 
