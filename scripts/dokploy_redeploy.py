@@ -99,6 +99,7 @@ ALLOWED_PROJECTS = frozenset({"darkfac-core"})
 # Only these services have Dokploy deploy titles comparable with the deploy candidate.
 # Darkhub's raw compose instead proves its commit through /health.
 CODE_BEARING_SERVICES = frozenset({"darkfac-cloud"})
+RUNTIME_REQUIRED_CLOUD_SERVICES = frozenset({"darkfac-coordinator", "darkfac-worker"})
 
 # USR-369: n8n was removed from the lean VPS stack. Dokploy may still list a leftover n8n
 # compose in the project; an "all services" redeploy must never bring it back. Restore
@@ -380,6 +381,100 @@ def latest_deployment(payload: Dict[str, Any]) -> Optional[Deployment]:
     # No parseable timestamps: fall back to list order (providers return it
     # oldest-first), so the just-triggered deployment is still found.
     return parsed[-1]
+
+
+def _container_service_name(container: Dict[str, Any]) -> Optional[str]:
+    """Extracts the allow-listed cloud component name from a Dokploy Docker row."""
+    labels = container.get("Labels") or container.get("labels") or {}
+    if isinstance(labels, dict):
+        labelled = str(labels.get("com.docker.compose.service") or "").strip()
+        if labelled in RUNTIME_REQUIRED_CLOUD_SERVICES:
+            return labelled
+    names = container.get("Names") or container.get("names") or []
+    if isinstance(names, str):
+        names = [names]
+    candidates = (
+        [container.get("Name"), container.get("name"), *names]
+        if isinstance(names, list)
+        else [container.get("Name"), container.get("name")]
+    )
+    for candidate in candidates:
+        name = str(candidate or "").strip().strip("/").lower()
+        for service_name in RUNTIME_REQUIRED_CLOUD_SERVICES:
+            if (
+                name == service_name
+                or name.startswith(service_name + "-")
+                or name.endswith("-" + service_name)
+                or f"-{service_name}-" in f"-{name}-"
+            ):
+                return service_name
+    return None
+
+
+def verify_cloud_runtime_containers(payload: Any, image_sha: str) -> Tuple[bool, List[Dict[str, str]], str]:
+    """Verifies live coordinator and worker containers use the exact candidate image and are healthy.
+
+    Dokploy's docker.getContainers returns Docker container rows; no deployment title is used as
+    runtime evidence. Unknown or incomplete API shapes fail closed.
+    """
+    rows = payload.get("containers") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return False, [], "docker.getContainers returned an unexpected response"
+    expected_image = f"ghcr.io/{CLOUD_IMAGE_REPOSITORY}:{image_sha}"
+    found: Dict[str, List[Dict[str, str]]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        service_name = _container_service_name(row)
+        if service_name is None:
+            continue
+        image = str(row.get("Image") or row.get("image") or "").strip()
+        state_data = row.get("State") or row.get("state") or ""
+        health_data = row.get("Health") or row.get("health") or ""
+        if isinstance(state_data, dict):
+            health_data = health_data or state_data.get("Health") or state_data.get("health") or ""
+            state_data = state_data.get("Status") or state_data.get("status") or ""
+        state = str(state_data).strip().lower()
+        status_text = str(row.get("Status") or row.get("status") or "").strip().lower()
+        if isinstance(health_data, dict):
+            health_data = health_data.get("Status") or health_data.get("status") or ""
+        health = str(health_data).strip().lower()
+        if health != "healthy" and "(healthy)" in status_text:
+            health = "healthy"
+        running = state == "running" or status_text.startswith("up ")
+        if not running:
+            continue
+        container_name = str(row.get("Name") or row.get("name") or "").strip().strip("/")
+        raw_names = row.get("Names") or row.get("names") or []
+        if not container_name and isinstance(raw_names, list) and raw_names:
+            container_name = str(raw_names[0]).strip().strip("/")
+        found.setdefault(service_name, []).append({
+            "image": image,
+            "state": "running" if running else (state or status_text or "unknown"),
+            "health": health or "unknown",
+            "container": container_name or service_name,
+        })
+    evidence: List[Dict[str, str]] = []
+    for service_name in sorted(RUNTIME_REQUIRED_CLOUD_SERVICES):
+        service_rows = found.get(service_name, [])
+        if not service_rows:
+            evidence.append({"service": service_name, "image": "missing", "state": "missing", "health": "unknown"})
+            continue
+        evidence.extend({"service": service_name, **row} for row in service_rows)
+    valid = all(
+        row["image"] == expected_image and row["state"] == "running" and row["health"] == "healthy"
+        for row in evidence
+    )
+    reason = "verified" if valid else f"expected running healthy containers on {expected_image}"
+    return valid, evidence, reason
+
+
+def _missing_cloud_runtime_evidence() -> List[Dict[str, str]]:
+    """Return safe per-service diagnostics when the runtime API gives no usable proof."""
+    return [
+        {"service": service_name, "image": "missing", "state": "missing", "health": "unknown"}
+        for service_name in sorted(RUNTIME_REQUIRED_CLOUD_SERVICES)
+    ]
 
 
 def detect_disk_space_failure(deployment: Optional[Deployment]) -> Optional[str]:
@@ -1703,11 +1798,14 @@ def _run_main(
         deploy_sha = image_sha if svc.name.lower() == "darkfac-cloud" else expected_sha
         deploy_subject = get_commit_subject(deploy_sha) if deploy_sha else local_subject
         if deploy_subject and result.deployment and result.deployment.title:
-            match_note = (
-                " [matches deploy candidate]"
-                if title.strip() == deploy_subject.strip()
-                else " [does not match deploy candidate]"
-            )
+            if svc.name.lower() in CODE_BEARING_SERVICES:
+                match_note = " [title informational; runtime image checked post-deploy]"
+            else:
+                match_note = (
+                    " [matches deploy candidate]"
+                    if title.strip() == deploy_subject.strip()
+                    else " [does not match deploy candidate]"
+                )
         print(
             f"[{svc.name}] status={result.outcome} title={title!r} elapsed={result.elapsed_seconds:.1f}s{match_note}",
             file=out,
@@ -1877,23 +1975,54 @@ def _run_main(
             # Divergent, unknown, offline or policy-excluded VPS is not convergence.
             backup_ok = False
             all_ok = False
-    if local_subject:
-        for svc in triggered:
+    for svc in triggered:
+        if svc.name.lower() in CODE_BEARING_SERVICES:
+            service_sha = image_sha or expected_sha
+            if not service_sha:
+                runtime_ok, runtime_evidence, runtime_reason = (
+                    False, _missing_cloud_runtime_evidence(), "no immutable image SHA"
+                )
+            else:
+                try:
+                    container_payload = transport("GET", "/api/docker.getContainers", None)
+                    runtime_ok, runtime_evidence, runtime_reason = verify_cloud_runtime_containers(
+                        container_payload, service_sha
+                    )
+                except Exception:
+                    runtime_ok, runtime_evidence, runtime_reason = (
+                        False, _missing_cloud_runtime_evidence(), "docker.getContainers request failed"
+                    )
+                if not runtime_evidence:
+                    runtime_evidence = _missing_cloud_runtime_evidence()
+            for item in runtime_evidence:
+                print(
+                    f"[RUNTIME IMAGE] service={item['service']} container={item.get('container', item['service'])} "
+                    f"image={item['image']} "
+                    f"state={item['state']} health={item['health']} expected_sha={service_sha or '(unknown)'}",
+                    file=out if runtime_ok else err,
+                    flush=True,
+                )
+            if runtime_ok:
+                print(
+                    f"[NODE SYNC] VPS service {svc.name}: running image SHA {service_sha} verified "
+                    "(Dokploy container evidence)",
+                    file=out,
+                    flush=True,
+                )
+            else:
+                all_ok = False
+                backup_ok = False
+                other_failure = True
+                print(
+                    f"[NODE SYNC] VPS service {svc.name}: runtime image not verified ({runtime_reason})",
+                    file=err,
+                    flush=True,
+                )
+        elif local_subject:
             result = next((r for r in completed if r.service.name == svc.name), None)
-            title = ""
-            if result is not None and result.deployment is not None and result.deployment.title:
-                title = result.deployment.title.splitlines()[0].strip()
-            service_sha = image_sha if svc.name.lower() == "darkfac-cloud" else expected_sha
-            service_subject = get_commit_subject(service_sha) if service_sha else local_subject
-            matches = bool(service_subject) and title == service_subject.strip()
-            if svc.name in CODE_BEARING_SERVICES:
-                # Weaker than a runtime SHA, so a missing/different title fails closed.
-                if not matches:
-                    all_ok = False
-                    backup_ok = False
-                    other_failure = True
-                    print(f"[NODE SYNC] VPS service {svc.name}: does not match deploy candidate", file=err, flush=True)
-            elif not matches:
+            title = result.deployment.title.splitlines()[0].strip() if result and result.deployment and result.deployment.title else ""
+            service_subject = get_commit_subject(expected_sha) if expected_sha else local_subject
+            if not service_subject or title != service_subject.strip():
                 print(f"[{svc.name}] info: deploy title {title!r} is not a commit subject (not code-bearing; ignored)", file=out, flush=True)
 
     # Post-deploy check-main verification (USR-85 scope in USR-72)

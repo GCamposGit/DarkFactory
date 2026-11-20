@@ -99,15 +99,28 @@ class QueueTransport:
         self.calls: List[Tuple[str, str, Optional[Dict[str, Any]]]] = []
         self._get_queues: Dict[str, List[Any]] = {}
         self.post_response: Any = {}
+        self.runtime_sha = "a" * 40
 
     def program_get(self, path: str, responses: Sequence[Any]) -> None:
         self._get_queues[path] = list(responses)
 
     def __call__(self, method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
         self.calls.append((method, path, body))
+        if method == "POST" and path == "/api/compose.update" and body:
+            env_text = body.get("env")
+            if isinstance(env_text, str):
+                for line in env_text.splitlines():
+                    if line.startswith("DARKFAC_GIT_SHA="):
+                        self.runtime_sha = line.partition("=")[2].strip()
         if method == "GET":
             queue = self._get_queues.get(path)
             if queue is None:
+                if path == "/api/docker.getContainers":
+                    sha = self.runtime_sha
+                    return [
+                        {"Names": ["/darkfac-coordinator"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:{sha}", "State": "running", "Status": "Up 2 minutes (healthy)"},
+                        {"Names": ["/darkfac-worker-1"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:{sha}", "State": "running", "Status": "Up 2 minutes (healthy)"},
+                    ]
                 return {}
             if len(queue) > 1:
                 return queue.pop(0)
@@ -1007,7 +1020,7 @@ def test_main_title_match_uses_commit_subject_only(monkeypatch: pytest.MonkeyPat
     )
     report = out.getvalue()
     assert exit_code == mod.EXIT_OK
-    assert "[matches deploy candidate]" in report
+    assert "[title informational; runtime image checked post-deploy]" in report
     assert "does not match" not in report
     assert "Body paragraph" not in report
 
@@ -1152,15 +1165,171 @@ def test_manual_deployment_title_only_informational_for_non_code_services(monkey
     assert "not code-bearing" in out
 
 
-def test_cloud_service_title_mismatch_still_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cloud_service_generic_title_passes_with_runtime_image_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mod.CODE_BEARING_SERVICES == frozenset({"darkfac-cloud"})
     transport = _make_transport_with_full_project()
     old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
     new = {"deploymentId": "new", "status": "done", "title": "Manual deployment", "createdAt": "2026-09-12T09:10:00Z"}
     _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
-    code, _out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], transport, monkeypatch, "feat: algo")
+    code, out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], transport, monkeypatch, "feat: algo")
+    assert code == mod.EXIT_OK, err
+    assert "service=darkfac-coordinator" in out and "service=darkfac-worker" in out
+    assert "running image SHA" in out
+
+
+def test_cloud_service_generic_title_runs_backup_when_runtime_sha_is_proven(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "Manual deployment", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+    backups: list[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {"snapshot_id": "snp_runtime", "drill_verified": True},
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert backups == ["darkfac"]
+    assert "service=darkfac-coordinator" in out.getvalue()
+    assert "service=darkfac-worker" in out.getvalue()
+    assert "snapshot=snp_runtime" in out.getvalue()
+
+
+def test_cloud_service_real_dokploy_container_dto_runs_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dokploy docker.ps rows use lowercase fields and include numbered worker names."""
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "Manual deployment", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+    sha = "a" * 40
+    transport.program_get("/api/docker.getContainers", [[
+        {"name": "darkfac-coordinator", "image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:{sha}", "state": "running", "status": "Up 2 minutes (healthy)"},
+        {"name": "darkfac-worker-1", "image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:{sha}", "state": "running", "status": "Up 2 minutes (healthy)"},
+    ]])
+    backups: list[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {"snapshot_id": "snp_dto", "drill_verified": True},
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert backups == ["darkfac"]
+    assert "container=darkfac-coordinator" in out.getvalue()
+    assert "container=darkfac-worker-1" in out.getvalue()
+    assert "snapshot=snp_dto" in out.getvalue()
+
+
+def test_matching_deploy_title_does_not_replace_invalid_runtime_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A matching subject is informational; incomplete runtime proof still blocks backup."""
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: "feat: algo")
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "feat: algo", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+    transport.program_get("/api/docker.getContainers", [[
+        {"name": "darkfac-coordinator", "image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "a" * 40,
+         "state": "running", "status": "Up 2 minutes (healthy)"},
+    ]])
+    backups: list[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {},
+        stdout=out, stderr=err,
+    )
     assert code == mod.EXIT_DEPLOY_FAILED
-    assert "darkfac-cloud: does not match deploy candidate" in err
+    assert "runtime image not verified" in err.getvalue()
+    assert "service=darkfac-worker container=darkfac-worker image=missing state=missing" in err.getvalue()
+    assert backups == []
+
+
+@pytest.mark.parametrize("payload", [None, {}, "private raw response"])
+def test_cloud_runtime_invalid_payload_fails_closed_with_sanitized_missing_evidence(
+    monkeypatch: pytest.MonkeyPatch, payload: Any,
+) -> None:
+    transport = _cloud_transport()
+    transport.program_get("/api/docker.getContainers", [payload])
+    backups: list[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {},
+        stdout=out, stderr=err,
+    )
+    report = out.getvalue() + err.getvalue()
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "service=darkfac-coordinator container=darkfac-coordinator image=missing state=missing" in report
+    assert "service=darkfac-worker container=darkfac-worker image=missing state=missing" in report
+    assert "private raw response" not in report
+    assert backups == []
+
+
+def test_cloud_runtime_request_exception_fails_closed_with_sanitized_missing_evidence() -> None:
+    delegate = _cloud_transport()
+
+    def transport(method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
+        if method == "GET" and path == "/api/docker.getContainers":
+            raise RuntimeError("secret response detail")
+        return delegate(method, path, body)
+
+    backups: list[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {},
+        stdout=out, stderr=err,
+    )
+    report = out.getvalue() + err.getvalue()
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "service=darkfac-coordinator container=darkfac-coordinator image=missing state=missing" in report
+    assert "service=darkfac-worker container=darkfac-worker image=missing state=missing" in report
+    assert "secret response detail" not in report
+    assert backups == []
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [],
+        [{"Names": ["/darkfac-coordinator"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "b" * 40, "State": "running", "Status": "Up (healthy)"}],
+        [
+            {"Names": ["/darkfac-coordinator"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "a" * 40, "State": "running", "Status": "Up (healthy)"},
+            {"Names": ["/darkfac-worker-1"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "a" * 40, "State": "running", "Status": "Up (unhealthy)"},
+        ],
+        [
+            {"Names": ["/darkfac-coordinator"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "a" * 40, "State": "running", "Status": "Up (healthy)"},
+            {"Names": ["/darkfac-cloud-darkfac-coordinator-2"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "b" * 40, "State": "running", "Status": "Up (healthy)"},
+            {"Names": ["/darkfac-worker-1"], "Image": f"ghcr.io/{mod.CLOUD_IMAGE_REPOSITORY}:" + "a" * 40, "State": "running", "Status": "Up (healthy)"},
+        ],
+    ],
+)
+def test_cloud_service_runtime_evidence_fails_closed_without_exact_healthy_containers(
+    monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, Any]]
+) -> None:
+    monkeypatch.setattr(mod, "get_commit_subject", lambda _sha: "feat: algo")
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "Manual deployment", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+    transport.program_get("/api/docker.getContainers", [rows])
+    backups: list[str] = []
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud"], env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: transport,
+        backup_runner=lambda project_id="darkfac": backups.append(project_id) or {"snapshot_id": "unexpected"},
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "runtime image not verified" in err.getvalue()
+    assert backups == []
 
 
 def _cloud_transport() -> QueueTransport:
@@ -2836,7 +3005,8 @@ def test_outside_tip_with_pending_runtime_pins_published_sha(monkeypatch: pytest
     assert health_seen == [_PUBLISHED]
     assert f"converged sha={_PUBLISHED}" in text
     assert f"published={_PUBLISHED}" in text
-    assert "[darkfac-cloud] status=done" in text and "[matches deploy candidate]" in text
+    assert "[darkfac-cloud] status=done" in text
+    assert "[title informational; runtime image checked post-deploy]" in text
     assert _reach_of(text) == ["AGENTS.md", "tests/test_usr515.py"]
     assert not deploy_classifier.touches_hub_image(_reach_of(text), deploy_classifier.hub_image_paths())
     assert synced == [_TARGET]
