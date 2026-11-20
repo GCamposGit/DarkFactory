@@ -2422,6 +2422,42 @@ def _deliver_external_project(
     return delivery
 
 
+def _publish_resumed_prior_phases(
+    progress: Any, rws: Any, target_worktree: Path, current_branch: str
+) -> None:
+    """Emit preflight/workspace/agent as succeeded when delivery opens a fresh progress run."""
+    if not getattr(progress, "owns_run", False):
+        return
+    events = getattr(progress, "events", ()) or ()
+    seen = {getattr(ev, "phase", None) for ev in events}
+    if "agent" in seen:
+        return
+    try:
+        build_harness = getattr(require_artifact(Stage.BUILD, rws), "harness", None) or None
+    except Exception:  # noqa: BLE001
+        build_harness = None
+    if "preflight" not in seen:
+        progress.phase(
+            "preflight",
+            "succeeded",
+            "retomada de entrega: preflight anterior concluido",
+            harness=build_harness,
+        )
+    if "workspace" not in seen:
+        progress.phase(
+            "workspace",
+            "succeeded",
+            f"worktree preservada: {target_worktree.name} ({current_branch})",
+            harness=build_harness,
+        )
+    progress.phase(
+        "agent",
+        "succeeded",
+        "BUILD preservado aproveitado na retomada de entrega",
+        harness=build_harness,
+    )
+
+
 def _deliver_worktree(
     git_mgr: Any,
     ticket: UserTicket,
@@ -2453,6 +2489,7 @@ def _deliver_worktree(
         _require_plan_and_build(ticket, rws, standalone, target_worktree)
     except StageArtifactMissing as exc:
         return refused(exc.stage, exc.reason)
+    _publish_resumed_prior_phases(progress, rws, target_worktree, current_branch)
     ticket_engine.clear_delivery(rws, keep_validation=True)
 
     # 1. Commit uncommitted changes in worktree if any (required before rebase)
@@ -2483,6 +2520,7 @@ def _deliver_worktree(
         and ticket_engine.keep_reusable_validation(rws, candidate_digest, policy_digest)
     )
     if reuse_validation:
+        progress.phase("gate", "succeeded", "validacao vigente reutilizada para este candidato")
         if not as_json:
             print("[+] Validacao vigente para este candidato; portao nao reexecutado.")
     else:

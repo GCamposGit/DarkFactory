@@ -790,11 +790,14 @@
     } else {
       const q = snap.executable_queue || {};
       if (q.is_blocked) {
-        kids.push(h('strong', { class: 'text-warn', text: 'Fila bloqueada (' + (q.blocked_count || 0) + ' ticket(s) bloqueado(s)): ' + (q.blocked_reason || 'dependência ou limite') }));
+        const blocker = (Array.isArray(q.candidates) ? q.candidates : []).find(function (c) { return c && !c.eligible && (c.message || c.reason); });
+        const reasonText = q.blocked_reason || (blocker && (blocker.message || blocker.reason)) || 'dependência ou limite';
+        kids.push(h('strong', { class: 'text-warn', text: 'Fila bloqueada (' + (q.blocked_count || 0) + ' ticket(s) bloqueado(s)): ' + reasonText }));
       } else if (q.is_empty) {
         kids.push(h('strong', { text: 'Fila executável vazia — a fábrica está ociosa.' }));
       } else {
-        kids.push(h('strong', { text: 'Nenhum run ativo (' + (q.executable_count || 0) + ' ticket(s) pronto(s) para despacho na fila).' }));
+        const readyCount = q.eligible_count != null ? q.eligible_count : (q.executable_count || 0);
+        kids.push(h('strong', { text: 'Nenhum run ativo (' + readyCount + ' ticket(s) pronto(s) para despacho na fila).' }));
       }
       let next = null;
       (snap.backlog || []).forEach(function (b) { if (!next && b.next && b.next.length && (state.filters.project === 'all' || b.project_id === state.filters.project)) next = b.next[0]; });
@@ -809,7 +812,7 @@
   function doneBuild(run, snap) {
     const rs = runStateVisual(run.state);
     const by = stageMap(run);
-    const dots = h('span', { class: 'dots', 'aria-hidden': 'true' }, stageKeys(snap, run).slice(0, 8).map(function (k) {
+    const dots = h('span', { class: 'dots', 'aria-hidden': 'true' }, stageKeys(snap, run).slice(0, 10).map(function (k) {
       const st = by[k];
       return h('i', { class: 'dot-s tone-' + stageVisual(st ? st.status : 'not_reached').tone, title: stageLabel(snap, k, st) + ': ' + stageVisual(st ? st.status : 'not_reached').text });
     }));

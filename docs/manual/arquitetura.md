@@ -121,3 +121,10 @@ e a guarda SSRF em `service_net`.
 Sem sessao, o Hub remoto mostra "Modo leitura" no rodape. Tocar nele ja chama `POST /api/auth/telegram-link`, que cria um pedido pendente (token de consulta secreto, guardado so no navegador que pediu; vale 5 min) e envia ao Telegram do owner a mensagem com o botao "Aprovar" (callback `hublogin:<id>`, aceito so de chat/usuario autorizado) e um link. O navegador consulta `GET /api/auth/telegram-poll` a cada 2 s; ao aprovar, recebe a sessao uma unica vez, guarda e recarrega em modo edicao. Abrir o link no celular tambem libera o celular e o navegador que pediu. `/api/session` agora confirma (200) quem ja envia o token valido; antes devolvia 401 e o frontend apagava o token recem-obtido, deixando o Hub em somente leitura.
 
 - `core/common/time.py` concentra `utc_now`/`utc_now_iso`; modulos importam em vez de redefinir (USR-386).
+
+## Projecao da Esteira ao vivo (`core/workflow/line_live.py`, USR-533)
+
+- `_normalize_stage_progression` marca como `succeeded` etapas anteriores a etapa em andamento ou barreira atingida (`failed`, `cancelled`, `waiting_human`, `waiting_dependency`, `retry`, `replan`), sem preencher etapas posteriores a falha antes de `retrospective`, e fecha etapas `running` residuais em runs terminais.
+- `_reconcile_superseded_run` encerra runs ativos cujo ticket canonico ja esta `completed` ou `cancelled` (descartando fantasmas fora da janela de 7 dias), respeitando janela de carencia para `run_ticket`.
+- `_resolve_run_reservation` vincula reservas ativas da frota por `(project_id, ticket_id)` quando `run_id` difere (`fleet-...` vs `local-...`), e `_local_execution_stall` detecta runs `run_ticket` parados quando o heartbeat no `execution_registry` passa a `lost` sem reserva com batimento recente.
+- `_OFF_LINE_STATUSES` inclui `validating` alem de `implementing` e `in_progress`.

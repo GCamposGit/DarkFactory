@@ -1591,3 +1591,48 @@ def test_docs_sync_refusal_is_candidate_even_when_file_names_look_like_infra(tmp
         progress, False, True,
     )
     assert infra["cause"] == "network"
+
+
+def test_resume_delivery_emits_prior_phases_and_reused_gate_succeeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.line.local_progress import LocalRunEvent, ProgressPublisher
+
+    class _Sink:
+        def __init__(self) -> None:
+            self.events: list[LocalRunEvent] = []
+
+        def write(self, event: LocalRunEvent) -> None:
+            self.events.append(event)
+
+    repo, _ticket, rws, candidate, policy = _candidate_repo(tmp_path, monkeypatch)
+    _seed_attempt(
+        rws,
+        {"passed": True, "gate": "previous", "detail": "kept", "candidate_digest": candidate},
+        [{"round": 1, "verdict": "approve", "candidate_digest": candidate, "policy_digest": policy}],
+    )
+    sink = _Sink()
+
+    def make(ticket_id: str, project_id: str = "darkfac", title: str = "", **_: object) -> ProgressPublisher:
+        return ProgressPublisher(ticket_id=ticket_id, project_id=project_id, title=title, sink=sink, worker="HOST-A")
+
+    monkeypatch.setattr(run_ticket, "open_progress", make)
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+            patch.object(GitAutonomyManager, "complete_ticket", return_value=TicketCompletionReport(
+                ok=True, ticket_id="USR-424", commit_sha="c" * 40, message="ok",
+            )), \
+            patch("run_ticket._run_gate_with_self_correction", side_effect=AssertionError("gate ran")), \
+            patch("run_ticket._invoke_fix_agent", side_effect=AssertionError("_invoke_fix_agent")), \
+            patch("core.line.stage_review.run_agent", side_effect=AssertionError("reviewer ran")):
+        code = run_ticket.resume_delivery("USR-424", worktree_path=repo, skip_validation=False)
+
+    assert code == 0
+    steps = [(ev.phase, ev.status) for ev in sink.events]
+    assert steps[:5] == [
+        ("preflight", "succeeded"),
+        ("workspace", "succeeded"),
+        ("agent", "succeeded"),
+        ("gate", "running"),
+        ("gate", "succeeded"),
+    ]
+    assert ("run", "succeeded") in steps

@@ -104,7 +104,13 @@ _KNOWN_STAGE_STATUSES: frozenset[str] = frozenset(
 _TERMINAL_RUN_STATUSES: frozenset[str] = frozenset(
     {"completed", "succeeded", "failed", "cancelled", "canceled", "aborted", "closed"}
 )
-_OFF_LINE_STATUSES: frozenset[str] = frozenset({"implementing", "in_progress"})
+_OFF_LINE_STATUSES: frozenset[str] = frozenset({"implementing", "in_progress", "validating"})
+_STOP_PROGRESSION_STATUSES: frozenset[str] = frozenset(
+    {"failed", "cancelled", "waiting_human", "waiting_dependency", "retry", "replan"}
+)
+_OPEN_RECONCILED_STAGE_STATUSES: frozenset[str] = frozenset(
+    {"waiting_human", "running", "pending", "waiting_dependency", "retry", "replan"}
+)
 _HORIZON_RANK: dict[str, int] = {"now": 0, "next": 1, "later": 2, "exploratory": 3, "unscheduled": 4}
 
 StageStatus = Literal[
@@ -697,6 +703,96 @@ def _current_stage(stages: list[LiveStage]) -> LiveStage | None:
     return reached[-1]
 
 
+def _terminal_stage_status(run_status: str) -> StageStatus:
+    lowered = run_status.strip().lower()
+    if lowered in {"cancelled", "canceled", "aborted"}:
+        return "cancelled"
+    if lowered in {"completed", "succeeded", "closed"}:
+        return "succeeded"
+    return "failed"
+
+
+def _normalize_stage_progression(
+    stages: list[LiveStage],
+    *,
+    line_stages: Sequence[str],
+    active: bool,
+    run_status: str,
+) -> list[LiveStage]:
+    """Ensure stages strictly before the active or barrier stage show as succeeded."""
+    by_name = {stage.stage: stage for stage in stages}
+    ordered = [by_name[name] for name in line_stages if name in by_name]
+    anchor_idx = -1
+    for idx, stage in enumerate(ordered):
+        if stage.status == "not_reached":
+            continue
+        if stage.stage == "retrospective" and any(
+            prev.status in {"failed", "cancelled"} for prev in ordered[:idx]
+        ):
+            break
+        anchor_idx = idx
+        if stage.status in _STOP_PROGRESSION_STATUSES:
+            break
+
+    updated: dict[str, LiveStage] = dict(by_name)
+    if anchor_idx > 0:
+        anchor = ordered[anchor_idx]
+        anchor_started = _parse_dt(anchor.started_at)
+        for stage in ordered[:anchor_idx]:
+            if stage.status == "not_reached":
+                updated[stage.stage] = stage.model_copy(update={"status": "succeeded"})
+            elif stage.status == "running":
+                if anchor.status in {"running", "succeeded"}:
+                    updated[stage.stage] = stage.model_copy(update={"status": "succeeded"})
+                else:
+                    stage_started = _parse_dt(stage.started_at)
+                    if stage_started is None or anchor_started is None or stage_started <= anchor_started:
+                        updated[stage.stage] = stage.model_copy(update={"status": "succeeded"})
+
+    if not active:
+        terminal = _terminal_stage_status(run_status)
+        for name, stage in list(updated.items()):
+            if stage.status == "running":
+                updated[name] = stage.model_copy(update={"status": terminal})
+
+    return [updated[stage.stage] for stage in stages]
+
+
+def _local_execution_stall(
+    *,
+    item: LiveStage,
+    exec_records: Sequence[ExecutionRecord],
+    ticket_id: str,
+    run_created: datetime | None,
+    reservation: Mapping[str, Any] | None,
+    now: datetime,
+) -> str | None:
+    if reservation is not None and _reservation_heartbeat_fresh(reservation, now):
+        return None
+    if not exec_records or not ticket_id:
+        return None
+    cutoff = (run_created - timedelta(seconds=60)) if run_created is not None else None
+    matching: list[ExecutionRecord] = []
+    for rec in exec_records:
+        if rec.source != LOCAL_RUN_MODE or rec.ticket_id != ticket_id:
+            continue
+        started = _parse_dt(rec.started_at)
+        if cutoff is not None and started is not None and started < cutoff:
+            continue
+        matching.append(rec)
+    if not matching or any(rec.state == "active" for rec in matching):
+        return None
+    if any(rec.stage == "ticket" and rec.state in {"succeeded", "failed", "cancelled"} for rec in matching):
+        return None
+    lost = [rec for rec in matching if rec.state == "lost"]
+    if not lost:
+        return None
+    last_hbs = [hb for rec in lost if (hb := _parse_dt(rec.last_heartbeat_at)) is not None]
+    if not last_hbs:
+        return None
+    return f"{item.label} sem batimento há {_fmt_duration((now - max(last_hbs)).total_seconds())}"
+
+
 def _stall_reason(
     *,
     state: RunState,
@@ -704,6 +800,10 @@ def _stall_reason(
     attempts_by_stage: Mapping[str, list[_Attempt]],
     now: datetime,
     local: bool = False,
+    exec_records: Sequence[ExecutionRecord] = (),
+    ticket_id: str = "",
+    run_created: datetime | None = None,
+    reservation: Mapping[str, Any] | None = None,
 ) -> str | None:
     for item in stages:
         if item.status != "running":
@@ -716,8 +816,19 @@ def _stall_reason(
         if lease is not None and lease < now:
             return f"lease de {item.label} expirou há {_fmt_duration((now - lease).total_seconds())}"
         # A local run publishes only on phase transitions (the agent phase is silent for minutes):
-        # its per-phase timeout above is the stall signal, not a short idle limit.
-        if not local and latest.updated is not None and now - latest.updated > RUNNING_IDLE_LIMIT:
+        # rely on execution_registry heartbeats / reservation freshness in addition to per-phase timeouts.
+        if local:
+            hb_stall = _local_execution_stall(
+                item=item,
+                exec_records=exec_records,
+                ticket_id=ticket_id,
+                run_created=run_created,
+                reservation=reservation,
+                now=now,
+            )
+            if hb_stall:
+                return hb_stall
+        elif latest.updated is not None and now - latest.updated > RUNNING_IDLE_LIMIT:
             return f"{item.label} sem atividade há {_fmt_duration((now - latest.updated).total_seconds())}"
     if state == "queued":
         pending = [
@@ -811,6 +922,54 @@ def _event_sort_key(event: Mapping[str, Any]) -> tuple[int, str]:
     return (_int(event.get("event_id")), parsed.isoformat() if parsed is not None else "")
 
 
+def _close_terminal_local_phases(
+    folded: dict[str, dict[str, Any]],
+    *,
+    status: str,
+    completed_at: datetime | None,
+    last_at: datetime,
+    closing_event: Mapping[str, Any] | None,
+) -> None:
+    if not folded:
+        return
+    end_at = completed_at or last_at
+    if status == "completed":
+        for entry in folded.values():
+            if entry["status"] == "running":
+                entry.update(status="succeeded", finished=end_at)
+        return
+    if status in {"failed", "cancelled"} and closing_event is not None:
+        if not any(entry["status"] == status for entry in folded.values()):
+            running = [name for name, entry in folded.items() if entry["status"] == "running"]
+            target = running[-1] if running else list(folded)[-1]
+            folded[target].update(
+                status=status,
+                finished=completed_at,
+                cause=closing_event.get("cause_code") or None,
+                message=str(closing_event.get("message") or ""),
+            )
+        barrier_indices = [
+            idx for idx, phase in enumerate(LOCAL_PHASES)
+            if phase in folded and folded[phase]["status"] == status
+        ]
+        first_barrier = barrier_indices[0] if barrier_indices else -1
+        barrier_started = folded[LOCAL_PHASES[first_barrier]].get("started") if first_barrier >= 0 else None
+        for idx, phase in enumerate(LOCAL_PHASES):
+            entry = folded.get(phase)
+            if entry is None or entry["status"] != "running":
+                continue
+            entry_updated = entry.get("updated")
+            before_barrier = first_barrier >= 0 and idx < first_barrier and (
+                entry_updated is None or barrier_started is None or entry_updated <= barrier_started
+            )
+            entry.update(status="succeeded" if before_barrier else status, finished=end_at)
+        return
+    if status == "aborted":
+        for entry in folded.values():
+            if entry["status"] == "running":
+                entry.update(status="cancelled", finished=last_at, cause="abandoned")
+
+
 def _fold_local_runs(
     events: Sequence[Mapping[str, Any]], now: datetime
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
@@ -882,32 +1041,9 @@ def _fold_local_runs(
                 "harness": next((e.get("harness") for e in reversed(phase_events) if e.get("harness")), None),
                 "worker": next((e.get("worker") for e in reversed(phase_events) if e.get("worker")), None),
             }
-        # The run ended without any stage carrying the reason: pin it on the phase that was active.
-        if status == "failed" and closing_event is not None and folded:
-            if not any(f["status"] == "failed" for f in folded.values()):
-                running = [name for name, f in folded.items() if f["status"] == "running"]
-                target = running[-1] if running else list(folded)[-1]
-                folded[target].update(
-                    status="failed",
-                    finished=completed_at,
-                    cause=closing_event.get("cause_code") or None,
-                    message=str(closing_event.get("message") or ""),
-                )
-        # Cancelled by the owner (USR-166) before any phase carried it: pin it on the phase that was active.
-        if status == "cancelled" and closing_event is not None and folded:
-            if not any(f["status"] == "cancelled" for f in folded.values()):
-                running = [name for name, f in folded.items() if f["status"] == "running"]
-                target = running[-1] if running else list(folded)[-1]
-                folded[target].update(
-                    status="cancelled",
-                    finished=completed_at,
-                    cause=closing_event.get("cause_code") or None,
-                    message=str(closing_event.get("message") or ""),
-                )
-        if status == "aborted":
-            for f in folded.values():
-                if f["status"] == "running":
-                    f.update(status="cancelled", finished=last_at, cause="abandoned")
+        _close_terminal_local_phases(
+            folded, status=status, completed_at=completed_at, last_at=last_at, closing_event=closing_event
+        )
 
         for phase, f in folded.items():
             jobs.append(
@@ -945,11 +1081,193 @@ def _fold_local_runs(
     return runs, jobs, claims, titles
 
 
+def _terminal_ticket_index(tickets: Sequence[Mapping[str, Any]]) -> dict[str, tuple[str, datetime | None]]:
+    index: dict[str, tuple[str, datetime | None]] = {}
+    for ticket in tickets:
+        tid = _ticket_field(ticket, "id")
+        if not tid:
+            continue
+        status = _ticket_field(ticket, "status").lower()
+        if status in {"completed", "cancelled"}:
+            index[tid] = (status, _parse_dt(ticket.get("updated_at")))
+    return index
+
+
+def _reconcile_superseded_run(
+    *,
+    active: bool,
+    run_status: str,
+    local: bool,
+    ticket_id: str,
+    demand_id: str,
+    run_moment: datetime | None,
+    terminal_tickets: Mapping[str, tuple[str, datetime | None]],
+    now: datetime,
+) -> tuple[bool, str, bool]:
+    """Close active runs whose canonical ticket is already completed or cancelled."""
+    if not active:
+        return active, run_status, False
+    match = terminal_tickets.get(ticket_id) or terminal_tickets.get(demand_id)
+    if match is None:
+        return active, run_status, False
+    t_status, t_updated = match
+    if t_status == "cancelled":
+        return False, "cancelled", True
+    if t_status == "completed":
+        if not local:
+            if t_updated is None or run_moment is None or run_moment <= t_updated:
+                return False, "cancelled", True
+        elif (
+            t_updated is not None
+            and run_moment is not None
+            and (t_updated - run_moment > timedelta(minutes=10) or now - run_moment > timedelta(minutes=30))
+        ):
+            return False, "cancelled", True
+    return active, run_status, False
+
+
+def _index_reservations(
+    raw: _RawStore, now: datetime
+) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], dict[str, Any]], dict[str, dict[str, Any]]]:
+    by_run: dict[str, dict[str, Any]] = {}
+    by_proj_ticket: dict[tuple[str, str], dict[str, Any]] = {}
+    by_ticket: dict[str, dict[str, Any]] = {}
+    for res in getattr(raw, "reservations", []):
+        rid = str(res.get("run_id") or "")
+        if rid and rid not in by_run:
+            by_run[rid] = res
+        status = str(res.get("status") or "").lower()
+        expires = _parse_dt(res.get("expires_at"))
+        if status == "active" and (expires is None or expires > now):
+            pid = str(res.get("project_id") or "")
+            tid = str(res.get("ticket_id") or "")
+            if pid and tid and (pid, tid) not in by_proj_ticket:
+                by_proj_ticket[(pid, tid)] = res
+            if tid and tid not in by_ticket:
+                by_ticket[tid] = res
+    return by_run, by_proj_ticket, by_ticket
+
+
+def _resolve_run_reservation(
+    *,
+    run_id: str,
+    active: bool,
+    project_id: str,
+    ticket_id: str,
+    demand_id: str,
+    by_run: Mapping[str, dict[str, Any]],
+    by_proj_ticket: Mapping[tuple[str, str], dict[str, Any]],
+    by_ticket: Mapping[str, dict[str, Any]],
+    claims: Iterable[Mapping[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    res = by_run.get(run_id)
+    if res is None and active:
+        res = (
+            by_proj_ticket.get((project_id, ticket_id))
+            or by_proj_ticket.get((project_id, demand_id))
+            or by_ticket.get(ticket_id)
+            or by_ticket.get(demand_id)
+        )
+    host_id = str(res.get("host_id")) if res and res.get("host_id") else None
+    res_state = str(res.get("status")) if res and res.get("status") else None
+    if not host_id:
+        for claim in claims:
+            if claim.get("run_id") == run_id:
+                owner_str = str(claim.get("owner") or "").lower()
+                for known_host in ("grokbox", "notebook", "desktop"):
+                    if known_host in owner_str:
+                        host_id = known_host
+                        break
+                if host_id:
+                    break
+    return res, host_id, res_state
+
+
+def _collect_run_attempts(
+    run_jobs: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, list[_Attempt]], list[str], dict[str, Any] | None, list[tuple[datetime, float]]]:
+    attempts_by_stage: dict[str, list[_Attempt]] = {}
+    stage_first_seen: list[str] = []
+    latest_job_row: dict[str, Any] | None = None
+    latest_job_updated: datetime | None = None
+    points: list[tuple[datetime, float]] = []
+    for job in run_jobs:
+        stage = str(job["stage"])
+        attempt = _Attempt(
+            row=job,
+            iteration=_int(job.get("iteration")),
+            status=str(job.get("status") or "pending").strip().lower(),
+            started=_parse_dt(job.get("started_at")),
+            finished=_parse_dt(job.get("finished_at")),
+            updated=_parse_dt(job.get("updated_at")),
+            created=_parse_dt(job.get("created_at")),
+            cost=_cost(job.get("actual_cost")),
+        )
+        if stage not in attempts_by_stage:
+            attempts_by_stage[stage] = []
+            stage_first_seen.append(stage)
+        attempts_by_stage[stage].append(attempt)
+        moment = attempt.finished or attempt.updated
+        if moment is not None and attempt.cost > 0:
+            points.append((moment, attempt.cost))
+        if latest_job_row is None or (
+            attempt.updated is not None
+            and (latest_job_updated is None or attempt.updated >= latest_job_updated)
+        ):
+            latest_job_row = job
+            latest_job_updated = attempt.updated
+    return attempts_by_stage, stage_first_seen, latest_job_row, points
+
+
+def _append_run_events(
+    events: list[LiveEvent],
+    *,
+    run: LiveRun,
+    stages: Sequence[LiveStage],
+    attempts_by_stage: Mapping[str, list[_Attempt]],
+    completed: datetime | None,
+    state: RunState,
+    cycle: float | None,
+    now: datetime,
+) -> None:
+    for stage_item in stages:
+        for attempt in attempts_by_stage.get(stage_item.stage, []):
+            events.extend(
+                _attempt_events(
+                    run=run,
+                    stage=stage_item.stage,
+                    attempt=attempt,
+                    diagnostic=stage_item.diagnostic,
+                    now=now,
+                )
+            )
+    if completed is not None:
+        message = "run concluída" if state == "succeeded" else "run encerrada"
+        if state == "failed":
+            message = "run encerrada com falha"
+        if cycle is not None and state == "succeeded":
+            message += f" em {_fmt_duration(cycle)}"
+        events.append(
+            LiveEvent(
+                at=completed.isoformat(),
+                run_id=run.run_id,
+                ticket_id=run.ticket_id,
+                title=run.title,
+                project_id=run.project_id,
+                stage=None,
+                kind="run_completed",
+                message=message,
+            )
+        )
+
+
 def _build_runs(
     raw: _RawStore,
     *,
     now: datetime,
     titles: Mapping[str, str],
+    tickets: Sequence[Mapping[str, Any]] = (),
+    exec_records: Sequence[ExecutionRecord] = (),
 ) -> tuple[list[LiveRun], list[LiveEvent], dict[str, list[tuple[datetime, float]]]]:
     local_runs, local_jobs, local_claims, local_titles = _fold_local_runs(raw.local_events, now)
     jobs_by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -969,12 +1287,9 @@ def _build_runs(
         if title:
             intake_titles[str(run_id)] = title
 
-    reservations_by_run: dict[str, dict[str, Any]] = {}
-    for res in getattr(raw, "reservations", []):
-        rid = str(res.get("run_id") or "")
-        if rid and rid not in reservations_by_run:
-            reservations_by_run[rid] = res
-
+    res_by_run, res_by_proj_ticket, res_by_ticket = _index_reservations(raw, now)
+    terminal_tickets = _terminal_ticket_index(tickets)
+    cutoff = now - RECENT_RUN_WINDOW
     runs: list[LiveRun] = []
     events: list[LiveEvent] = []
     cost_points: dict[str, list[tuple[datetime, float]]] = {}
@@ -991,41 +1306,16 @@ def _build_runs(
         updated = _parse_dt(run_row.get("updated_at"))
         completed = _parse_dt(run_row.get("completed_at"))
 
-        attempts_by_stage: dict[str, list[_Attempt]] = {}
-        stage_first_seen: list[str] = []
-        latest_job_row: dict[str, Any] | None = None
-        latest_job_updated: datetime | None = None
-        points: list[tuple[datetime, float]] = []
         run_jobs = sorted(
             jobs_by_run.get(run_id, []),
             key=lambda j: (_parse_dt(j.get("created_at")) or now, _int(j.get("iteration"))),
         )
-        for job in run_jobs:
-            stage = str(job["stage"])
-            attempt = _Attempt(
-                row=job,
-                iteration=_int(job.get("iteration")),
-                status=str(job.get("status") or "pending").strip().lower(),
-                started=_parse_dt(job.get("started_at")),
-                finished=_parse_dt(job.get("finished_at")),
-                updated=_parse_dt(job.get("updated_at")),
-                created=_parse_dt(job.get("created_at")),
-                cost=_cost(job.get("actual_cost")),
-            )
-            if stage not in attempts_by_stage:
-                attempts_by_stage[stage] = []
-                stage_first_seen.append(stage)
-            attempts_by_stage[stage].append(attempt)
-            moment = attempt.finished or attempt.updated
-            if moment is not None and attempt.cost > 0:
-                points.append((moment, attempt.cost))
-            if latest_job_row is None or (
-                attempt.updated is not None
-                and (latest_job_updated is None or attempt.updated >= latest_job_updated)
-            ):
-                latest_job_row = job
-                latest_job_updated = attempt.updated
-        cost_points[run_id] = points
+        attempts_by_stage, stage_first_seen, latest_job_row, points = _collect_run_attempts(run_jobs)
+        ticket_id = str((latest_job_row or {}).get("ticket_id") or demand_id)
+        # Real cloud rows carry ticket_id = project_id (e.g. "darkfac"), which is not a
+        # meaningful task identifier; show the unique demand_id instead (same rule as USR-44).
+        if ticket_id == project_id:
+            ticket_id = demand_id
 
         extra_stages = [name for name in stage_first_seen if name not in line_stages]
         stages: list[LiveStage] = []
@@ -1039,32 +1329,69 @@ def _build_runs(
             claim = claims_by_key.get((run_id, stage, latest_iteration))
             stages.append(_build_stage(stage, attempts, claim, now))
 
+        run_moment = updated or created
+        active, run_status, reconciled = _reconcile_superseded_run(
+            active=active,
+            run_status=run_status,
+            local=local,
+            ticket_id=ticket_id,
+            demand_id=demand_id,
+            run_moment=run_moment,
+            terminal_tickets=terminal_tickets,
+            now=now,
+        )
+        if reconciled:
+            if run_moment is not None and run_moment < cutoff:
+                continue
+            stages = [
+                stage.model_copy(update={"status": "cancelled"})
+                if stage.status in _OPEN_RECONCILED_STAGE_STATUSES
+                else stage
+                for stage in stages
+            ]
+
+        cost_points[run_id] = points
+        stages = _normalize_stage_progression(
+            stages, line_stages=line_stages, active=active, run_status=run_status
+        )
         state = _run_state(active=active, run_status=run_status, stages=stages, required=line_stages)
         current = _current_stage(stages)
         attention: LiveAttention | None = None
         if state == "attention" and current is not None:
             fallback = _ATTENTION_FALLBACK.get(current.status, "{label}").format(label=current.label)
-            since = None
-            if current.history:
-                since = current.history[-1].updated_at
+            since = current.history[-1].updated_at if current.history else None
             attention = LiveAttention(
                 stage=current.stage,
                 cause_code=current.cause_code,
                 diagnostic=current.diagnostic or fallback,
                 since=since,
             )
+        res, host_id, res_state = _resolve_run_reservation(
+            run_id=run_id,
+            active=active,
+            project_id=project_id,
+            ticket_id=ticket_id,
+            demand_id=demand_id,
+            by_run=res_by_run,
+            by_proj_ticket=res_by_proj_ticket,
+            by_ticket=res_by_ticket,
+            claims=claims_by_key.values(),
+        )
         stall = (
             _stall_reason(
-                state=state, stages=stages, attempts_by_stage=attempts_by_stage, now=now, local=local
+                state=state,
+                stages=stages,
+                attempts_by_stage=attempts_by_stage,
+                now=now,
+                local=local,
+                exec_records=exec_records,
+                ticket_id=ticket_id,
+                run_created=created,
+                reservation=res,
             )
             if active
             else None
         )
-        ticket_id = str((latest_job_row or {}).get("ticket_id") or demand_id)
-        # Real cloud rows carry ticket_id = project_id (e.g. "darkfac"), which is not a
-        # meaningful task identifier; show the unique demand_id instead (same rule as USR-44).
-        if ticket_id == project_id:
-            ticket_id = demand_id
         title = (
             intake_titles.get(run_id)
             or titles.get(demand_id)
@@ -1072,29 +1399,8 @@ def _build_runs(
             or demand_id
         )[:240]
         age = _seconds(created, now) if active else None
-        cycle = None
-        if not active:
-            cycle = _seconds(created, completed or updated)
-
-        res = reservations_by_run.get(run_id)
-        host_id = str(res.get("host_id")) if res and res.get("host_id") else None
-        res_state = str(res.get("status")) if res and res.get("status") else None
-        if not host_id:
-            for claim in claims_by_key.values():
-                if claim.get("run_id") == run_id:
-                    owner_str = str(claim.get("owner") or "").lower()
-                    for known_host in ("grokbox", "notebook", "desktop"):
-                        if known_host in owner_str:
-                            host_id = known_host
-                            break
-                    if host_id:
-                        break
-
-        idle_reason: str | None = None
-        if attention:
-            idle_reason = attention.cause_code or attention.diagnostic
-        elif stall:
-            idle_reason = stall
+        cycle = None if active else _seconds(created, completed or updated)
+        idle_reason = (attention.cause_code or attention.diagnostic) if attention else stall
 
         run = LiveRun(
             run_id=run_id,
@@ -1124,36 +1430,16 @@ def _build_runs(
             fixture=is_fixture(ticket_id, None, title) or is_fixture(demand_id) or "canary" in project_id.lower(),
         )
         runs.append(run)
-
-        for stage_item in stages:
-            for attempt in attempts_by_stage.get(stage_item.stage, []):
-                events.extend(
-                    _attempt_events(
-                        run=run,
-                        stage=stage_item.stage,
-                        attempt=attempt,
-                        diagnostic=stage_item.diagnostic,
-                        now=now,
-                    )
-                )
-        if completed is not None:
-            message = "run concluída" if state == "succeeded" else "run encerrada"
-            if state == "failed":
-                message = "run encerrada com falha"
-            if cycle is not None and state == "succeeded":
-                message += f" em {_fmt_duration(cycle)}"
-            events.append(
-                LiveEvent(
-                    at=completed.isoformat(),
-                    run_id=run.run_id,
-                    ticket_id=run.ticket_id,
-                    title=run.title,
-                    project_id=run.project_id,
-                    stage=None,
-                    kind="run_completed",
-                    message=message,
-                )
-            )
+        _append_run_events(
+            events,
+            run=run,
+            stages=stages,
+            attempts_by_stage=attempts_by_stage,
+            completed=completed,
+            state=state,
+            cycle=cycle,
+            now=now,
+        )
 
     runs.sort(key=_run_sort_key)
     events.sort(key=lambda e: (e.at, e.run_id, e.stage or "", e.kind), reverse=True)
@@ -1305,11 +1591,19 @@ def _natural_key(value: str) -> tuple[Any, ...]:
     return tuple(parts)
 
 
-def _build_executions(raw: _RawStore | None, *, now: datetime) -> LiveExecutions:
+def _build_executions(
+    raw: _RawStore | None,
+    *,
+    now: datetime,
+    records: Sequence[ExecutionRecord] | None = None,
+) -> LiveExecutions:
     """Project the execution registry rows (USR-208): active by source/stage, lost, recent deliveries."""
-    if raw is None or not raw.execution_events:
+    if records is None:
+        if raw is None or not raw.execution_events:
+            return LiveExecutions()
+        records = fold_executions(raw.execution_events, now)
+    if not records:
         return LiveExecutions()
-    records = fold_executions(raw.execution_events, now)
     lost = [r for r in records if r.state == "lost"]
     recent = [r for r in records if is_delivery(r)][:RECENT_EXECUTION_LIMIT]
     active = group_active(records)
@@ -1501,8 +1795,15 @@ def build_line_live(
     runs: list[LiveRun] = []
     events: list[LiveEvent] = []
     cost_points: dict[str, list[tuple[datetime, float]]] = {}
+    exec_records = (
+        fold_executions(raw.execution_events, now)
+        if raw is not None and raw.execution_events
+        else []
+    )
     if raw is not None:
-        runs, events, cost_points = _build_runs(raw, now=now, titles=titles)
+        runs, events, cost_points = _build_runs(
+            raw, now=now, titles=titles, tickets=tickets, exec_records=exec_records
+        )
     backlog, off_line, planned_total = _build_backlog(tickets, runs)
     kpis = _build_kpis(runs, cost_points, now=now, planned_backlog=planned_total)
     stage_order = list(LINE_STAGES)
@@ -1510,7 +1811,7 @@ def build_line_live(
     labels = {stage: _label(stage) for stage in (*stage_order, *dict.fromkeys(extra))}
     labels.update({stage: label for stage, label in STAGE_LABELS.items() if stage not in labels})
     fleet = _build_fleet(raw, now=now)
-    executions = _build_executions(raw, now=now)
+    executions = _build_executions(raw, now=now, records=exec_records)
     executable_queue = _build_executable_queue(tickets, runs)
     snapshot = LineLiveSnapshot(
         generated_at=now.isoformat(),

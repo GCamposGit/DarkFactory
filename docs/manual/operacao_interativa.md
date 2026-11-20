@@ -189,7 +189,7 @@ Toda chamada de `run_ticket.py` (ticket completo, `--resume-delivery` isolado, o
 [ESTEIRA] progresso mudo - <motivo curto, sem senha e sem URL>
 ```
 
-O operador ve esse veredito sem abrir log algum. Publicacao mudo preserva o exit code. Com `--json` a linha continua so no stderr (o stdout permanece um JSON unico) e o mesmo veredito tambem fica em `live_progress` no payload JSON (`published`, `warning`, `cause_code` e, em falha, `failure` com fase, categoria e mensagem sanitizada). A linha e o JSON nao trazem senha nem URL de banco.
+O operador ve esse veredito sem abrir log algum. Publicacao mudo preserva o exit code. Com `--json` a linha continua so no stderr (o stdout permanece um JSON unico) e o mesmo veredito tambem fica em `live_progress` no payload JSON (`published`, `warning`, `cause_code` e, em falha, `failure` com fase, categoria e mensagem sanitizada). A linha e o JSON nao trazem senha nem URL de banco. Em retomada isolada (`--resume-delivery`), `run_ticket.py` publica `preflight`, `workspace` e `agent` como `succeeded` (e `gate` como `succeeded` em `reuse_validation`), e `scripts/live_run.py` encerra a fase anterior quando a seguinte recebe `--status succeeded` (USR-533).
 
 O sink resolve a mesma URL (`DARKFAC_HF02_DATABASE_URL`) que o control store, incluindo host, porta e
 `sslmode` da URL/`PGSSLMODE`, mas com limites proprios e mais largos que os 5 s de conexao do control

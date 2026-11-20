@@ -796,3 +796,13 @@ def test_the_script_runs_from_any_working_directory_and_exits_zero(tmp_path: Pat
     )
     assert done.returncode == 0, done.stderr
     assert json.loads(done.stdout)["ticket_id"] == "USR-164"
+
+
+def test_phase_succeeded_advances_and_closes_previous_active_phase(cli: Any) -> None:
+    sink = RecordingSink()
+    assert cli("open", "--ticket", "USR-164", sink=sink) == 0
+    assert cli("phase", "ci", "--ticket", "USR-164", sink=sink) == 0
+    sink.events.clear()
+
+    assert cli("phase", "merge", "--ticket", "USR-164", "--status", "succeeded", "--message", "merge ok", sink=sink) == 0
+    assert sink.steps == [("ci", "succeeded"), ("merge", "succeeded")]
