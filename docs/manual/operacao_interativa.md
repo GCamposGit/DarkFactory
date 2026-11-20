@@ -18,6 +18,10 @@ O processo interativo identifica o harness do operador. Serviços headless criam
 contexto de execução e não usam a preferência interativa como preferência de desenvolvimento.
 O pin de modelo e esforço é resolvido por stage, harness e complexidade; a auditoria compara
 o modelo esperado ao reportado e grava contexto efetivo, latência e entrega em recibo.
+Na classificação de tier e família, o roteador reconhece o id canônico, aliases, wire IDs
+OpenRouter (`gateway_ids`) e nomes de CLI (`cli_ids`). Isso mantém a checagem de alta capacidade
+e a revisão por família corretas quando uma rota chega com o slug usado pelo CLI; `cli_ids` não
+são wire IDs e não declaram a disponibilidade de um gateway OpenRouter.
 
 Sem assinatura elegível, usar a contingência OpenRouter com saldo e orçamento
 confirmados, preservando revisão por outra família. `route_wait` fica persistido
