@@ -1,4 +1,4 @@
-<!-- covers: core/line/routing.py, core/line/operating_harness.py, core/router/token_budget.py, core/line/operational_context.py -->
+<!-- covers: core/line/routing.py, core/line/operating_harness.py, core/router/token_budget.py, core/line/operational_context.py, core/models/gateway_probe.py -->
 # Roteamento do estagio de desenvolvimento (USR-378)
 
 Os modelos/efforts por complexidade vivem no registro e na configuração de roteamento.
@@ -120,6 +120,10 @@ O OpenRouter atua na fabrica com duplo papel: **otimizacao continua de custo-ben
 4. **Enforcement de Orcamento e Alertas no Telegram**: O roteador e a telemetria de creditos (`ApiCreditsMonitor`) respeitam o teto por execucao (`run_caps.openrouter_usd`, default US$ 2.00) e o teto mensal (`run_caps.openrouter_monthly_cap_usd`, US$ 28.13 neste mes e US$ 10.00 a partir de 01/12/2026). Ao atingir o limiar de alerta (`openrouter_alert_threshold`, default 80% do teto), uma notificacao critica com categoria `AlertCategory.EXECUTION_BUDGET` e enviada via Telegram ao Owner.
 5. **Consulta Dinamica a Fronteira de Pareto sem Modelos Hard-coded (USR-444)**: Nenhum modelo de inferencia fica hard-coded em codigo ou instrucoes estaticas. O roteador invoca `resolve_pareto_openrouter_model`, consultando diariamente o ledger de benchmarks (`core.benchmarks.fetcher.ensure_daily_benchmark()`) gerado a partir de Artificial Analysis e OpenRouter. Para planejamento e arquitetura, a esteira exige alta inteligencia (score >= 85.0, classe Claude Opus `anthropic/claude-opus-5` e GPT Sol `openai/gpt-5-6-sol` / `gpt-sol`). Modelos proibidos para autonomia (`fable`, `astra`) sao excluidos por contrato. <!-- census: wire-id -->
 6. **Resolucao Automatica de Wire IDs e Dynamic Headroom (USR-440)**: Todo alias interno (`gpt-sol`, `opus`, `sonnet`) e traduzido transparentemente para o wire ID oficial do provedor (`gateway_id`, ex.: `openai/gpt-5.6-sol`), prevenindo erros HTTP 400 de API e garantindo despacho imediato sem atrito. <!-- census: wire-id -->
+
+## Sonda offline de gateways (USR-505)
+
+`python -m core.models.gateway_probe` confere toda declaracao explicita de `gateway_ids` contra o snapshot versionado `.factory/config/openrouter_catalog.json` (coleta de 2026-11-10), em qualquer status, e nao abre rede. Sem declaracao, o id canonico entra somente para modelo `active` quando ja e um id `provedor/modelo`. Candidate ou deprecated sem `gateway_ids` nao alega o id canonico. Um id canonico sem barra nao e gateway OpenRouter. `cli_ids` fica de fora. Saida 0: todas as alegacoes estao no snapshot. Saida 1: achados, cada um com o modelo e o comando de atualizacao. Saida 2: catalogo vazio ou ilegivel (`empty_catalog` ou `catalog_unavailable`); isso nunca e sucesso com lista vazia. `--json` imprime o relatorio. `--write-snapshot` baixa o catalogo vivo e regrava o snapshot. A checagem viva no teste e opt-in (`DARKFAC_LIVE_OPENROUTER=1`).
 
 ## Auditoria das execucoes dos modelos (USR-471 T4)
 

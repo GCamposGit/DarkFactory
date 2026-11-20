@@ -14843,5 +14843,39 @@
     "dependencies": [],
     "created_at": "2026-11-09T22:20:17.080494Z",
     "updated_at": "2026-11-17T15:59:43.240418Z"
+  },
+  {
+    "id": "USR-505",
+    "project_id": "darkfac",
+    "title": "Gateways de modelos nao-active ausentes no catalogo OpenRouter",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "d4534614b03c8d9c1c1af3bcc666a5fbd5abcf7e",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "[Triagem 15/11/2026, roadmap docs/plans/ROADMAP_ESTABILIZACAO_2026-11-15.md] Catalogo de gateways de modelos nao ativos; sem efeito na linha. || A sonda viva de 2026-11-10 (469 ids em .factory/config/openrouter_catalog.json) nao achou estes wire ids, todos de modelos que nao estao active: candidate gemini-3.1-pro usa google/gemini-3.1-pro; candidate gpt-image-2 usa openai/gpt-image-2; deprecated claude-3-7-sonnet usa anthropic/claude-3.7-sonnet; deprecated gemini-2.0-flash-001 usa google/gemini-2.0-flash-001; deprecated deepseek/deepseek-r1 e deepseek-coder e o candidate claude-fable-5-1 caem no id canonico, que tambem nao esta no catalogo. A sonda de modelos active ficou sem achados. Nao da para corrigir estes ids neste ticket sem mudar wire ids pinados fora do conjunto active.",
+    "core_journey": [
+      "A sonda viva de 2026-11-10 (469 ids em .factory/config/openrouter_catalog.json) nao achou estes wire ids, todos de modelos que nao estao active: candidate gemini-3.1-pro usa google/gemini-3.1-pro; candidate gpt-image-2 usa openai/gpt-image-2; deprecated claude-3-7-sonnet usa anthropic/claude-3.7-sonnet; deprecated gemini-2.0-flash-001 usa google/gemini-2.0-flash-001; deprecated deepseek/deepseek-r1 e deepseek-coder e o candidate claude-fable-5-1 caem no id canonico, que tambem nao esta no catalogo. A sonda de modelos active ficou sem achados. Nao da para corrigir estes ids neste ticket sem mudar wire ids pinados fora do conjunto active."
+    ],
+    "non_goals": [
+      "Nao promover candidate ou deprecated a active",
+      "Nao alterar papeis nem pares de revisao"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Cada id citado passa a existir no catalogo OpenRouter ou deixa de ser declarado como gateway",
+      "roles e review_pairs permanecem iguais",
+      "python -m core.models.gateway_probe segue saindo 0 contra o snapshot versionado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-10T21:56:52.263658Z",
+    "updated_at": "2026-11-20T04:36:00.312076Z"
   }
 ]

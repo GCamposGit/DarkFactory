@@ -310,7 +310,7 @@ Self-Modification, ou `permission denied` em `core/line`, `core/harness`, `run_t
 ## Planejamento
 
 Rotas de planejamento: Claude (role `planning.claude`) ou Codex (role `planning.codex`), ambos com modelo tier `high` no registro.
-O Codex roda com esforco `high` (pin do estagio) e o slug do CLI vem do `gateway_ids` do modelo no registro.
+O Codex roda com esforco `high` (pin do estagio) e o slug do CLI vem de `cli_ids` do modelo no registro.
 
 O estagio `planning` so roteia para modelos de nivel alto (`tier` `high` ou `frontier` em
 `.factory/config/model_registry.json`, lido por `core.models.registry`). Um harness sem modelo

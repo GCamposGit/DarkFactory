@@ -53,10 +53,15 @@ from core.harness.test_subagent import (
 from core.infra.git_sha import current_git_sha
 from core.infra.host_identity import NodeIdentity, resolve_node_identity
 from core.infra.metrics import HardwareMetrics, collect_host_hardware_metrics
-from core.models.registry import gateway_id, id_of, resolve
+from core.models.registry import cli_id, id_of, resolve
 
 logger = logging.getLogger("core.harness.remote_worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+
+def _cli_model_or_default(model: Optional[str], default: str) -> str:
+    """Return a harness CLI slug for an override or its configured default."""
+    return cli_id(model) if model else cli_id(default)
 
 DEFAULT_WORKER_PORT = 8080
 DEFAULT_WORKER_HOST = "0.0.0.0"
@@ -243,7 +248,7 @@ class CodexExecutionResponse(BaseModel):
     """Result of Codex execution on the node."""
     success: bool = Field(..., description="True if Codex executed successfully")
     text: str = Field(default="", description="Generated text / code / patch")
-    model: str = Field(default=gateway_id("sol"), description="Actual model used by Codex")
+    model: str = Field(default=cli_id("sol"), description="Actual model used by Codex CLI")
     tokens_used: int = Field(default=0, description="Tokens recorded by Codex CLI")
     duration_seconds: float = Field(..., description="Duration of execution in seconds")
     error: Optional[str] = Field(default=None, description="Error message if failed")
@@ -2173,7 +2178,7 @@ def create_worker_app(
 
         start_t = time.perf_counter()
         target_cwd = Path(req_data.cwd).resolve() if req_data.cwd else root_path
-        model_flag = f'-m "{req_data.model}"' if req_data.model else ""
+        model_flag = f'-m "{cli_id(req_data.model)}"' if req_data.model else ""
         cmd = f'"{executable}" exec --sandbox read-only --ephemeral --skip-git-repo-check {model_flag} -o "{tmp_out}" -'
 
         try:
@@ -2202,12 +2207,13 @@ def create_worker_app(
             if not output_text and proc.stdout.strip():
                 output_text = proc.stdout.strip()
 
-            detected_model = req_data.model or gateway_id("sol")
+            detected_model = _cli_model_or_default(req_data.model, "sol")
             tokens_used = 0
             if proc.stderr:
                 for line in proc.stderr.splitlines():
                     if line.startswith("model:"):
                         detected_model = line.split(":", 1)[1].strip()
+            detected_model = cli_id(detected_model)
 
             if proc.returncode != 0 and not output_text:
                 return HarnessExecutionResponse(
@@ -2278,7 +2284,7 @@ def create_worker_app(
         target_cwd = Path(req_data.cwd).resolve() if req_data.cwd else root_path
         cmd_args = [executable, "-p", full_prompt, "--output-format", "plain"]
         if req_data.model:
-            cmd_args.extend(["-m", req_data.model])
+            cmd_args.extend(["-m", cli_id(req_data.model)])
 
         try:
             logger.info("Executing Grok non-interactively on node %s (prompt length: %d)", node_id, len(full_prompt))
@@ -2294,7 +2300,7 @@ def create_worker_app(
             )
             duration = round(time.perf_counter() - start_t, 3)
             output_text = proc.stdout.strip()
-            detected_model = req_data.model or resolve("review.grok")
+            detected_model = _cli_model_or_default(req_data.model, resolve("review.grok"))
 
             if proc.returncode != 0 and not output_text:
                 err_msg = proc.stderr.strip() or f"Grok exited with code {proc.returncode}"
@@ -2430,6 +2436,8 @@ def create_worker_app(
         start_t = time.perf_counter()
         target_cwd = Path(req_data.cwd).resolve() if req_data.cwd else root_path
         cmd_args = [executable, "-p", full_prompt]
+        if req_data.model:
+            cmd_args.extend(["--model", cli_id(req_data.model)])
         try:
             logger.info("Executing Claude Code on node %s (prompt length: %d)", node_id, len(full_prompt))
             proc = subprocess.run(
@@ -2449,7 +2457,7 @@ def create_worker_app(
                     success=False,
                     harness="claude",
                     text="",
-                    model=req_data.model or gateway_id("sonnet"),
+                    model=_cli_model_or_default(req_data.model, "sonnet"),
                     duration_seconds=duration,
                     error=proc.stderr.strip()[:500] or f"Claude exited with code {proc.returncode}",
                     node_id=node_id,
@@ -2458,7 +2466,7 @@ def create_worker_app(
                 success=True,
                 harness="claude",
                 text=output_text,
-                model=req_data.model or gateway_id("sonnet"),
+                model=_cli_model_or_default(req_data.model, "sonnet"),
                 duration_seconds=duration,
                 node_id=node_id,
             )
@@ -2571,7 +2579,7 @@ def create_worker_app(
         return CodexExecutionResponse(
             success=res.success,
             text=res.text,
-            model=res.model or gateway_id("sol"),
+            model=res.model or cli_id("sol"),
             tokens_used=res.tokens_used,
             duration_seconds=res.duration_seconds,
             error=res.error,

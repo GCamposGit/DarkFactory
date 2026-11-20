@@ -2107,6 +2107,7 @@ def test_fleet_child_gets_its_own_checkout_and_drops_the_parent_session(tmp_path
     checkout = tmp_path / "operational-checkout"
     shared_state = tmp_path / "shared-state"
     interactive = tmp_path / "interactive-worktree"
+    monkeypatch.delenv("PROJECT_ROOT", raising=False)
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(shared_state))
     monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(interactive))
     monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "grok")

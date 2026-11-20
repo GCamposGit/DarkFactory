@@ -13,6 +13,7 @@ from core.line.routing import (
     HarnessPin,
     RoutingConfig,
     StageRoute,
+    _independent_openrouter,
     _quota_headroom_diagnosis,
     default_config_path,
     harness_cli_pin,
@@ -1053,4 +1054,11 @@ def test_antigravity_neon_and_hydrogen_pins_resolve_for_planning_and_development
     )
     assert harness_cli_pin("antigravity", None, stage="development", config=cfg, complexity="low") == (
         "gemini-4-hydrogen-high", None
+    )
+
+
+def test_cli_model_id_is_high_tier_and_preserves_openrouter_review_family() -> None:
+    assert is_high_tier_model("gpt-5.6-sol") is True
+    assert _independent_openrouter(("openrouter", "luna"), "codex") == (
+        "openrouter", "deepseek/deepseek-v4.1-flash"
     )

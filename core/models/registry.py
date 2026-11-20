@@ -19,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,8 @@ class ModelEntry(BaseModel):
     family: str = Field(min_length=1)
     tier: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
-    gateway_ids: list[str] = Field(default_factory=list)  # provider/gateway-prefixed ids (e.g. OpenRouter); naming only
+    gateway_ids: list[str] = Field(default_factory=list)  # provider/model wire ids (e.g. OpenRouter); naming only
+    cli_ids: list[str] = Field(default_factory=list)  # slash-free CLI slugs; naming only
     claude_cli_model_id: Optional[str] = None
     status: ModelStatus
     price_input_per_mtok: Optional[float] = Field(default=None, ge=0)
@@ -84,6 +85,24 @@ class ModelEntry(BaseModel):
     discovered_at: Optional[str] = None  # set by autonomous discovery (slice 5)
     source: Optional[str] = None  # discovery source name (e.g. openrouter)
     qualification: Optional[QualificationRecord] = None
+
+    @field_validator("gateway_ids")
+    @classmethod
+    def _gateway_ids_are_provider_models(cls, values: list[str]) -> list[str]:
+        for value in values:
+            text = value.strip()
+            if not text or "/" not in text or text.startswith("/") or text.endswith("/") or any(ch.isspace() for ch in value):
+                raise ValueError(f"gateway id {value!r} must be a provider/model id")
+        return values
+
+    @field_validator("cli_ids")
+    @classmethod
+    def _cli_ids_are_slugs(cls, values: list[str]) -> list[str]:
+        for value in values:
+            text = value.strip()
+            if not text or "/" in text or any(ch.isspace() for ch in value):
+                raise ValueError(f"cli id {value!r} must be a slash-free CLI slug")
+        return values
 
 
 class ReviewPair(BaseModel):
@@ -140,7 +159,7 @@ class ModelRegistry(BaseModel):
                 raise ValueError(f"duplicate model id {entry.id!r}")
             by_id[entry.id] = entry
         for entry in self.models:
-            for alias in [*entry.aliases, *entry.gateway_ids]:
+            for alias in [*entry.aliases, *entry.gateway_ids, *entry.cli_ids]:
                 key = alias.strip().lower()
                 if key in names or key in by_id:
                     raise ValueError(f"alias {alias!r} collides with another alias or model id")
@@ -197,28 +216,34 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         "min_qualification_steps": DEFAULT_MIN_QUALIFICATION_STEPS,
     },
     "models": [
-        _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"], context_tokens=200000),
-        _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"], gateway_ids=["claude-sonnet"]),
-        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5-5"], claude_cli_model_id="claude-haiku-5-5"),
+        _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"], context_tokens=200000, gateway_ids=["anthropic/claude-opus-5.5"]),
+        _fb(
+            "claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"],
+            gateway_ids=["anthropic/claude-sonnet-5.5"], cli_ids=["claude-sonnet"],
+        ),
+        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"], gateway_ids=["anthropic/claude-haiku-5.5"], claude_cli_model_id="claude-haiku-5-5"),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
         _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
-        _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna", "openai/gpt-5-6-luna-high"]),
+        _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"], gateway_ids=["openai/gpt-6-luna"]),
         _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True, gateway_ids=["openai/gpt-6-astra"]),
-        _fb("gpt-sol", "openai", "openai", "high", ["sol"], gateway_ids=["openai/gpt-5.6-sol", "gpt-5.6-sol", "openai/gpt-5-6-sol"]),
-        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["xai/grok-4.6"]),
-        _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"]),
+        _fb(
+            "gpt-sol", "openai", "openai", "high", ["sol"],
+            gateway_ids=["openai/gpt-5.6-sol"], cli_ids=["gpt-5.6-sol"],
+        ),
+        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["x-ai/grok-4.6"]),
+        _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"], gateway_ids=["x-ai/grok-4.7"]),
         _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"], gateway_ids=["google/gemini-3.8-flash"]),
         _fb("gemini-4-neon", "google", "gemini", "high", ["neon", "neon-orchestrator"], context_tokens=1000000, capabilities=["text", "code", "reasoning", "orchestration"]),
         _fb("gemini-4-argon-high", "google", "gemini", "high", ["argon", "argon-high"], context_tokens=1000000, capabilities=["text", "code", "reasoning"]),
         _fb("gemini-4-hydrogen-high", "google", "gemini", "mid", ["hydrogen", "hydrogen-high"], context_tokens=1000000, capabilities=["text", "code"]),
         _fb("deepseek/deepseek-v4.1-flash", "deepseek", "deepseek", "low", ["deepseek-flash"]),
         _fb("deepseek/deepseek-v4-pro", "deepseek", "deepseek", "high", ["deepseek-v4-pro"], "candidate"),
-        _fb("gemini-3.1-pro", "google", "gemini", "high", ["gemini-pro"], "candidate", gateway_ids=["google/gemini-3.1-pro"]),
+        _fb("gemini-3.1-pro", "google", "gemini", "high", ["gemini-pro"], "candidate"),
         _fb("gemini-3.1-flash-lite-image", "google", "gemini", "low", ["gemini-image-fast"], "candidate", gateway_ids=["google/gemini-3.1-flash-lite-image"]),
-        _fb("gpt-image-2", "openai", "openai", "high", ["gpt-image"], "candidate", gateway_ids=["openai/gpt-image-2"]),
-        _fb("claude-3-7-sonnet", "anthropic", "claude", "mid", ["claude-legacy-sonnet", "legacy-sonnet"], "deprecated", gateway_ids=["anthropic/claude-3.7-sonnet"]),
+        _fb("gpt-image-2", "openai", "openai", "high", ["gpt-image"], "candidate"),
+        _fb("claude-3-7-sonnet", "anthropic", "claude", "mid", ["claude-legacy-sonnet", "legacy-sonnet"], "deprecated"),
         _fb("deepseek/deepseek-r1", "deepseek", "deepseek", "high", ["deepseek-r1"], "deprecated"),
-        _fb("gemini-2.0-flash-001", "google", "gemini", "low", ["gemini-legacy-flash"], "deprecated", gateway_ids=["google/gemini-2.0-flash-001"]),
+        _fb("gemini-2.0-flash-001", "google", "gemini", "low", ["gemini-legacy-flash"], "deprecated"),
         _fb("deepseek-coder", "deepseek", "deepseek", "low", ["coder-legacy"], "deprecated"),
         _fb("openai/gpt-4o", "openai", "openai", "high", ["gpt-4o"]),
         _fb("qwen/qwen-2.5-coder-32b-instruct", "qwen", "qwen", "high", ["qwen-coder"]),
@@ -289,7 +314,7 @@ def clear_cache() -> None:
 def _find(reg: ModelRegistry, name: str) -> Optional[ModelEntry]:
     low = name.strip().lower()
     for entry in reg.models:
-        if low == entry.id.lower() or low in (a.strip().lower() for a in [*entry.aliases, *entry.gateway_ids]):
+        if low == entry.id.lower() or low in (a.strip().lower() for a in [*entry.aliases, *entry.gateway_ids, *entry.cli_ids]):
             return entry
     return None
 
@@ -414,10 +439,28 @@ def id_of(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
     raise KeyError(f"unknown model alias or id: {alias_or_id!r}")
 
 
-def gateway_id(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
-    """Provider/gateway-prefixed id (e.g. ``anthropic/claude-opus-5``) for a name, regardless of status.
+def cli_id(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
+    """Slash-free CLI slug for a name, regardless of status.
 
-    Falls back to the canonical id when the model has no gateway id. Naming only, NOT a routability check.
+    Uses the first declared ``cli_ids`` entry. When none is declared, uses the canonical id
+    if that id is itself a CLI slug. Naming only, NOT a routability check.
+    """
+    reg = registry if registry is not None else get_registry()
+    entry = _find(reg, alias_or_id)
+    if entry is None:
+        raise KeyError(f"unknown model alias or id: {alias_or_id!r}")
+    if entry.cli_ids:
+        return entry.cli_ids[0]
+    if "/" not in entry.id:
+        return entry.id
+    raise KeyError(f"no CLI slug declared for {alias_or_id!r}")
+
+
+def gateway_id(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
+    """Provider/model wire id (e.g. ``anthropic/claude-opus-5``) for a name, regardless of status.
+
+    When ``gateway_ids`` is declared, returns the first one. Otherwise falls back to the canonical id.
+    Naming only, NOT a routability check.
     """
     reg = registry if registry is not None else get_registry()
     entry = _find(reg, alias_or_id)

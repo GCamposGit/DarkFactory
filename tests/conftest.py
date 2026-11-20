@@ -34,6 +34,12 @@ AMBIENT_REMOTE_INFRA_ENV = (
     "REMOTE_HARNESS_URLS",
     "DARKFAC_FLEET_DISABLED_HOSTS",
     "DARKFAC_PROJECT_ROOT",
+    "STATE_ROOT",
+    # A delivery worker may launch the gate with its own execution role in the
+    # environment. Tests model interactive and headless callers explicitly; the
+    # worker's identity must not become the suite-wide default.
+    "DARKFAC_EXECUTION_CONTEXT",
+    "DARKFAC_FLEET_MODE",
 )
 for _remote_env_name in AMBIENT_REMOTE_INFRA_ENV:
     os.environ.pop(_remote_env_name, None)
