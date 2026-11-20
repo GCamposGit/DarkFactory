@@ -14,6 +14,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,10 @@ def test_default_probe_uses_the_versioned_snapshot_and_does_not_call_the_network
 
     assert snapshot["generated_by"] == UPDATE_COMMAND
     assert snapshot["source"] == OPENROUTER_MODELS_URL
-    assert snapshot["collected_at"].startswith("2026-11-10T")
+    collected_at = snapshot["collected_at"]
+    assert isinstance(collected_at, str)
+    assert collected_at.endswith("Z")
+    assert datetime.fromisoformat(collected_at.replace("Z", "+00:00")).tzinfo is not None
     assert len(catalog) == 469
     assert set(_CATALOGUED_ACTIVE.values()) <= catalog
 

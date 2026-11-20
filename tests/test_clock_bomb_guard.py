@@ -88,6 +88,7 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_waiting_human_consultation.py": "linhas de seed SQL para um teste de dashboard de waiting_human; sem filtro por idade",
     "tests/line/test_operational_context.py": "campos 'generated_at' e 'audited_at' de payloads sinteticos comparados verbatim em test_operational_context; nao sao comparados ao relogio real",
     "tests/test_model_execution_audit_usr471.py": "campos 'started_at'/'finished_at' de amostras sinteticas usados apenas para calcular latencia/ordenacao relativa; nunca comparados ao relogio real",
+    "tests/test_gateway_probe_usr505.py": "collected_at e metadata sintetica de write_snapshot, armazenada e comparada verbatim sem leitura ou comparacao com relogio real",
 }
 
 
