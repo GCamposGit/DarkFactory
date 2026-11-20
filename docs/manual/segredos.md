@@ -16,25 +16,49 @@
    age-keygen --version
    ```
    Os três comandos devem aparecer no `Get-Command` e cada comando `--version` deve imprimir a versão instalada. Essas verificações nao leem nem gravam credenciais ou arquivos de chave.
-2. Se o WinGet listar os pacotes, mas `Get-Command` nao encontrar algum executavel ou os comandos de versao falharem, procure as instalacoes no diretorio de pacotes e acrescente os diretorios encontrados ao `PATH` desta sessao do PowerShell:
+2. Se o WinGet listar os pacotes, mas `Get-Command` nao encontrar algum executavel ou os comandos de versao falharem, procure as instalacoes nos diretorios de pacotes do WinGet para o usuario e para a maquina:
    ```powershell
-   $wingetPackages = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+   $wingetPackageRoots = @(
+       (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'),
+       (Join-Path $env:ProgramFiles 'WinGet\Packages')
+   )
    $executables = foreach ($package in @('SecretsOPerationS.SOPS_*', 'FiloSottile.age_*')) {
-       Get-ChildItem $wingetPackages -Directory -Filter $package -ErrorAction SilentlyContinue |
-           Get-ChildItem -Recurse -File -Include sops.exe, age.exe, age-keygen.exe -ErrorAction SilentlyContinue
-   }
-   $executables | Select-Object FullName
-   foreach ($exe in $executables) {
-       if ($env:Path -notlike "*$($exe.DirectoryName)*") {
-           $env:Path = "$($exe.DirectoryName);$env:Path"
+       foreach ($root in $wingetPackageRoots) {
+           if (Test-Path $root) {
+               Get-ChildItem $root -Directory -Filter $package -ErrorAction SilentlyContinue |
+                   Get-ChildItem -Recurse -File -Include sops.exe, age.exe, age-keygen.exe -ErrorAction SilentlyContinue
+           }
        }
    }
+   $executables = @($executables | Sort-Object FullName -Unique)
+   $executables | Select-Object FullName
+   foreach ($exe in $executables) {
+       & $exe.FullName --version
+   }
+   ```
+   Se nenhum executavel aparecer, confira `winget list` e reinstale o pacote ausente. Se algum caminho completo nao imprimir a versao, corrija essa instalacao antes de continuar.
+   ```powershell
+   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+   $userPathEntries = @($userPath -split ';' | Where-Object { $_ })
+   $directoriesToAdd = @(
+       $executables.DirectoryName |
+           Sort-Object -Unique |
+           Where-Object { $directory = $_; -not ($userPathEntries | Where-Object { $_.TrimEnd('\') -ieq $directory.TrimEnd('\') }) }
+   )
+   if ($directoriesToAdd.Count -gt 0) {
+       $newUserPath = (@($userPathEntries) + $directoriesToAdd) -join ';'
+       [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+   }
+   # Feche e reabra o PowerShell para carregar o PATH atualizado do usuario.
+   ```
+   Depois de reabrir o PowerShell, confira novamente os comandos e as versoes:
+   ```powershell
    Get-Command sops, age, age-keygen -ErrorAction SilentlyContinue | Select-Object Name, Source
    sops --version
    age --version
    age-keygen --version
    ```
-   Esse ajuste vale somente para a sessao atual. Se nenhum executavel aparecer em `$executables`, confira `winget list` e reinstale o pacote ausente; se os arquivos aparecerem mas os comandos continuarem sem versao, use o caminho completo mostrado por `FullName` para confirmar qual instalacao esta sendo executada.
+   O bloco so acrescenta ao `PATH` do usuario os diretorios descobertos que ainda nao constam nele; nao use `setx PATH`.
 3. Gere sua chave somente depois de confirmar os comandos: `New-Item -ItemType Directory -Force "$env:APPDATA\sops\age"; age-keygen -o "$env:APPDATA\sops\age\keys.txt"`. O comando imprime `Public key: age1...`; copie esse valor.
 4. Aponte o SOPS para a chave (uma vez por maquina): `setx SOPS_AGE_KEY_FILE "$env:APPDATA\sops\age\keys.txt"` e reabra o PowerShell.
 5. Abra `C:\dev\DarkFac\.sops.yaml` e coloque a chave publica em `age: "age1..."` (varias maquinas: separe por virgula).
