@@ -303,6 +303,7 @@ def test_config_disabled_worker_override_is_filtered_before_health_probe(
 def test_custom_worker_url_cannot_bypass_persisted_host_exclusion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
+    monkeypatch.setattr(socket_module, "gethostname", lambda: "synthetic-local-host")
     from core.line import fleet_policy
     from core.line.admission_store import AdmissionStore
 
@@ -348,6 +349,7 @@ def test_custom_worker_url_cannot_bypass_persisted_host_exclusion(
 
 
 def test_offline_primary_worker_falls_through_to_next_eligible_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(socket_module, "gethostname", lambda: "synthetic-local-host")
     monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080,http://100.78.181.90:8080")
     monkeypatch.setattr(
@@ -400,6 +402,7 @@ def test_remote_worker_candidates_appends_fleet_hosts_when_override_names_only_o
 def test_maybe_dispatch_remote_falls_through_when_override_names_only_offline_grokbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(socket_module, "gethostname", lambda: "synthetic-local-host")
     monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.77.130.5:8080")
     monkeypatch.setattr(
@@ -438,6 +441,7 @@ def test_maybe_dispatch_remote_falls_through_when_override_names_only_offline_gr
 def test_remote_dispatch_skips_healthy_endpoint_rejected_by_effective_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(socket_module, "gethostname", lambda: "synthetic-local-host")
     monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://100.78.181.90:8080")
     monkeypatch.setattr(

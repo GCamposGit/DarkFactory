@@ -14936,5 +14936,36 @@
     "dependencies": [],
     "created_at": "2026-11-15T09:21:33.547955Z",
     "updated_at": "2026-11-20T11:24:13.918480Z"
+  },
+  {
+    "id": "USR-534",
+    "project_id": "darkfac",
+    "title": "Isolar hostname local em tests/test_remote_dispatch.py quando executado no worker DESKTOP-G45IPEM",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Quando runner.py despacha a suite completa remotamente para o worker DESKTOP-G45IPEM (http://100.78.181.90:8080), 4 testes em tests/test_remote_dispatch.py falham com discard_reason='self_dispatch' porque o mock de probe_health devolve hostname='desktop-g45ipem', que coincide com socket.gethostname() do proprio worker. Os mesmos 51 testes passam localmente em AI_Notebook.",
+    "core_journey": [
+      "Quando runner.py despacha a suite completa remotamente para o worker DESKTOP-G45IPEM (http://100.78.181.90:8080), 4 testes em tests/test_remote_dispatch.py falham com discard_reason='self_dispatch' porque o mock de probe_health devolve hostname='desktop-g45ipem', que coincide com socket.gethostname() do proprio worker. Os mesmos 51 testes passam localmente em AI_Notebook."
+    ],
+    "non_goals": [
+      "Nao alterar a logica de protecao contra self_dispatch em core/harness/remote_dispatch.py."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Os 4 testes de test_remote_dispatch.py (test_custom_worker_url_cannot_bypass_persisted_host_exclusion, test_offline_primary_worker_falls_through_to_next_eligible_host, test_maybe_dispatch_remote_falls_through_when_override_names_only_offline_grokbox, test_remote_dispatch_skips_healthy_endpoint_rejected_by_effective_policy) mockam o hostname local ou usam hostname sintetico distinto de DESKTOP-G45IPEM e passam tanto no notebook quanto no worker DESKTOP-G45IPEM."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-20T04:03:23.304649Z",
+    "updated_at": "2026-11-20T04:03:23.304649Z"
   }
 ]
