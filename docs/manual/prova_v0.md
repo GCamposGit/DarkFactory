@@ -152,6 +152,10 @@ a própria coleta falhar de um jeito inesperado, devolve um `V0ProofReport` vazi
 `degraded_sources=["v0_proof_collect_failed"]`. Em qualquer um desses casos o endpoint responde
 `200`, nunca `500` — só o conteúdo do relatório muda.
 
+O painel `/live` (`hub/frontend/live.html` + `live.js` + `live.css`) também exibe os 9 pontos de etapa
+para runs `run_ticket` em "Concluídos recentemente" e lê `executable_queue.eligible_count` e o motivo
+dos candidatos bloqueados quando não há runs ativos (USR-533).
+
 O painel `/live` (`hub/frontend/live.html` + `live.js` + `live.css`) busca esse endpoint em um
 ciclo próprio (a cada 60 s, independente do SSE da esteira) e desenha a seção "Prova da V0" na
 coluna lateral: o rótulo do cabeçalho mostra `cumprido` ou `streak/5`; cada slot preenchido mostra

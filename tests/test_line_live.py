@@ -767,3 +767,415 @@ def test_api_line_live_includes_local_runs(tmp_path: Path, seeded_local: tuple[P
     live = _run(snapshot, ids["local_live"])
     assert live.mode == "run_ticket" and live.current_stage == "agent"
     assert live.stages[2].worker == "DESKTOP-TEST"
+
+
+def test_normalize_backfills_resumed_local_stages_and_skipped_middle_phases(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    seed_line_live_demo(db, NOW)
+    _emit_local_run(
+        db, NOW, run_id="local-res-run", ticket_id="USR-611", title="Resumed running",
+        started_min_ago=5, steps=[(1, "gate", "running", "validando", None, "claude")],
+    )
+    _emit_local_run(
+        db, NOW, run_id="local-res-fail", ticket_id="USR-612", title="Resumed failed",
+        started_min_ago=8, steps=[(1, "gate", "failed", "falhou no portao", "gate_failed", "claude")],
+        finish=(2, False, "gate_failed"),
+    )
+    _emit_local_run(
+        db, NOW, run_id="local-skip-mid", ticket_id="USR-613", title="Skipped middle",
+        started_min_ago=12,
+        steps=[
+            (1, "preflight", "succeeded", "ok", None, "claude"),
+            (2, "workspace", "succeeded", "ok", None, "claude"),
+            (4, "pr", "succeeded", "pr aberto", None, "claude"),
+            (6, "merge", "succeeded", "merge ok", None, "claude"),
+        ],
+        finish=(7, True, None),
+    )
+
+    snap = _read(db)
+
+    resumed = _run(snap, "local-res-run")
+    res_map = {st.stage: st.status for st in resumed.stages}
+    assert resumed.current_stage == "gate"
+    assert resumed.current_stage_status == "running"
+    assert [res_map[p] for p in LOCAL_PHASES] == [
+        "succeeded", "succeeded", "succeeded", "running",
+        "not_reached", "not_reached", "not_reached", "not_reached", "not_reached",
+    ]
+
+    failed = _run(snap, "local-res-fail")
+    fail_map = {st.stage: st.status for st in failed.stages}
+    assert failed.state == "failed"
+    assert [fail_map[p] for p in LOCAL_PHASES] == [
+        "succeeded", "succeeded", "succeeded", "failed",
+        "not_reached", "not_reached", "not_reached", "not_reached", "not_reached",
+    ]
+
+    skipped = _run(snap, "local-skip-mid")
+    skip_map = {st.stage: st.status for st in skipped.stages}
+    assert skipped.state == "succeeded"
+    assert [skip_map[p] for p in LOCAL_PHASES] == [
+        "succeeded", "succeeded", "succeeded", "succeeded",
+        "succeeded", "succeeded", "succeeded", "succeeded", "not_reached",
+    ]
+
+
+def test_normalize_stops_at_failed_autonomous_stage_before_retrospective_and_closes_running(
+    seeded: tuple[Path, dict[str, str]],
+) -> None:
+    db, _ids = seeded
+    created = (NOW - timedelta(minutes=20)).isoformat()
+    completed = (NOW - timedelta(minutes=1)).isoformat()
+
+    _execute(
+        db,
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
+        " plan_digest, config_version, created_at, updated_at, completed_at)"
+        " VALUES (?, 'darkfac', 'USR-614', 'v1', 'cloud_dbos_postgres', 'autonomous', 'failed', 'd', 'c', ?, ?, ?)",
+        ("run-auto-fail-retro", created, completed, completed),
+    )
+    for stage, st_status, offset in [
+        ("grill", "running", 19),
+        ("planning", "succeeded", 17),
+        ("development", "failed", 15),
+        ("retrospective", "succeeded", 2),
+    ]:
+        ts = (NOW - timedelta(minutes=offset)).isoformat()
+        _execute(
+            db,
+            "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, started_at, created_at, updated_at)"
+            " VALUES (?, 'USR-614', '1.0', ?, 0, ?, 'role', ?, ?, ?)",
+            ("run-auto-fail-retro", stage, st_status, ts, ts, ts),
+        )
+
+    _execute(
+        db,
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
+        " plan_digest, config_version, created_at, updated_at, completed_at)"
+        " VALUES (?, 'darkfac', 'USR-615', 'v1', 'cloud_dbos_postgres', 'autonomous', 'active', 'd', 'c', ?, ?, NULL)",
+        ("run-auto-stale-running", created, (NOW - timedelta(minutes=2)).isoformat()),
+    )
+    for stage, offset in [("planning", 10), ("development", 2)]:
+        ts = (NOW - timedelta(minutes=offset)).isoformat()
+        _execute(
+            db,
+            "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, started_at, created_at, updated_at)"
+            " VALUES (?, 'USR-615', '1.0', ?, 0, 'running', 'role', ?, ?, ?)",
+            ("run-auto-stale-running", stage, ts, ts, ts),
+        )
+
+    _execute(
+        db,
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
+        " plan_digest, config_version, created_at, updated_at, completed_at)"
+        " VALUES (?, 'darkfac', 'USR-616', 'v1', 'cloud_dbos_postgres', 'autonomous', 'failed', 'd', 'c', ?, ?, ?)",
+        ("run-auto-leftover-running", created, completed, completed),
+    )
+    dev_ts = (NOW - timedelta(minutes=5)).isoformat()
+    _execute(
+        db,
+        "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, started_at, created_at, updated_at)"
+        " VALUES (?, 'USR-616', '1.0', 'development', 0, 'running', 'role', ?, ?, ?)",
+        ("run-auto-leftover-running", dev_ts, dev_ts, dev_ts),
+    )
+
+    snap = _read(db)
+
+    fail_retro = {st.stage: st.status for st in _run(snap, "run-auto-fail-retro").stages}
+    assert fail_retro["grill"] == "succeeded"
+    assert fail_retro["planning"] == "succeeded"
+    assert fail_retro["development"] == "failed"
+    assert fail_retro["validation"] == "not_reached"
+    assert fail_retro["independent_review"] == "not_reached"
+    assert fail_retro["integration"] == "not_reached"
+    assert fail_retro["build_deploy"] == "not_reached"
+    assert fail_retro["retrospective"] == "succeeded"
+
+    stale = _run(snap, "run-auto-stale-running")
+    stale_map = {st.stage: st.status for st in stale.stages}
+    assert stale.current_stage == "development"
+    assert stale_map["grill"] == "succeeded"
+    assert stale_map["planning"] == "succeeded"
+    assert stale_map["development"] == "running"
+
+    leftover = {st.stage: st.status for st in _run(snap, "run-auto-leftover-running").stages}
+    assert leftover["development"] == "failed"
+
+
+def test_reconciles_completed_ghost_autonomous_runs_and_keeps_fresh_local_run(
+    seeded: tuple[Path, dict[str, str]],
+) -> None:
+    db, _ids = seeded
+    old_ts = (NOW - timedelta(days=10)).isoformat()
+    recent_ts = (NOW - timedelta(days=2)).isoformat()
+
+    for run_id, demand_id, ts in [
+        ("run-ghost-old", "USR-343", old_ts),
+        ("run-ghost-recent", "USR-344", recent_ts),
+    ]:
+        _execute(
+            db,
+            "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
+            " plan_digest, config_version, created_at, updated_at, completed_at)"
+            " VALUES (?, 'darkfac', ?, 'v1', 'cloud_dbos_postgres', 'autonomous', 'active', 'd', 'c', ?, ?, NULL)",
+            (run_id, demand_id, ts, ts),
+        )
+        _execute(
+            db,
+            "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, cause_code, created_at, updated_at)"
+            " VALUES (?, ?, '1.0', 'grill', 0, 'waiting_human', 'grill', 'grill_pending', ?, ?)",
+            (run_id, demand_id, ts, ts),
+        )
+
+    _emit_local_run(
+        db, NOW, run_id="local-USR-500-recent", ticket_id="USR-500", title="Closing deploy",
+        started_min_ago=2, steps=[(1, "deploy", "running", "deploy em curso", None, "claude")],
+    )
+
+    tickets = [
+        {"id": "USR-343", "project_id": "darkfac", "status": "completed", "updated_at": (NOW - timedelta(days=1)).isoformat()},
+        {"id": "USR-344", "project_id": "darkfac", "status": "completed", "updated_at": (NOW - timedelta(hours=1)).isoformat()},
+        {"id": "USR-500", "project_id": "darkfac", "status": "completed", "updated_at": (NOW - timedelta(minutes=1)).isoformat()},
+    ]
+    snap = _read(db, tickets=tickets)
+    by_id = {r.run_id: r for r in snap.runs}
+
+    assert "run-ghost-old" not in by_id
+    recent_ghost = by_id["run-ghost-recent"]
+    assert recent_ghost.state == "cancelled"
+    assert recent_ghost.run_status == "cancelled"
+    assert recent_ghost.stages[0].status == "cancelled"
+
+    local_recent = by_id["local-USR-500-recent"]
+    assert local_recent.state == "running"
+
+
+def test_matches_fleet_reservation_by_ticket_and_detects_local_execution_stall(tmp_path: Path) -> None:
+    from core.line.local_progress import SqliteSink
+    from core.workflow.control_store import SQLiteControlStore
+    from core.workflow.execution_registry import ExecutionRegistry
+
+    db = tmp_path / "control.db"
+    seed_line_live_demo(db, NOW)
+    store = SQLiteControlStore(db)
+    store.reserve_cycle(
+        project_id="darkfac",
+        ticket_id="USR-701",
+        run_id="fleet-usr-701-other-id",
+        host_id="notebook",
+        now=NOW - timedelta(seconds=10),
+        lease_duration_sec=120,
+    )
+
+    _emit_local_run(
+        db, NOW, run_id="local-USR-701-abc", ticket_id="USR-701", title="Active with fleet reservation",
+        started_min_ago=3, steps=[(1, "gate", "running", "rodando", None, "claude")],
+    )
+    _emit_local_run(
+        db, NOW, run_id="local-USR-702-abc", ticket_id="USR-702", title="Lost execution heartbeat",
+        started_min_ago=8, steps=[(1, "agent", "running", "codificando", None, "claude")],
+    )
+    _emit_local_run(
+        db, NOW, run_id="local-USR-703-abc", ticket_id="USR-703", title="Fresh execution heartbeat",
+        started_min_ago=3, steps=[(1, "agent", "running", "codificando", None, "claude")],
+    )
+
+    lost_clock = [NOW - timedelta(minutes=6)]
+    lost_reg = ExecutionRegistry(
+        sink=SqliteSink(db), state_dir=tmp_path / "state-lost", clock=lambda: lost_clock[0], hostname="DESKTOP-TEST"
+    )
+    lost_reg.start("run_ticket", "claude", "agent", "USR-702")
+
+    fresh_clock = [NOW - timedelta(seconds=30)]
+    fresh_reg = ExecutionRegistry(
+        sink=SqliteSink(db), state_dir=tmp_path / "state-fresh", clock=lambda: fresh_clock[0], hostname="DESKTOP-TEST"
+    )
+    fresh_reg.start("run_ticket", "claude", "agent", "USR-703")
+
+    snap = _read(db)
+    r701 = _run(snap, "local-USR-701-abc")
+    assert r701.host_id == "notebook"
+    assert r701.reservation_state == "active"
+    assert r701.stalled is False
+
+    r702 = _run(snap, "local-USR-702-abc")
+    assert r702.stalled is True
+    assert "sem batimento há" in (r702.stalled_reason or "")
+
+    r703 = _run(snap, "local-USR-703-abc")
+    assert r703.stalled is False
+
+
+def test_live_js_renders_nine_local_stage_dots_and_eligible_queue_counts() -> None:
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    live_js = Path(__file__).resolve().parents[1] / "hub" / "frontend" / "live.js"
+    syntax = subprocess.run([node, "--check", str(live_js)], capture_output=True, text=True, check=False)
+    assert syntax.returncode == 0, syntax.stderr
+
+    harness = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+
+function makeNode(tag) {
+  const node = {
+    nodeType: 1,
+    tagName: String(tag || 'div').toUpperCase(),
+    className: '',
+    hidden: false,
+    textContent: '',
+    title: '',
+    innerHTML: '',
+    checked: true,
+    value: '',
+    disabled: false,
+    style: {},
+    dataset: {},
+    attributes: {},
+    children: [],
+    classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
+    setAttribute(k, v) { this.attributes[String(k)] = String(v); },
+    getAttribute(k) { return this.attributes[String(k)] ?? null; },
+    removeAttribute(k) { delete this.attributes[String(k)]; },
+    addEventListener() {},
+    remove() {},
+    focus() {},
+    append(...items) {
+      for (const item of items) {
+        if (item == null) continue;
+        this.children.push(typeof item === 'string' ? { nodeType: 3, textContent: item, children: [] } : item);
+      }
+    },
+    appendChild(item) { this.append(item); return item; },
+    insertBefore(item, ref) {
+      const idx = ref ? this.children.indexOf(ref) : -1;
+      if (idx >= 0) this.children.splice(idx, 0, item);
+      else this.children.push(item);
+      return item;
+    },
+    replaceChildren(...items) { this.children = []; this.append(...items); },
+    querySelector() { return makeNode('span'); },
+    querySelectorAll() { return []; },
+  };
+  return node;
+}
+
+function collectText(node) {
+  if (!node) return '';
+  return (node.textContent || '') + (Array.isArray(node.children) ? node.children.map(collectText).join('') : '');
+}
+
+const ids = Object.create(null);
+const listeners = Object.create(null);
+class MockEventSource {
+  constructor(url) { this.url = url; }
+  addEventListener(type, fn) { (listeners[type] ||= []).push(fn); }
+  close() {}
+}
+
+const document = {
+  hidden: false,
+  visibilityState: 'visible',
+  title: '',
+  getElementById(id) { return ids[id] || (ids[id] = makeNode('div')); },
+  createElement(tag) { return makeNode(tag); },
+  createElementNS(_ns, tag) { return makeNode(tag); },
+  createTextNode(t) { return { nodeType: 3, textContent: String(t), children: [] }; },
+  addEventListener() {},
+  querySelector() { return makeNode('div'); },
+  querySelectorAll() { return []; },
+};
+const ctx = {
+  document,
+  location: { search: '', pathname: '/live' },
+  localStorage: { getItem: () => null, setItem() {} },
+  navigator: {},
+  EventSource: MockEventSource,
+  fetch: () => new Promise(() => {}),
+  setInterval: () => 1,
+  clearInterval() {},
+  setTimeout: () => 1,
+  clearTimeout() {},
+  addEventListener() {},
+  AbortController: globalThis.AbortController,
+  console,
+  URLSearchParams,
+  Date,
+  Math,
+  JSON,
+};
+ctx.window = ctx;
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), ctx);
+const emit = listeners.snapshot[0];
+const stages = ['preflight', 'workspace', 'agent', 'gate', 'commit', 'pr', 'ci', 'merge', 'deploy'];
+
+emit({
+  data: JSON.stringify({
+    version: 'v1',
+    generated_at: '2026-10-04T15:00:00+00:00',
+    source: { backend: 'sqlite', status: 'ok' },
+    stage_order: ['grill', 'planning', 'development', 'validation', 'independent_review', 'integration', 'build_deploy', 'retrospective'],
+    local_stage_order: stages,
+    stage_labels: Object.fromEntries(stages.map((s) => [s, s])),
+    kpis: {},
+    runs: [{
+      run_id: 'local-USR-9-done',
+      ticket_id: 'USR-9',
+      demand_id: 'USR-9',
+      project_id: 'darkfac',
+      title: 'Deploy nine stages',
+      mode: 'run_ticket',
+      run_status: 'completed',
+      state: 'succeeded',
+      completed_at: '2026-10-04T14:59:00+00:00',
+      updated_at: '2026-10-04T14:59:00+00:00',
+      stages: stages.map((s) => ({ stage: s, label: s, status: 'succeeded' })),
+    }],
+    executable_queue: {
+      is_empty: false,
+      is_blocked: true,
+      blocked_count: 1,
+      eligible_count: 0,
+      candidates: [{ ticket_id: 'USR-10', eligible: false, message: 'aguardando PR #42' }],
+    },
+    backlog: [],
+    executions: { groups: [], lost: [], recent: [] },
+    events: [],
+    fleet: { hosts: [] },
+    off_line: [],
+  }),
+});
+
+assert.match(collectText(ids['lanes-empty']), /aguardando PR #42/);
+const doneDots = ids['done-list'].children[0].children.find((c) => c.className === 'done-extra').children.find((c) => c.className === 'dots');
+assert.equal(doneDots.children.length, 9);
+
+emit({
+  data: JSON.stringify({
+    version: 'v2',
+    generated_at: '2026-10-04T15:01:00+00:00',
+    source: { backend: 'sqlite', status: 'ok' },
+    stage_order: [],
+    local_stage_order: stages,
+    stage_labels: {},
+    kpis: {},
+    runs: [],
+    executable_queue: { is_empty: false, is_blocked: false, eligible_count: 3, candidates: [] },
+    backlog: [],
+    executions: { groups: [], lost: [], recent: [] },
+    events: [],
+    fleet: { hosts: [] },
+    off_line: [],
+  }),
+});
+assert.match(collectText(ids['lanes-empty']), /3 ticket\(s\) pronto\(s\)/);
+"""
+    run = subprocess.run([node, "-e", harness, str(live_js)], capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr + run.stdout

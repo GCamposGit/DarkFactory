@@ -284,7 +284,16 @@ def _apply(
         if (state.last_phase, state.last_status, state.last_message) == (name, status, message):
             return f"fase {name} {status} ja registrada (nada a publicar)"
         previous = pub.active_phase
-        if status == "running" and previous not in (None, name):
+        should_close_previous = previous not in (None, name) and (
+            status == "running"
+            or (
+                status == "succeeded"
+                and previous in PHASES
+                and name in PHASES
+                and PHASES.index(previous) < PHASES.index(name)
+            )
+        )
+        if should_close_previous:
             pub.phase(previous, "succeeded", f"encerrada ao iniciar {name}")  # type: ignore[arg-type]
         pub.phase(name, status, message, cause=args.cause, worker=args.stage_worker)  # type: ignore[arg-type]
         state.last_phase, state.last_status, state.last_message = name, status, message
