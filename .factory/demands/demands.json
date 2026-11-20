@@ -14942,8 +14942,8 @@
     "project_id": "darkfac",
     "title": "Isolar hostname local em tests/test_remote_dispatch.py quando executado no worker DESKTOP-G45IPEM",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "49eb3ff4096394863ba948139a2561c61d464738",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14966,6 +14966,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-20T04:03:23.304649Z",
-    "updated_at": "2026-11-20T04:03:23.304649Z"
+    "updated_at": "2026-11-20T15:56:55.115883Z"
   }
 ]
