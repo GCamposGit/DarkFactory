@@ -604,6 +604,56 @@ def test_read_mode_with_output_schema_uses_json_and_extracts_structured_output(
     assert result.usage == {"input_tokens": 1200, "output_tokens": 45}
     assert result.cost_usd == pytest.approx(0.042)
     assert result.model == "grok-4.6" and result.model_source == "provider_reported"
+    assert result.structured_output_incomplete is False
+
+
+def test_structured_intermediate_review_envelope_is_marked_incomplete_and_keeps_telemetry(
+    install_fake, tmp_path: Path
+) -> None:
+    """Reproduce the Grok envelope from USR-535: progress text plus synthetic changes_required JSON."""
+    payload = {
+        "text": "Reading SPEC, tickets, candidate.diff, and every changed file before judging",
+        "structuredOutput": {"verdict": "changes_required", "blocking": [], "non_blocking": []},
+        "usage": {"input_tokens": 1400, "output_tokens": 26},
+        "total_cost_usd": 0.031,
+        "modelUsage": {
+            "grok-4.7-build": {
+                "inputTokens": 1400, "outputTokens": 26, "costUSD": 0.031, "reasoningEffort": "high",
+            }
+        },
+    }
+    install_fake(stdout=json.dumps(payload))
+    schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+
+    result = run_agent(AgentRequest(
+        prompt="review this", cwd=tmp_path, mode="read", harness="grok",
+        model="grok-4.7", effort="high", output_schema=schema,
+    ))
+
+    assert result.ok is True
+    assert result.structured_output_incomplete is True
+    assert json.loads(result.text) == payload["structuredOutput"]
+    assert result.usage == payload["usage"]
+    assert result.cost_usd == pytest.approx(0.031)
+    assert result.model == "grok-4.7-build" and result.effort == "high"
+    assert result.exit_code == 0
+
+
+def test_structured_output_with_conflicting_text_verdict_is_marked_incomplete(
+    install_fake, tmp_path: Path
+) -> None:
+    payload = {
+        "text": "Review complete: approve; no blocking findings.",
+        "structuredOutput": {"verdict": "changes_required", "blocking": [], "non_blocking": []},
+    }
+    install_fake(stdout=json.dumps(payload))
+    schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+
+    result = run_agent(AgentRequest(
+        prompt="review this", cwd=tmp_path, mode="read", harness="grok", output_schema=schema,
+    ))
+
+    assert result.structured_output_incomplete is True
 
 
 def test_read_mode_with_output_schema_classifies_json_error_object(

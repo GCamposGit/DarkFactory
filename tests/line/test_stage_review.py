@@ -21,7 +21,7 @@ from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import load_routing_config
 from core.line.routing import pick as real_pick
-from core.line.stage_review import ReviewStage
+from core.line.stage_review import ReviewStage, _candidate_digest
 from core.projects.models import ProjectDescriptor
 from tests.line.conftest import copy_bare_origin, make_fake_cli, set_fake_response
 
@@ -369,6 +369,85 @@ def test_invalid_review_response_excludes_harness_for_same_candidate_and_fails_o
     )
     assert calls == ["claude", "codex"]
     assert (ctx / "review_verdict.json").is_file()
+
+
+def test_grok_intermediate_response_fails_over_without_consuming_review_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-grok-intermediate-review"
+    ws = _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+    ctx = ws_mod.context_dir(ws)
+    progress_before = (ctx / "progress.json").read_bytes()
+    validation_before = (ctx / "validation.json").read_bytes()
+    digest_before = _candidate_digest(ws, "main")
+
+    picks: list[list[object]] = []
+    choices = [("grok", None), ("codex", None)]
+
+    def picking(_stage, _caps, *, exclude=(), **_kwargs):
+        excluded = list(exclude)
+        picks.append(excluded)
+        return next((route for route in choices if route[0] not in excluded and route not in excluded), None)
+
+    calls: list[str] = []
+
+    def agent(req: AgentRequest) -> AgentResult:
+        calls.append(req.harness)
+        if req.harness == "grok":
+            # USR-535 envelope: schema-shaped structuredOutput paired with progress text.
+            return AgentResult(
+                ok=True,
+                text=json.dumps({
+                    "verdict": "changes_required", "blocking": [], "non_blocking": [],
+                }),
+                harness="grok", duration_s=0.01, structured_output_incomplete=True,
+            )
+        return AgentResult(
+            ok=True,
+            text=json.dumps({
+                "verdict": "changes_required",
+                "blocking": [{"file": "feature.py", "line": 1, "issue": "real defect", "fix": "correct it"}],
+                "non_blocking": [],
+            }),
+            harness="codex", duration_s=0.01,
+        )
+
+    stage = ReviewStage(run_agent_func=agent, pick_func=picking, routing_config=load_routing_config())
+
+    first = stage.run(project, run_id)
+
+    assert first.outcome == "retry"
+    assert first.cause_code == "review_incomplete_response:harness=grok:next=codex"
+    assert calls == ["grok"]
+    assert (ctx / "progress.json").read_bytes() == progress_before
+    assert (ctx / "validation.json").read_bytes() == validation_before
+    assert _candidate_digest(ws, "main") == digest_before
+    assert not (ctx / "review-1.md").exists()
+    assert not (ctx / "review_verdict.json").exists()
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["rounds"] == []
+    assert state["incomplete_response_routes"][0]["harness"] == "grok"
+    assert state["incomplete_response_routes"][0]["candidate_digest"] == digest_before
+    diagnostic = json.loads((ctx / "review_invalid_response.json").read_text(encoding="utf-8"))
+    assert diagnostic["reason"] == "structured_output_incomplete"
+    attempts = json.loads((ctx / "review_attempts.json").read_text(encoding="utf-8"))
+    assert attempts[-1]["failure"] == "structured_output_incomplete"
+    assert attempts[-1]["provider_ok"] is True
+
+    second = stage.run(project, run_id)
+
+    assert second.outcome == "retry"
+    assert second.cause_code.startswith("retry:development\nchanges_required:round=1")
+    assert calls == ["grok", "codex"]
+    assert picks[1] == ["grok"]
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert [round_["round"] for round_ in state["rounds"]] == [1]
+    assert state["rounds"][0]["verdict"] == "changes_required"
+    assert (ctx / "review-1.md").is_file()
+    assert not (ctx / "review-2.md").exists()
+    assert not (ctx / "review_verdict.json").exists()
 
 
 def test_invalid_review_exclusion_expires_when_candidate_changes(

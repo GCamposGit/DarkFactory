@@ -15364,5 +15364,37 @@
     "dependencies": [],
     "created_at": "2026-11-15T09:26:24.926860Z",
     "updated_at": "2026-11-27T08:55:14.077345Z"
+  },
+  {
+    "id": "USR-537",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Tratar resposta intermediaria do Grok como revisao incompleta",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "O artefato .factory/artifacts/ticket_runs/USR-535/.darkfac/runs/USR-535/review-3.md registra changes_required e a mensagem Reading SPEC, tickets, candidate.diff, and every changed file before judging como unico bloqueio. Nao ha achado sobre o candidato e a linha esgota a revisao. Investigar o contrato de resposta do adaptador e da etapa de revisao.",
+    "core_journey": [
+      "O artefato .factory/artifacts/ticket_runs/USR-535/.darkfac/runs/USR-535/review-3.md registra changes_required e a mensagem Reading SPEC, tickets, candidate.diff, and every changed file before judging como unico bloqueio. Nao ha achado sobre o candidato e a linha esgota a revisao. Investigar o contrato de resposta do adaptador e da etapa de revisao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir o evento real de resposta intermediaria e distingui-lo de um veredito final com achados.",
+      "Resposta intermediaria isolada aciona recuperacao de rota, preserva o candidato e nao consome rodada de correcao como se houvesse defeito no codigo.",
+      "Revisao independente continua obrigatoria. Veredito final com achados permanece bloqueante."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T06:06:55.097578Z",
+    "updated_at": "2026-11-21T06:06:55.097578Z"
   }
 ]

@@ -206,6 +206,9 @@ class AgentResult(BaseModel):
     usage: Optional[dict[str, Any]] = None
     # OpenRouter ``finish_reason``. ``length`` means the completion hit the token cap.
     finish_reason: Optional[str] = None
+    # A structured Grok response can contain an interim `text` update alongside a
+    # schema-shaped but not yet final `structuredOutput` (USR-537).
+    structured_output_incomplete: bool = False
     # True when that reason is ``length`` or ``completion_tokens`` reached the paid ceiling.
     truncated: bool = False
     cost_usd: Optional[float] = None
@@ -1725,6 +1728,53 @@ def _build_grok_read_argv(executable: str, req: AgentRequest) -> list[str]:
     return argv
 
 
+_GROK_INTERIM_REVIEW_PATTERN = re.compile(
+    r"\b(?:before|until|once|after)\b.{0,100}\b(?:judg\w*|decid\w*|conclud\w*|finaliz\w*)\b"
+    r"|\b(?:i(?:'m| am) still|i(?:'ll| will)|let me|currently)\b.{0,100}"
+    r"\b(?:read\w*|inspect\w*|review\w*|check\w*|examin\w*)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_GROK_FINAL_REVIEW_PATTERN = re.compile(
+    r"\b(?:approve(?:d)?|changes?[_ ]required|reject(?:ed)?|blocking findings?)\b",
+    re.IGNORECASE,
+)
+
+
+def _grok_structured_output_is_incomplete(parsed: dict[str, Any], structured: Any) -> bool:
+    """Identify an interim status envelope that carries a premature schema object.
+
+    Grok's JSON envelope has both a user-facing `text` and `structuredOutput`. A
+    final JSON repeated in `text`, or a text verdict that agrees with the JSON,
+    is evidence of a completed response. Progress text without such evidence is
+    not a final review, even when the structured field happens to validate.
+    """
+    text = parsed.get("text")
+    if not isinstance(text, str) or not text.strip() or not isinstance(structured, dict):
+        return False
+
+    verdict = structured.get("verdict")
+    normalized_verdict = str(verdict).strip().lower().replace(" ", "_") if verdict is not None else ""
+    for match in re.finditer(r"\{", text):
+        try:
+            candidate, _end = json.JSONDecoder().raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and candidate == structured:
+            return False
+
+    final_match = _GROK_FINAL_REVIEW_PATTERN.search(text)
+    if final_match:
+        phrase = final_match.group(0).lower().replace(" ", "_")
+        if normalized_verdict == "approve" and phrase.startswith("approve"):
+            return False
+        if normalized_verdict == "changes_required" and phrase.startswith(("change", "blocking", "reject")):
+            return False
+        # Text explicitly states a different outcome than the structured result.
+        return True
+
+    return bool(_GROK_INTERIM_REVIEW_PATTERN.search(text))
+
+
 def _parse_grok_structured_read(
     req: AgentRequest,
     output_text: str,
@@ -1747,6 +1797,10 @@ def _parse_grok_structured_read(
 
     is_error = parsed.get("type") == "error"
     structured = parsed.get("structuredOutput") if "structuredOutput" in parsed else parsed.get("structured_output")
+    structured_incomplete = (
+        _grok_structured_output_is_incomplete(parsed, structured)
+        if structured is not None and not is_error else False
+    )
     if structured is not None and not is_error:
         result_text = json.dumps(structured, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     else:
@@ -1769,7 +1823,8 @@ def _parse_grok_structured_read(
     return AgentResult(
         ok=True, text=redact_secrets(result_text), harness="grok",
         model=model, model_source=model_source, effort=effort,
-        duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
+        duration_s=duration, usage=usage, cost_usd=cost_usd,
+        structured_output_incomplete=structured_incomplete, **diag,
     )
 
 

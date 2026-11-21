@@ -500,6 +500,15 @@ resposta truncada recusa como `review_output_truncated`.
 Somente uma resposta completa, com `truncated=false`, pode sustentar aprovação; saída
 truncada não é evidência de revisão concluída.
 
+Uma resposta Grok marcada como `structured_output_incomplete` é uma entrega real,
+mas ainda intermediária. O estágio registra a resposta como inválida, exclui somente
+o par harness/modelo daquela tentativa para o mesmo digest do candidato e política,
+e seleciona outro revisor independente. Ela não cria rodada, `review-N.md` ou
+`review_verdict.json`, nem volta ao desenvolvimento. Candidato, `progress.json` e
+`validation.json` permanecem iguais durante a cascata ou espera por rota. Somente
+um veredito final válido pode aprovar; `changes_required` final com achados continua
+bloqueando e consumindo uma rodada de correção.
+
 O evento de uso atribui `ticket_id` a partir da requisição ou de `DARKFAC_TICKET_ID`
 para relacionar tokens e custo ao ticket. Se essa identidade não puder ser determinada, a
 atribuição fica ausente e deve ser tratada como lacuna de evidência, sem inferência a

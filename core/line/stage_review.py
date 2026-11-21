@@ -187,6 +187,8 @@ class ReviewState(BaseModel):
     invalid_response_routes: list[dict[str, str]] = Field(default_factory=list)
     # USR-512: infrastructure failures are scoped the same way, one harness/model pair at a time.
     failed_routes: list[dict[str, str]] = Field(default_factory=list)
+    # USR-537: a Grok progress envelope is a real delivery, but not a final verdict.
+    incomplete_response_routes: list[dict[str, str]] = Field(default_factory=list)
 
 
 def _load_prompt_template(name: str, fallback: str) -> str:
@@ -486,9 +488,15 @@ def _activate_exclusions(state: ReviewState, candidate: str, policy: str) -> boo
     """Drop exclusions from another candidate or policy. True when the state changed."""
     invalid = _scoped_routes(state.invalid_response_routes, candidate, policy)
     failed = _scoped_routes(state.failed_routes, candidate, policy)
-    changed = invalid != state.invalid_response_routes or failed != state.failed_routes
+    incomplete = _scoped_routes(state.incomplete_response_routes, candidate, policy)
+    changed = (
+        invalid != state.invalid_response_routes
+        or failed != state.failed_routes
+        or incomplete != state.incomplete_response_routes
+    )
     state.invalid_response_routes = invalid
     state.failed_routes = failed
+    state.incomplete_response_routes = incomplete
     return changed
 
 
@@ -530,6 +538,11 @@ def _exclude_tokens(state: ReviewState, candidate: str, policy: str) -> list[Any
             continue
         model = item.get("model") or ""
         add((harness, model) if model else harness)
+    for item in _scoped_routes(state.incomplete_response_routes, candidate, policy):
+        harness = item.get("harness") or ""
+        model = item.get("model") or ""
+        if harness:
+            add((harness, model) if model else harness)
     return tokens
 
 
@@ -937,6 +950,36 @@ class ReviewStage:
             cause_for=lambda nxt: f"review_invalid_json:harness={harness}:next={nxt.harness}",
         )
 
+    def _retry_incomplete_response(
+        self,
+        ws: RunWorkspace,
+        state: ReviewState,
+        *,
+        project: ProjectDescriptor,
+        run_id: str,
+        harness: str,
+        model: Optional[str],
+        text: str,
+        candidate_digest: str,
+        policy_digest: str,
+        implementing_harness: Optional[str],
+    ) -> StageResult:
+        """Record a real progress-only delivery and route around that exact route."""
+        _record_invalid_response(
+            ws, harness=harness, text=text, reason="structured_output_incomplete",
+        )
+        _remember_route(
+            state.incomplete_response_routes, harness=harness, model=model,
+            candidate=candidate_digest, policy=policy_digest,
+        )
+        _write_review_state(ws, state)
+        excluded = _exclude_tokens(state, candidate_digest, policy_digest)
+        return self._retry_or_wait(
+            project, run_id, ws=ws, implementing_harness=implementing_harness,
+            excluded=excluded,
+            cause_for=lambda nxt: f"review_incomplete_response:harness={harness}:next={nxt.harness}",
+        )
+
     def _handle_agent_failure(
         self,
         ws: RunWorkspace,
@@ -1104,6 +1147,17 @@ class ReviewStage:
             return self._handle_agent_failure(
                 ws, state, agent_result, project=project, run_id=run_id,
                 harness=harness, model=model, candidate_digest=cur_candidate,
+                policy_digest=cur_policy, implementing_harness=implementing_harness,
+            )
+
+        if agent_result.structured_output_incomplete:
+            self._observe_review_turn(
+                ws, observed, schema_valid=False, real_delivery=True,
+                failure="structured_output_incomplete",
+            )
+            return self._retry_incomplete_response(
+                ws, state, project=project, run_id=run_id, harness=harness, model=model,
+                text=agent_result.text, candidate_digest=cur_candidate,
                 policy_digest=cur_policy, implementing_harness=implementing_harness,
             )
 
