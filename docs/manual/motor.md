@@ -581,3 +581,6 @@ a mesma assinatura estrutural (detalhes operacionais em
   `_publish_resumed_prior_phases` emite `preflight`, `workspace` e `agent` como `succeeded` depois de
   validar `PLAN`, `RESEARCH` e `BUILD`; quando `reuse_validation` reaproveita o portao vigente, a
   entrega emite `gate` como `succeeded` (USR-533).
+# Prioridade ao criar uma demanda pela CLI
+
+`run_ticket.py --create` aceita `--priority <inteiro>` (padrão `0`) e persiste o valor no ticket criado. Use valores maiores para colocar trabalho elegível antes na fila. O dispatcher aplica a prioridade depois de seus filtros de dependência, reserva e recuperação; o argumento não força a execução de um ticket bloqueado.

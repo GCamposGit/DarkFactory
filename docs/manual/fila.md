@@ -251,3 +251,6 @@ tratar o store como desconfigurado.
 - `OwnerActionDraft` (`core/owner_actions/models.py`) valida comandos em passos destinados ao owner para
   rejeitar invocacoes relativas dependentes de `CWD` (`git <subcmd>` sem `-C <abs>`, script `.py` relativo
   ou `python -m core.*` sem `Set-Location <abs>`), mantendo leitura retrocompatível de `OwnerAction` historicas.
+# Prioridade explícita na entrada
+
+Demandas podem carregar `priority` numérico. O intake autônomo do Hub encaminha esse valor ao registro da demanda, e `run_ticket.py --create --priority <valor>` permite defini-lo na criação pela CLI (padrão `0`). Valores maiores indicam prioridade maior. A prioridade afeta a ordem de seleção do dispatcher entre tickets elegíveis; não remove dependências nem critérios de admissão.

@@ -675,3 +675,8 @@ A recusa da etapa DOCS (docs-sync) sai como `docs_sync_failed`, causa de candida
 Relancamento pelo despachante (USR-447): se a worktree preservada do ticket tem commits a frente de `origin/main` e plano valido (`SPEC.md` e `tickets.json` na worktree ou em `state_root()/artifacts/ticket_runs/<id>/.darkfac/runs/<id>`), `default_launch` acrescenta `--resume-delivery --worktree <caminho>` ao comando da frota; sem isso o ticket e relancado inteiro.
 
 A varredura diaria de worktrees orfas (`maybe_run_scheduled`) reside no dominio `core/git/orphan_worktree_cleanup.py` consumido por `core/line/fleet_dispatcher.py`, enquanto `scripts/cleanup_orphan_worktrees.py` permanece apenas como launcher CLI (sem imports de `scripts` em `core/`, `USR-531`).
+# Prioridade e continuidade de entrega
+
+Na seleção regular, o dispatcher ordena tickets elegíveis por prioridade numérica decrescente. Empates preservam a ordem de criação e, em seguida, o ID, mantendo o resultado estável. A prioridade não altera dependências, reservas, bloqueios, faixas de recuperação ou o modo `resume-only`.
+
+Após um merge que ainda aguarda deploy, o dispatcher grava a entrega em `pending_deliveries.json`, vinculada ao ticket, run e digest do candidato. Um processo novo recupera esse diário e conclui o deploy pendente antes de admitir trabalho regular. Só um deploy canônico bem-sucedido marca a entrada como entregue e permite anexar recibo/evidências; falhas preservam a espera para uma nova tentativa.
