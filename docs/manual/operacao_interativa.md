@@ -1,4 +1,4 @@
-<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py -->
+<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/notifications/telegram_delivery.py, scripts/telegram_delivery_check.py -->
 # Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
 ## Assumir a coordenação
@@ -241,6 +241,24 @@ O preflight do Claude consulta os servidores opcionais em `~/.claude.json`. Arqu
 ou inacessivel, inclusive quando a consulta de existencia recebe `PermissionError`, e tratado
 como configuracao opcional indisponivel e nao interrompe a execucao do ticket. Para exigir o
 modo MCP estrito explicitamente, use `DARKFAC_STRICT_MCP_CONFIG=1`.
+
+## Diagnostico e replay de alerta no Telegram (USR-536)
+
+O canal Telegram do owner entrega o alerta operacional pelo bot `owner` ao primeiro destino efetivo: `authorized_chat_ids` e, se a lista ficar vazia, `authorized_user_ids`. Zero nao e destino. O comando localiza o `NotificationEvent` pelo `notification_id`. Sem token ou sem destino a execucao e recusada (codigo 2) e a saida nao traz token, chat, titulo nem texto.
+
+Diagnostico, sem chamar `sendMessage`:
+
+```powershell
+python C:\dev\DarkFac\scripts\telegram_delivery_check.py --notification-id notif_3e46d90ee946
+```
+
+Replay. A segunda execucao do mesmo `notification_id` devolve `already_delivered` e nao chama `sendMessage` de novo. Falha transitoria permanece no outbox; timeout ambiguo fica `uncertain` e tambem nao e reenviado.
+
+```powershell
+python C:\dev\DarkFac\scripts\telegram_delivery_check.py --notification-id notif_3e46d90ee946 --replay
+```
+
+Estado consolidado do canal Telegram: o alerta usa o bot owner e o primeiro destino efetivo de `load_telegram_config` (ambiente do processo ou `.env` do checkout; id zero fica de fora). Sem token ou sem destino o comando recusa e nao chama `sendMessage`. O diagnostico de `notif_3e46d90ee946` neste processo encontrou o evento e recusou com `missing_token`, sem imprimir titulo, texto, token ou chat. Quando token e destino existem, o replay imprime `notification_id`, `role`, `message_id` e `timestamp`; a execucao seguinte do mesmo id devolve `already_delivered`.
 
 ## Checkpoint de BUILD e recuperacao de rebase (USR-475)
 

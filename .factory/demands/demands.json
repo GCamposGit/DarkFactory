@@ -14967,5 +14967,36 @@
     "dependencies": [],
     "created_at": "2026-11-20T04:03:23.304649Z",
     "updated_at": "2026-11-20T15:56:55.115883Z"
+  },
+  {
+    "id": "USR-536",
+    "project_id": "darkfac",
+    "title": "Restaurar alertas operacionais no Telegram apos HTTP 400",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "faf0b9ae7b7446429a8f8c4b70299cb1ce9bc03b",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21/11/2026, USR-446-notebook.log registrou HTTP 400 ao enviar alertas, inclusive na tentativa sem HTML. O alerta critico notif_3e46d90ee946 ficou no outbox, tambem houve ocorrencias nos logs de USR-519 e USR-535. Investigar com diagnostico sanitizado e recuperar a entrega pelo bot configurado.",
+    "core_journey": [
+      "Em 21/11/2026, USR-446-notebook.log registrou HTTP 400 ao enviar alertas, inclusive na tentativa sem HTML. O alerta critico notif_3e46d90ee946 ficou no outbox, tambem houve ocorrencias nos logs de USR-519 e USR-535. Investigar com diagnostico sanitizado e recuperar a entrega pelo bot configurado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Classificar o motivo da resposta 400 sem registrar token ou dados privados.",
+      "Confirmar o percurso do alerta ate o destino configurado com recibo real.",
+      "Preservar o outbox para falhas transitorias e evitar reenvio duplicado."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T06:06:02.537134Z",
+    "updated_at": "2026-11-21T10:31:39.281633Z"
   }
 ]
