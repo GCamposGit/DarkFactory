@@ -14973,8 +14973,8 @@
     "project_id": "darkfac",
     "title": "Restaurar alertas operacionais no Telegram apos HTTP 400",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "faf0b9ae7b7446429a8f8c4b70299cb1ce9bc03b",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -14997,6 +14997,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-21T06:06:02.537134Z",
-    "updated_at": "2026-11-21T06:06:02.537134Z"
+    "updated_at": "2026-11-21T10:31:39.281633Z"
   }
 ]
