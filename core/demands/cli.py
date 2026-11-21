@@ -23,7 +23,7 @@ from core.paths import state_root
 from core.roadmap.models import DeliveryStatus, PlanningHorizon, RoadmapItemType
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Dark Factory User Demands & Backlog CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -109,7 +109,11 @@ def main() -> int:
     boot_p.add_argument("--kind", choices=["greenfield", "brownfield"], default="greenfield", help="Bootstrap mode")
     boot_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
     service = build_default_demands_service(PROJECT_ROOT)
 
     if args.command == "guide":
@@ -360,6 +364,7 @@ def main() -> int:
                     "journey": args.journey,
                     "non_goals": args.non_goals,
                     "criteria": args.criteria,
+                    "priority": args.priority,
                 },
                 mode=args.mode,
                 policy_ref="policy-v1",

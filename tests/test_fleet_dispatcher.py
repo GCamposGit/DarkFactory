@@ -1822,7 +1822,7 @@ def test_recovery_success_requires_merge_receipt(tmp_path: Path, monkeypatch):
     assert cycle["recovery"]["successes"] == 1
     assert json.loads((directory / "deploy_report.json").read_text(encoding="utf-8"))["deployed"] is True
     assert e.deploys == 2 and not e.d.pending_releases
-    assert e.launched == [("USR-01", "grokbox")]
+    assert e.launched == [("USR-01", "grokbox"), ("USR-02", "notebook")]
 
 
 def test_recovery_rejects_missing_production_receipt_and_persists_cause(tmp_path: Path):

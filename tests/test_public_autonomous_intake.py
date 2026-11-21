@@ -226,6 +226,8 @@ def test_cli_intake_subprocess_success(tmp_path: Path) -> None:
         "Exit 0 and valid JSON",
         "--external-id",
         "ext-cli-001",
+        "--priority",
+        "17",
         "--store-path",
         str(db_path),
         "--json",
@@ -247,6 +249,7 @@ def test_cli_intake_subprocess_success(tmp_path: Path) -> None:
     assert out["run_id"].startswith("run-")
     assert out["initial_job_id"].startswith("job-")
     assert out["mode"] == "autonomous"
+    assert out["ticket"]["priority"] == 17
 
     # Verify job exists in DB
     store = SQLiteControlStore(db_path=db_path)

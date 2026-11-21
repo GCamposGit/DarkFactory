@@ -2106,7 +2106,8 @@ class FleetDispatcher:
         if durable_delivery_wait and not deployed_resume:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(),
                                        "resumptions": resumptions, "dispatched": [],
-                                       "deployed": False, "delivery_wait": True})
+                                       "deployed": False, "deployed_this_cycle": False,
+                                       "delivery_wait": True, "recovery": self._recovery_summary()})
         if self.config.resume_only:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
                                        "resumptions": resumptions, "dispatched": [],
@@ -2195,21 +2196,24 @@ class FleetDispatcher:
             "queue_remaining": queue,
             "cooldown": sorted(tid for tid, reason in skipped.items() if reason == "backoff_infra"),
             "deploys_total": self.deploys,
-            "deployed_this_cycle": deployed,
+            "deployed_this_cycle": deployed or deployed_resume,
             "demands_error": load_error,
             "recent_failures": self.failures,
             "deploy_deferral": self.deploy_deferral_snapshot(),
             "ticket_holds": self._ticket_holds(),
             "recovery_list": {k: v for k, v in recovery_list.items() if k != "live"},
-            "recovery": {"active": bool(self.recovery.get("active")),
-                         "cause": self.recovery.get("cause", ""),
-                         "fingerprint": self.recovery.get("fingerprint", ""),
-                         "successes": self.recovery.get("successes", 0),
-                         "receipt_cause": self.recovery.get("receipt_cause", ""),
-                         "receipt_digest": self.recovery.get("receipt_digest", ""),
-                         "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")},
+            "recovery": self._recovery_summary(),
             "reconciled": reconciled,
         })
+
+    def _recovery_summary(self) -> dict[str, Any]:
+        return {"active": bool(self.recovery.get("active")),
+                "cause": self.recovery.get("cause", ""),
+                "fingerprint": self.recovery.get("fingerprint", ""),
+                "successes": self.recovery.get("successes", 0),
+                "receipt_cause": self.recovery.get("receipt_cause", ""),
+                "receipt_digest": self.recovery.get("receipt_digest", ""),
+                "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")}
 
     def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
         self._record_queue_blockage(cycle)
