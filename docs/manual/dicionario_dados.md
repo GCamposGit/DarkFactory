@@ -56,3 +56,40 @@ Autorizacoes assinadas pelo owner para alterar paths protegidos. Le: `core/gover
 | `.factory/reviews/**/*.json` (11) | Pacotes de revisao `hf-critical-20260909` e `hf-wave1-luna` (validacao, dispositions, delta). | historico; `scripts/run_deepseek_review.py` grava em `.factory/reviews` | revisores e `scripts/run_deepseek_review.py` | `schema_version`, `scope`, `files`, `harness`, `count_delta`, `head` |
 | `.factory/reports/**/*.json` (2) | Relatorio de aceite da linha e evidencias de revisao de projeto. | `core/line/acceptance.py` | `core/line/acceptance.py` | `review_date`, `base_commit`, `validation`, `probes`, `inventory` |
 | `.factory/planning/**/*.json` (12) | Pacote de planejamento `continuous-autonomy` (plan, bindings, handoff, integridade, validacao, recibos) e `hf01-hf02-handoffs.json`. | `core/demands/specifier.py`, `core/roadmap/sources.py`, `core/workflow/*_handler.py`, `core/learning/research_dispatch.py` | planejador (modelo `opus`) | `schema_version`, `ticket_id`, `baseline_sha`, `environment_profile`, `depends_on`, `artifacts` |
+
+## Outbox do Telegram (runtime, nao versionado)
+
+O arquivo vive em `.factory/telegram/outbox.json`, `outbox_owner.json` ou `outbox_ops.json` (ou `<state>_outbox.json` quando o gateway recebe `state_file`). `.gitignore` ignora `.factory/telegram/*.json` fora de `config.example.json`, entao este JSON nao entra na linha `paths:`. Quem le e escreve e `core/integrations/telegram.py` (`TelegramGateway`). A gravacao escreve um temporario no mesmo diretorio e troca com `os.replace`. Uma falha no meio deixa o arquivo anterior inteiro.
+
+O conteudo e uma lista. A chave estavel de cada item e `notification_id|role|chat_id` (`key`). Um enqueue repetido da mesma chave atualiza a linha; nao cria outra. `role` e `owner`, `ops` ou `all`. `chat_id` `0` nao e destino.
+
+| Campo | Significado |
+|---|---|
+| `notification_id` | Id original do alerta (`notif_` + hex). O `NotificationService` repassa esse id e nao gera outro no envio. |
+| `role` | Papel do bot que deve entregar. |
+| `chat_id` | Destino numerico. |
+| `key` | `notification_id\|role\|chat_id`. |
+| `text` | Corpo ja redatado. Nao guarda token. |
+| `buttons` | Teclado inline, ou nulo. |
+| `parse_mode` | `HTML` ou vazio depois de uma tentativa sem formatacao. |
+| `created_at` | ISO-8601 da primeira entrada. |
+| `updated_at` | ISO-8601 da ultima mudanca. |
+| `status` | `pending`, `sending`, `delivered`, `uncertain` ou `permanent`. |
+| `failure_reason` | Categoria sanitizada, por exemplo `category=transient`. Sem corpo HTTP e sem segredo. |
+| `message_id` | Id da mensagem no Telegram depois do recibo. Nulo antes disso. |
+| `delivered_at` | ISO-8601 do recibo. |
+| `fingerprint` | SHA-256 truncado (16 hex) do texto redatado. Nao e o texto nem o token. |
+| `delivered` | Espelho de `status=delivered`, para leitura antiga. |
+| `claim_token` | Preenchido so em `sending`. |
+| `claim_pid` | PID do worker que reivindicou. |
+| `claimed_at` | ISO-8601 da reivindicacao. |
+
+Estados:
+
+- `pending`: falha transitoria ou ausencia de token. O `replay_outbox` pode enviar. Reiniciar o processo nao apaga a linha.
+- `sending`: um replay reivindicou a linha. Outro replay concorrente nao pega a mesma linha. Se o PID morre ou a reivindicacao passa de 120 s, ela volta a `pending`.
+- `delivered`: recibo confirmado. Guarda `message_id`, `delivered_at` e `fingerprint`. A mesma chave nao chama `sendMessage` de novo.
+- `uncertain`: timeout ambiguo (`TimeoutError` / `socket.timeout` durante a leitura). A requisicao pode ter chegado. Nao e reenviada por `send_message` nem por `replay_outbox`.
+- `permanent`: erro HTTP definitivo encontrado no replay. Nao volta para a fila.
+
+`NotificationService` so acrescenta `telegram` em `delivered_channels` depois do recibo. Falha do envio, ou ausencia do bot, acrescenta `telegram_outbox` e nao marca `telegram`. Destino ausente nao entra no outbox e nao usa esse canal.
