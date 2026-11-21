@@ -976,7 +976,7 @@ class GitAutonomyManager:
     def _record_completion(
         self, ticket_id: str, title: str, cwd: Path, custom_message: str | None = None
     ) -> str:
-        """Commit implementation, then atomically record its SHA and completed status.
+        """Commit implementation and record its candidate SHA without closing the ticket.
 
         The canonical row is the worktree ledger or, when that id is missing, the
         durable queue (USR-424). A missing ledger file with no queue row keeps the
@@ -991,18 +991,22 @@ class GitAutonomyManager:
         ticket = store.resolve_for_delivery(ticket_id)
         if ticket is None:
             raise TicketAbsentError(ticket_id)
-        if ticket.status == DeliveryStatus.COMPLETED and ticket.delivery_evidence:
+        evidence = ticket.delivery_evidence or ""
+        has_merge_proof = ":merged:" in evidence
+        has_live_proof = any(marker in evidence for marker in ("live_converged", "live_verified"))
+        if ticket.status == DeliveryStatus.COMPLETED and has_merge_proof and (
+            not ticket.is_live_deploy or has_live_proof
+        ):
             if self.is_dirty(cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
             return self.get_current_sha(cwd)
         if self.is_dirty(cwd):
             self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
         implementation_sha = self.get_current_sha(cwd)
-        ticket.status = DeliveryStatus.COMPLETED
-        if ticket.is_live_deploy:
-            ticket.delivery_evidence = f"{implementation_sha}:live_provisional"
-        else:
-            ticket.delivery_evidence = implementation_sha
+        if ticket.status == DeliveryStatus.COMPLETED:
+            # A legacy terminal row without merge/deploy proof is not canonical completion.
+            ticket.status = DeliveryStatus.PLANNED
+        ticket.delivery_evidence = f"candidate:{implementation_sha}"
         ticket.updated_at = datetime.now(timezone.utc)
         store.save_ticket(ticket)
         return self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message) or implementation_sha
@@ -1672,11 +1676,40 @@ class GitAutonomyManager:
             )
             if delivery_error:
                 return delivery_error
+        if not delivery or not delivery.ok or delivery.action != "merged" or not delivery.merge_sha:
+            cause = delivery.action if delivery else (sync_result.action if sync_result else "merge_evidence_missing")
+            return TicketCompletionReport(
+                ok=False, ticket_id=ticket.id, commit_sha=commit_sha, sync_result=sync_result,
+                delivery=delivery, cause="merge_evidence_missing",
+                message=(f"Ticket {ticket.id} candidate {commit_sha} preserved; completion withheld: "
+                         f"verified PR merge evidence is missing (delivery cause: {cause})."),
+            )
+
         proof_error = self._verify_live_completion(
             ticket, store, target_dir, delivery, commit_sha, sync_result, live_verifier,
         )
         if proof_error:
             return proof_error
+
+        current = store.canonical_ticket(ticket.id)
+        if current is not None:
+            evidence = f"{delivery.merge_sha}:merged"
+            if current.is_live_deploy:
+                existing = current.delivery_evidence or ""
+                if "live_converged" not in existing:
+                    evidence = f"{delivery.merge_sha}:merged"
+                else:
+                    evidence = f"{delivery.merge_sha}:merged\n{existing}"
+            current.status = DeliveryStatus.COMPLETED
+            current.delivery_evidence = evidence
+            current.updated_at = datetime.now(timezone.utc)
+            # The canonical queue survives cleanup of a linked worktree. Do not
+            # recreate its ledger after deliver_branch has removed that worktree.
+            from core.demands import queue_store
+            if queue_store.get_ticket(current.id) is not None:
+                queue_store.register_ticket(current)
+            elif target_dir.exists():
+                store.save_ticket(current)
 
         # Delivery can already have attempted cleanup on this exact secondary worktree.
         # Do not retry a blocked attempt in the same finalization flow; its durable

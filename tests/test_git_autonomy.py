@@ -11,7 +11,7 @@ import pytest
 
 from core.demands.models import DemandOrigin, LifecycleStage, PlanningHorizon, RoadmapItemType, UserTicket
 from core.demands.store import DemandsStore
-from core.git.autonomy import GitAutonomyManager, GitSyncResult, TicketCompletionReport
+from core.git.autonomy import DeliveryReport, GitAutonomyManager, GitSyncResult, TicketCompletionReport
 from core.orchestrator.guard import audit_paths, is_governance_evolution_authorized, main as guard_main
 from core.roadmap.models import DeliveryStatus
 from run_ticket import build_parser
@@ -309,7 +309,7 @@ def test_git_autonomy_sync_fast_forward_when_remote_ahead(test_remote_pair: tupl
     assert (local / "peer.txt").exists()
 
 
-def test_git_autonomy_complete_ticket_lifecycle(test_remote_pair: tuple[Path, Path]):
+def test_git_autonomy_complete_ticket_withholds_terminal_status_without_merge_proof(test_remote_pair: tuple[Path, Path]):
     local, _ = test_remote_pair
     mgr = GitAutonomyManager(local)
 
@@ -338,16 +338,44 @@ def test_git_autonomy_complete_ticket_lifecycle(test_remote_pair: tuple[Path, Pa
 
     # Complete ticket
     report = mgr.complete_ticket("USR-57", cwd=local, auto_push=True, auto_commit=True)
-    assert report.ok
+    assert not report.ok
     assert report.ticket_id == "USR-57"
     assert report.commit_sha is not None
     assert report.sync_result is not None
     assert report.sync_result.ok
+    assert report.cause == "merge_evidence_missing"
+    assert "candidate" in report.message
 
     # Verify store updated to COMPLETED
     updated_ticket = store.get_ticket("USR-57")
     assert updated_ticket is not None
-    assert updated_ticket.status == DeliveryStatus.COMPLETED
+    assert updated_ticket.status == DeliveryStatus.PLANNED
+    assert updated_ticket.delivery_evidence.startswith("candidate:")
+
+
+def test_git_autonomy_marks_completed_only_after_verified_merge(test_remote_pair: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch):
+    local, _ = test_remote_pair
+    mgr = GitAutonomyManager(local)
+    store = DemandsStore(local / ".factory" / "demands" / "demands.json")
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    store.save_ticket(UserTicket(
+        id="USR-58", project_id="darkfac", title="Merge evidence gate",
+        origin=DemandOrigin.USER, status=DeliveryStatus.PLANNED,
+        item_type=RoadmapItemType.FEATURE, lifecycle_stage=LifecycleStage.EXECUTION,
+        horizon=PlanningHorizon.NOW, problem_statement="Test", acceptance_criteria=["Merged"],
+    ))
+    (local / "merge_evidence.py").write_text("# candidate\n", encoding="utf-8")
+    merge_sha = "a" * 40
+    monkeypatch.setattr(mgr, "_deliver_completion", lambda *args: (
+        GitSyncResult(ok=True, action="merged", remote_sha=merge_sha),
+        DeliveryReport(ok=True, action="merged", merge_sha=merge_sha), None,
+    ))
+
+    report = mgr.complete_ticket("USR-58", cwd=local, auto_push=True, auto_commit=True)
+
+    assert report.ok
+    assert store.get_ticket("USR-58").status == DeliveryStatus.COMPLETED
+    assert store.get_ticket("USR-58").delivery_evidence == f"{merge_sha}:merged"
 
 
 def test_run_ticket_parser_supports_git_autonomy_flags():

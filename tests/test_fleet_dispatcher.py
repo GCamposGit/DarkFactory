@@ -1399,22 +1399,99 @@ def test_completed_without_deploy_proof_is_reconciled_during_backoff(tmp_path: P
     result = pd.tick(tmp_path, directory=directory, now=row.next_check)
 
     assert result[0]["status"] == "blocked"
-    assert result[0]["cause"] == "deploy_evidence_missing"
+    assert result[0]["cause"] == "completed_without_merge_evidence_ambiguous"
     assert calls == []
     kept = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
     assert kept.status == "blocked"
-    assert kept.cause == "deploy_evidence_missing"
+    assert kept.cause == "completed_without_merge_evidence_ambiguous"
     import json
 
     ledger_path = directory / "reconciliations" / "USR-99.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     assert ledger["events"][-1]["from_cause"] == "launcher_exit:1"
-    assert ledger["events"][-1]["to_cause"] == "deploy_evidence_missing"
-    assert ledger["events"][-1]["evidence"] == "release_missing"
+    assert ledger["events"][-1]["to_cause"] == "completed_without_merge_evidence_ambiguous"
+    assert ledger["events"][-1]["evidence"] == "candidate_sha_missing_or_invalid"
 
     ledger_bytes = ledger_path.read_bytes()
     pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
     assert ledger_path.read_bytes() == ledger_bytes
+
+
+def test_completed_without_merge_reopens_same_candidate_for_review(tmp_path: Path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from core.demands.models import UserTicket
+    from core.line import pending_delivery as pd
+
+    _pd, directory, _context, candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1",
+    )
+    candidate_sha = "8" * 40
+    ticket = UserTicket(id="USR-99", project_id="darkfac", title="Preserved candidate",
+                        status="completed", delivery_evidence=candidate_sha)
+
+    class Queue:
+        mock_mode = False
+
+        def __init__(self):
+            self.ticket = ticket.model_dump(mode="json")
+
+        def list_tickets(self):
+            return [self.ticket]
+
+        def upsert_ticket(self, project_id, ticket_id, status, payload, now):
+            self.ticket = payload
+
+    queue = Queue()
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: queue)
+
+    def git_run(args, **_kwargs):
+        if args[1:3] == ["rev-parse", "origin/main"]:
+            return SimpleNamespace(returncode=0, stdout="4" * 40)
+        if args[1:3] == ["merge-base", "--is-ancestor"]:
+            return SimpleNamespace(returncode=1, stdout="")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(pd.subprocess, "run", git_run)
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "running"
+    assert queue.ticket["status"] == "planned"
+    assert queue.ticket["delivery_evidence"] == f"completed_without_merge:{candidate_sha}"
+    assert candidate.is_dir()
+    assert calls and calls[0][2:4] == ["--resume-delivery", "USR-99"]
+    assert "--worktree" in calls[0]
+    pending = pd.PendingDelivery.model_validate_json((directory / "USR-99.json").read_text(encoding="utf-8"))
+    assert pending.stage == "review" and pending.resume_delivery
+    ledger = json.loads((directory / "reconciliations" / "USR-99.json").read_text(encoding="utf-8"))
+    assert len(ledger["events"]) == 1
+    assert ledger["events"][0]["to_cause"] == "completed_without_merge"
+
+
+def test_completed_without_merge_ambiguous_git_evidence_stays_blocked(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.demands.models import UserTicket
+    from core.line import pending_delivery as pd
+
+    _pd, directory, _context, candidate, row, calls = _arm_completed_wait(
+        tmp_path, monkeypatch, cause="launcher_exit:1",
+    )
+    queue = SimpleNamespace(
+        mock_mode=False,
+        list_tickets=lambda: [UserTicket(id="USR-99", title="Preserved candidate", status="completed",
+                                         delivery_evidence="8" * 40).model_dump(mode="json")],
+        upsert_ticket=lambda *_args: pytest.fail("ambiguous evidence must not mutate the queue"),
+    )
+    monkeypatch.setattr("core.demands.queue_store.control_store", lambda: queue)
+    monkeypatch.setattr(pd.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(returncode=128, stdout=""))
+
+    result = pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
+
+    assert result[0]["status"] == "blocked"
+    assert result[0]["cause"] == "completed_without_merge_evidence_ambiguous"
+    assert candidate.is_dir() and not calls
 
 
 def test_conflicting_legacy_ticket_status_fails_closed_with_a_durable_reason(tmp_path: Path, monkeypatch):
@@ -1499,8 +1576,8 @@ def test_missing_deploy_proof_alerts_once_until_the_evidence_changes(tmp_path: P
     pd.tick(tmp_path, directory=directory, now=row.next_check + 1)
     pd.tick(tmp_path, directory=directory, now=row.next_check + 2)
     assert len(sent) == 1
-    assert sent[0]["cause"] == "deploy_evidence_missing"
-    assert sent[0]["evidence"] == "release_missing"
+    assert sent[0]["cause"] == "completed_without_merge_evidence_ambiguous"
+    assert sent[0]["evidence"] == "candidate_sha_missing_or_invalid"
 
     (context / "deploy_report.json").write_text('{"deployed": false}', encoding="utf-8")
     pd.tick(tmp_path, directory=directory, now=row.next_check + 3)
