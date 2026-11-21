@@ -100,6 +100,22 @@ def test_selection_filters():
     assert sk["USR-02"].startswith("tag:") and sk["USR-04"] == "dependencia_aberta" and sk["USR-07"] == "em_voo"
 
 
+def test_selection_orders_eligible_tickets_by_priority_then_stable_creation_and_id():
+    demands = [
+        {**_d("USR-04"), "priority": 2, "created_at": "2026-01-01"},
+        {**_d("USR-03"), "priority": 2, "created_at": "2026-01-01"},
+        {**_d("USR-02"), "priority": 5, "created_at": "2026-01-03"},
+        {**_d("USR-01"), "priority": 0, "created_at": "2026-01-01"},
+        {**_d("USR-05", deps=["USR-99"]), "priority": 99},
+        {**_d("USR-06"), "priority": 100},
+    ]
+
+    queue, skipped = fd.select_tickets(demands, busy_ids={"USR-06"})
+
+    assert queue == ["USR-02", "USR-03", "USR-04", "USR-01"]
+    assert skipped == {"USR-05": "dependencia_aberta", "USR-06": "em_voo"}
+
+
 def test_active_canonical_reservation_blocks_dispatch_until_lease_expires(tmp_path):
     from core.workflow.control_store import SQLiteControlStore
 

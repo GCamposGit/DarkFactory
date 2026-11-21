@@ -35,6 +35,7 @@ def main() -> int:
     guide_p.add_argument("--non-goals", nargs="*", default=[], help="List of non-goals")
     guide_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     guide_p.add_argument("--project", default="darkfac", help="Project identifier")
+    guide_p.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     guide_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script without Ollama")
     guide_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
@@ -46,6 +47,7 @@ def main() -> int:
     create_p.add_argument("--non-goals", nargs="*", default=[], help="List of non-goals")
     create_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     create_p.add_argument("--project", default="darkfac", help="Project identifier")
+    create_p.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     create_p.add_argument("--horizon", default="now", choices=["now", "next", "later", "exploratory", "unscheduled"])
     create_p.add_argument("--type", default="feature", choices=["feature", "quality", "infrastructure", "operations", "documentation"])
     create_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script without Ollama")
@@ -88,6 +90,7 @@ def main() -> int:
     intake_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     intake_p.add_argument("--audio-file", default=None, help="Audio file to transcribe via Skill 09")
     intake_p.add_argument("--project", default="darkfac", help="Project identifier")
+    intake_p.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     intake_p.add_argument("--mode", choices=["autonomous", "documentary"], default="autonomous", help="Intake execution mode")
     intake_p.add_argument("--external-id", default=None, help="External ID for idempotency and replay")
     intake_p.add_argument("--store-path", default=None, help="Path to control database")
@@ -112,6 +115,7 @@ def main() -> int:
     if args.command == "guide":
         inp = DemandInput(
             project_id=args.project,
+            priority=args.priority,
             title=args.title,
             problem_statement=args.problem,
             core_journey=args.journey,
@@ -169,6 +173,7 @@ def main() -> int:
                         "journey": args.journey,
                         "non_goals": args.non_goals,
                         "criteria": args.criteria,
+                        "priority": args.priority,
                     },
                     mode="autonomous",
                     policy_ref="policy-v1",
@@ -201,6 +206,7 @@ def main() -> int:
 
         inp = DemandInput(
             project_id=args.project,
+            priority=args.priority,
             title=args.title,
             problem_statement=args.problem,
             core_journey=args.journey,

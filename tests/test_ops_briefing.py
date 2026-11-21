@@ -103,3 +103,58 @@ def test_handoff_is_versioned_and_has_operational_sections() -> None:
     handoff = (Path(__file__).resolve().parents[1] / "docs/operacao/HANDOFF.md").read_text(encoding="utf-8")
     for expected in ("Versao:", "## Estado", "## Decisoes", "## Pendencias", "## Proximo passo"):
         assert expected in handoff
+
+
+def test_coordination_receipt_persists_route_and_cost(monkeypatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from core.ops import coordination
+
+    ticket = SimpleNamespace(id="USR-539", project_id="darkfac")
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [
+        SimpleNamespace(eligible=True, ticket=ticket),
+    ])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: ["USR-500"])
+    monkeypatch.setattr(coordination, "_route", lambda *_args: (
+        {"stage": "development", "harness": "codex", "model": "route-alias"}, 1.25, "event-1",
+    ))
+
+    receipt = coordination.coordinate(harness="codex")
+
+    saved = json.loads((tmp_path / "state/coordination/last_receipt.json").read_text(encoding="utf-8"))
+    assert receipt.project_id == "darkfac"
+    assert receipt.role == "coordinator" and receipt.in_flight == ["USR-500"]
+    assert receipt.ticket_id == "USR-539" and receipt.first_action.startswith("Delegar")
+    assert receipt.route_event_id == "event-1" and receipt.cost_available_usd == 1.25
+    assert saved == receipt.model_dump(mode="json")
+
+
+def test_coordination_idle_does_not_route_without_eligible_work(monkeypatch, tmp_path: Path) -> None:
+    from core.ops import coordination
+
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: [])
+    monkeypatch.setattr(coordination, "_route", lambda *_args: (_ for _ in ()).throw(AssertionError("route without work")))
+
+    receipt = coordination.coordinate(harness="grok")
+
+    assert receipt.status == "idle" and receipt.ticket_id is None
+    assert receipt.route is None and "sem trabalho elegível" in receipt.first_action
+
+
+def test_short_and_skill_file_entries_share_the_same_contract(monkeypatch, tmp_path: Path) -> None:
+    from core.ops import coordination
+
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination.briefing, "render_briefing", lambda: "briefing")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: ["USR-100"])
+    short = coordination.coordinate(harness="claude", entry="short-request")
+    explicit = coordination.coordinate(harness="claude", entry="skill-file")
+
+    assert short.model_dump(exclude={"created_at"}) == explicit.model_dump(exclude={"created_at"})
+    assert short.status == "in_flight" and short.in_flight == ["USR-100"]

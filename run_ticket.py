@@ -277,6 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--create", action="store_true", help="Create a new ticket before running")
     parser.add_argument("--title", default="", help="Title for newly created ticket")
     parser.add_argument("--problem", default="", help="Problem statement for newly created ticket")
+    parser.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     parser.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria for newly created ticket")
     parser.add_argument(
         "--non-goal",
@@ -349,6 +350,7 @@ def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
     return UserTicket(
         id=store.next_ticket_id(args.project),
         project_id=args.project,
+        priority=args.priority,
         title=args.title,
         problem_statement=args.problem,
         core_journey=[args.problem] if args.problem else [],

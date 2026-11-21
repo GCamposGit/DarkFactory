@@ -1,7 +1,9 @@
 <!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/notifications/telegram_delivery.py, scripts/telegram_delivery_check.py -->
-# Operacao interativa por Antigravity e Codex (USR-431, USR-433)
+# Operacao interativa por Claude Code, Codex, Grok Build e Antigravity (USR-431, USR-433, USR-539)
 
 ## Assumir a coordenação
+
+O pedido curto e a entrada explícita pela skill executam `python -m core.ops.coordination` e recebem o mesmo recibo persistido em `DARKFAC_STATE_ROOT/coordination/last_receipt.json`. Use `--entry skill-file` para declarar a segunda entrada e `--harness` somente quando o harness não puder ser detectado. O recibo contém projeto, papel, trabalho em voo, primeira ação, ticket, decisão de rota, evento e custo disponível. A seleção lê a elegibilidade pelo feeder canônico. Fila sem trabalho elegível persiste `idle` (ou `in_flight` durante recuperação), e rota indisponível persiste `wait`; esses estados não iniciam agente nem repetem chamadas de LLM.
 
 Abra o checkout da fábrica ou do produto adotado e diga **“assuma a fábrica”** em uma sessão com descoberta da skill `coordenar-fabrica`. Para qualquer harness com acesso ao checkout da DarkFac, a entrada explícita é **“Leia `.agents/skills/coordenar-fabrica/SKILL.md` e assuma a coordenação deste projeto”**. A skill começa pelo briefing e pelas lições anteriores, identifica o projeto e delega o próximo trabalho elegível. A execução fora do chat depende do modo e da disponibilidade do despachante. [Guia do coordenador](../../.agents/skills/coordenar-fabrica/SKILL.md)
 

@@ -80,6 +80,7 @@ class AutonomousIntakeService:
             ticket = UserTicket(
                 id=receipt.demand_id,
                 project_id=command.project_id,
+                priority=int(payload.get("priority", 0) or 0),
                 title=payload.get("title", f"Demand {receipt.demand_id}"),
                 problem_statement=payload.get("problem", ""),
                 core_journey=core_journey,

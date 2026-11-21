@@ -35,6 +35,7 @@ class DemandInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: str = Field(default="darkfac", min_length=1)
+    priority: int = Field(default=0, ge=0, description="Explicit queue priority; larger values run first")
     title: str = Field(..., min_length=3, max_length=200)
     problem_statement: str = Field(default="", description="The real user pain or problem to solve")
     core_journey: str = Field(default="", description="Observable user steps or desired journey")
@@ -54,6 +55,7 @@ class UserTicket(BaseModel):
 
     id: str = Field(..., min_length=1, description="Deterministic ticket identifier (e.g. USR-01)")
     project_id: str = Field(default="darkfac", min_length=1)
+    priority: int = Field(default=0, ge=0, description="Explicit queue priority; larger values run first")
     title: str = Field(..., min_length=3)
     origin: DemandOrigin = Field(default=DemandOrigin.USER)
     status: DeliveryStatus = Field(default=DeliveryStatus.PLANNED)

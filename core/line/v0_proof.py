@@ -54,6 +54,7 @@ class DeliveryEvidence(BaseModel):
     in_progress: bool = False
     owner_actions_count: int = 0  # ActionKind.ACTION tied to the ticket during the run (never allowed)
     owner_decisions_count: int = 0  # ActionKind.DECISION tied to the ticket during the run (<=1: the aceite)
+    intervention_types: list[str] = Field(default_factory=list)
     learning_pack_linked: bool = False
     manual_page_changed: bool = False
     merge_sha: str | None = None
@@ -80,6 +81,9 @@ class QualifiedDelivery(BaseModel):
     smoke_passed: bool = False
     learning_pack_linked: bool = False
     manual_page_changed: bool = False
+    owner_interventions_count: int = 0
+    owner_intervention_types: list[str] = Field(default_factory=list)
+    learning_pack_ref: str | None = None
 
 
 class V0ProofSlot(BaseModel):
@@ -101,6 +105,9 @@ class V0ProofSlot(BaseModel):
     learning_pack_linked: bool = False
     manual_page_changed: bool = False
     occurred_at: str | None = None
+    owner_interventions_count: int = 0
+    owner_intervention_types: list[str] = Field(default_factory=list)
+    learning_pack_ref: str | None = None
 
 
 class V0ProofReport(BaseModel):
@@ -133,6 +140,8 @@ def _disqualify_reasons(delivery: DeliveryEvidence) -> list[str]:
         reasons.append("sem_sha_de_merge")
     if not delivery.smoke_passed:
         reasons.append("smoke_nao_verde")
+    if any(code in {"owner_actions_store_unavailable", "owner_actions_read_failed"} for code in delivery.source_notes):
+        reasons.append("intervencoes_owner_indisponiveis")
     return reasons
 
 
@@ -170,6 +179,9 @@ def evaluate_v0_proof(
             smoke_passed=item.smoke_passed,
             learning_pack_linked=item.learning_pack_linked,
             manual_page_changed=item.manual_page_changed,
+            owner_interventions_count=item.owner_actions_count + item.owner_decisions_count,
+            owner_intervention_types=item.intervention_types,
+            learning_pack_ref=f".factory/learning_packs/{item.ticket_id}" if item.learning_pack_linked else None,
         )
         streak = streak + [evaluated] if evaluated.qualifies else []
 
@@ -177,7 +189,11 @@ def evaluate_v0_proof(
     projects_involved = sorted({item.project_id for item in streak})
     has_real_product = any(p != "darkfac" for p in projects_involved)
     missing_channels = ALLOWED_CHANNELS - set(channels_covered)
-    criterion_met = len(streak) >= required_streak and has_real_product and not missing_channels
+    intervention_source_ok = not any(
+        code in {"owner_actions_store_unavailable", "owner_actions_read_failed"}
+        for code in (degraded_sources or [])
+    )
+    criterion_met = len(streak) >= required_streak and has_real_product and not missing_channels and intervention_source_ok
 
     missing: list[str] = []
     if len(streak) < required_streak:
@@ -189,6 +205,8 @@ def evaluate_v0_proof(
         missing.append("falta ao menos 1 entrega qualificada de um produto real (project_id != darkfac)")
     if missing_channels:
         missing.append(f"falta(m) canal(is) na sequencia qualificada: {', '.join(sorted(missing_channels))}")
+    if not intervention_source_ok:
+        missing.append("nao foi possivel comprovar a contagem de intervencoes humanas")
 
     return V0ProofReport(
         generated_at=now.isoformat(),
@@ -230,6 +248,9 @@ def build_v0_proof_slots(
                 smoke_passed=item.smoke_passed,
                 learning_pack_linked=item.learning_pack_linked,
                 manual_page_changed=item.manual_page_changed,
+                owner_interventions_count=item.owner_interventions_count,
+                owner_intervention_types=item.owner_intervention_types,
+                learning_pack_ref=item.learning_pack_ref,
                 occurred_at=item.occurred_at,
             )
         )
@@ -310,13 +331,14 @@ def _owner_touches(
     owner_actions: list[Any],
     window_start: datetime | None,
     window_end: datetime | None,
-) -> tuple[int, int]:
-    """(acoes, decisoes) do owner ligadas ao ticket, criadas dentro da janela do run."""
+) -> tuple[int, int, list[str]]:
+    """(acoes, decisoes, tipos) do owner dentro da janela do run."""
     if window_start is None:
-        return 0, 0
+        return 0, 0, []
     end = window_end or window_start
     actions = 0
     decisions = 0
+    types: list[str] = []
     for action in owner_actions:
         if ticket_id not in action.blocks and ticket_id not in action.depends_on:
             continue
@@ -327,9 +349,11 @@ def _owner_touches(
             continue
         if action.kind is ActionKind.ACTION:
             actions += 1
+            types.append("action")
         else:
             decisions += 1
-    return actions, decisions
+            types.append("decision")
+    return actions, decisions, types
 
 
 def _delivery_evidence(
@@ -382,7 +406,9 @@ def _delivery_evidence(
     merge_sha = _merge_sha_from_status(status)
     window_start = _parse_dt(status.get("created_at"))
     window_end = _parse_dt(status.get("completed_at")) or _parse_dt(status.get("updated_at"))
-    owner_actions_count, owner_decisions_count = _owner_touches(ticket.id, owner_actions, window_start, window_end)
+    owner_actions_count, owner_decisions_count, intervention_types = _owner_touches(
+        ticket.id, owner_actions, window_start, window_end
+    )
 
     return DeliveryEvidence(
         ticket_id=ticket.id,
@@ -392,12 +418,13 @@ def _delivery_evidence(
         in_progress=state == "in_flight",
         owner_actions_count=owner_actions_count,
         owner_decisions_count=owner_decisions_count,
+        intervention_types=intervention_types,
         learning_pack_linked=_has_learning_pack(ticket.id, packs_dir),
         manual_page_changed=_manual_page_changed(repo_root, merge_sha) if merge_sha else False,
         merge_sha=merge_sha,
         smoke_passed=_build_deploy_smoke_passed(status),
         delivery_evidence=delivery_evidence,
-        occurred_at=occurred_at,
+        occurred_at=(window_end or window_start).isoformat() if (window_end or window_start) else occurred_at,
         source_notes=notes,
     )
 
@@ -464,6 +491,8 @@ def collect_v0_proof_evidence(
         except Exception:
             logger.warning("v0_proof: leitura do backlog de acoes do owner falhou", exc_info=True)
             degraded.append("owner_actions_read_failed")
+    else:
+        degraded.append("owner_actions_store_unavailable")
 
     registry = project_registry
     if registry is None:
@@ -508,7 +537,10 @@ def collect_v0_proof_evidence(
                     logger.warning("v0_proof: consulta ao ProjectRegistry falhou", exc_info=True)
             deliveries.append(evidence)
 
-    return evaluate_v0_proof(deliveries, now=moment, required_streak=required_streak, degraded_sources=degraded)
+    deliveries.sort(key=lambda item: (_parse_dt(item.occurred_at) or datetime.max.replace(tzinfo=UTC), item.ticket_id))
+    return evaluate_v0_proof(
+        deliveries, now=moment, required_streak=required_streak, degraded_sources=sorted(set(degraded))
+    )
 
 
 def save_v0_proof_report(report: V0ProofReport, out_dir: Path | None = None, *, day: date | None = None) -> Path:
@@ -547,7 +579,12 @@ def render_v0_proof_markdown(report: V0ProofReport) -> str:
     ]
     if report.qualified_deliveries:
         for item in report.qualified_deliveries:
-            lines.append(f"- `{item.ticket_id}` ({item.project_id}, canal {item.channel})")
+            lines.append(
+                f"- `{item.ticket_id}` ({item.project_id}, canal {item.channel}, run {item.run_id or 'indisponivel'}, "
+                f"SHA {item.merge_sha or 'indisponivel'}, learning pack "
+                f"{item.learning_pack_ref or 'ausente'}, intervencoes humanas "
+                f"{item.owner_interventions_count} [{', '.join(item.owner_intervention_types) or 'nenhuma'}])"
+            )
     else:
         lines.append("Nenhuma entrega qualificada na sequencia atual.")
     lines.append("")

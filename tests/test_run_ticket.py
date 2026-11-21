@@ -135,12 +135,15 @@ def test_queue_only_registers_ticket_without_running_agent(
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
     monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
     queue_store._store.cache_clear()
-    args = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--title", "Defeito Y"])
+    args = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--title", "Defeito Y", "--project", "produto", "--priority", "8"])
     with patch.object(run_ticket.DemandsStore, "next_ticket_id", return_value="USR-998"),             patch("core.git.ticket_workspace.create_workspace") as workspace:
         ticket = run_ticket._queue_ticket_isolated(args)
     workspace.assert_not_called()
     assert ticket is not None and ticket.id == "USR-998"
-    assert [t.id for t in queue_store.list_queue_tickets()] == ["USR-998"]
+    assert ticket.project_id == "produto" and ticket.priority == 8
+    queued_rows = queue_store.list_queue_tickets()
+    assert [t.id for t in queued_rows] == ["USR-998"]
+    assert queued_rows[0].project_id == "produto" and queued_rows[0].priority == 8
     queue_store._store.cache_clear()
 
 
