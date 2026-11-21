@@ -1,6 +1,11 @@
 <!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py -->
 # Operacao interativa por Antigravity e Codex (USR-431, USR-433)
 
+## Assumir a coordenação
+
+Abra o checkout da fábrica ou do produto adotado e diga **“assuma a fábrica”** em uma sessão com descoberta da skill `coordenar-fabrica`. Para qualquer harness com acesso ao checkout da DarkFac, a entrada explícita é **“Leia `.agents/skills/coordenar-fabrica/SKILL.md` e assuma a coordenação deste projeto”**. A skill começa pelo briefing e pelas lições anteriores, identifica o projeto e delega o próximo trabalho elegível. A execução fora do chat depende do modo e da disponibilidade do despachante. [Guia do coordenador](../../.agents/skills/coordenar-fabrica/SKILL.md)
+
+
 O briefing le OAs apenas da fonte configurada pelo `OwnerActionStore`: control store
 em producao, arquivo com modo local explicito. Nao consulta `dynamic.json` nem
 `resolutions.json`. Banco indisponivel aparece como erro na secao de OAs do briefing.
