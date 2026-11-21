@@ -117,6 +117,13 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         cost = None
         route_event_id = None
     else:
+        # The feeder preserves creation order for admission. Interactive coordination must
+        # honor the dispatcher's explicit priority among the already eligible candidates.
+        eligible.sort(key=lambda item: (
+            -int(getattr(item.ticket, "priority", 0)),
+            getattr(item.ticket, "created_at", datetime.min.replace(tzinfo=timezone.utc)),
+            item.ticket.id,
+        ))
         candidate = eligible[0]
         ticket = candidate.ticket
         status = "ready"

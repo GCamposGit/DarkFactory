@@ -265,6 +265,7 @@ KNOWN_EPHEMERAL_PATTERNS = (
     "test_logs",
     "reports/canary",
     "ticket_quota_usage.jsonl",
+    ".factory/learning/observations/",
 )
 
 # These explicit generated fleet artifacts can be untracked on nodes that do

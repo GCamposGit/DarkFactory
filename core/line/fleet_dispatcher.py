@@ -1469,6 +1469,17 @@ class FleetDispatcher:
             return False
         if self.dry_run:
             return False
+        already_deployed = bool(self.pending_releases) and any(
+            row.get("status") == "deployed"
+            and float(row.get("deployed_at_epoch") or 0) >= float(self.last_merge_at)
+            for row in self.delivery_journal
+        )
+        if already_deployed:
+            if not self._complete_pending_releases():
+                self.last_merge_at = self.clock()
+                return False
+            self.pending_deploy = False
+            return True
         from core.demands.store import _PathMutex, DemandsLockTimeout
         recovered = self._recover_convergence() if self._deferred_sha is not None else None
         if recovered is False:
@@ -1558,6 +1569,7 @@ class FleetDispatcher:
                 continue
             row["status"] = "deployed"
             row["deployed_at"] = completed_at
+            row["deployed_at_epoch"] = float(self.clock())
             row["deploy_sha"] = run_outcome.main_sha(PROJECT_ROOT)
             try:
                 from core.line.recovery_receipt import build_receipt
