@@ -1643,7 +1643,7 @@ class GitAutonomyManager:
         gh_runner: Optional[GhRunner] = None,
         live_verifier: Optional[Callable[[str], Any]] = None,
     ) -> TicketCompletionReport:
-        """Finalize ticket development: resolve the canonical row, record completed, commit, and push.
+        """Commit the candidate and record completion only after verified delivery.
 
         The row is the worktree ledger or the durable queue. An id in neither place
         returns ``cause=ticket_absent`` without allocating a ticket.
@@ -1676,6 +1676,11 @@ class GitAutonomyManager:
             )
             if delivery_error:
                 return delivery_error
+        if delivery and delivery.ok and delivery.action == "awaiting_commercial_acceptance":
+            return TicketCompletionReport(
+                ok=True, ticket_id=ticket.id, commit_sha=commit_sha, sync_result=sync_result,
+                delivery=delivery, cause=delivery.action, message=delivery.message,
+            )
         if not delivery or not delivery.ok or delivery.action != "merged" or not delivery.merge_sha:
             cause = delivery.action if delivery else (sync_result.action if sync_result else "merge_evidence_missing")
             return TicketCompletionReport(
@@ -1789,8 +1794,10 @@ class GitAutonomyManager:
         gh_runner: Optional[GhRunner], commit_sha: Optional[str],
     ) -> tuple[Optional[GitSyncResult], Optional[DeliveryReport], Optional[TicketCompletionReport]]:
         if not self.gh_ready(cwd=target_dir, gh_runner=gh_runner):
-            logger.warning("gh unavailable or unauthenticated; falling back to direct push to main.")
-            return self.sync_environment(cwd=target_dir, allow_push=True), None, None
+            return None, None, TicketCompletionReport(
+                ok=False, ticket_id=ticket_id, commit_sha=commit_sha, cause="merge_evidence_missing",
+                message=f"Ticket {ticket_id} candidate {commit_sha} preserved; authenticated PR delivery is unavailable.",
+            )
         needs_acceptance = self._requires_commercial_acceptance(project_id)
         delivery = self.deliver_branch(
             ticket_id, title, cwd=target_dir, gh_runner=gh_runner,

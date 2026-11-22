@@ -146,7 +146,9 @@ def test_sync_preserves_evidence_when_behind_origin(env: tuple[Path, Path, FakeG
     assert (local / "other.txt").exists() and (local / "mine.txt").exists()
     ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-71")
     assert ticket is not None and ticket.delivery_evidence
-    assert _git(local, "merge-base", "--is-ancestor", ticket.delivery_evidence, "HEAD") == ""
+    assert ticket.status == DeliveryStatus.PLANNED
+    assert ticket.delivery_evidence.startswith("candidate:")
+    assert _git(local, "merge-base", "--is-ancestor", ticket.delivery_evidence.removeprefix("candidate:"), "HEAD") == ""
 
 
 def test_conflict_is_reported_and_tree_left_clean(env: tuple[Path, Path, FakeGh], tmp_path: Path) -> None:
@@ -343,12 +345,11 @@ def test_complete_ticket_uses_delivery(env: tuple[Path, Path, FakeGh]) -> None:
     ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-76")
     assert ticket is not None and ticket.status == DeliveryStatus.COMPLETED
     assert ticket.delivery_evidence
-    assert _git(local, "cat-file", "-t", ticket.delivery_evidence) == "commit"
-    assert '"status": "completed"' in _git(local, "show", "HEAD:.factory/demands/demands.json")
-    assert ticket.delivery_evidence in _git(local, "show", "HEAD:.factory/demands/demands.json")
-    ledger_commit = _git(local, "show", "--format=", "HEAD", "--", ".factory/demands/demands.json")
-    assert '+    "status": "completed"' in ledger_commit
-    assert '+    "delivery_evidence": "' + ticket.delivery_evidence + '"' in ledger_commit
+    assert ticket.delivery_evidence == f"{rep.delivery.merge_sha}:merged"
+    assert _git(local, "cat-file", "-t", rep.delivery.merge_sha) == "commit"
+    committed = json.loads(_git(local, "show", "HEAD:.factory/demands/demands.json"))
+    assert committed[0]["status"] == "planned"
+    assert committed[0]["delivery_evidence"].startswith("candidate:")
 
 
 def test_queue_delivery_uses_chore_title_and_label(env: tuple[Path, Path, FakeGh]) -> None:
@@ -510,8 +511,9 @@ def test_complete_ticket_closes_queue_row_without_shared_ledger(
     assert payload["status"] == "completed"
     assert payload["delivery_evidence"]
     stored = DemandsStore(ledger).get_ticket("USR-413")
-    assert stored is not None and stored.status == DeliveryStatus.COMPLETED
-    assert stored.delivery_evidence == payload["delivery_evidence"]
+    assert stored is not None and stored.status == DeliveryStatus.IMPLEMENTING
+    assert stored.delivery_evidence.startswith("candidate:")
+    assert payload["delivery_evidence"] == f"{rep.delivery.merge_sha}:merged"
     ids = [row["id"] for row in json.loads(ledger.read_text(encoding="utf-8"))]
     assert ids.count("USR-413") == 1
     assert "USR-1" in ids
@@ -607,8 +609,9 @@ def test_complete_ticket_gitfile_queue_opens_pr_without_shared_ledger(
     assert ids.count("USR-413") == 1
     assert "USR-1" in ids
     stored = next(row for row in committed if row["id"] == "USR-413")
-    assert stored["status"] == "completed"
-    assert stored["delivery_evidence"] == payload["delivery_evidence"]
+    assert stored["status"] == "implementing"
+    assert stored["delivery_evidence"].startswith("candidate:")
+    assert payload["delivery_evidence"] == f"{rep.delivery.merge_sha}:merged"
     assert not shared.exists()
     assert queue.get_ticket("USR-1") is None
 
@@ -636,8 +639,8 @@ def test_complete_ticket_gitfile_ledger_only_does_not_create_control_store(
     assert queue.get_ticket("USR-76") is None
     committed = json.loads(_git(local, "show", "HEAD:.factory/demands/demands.json"))
     assert [row["id"] for row in committed] == ["USR-76"]
-    assert committed[0]["status"] == "completed"
-    assert committed[0]["delivery_evidence"]
+    assert committed[0]["status"] == "planned"
+    assert committed[0]["delivery_evidence"].startswith("candidate:")
 
 
 def test_complete_ticket_gitfile_ledger_only_branch_keeps_queue_status(
@@ -678,6 +681,8 @@ def test_complete_ticket_commercial_project_awaits(env: tuple[Path, Path, FakeGh
     assert rep.ok and rep.delivery is not None
     assert rep.delivery.action == "awaiting_commercial_acceptance"
     assert not any(c[:2] == ["pr", "merge"] for c in gh.calls)
+    ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-77")
+    assert ticket.status == DeliveryStatus.PLANNED
 
 
 def test_delivery_report_model() -> None:

@@ -309,9 +309,13 @@ def test_git_autonomy_sync_fast_forward_when_remote_ahead(test_remote_pair: tupl
     assert (local / "peer.txt").exists()
 
 
-def test_git_autonomy_complete_ticket_withholds_terminal_status_without_merge_proof(test_remote_pair: tuple[Path, Path]):
-    local, _ = test_remote_pair
+def test_git_autonomy_complete_ticket_withholds_terminal_status_without_merge_proof(
+    test_remote_pair: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+):
+    local, remote = test_remote_pair
     mgr = GitAutonomyManager(local)
+    base_sha = _git(remote, "rev-parse", "main").stdout.strip()
+    monkeypatch.setattr(mgr, "gh_ready", lambda **kwargs: False)
 
     # Setup demands store inside local repo
     demands_dir = local / ".factory" / "demands"
@@ -341,12 +345,12 @@ def test_git_autonomy_complete_ticket_withholds_terminal_status_without_merge_pr
     assert not report.ok
     assert report.ticket_id == "USR-57"
     assert report.commit_sha is not None
-    assert report.sync_result is not None
-    assert report.sync_result.ok
+    assert report.sync_result is None
+    assert _git(remote, "rev-parse", "main").stdout.strip() == base_sha
     assert report.cause == "merge_evidence_missing"
     assert "candidate" in report.message
 
-    # Verify store updated to COMPLETED
+    # The local candidate remains open.
     updated_ticket = store.get_ticket("USR-57")
     assert updated_ticket is not None
     assert updated_ticket.status == DeliveryStatus.PLANNED
