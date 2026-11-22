@@ -1555,11 +1555,33 @@ class FleetDispatcher:
             "merged_at_epoch": float(self.clock()),
             "gate_sha": getattr(outcome, "candidate_sha", None) if outcome else None,
             "evidence_refs": [str(job.log_path)] if job.log_path else [],
-            "interventions": [],
+            "interventions": self._owner_interventions(job),
             "cost_usd": cost_usd,
         }
         self.delivery_journal.append(row)
         self._save_delivery_journal()
+
+    @staticmethod
+    def _owner_interventions(job: InFlight) -> list[dict[str, Any]]:
+        """Snapshot owner actions and decisions linked to this ticket into its delivery proof."""
+        try:
+            from core.owner_actions.store import OwnerActionStore
+
+            actions = OwnerActionStore().list_actions()
+            result: list[dict[str, Any]] = []
+            for action in actions:
+                if job.ticket_id not in action.blocks:
+                    continue
+                result.append({
+                    "id": action.id, "kind": action.kind.value,
+                    "status": action.status.value,
+                    "resolved_at": action.resolved_at.isoformat() if action.resolved_at else None,
+                    "answer": action.answer.model_dump(mode="json") if action.answer else None,
+                })
+            return result
+        except Exception as exc:  # noqa: BLE001 - delivery persists with explicit evidence degradation
+            logger.warning("owner intervention evidence unavailable for %s (%s)", job.ticket_id, type(exc).__name__)
+            return [{"evidence": "unavailable"}]
 
     def _complete_delivery_journal(self) -> None:
         """Mark journal entries deployed only after the canonical deploy returned success."""

@@ -79,7 +79,22 @@ def collect_coordination_proof(*, evidence_dir: Path | None = None, now: datetim
             if not isinstance(refs, list):
                 degraded.append(f"{criterion_id}:invalid_evidence_manifest")
                 continue
-            evidence[criterion_id] = [str(ref) for ref in refs if isinstance(ref, str) and ref.strip()]
+            valid_refs: list[str] = []
+            for ref in refs:
+                if not isinstance(ref, str) or not ref.strip():
+                    continue
+                target = Path(ref)
+                if not target.is_absolute():
+                    target = path.parent / target
+                try:
+                    resolved = target.resolve(strict=True)
+                    if resolved.is_file() and resolved.stat().st_size > 0:
+                        valid_refs.append(str(resolved))
+                    else:
+                        degraded.append(f"{criterion_id}:invalid_evidence_ref")
+                except (OSError, RuntimeError):
+                    degraded.append(f"{criterion_id}:invalid_evidence_ref")
+            evidence[criterion_id] = valid_refs
         except (OSError, json.JSONDecodeError):
             degraded.append(f"{criterion_id}:evidence_read_failed")
     return evaluate_coordination_proof(evidence, now=now or datetime.now(UTC), degraded_sources=degraded)

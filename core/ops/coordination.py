@@ -6,7 +6,6 @@ import argparse
 import os
 import sys
 import logging
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,6 +30,7 @@ class CoordinationReceipt(BaseModel):
     first_action: str
     route: dict[str, str | None] | None = None
     route_event_id: str | None = None
+    active_run: dict[str, Any] | None = None
     cost_available_usd: float | None = None
     created_at: str
 
@@ -63,20 +63,57 @@ def _in_flight() -> list[str]:
         return []
 
 
-def _route(ticket: Any, harness: str) -> tuple[dict[str, str | None] | None, float | None, str | None]:
+def _active_run_details(active: list[str]) -> dict[str, Any] | None:
+    """Recover the durable run boundary and evidence before admitting another ticket."""
+    try:
+        from core.paths import state_root
+
+        journal = state_root() / "fleet_dispatcher_state.json"
+        journal = journal.with_name("pending_deliveries.json")
+        if journal.is_file():
+            rows = __import__("json").loads(journal.read_text(encoding="utf-8"))
+            pending = [row for row in rows if isinstance(row, dict) and row.get("status") == "awaiting_deploy"] \
+                if isinstance(rows, list) else []
+            for row in pending:
+                if not active or row.get("ticket_id") in active:
+                    return {
+                        "ticket_id": row["ticket_id"], "run_id": row["run_id"],
+                        "stage": row.get("stage", "deploy"),
+                        "evidence_refs": list(row.get("evidence_refs") or []),
+                    }
+        from core.line.live_run import state_directory, load_state
+
+        if not active:
+            return None
+        ticket_id = sorted(active)[0]
+        live_path = state_directory(state_root()) / f"{ticket_id}.json"
+        live = load_state(state_directory(state_root()), ticket_id)
+        if live:
+            return {
+                "ticket_id": live.ticket_id, "run_id": live.run_id,
+                "stage": live.active_phase or live.last_phase or "in_flight",
+                "evidence_refs": [str(live_path)] if live_path.is_file() else [],
+            }
+    except (OSError, ValueError, TypeError):
+        logger.warning("Could not recover the active delivery journal")
+    if not active:
+        return None
+    return {"ticket_id": sorted(active)[0], "run_id": None, "stage": "in_flight", "evidence_refs": []}
+
+
+def _route(ticket: Any, harness: str, stage: str) -> tuple[dict[str, str | None] | None, float | None, str | None]:
     """Ask the stage router once, passing the ticket so route logs and budget share identity."""
     from core.line.routing import pick
     from core.usage.ledger import ModelUsageLedger
 
     spent = ModelUsageLedger().spent_usd(ticket.id, "openrouter")
     route = pick(
-        "development", [f"harness:{name}" for name in sorted(HARNESS_NAMES - {"antigravity"})],
+        stage, [f"harness:{name}" for name in sorted(HARNESS_NAMES - {"antigravity"})],
         ticket_id=ticket.id, project_id=ticket.project_id, spent_usd=spent,
         execution_context="interactive", operating_harness=harness,
     )
-    event_id = str(uuid.uuid4())
     if route is None:
-        return None, None, event_id
+        return None, None, None
     available: float | None = None
     try:
         from core.line.routing import load_routing_config
@@ -84,14 +121,16 @@ def _route(ticket: Any, harness: str) -> tuple[dict[str, str | None] | None, flo
         available = max(0.0, load_routing_config().run_caps.openrouter_usd - spent)
     except (AttributeError, OSError, ValueError):
         pass
-    logger.info(
-        "coordination_route_decision event_id=%s project_id=%s ticket_id=%s stage=development harness=%s cost_available_usd=%s",
-        event_id, ticket.project_id, ticket.id, route[0], available,
-        extra={"route_event": {"event_id": event_id, "project_id": ticket.project_id,
-                                "ticket_id": ticket.id, "stage": "development",
-                                "harness": route[0], "cost_available_usd": available}},
-    )
-    return {"stage": "development", "harness": route[0], "model": route[1]}, available, event_id
+    # `pick` does not issue a durable route-event id. Link to the actual usage event
+    # when one exists; otherwise leave the reference absent instead of inventing a UUID.
+    try:
+        events = ModelUsageLedger()._store.read().get("events", [])
+        matching = [event for event in events if event.get("ticket_id") == ticket.id
+                    and event.get("project_id") == ticket.project_id]
+        event_id = matching[-1].get("invocation_id") if matching else None
+    except (AttributeError, OSError, TypeError, ValueError):
+        event_id = None
+    return {"stage": stage, "harness": route[0], "model": route[1]}, available, event_id
 
 
 def coordinate(*, harness: str | None = None, entry: str = "short-request") -> CoordinationReceipt:
@@ -104,14 +143,25 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
     if entry not in {"short-request", "skill-file"}:
         raise ValueError(f"entrada invalida: {entry}")
     # Both entry modes deliberately share this exact read and recovery path.
-    briefing.render_briefing()
     root = project_root()
     candidates = _candidates()
     eligible = [item for item in candidates if item.eligible and item.ticket is not None]
     active = _in_flight()
-    if not eligible:
-        status = "in_flight" if active else "idle"
-        first = "Aguardar recuperação do trabalho em voo." if active else "Fila sem trabalho elegível; aguardar evento do despachante."
+    active_run = _active_run_details(active)
+    if active_run and active_run.get("ticket_id") not in active:
+        active.append(str(active_run["ticket_id"]))
+    if active or active_run:
+        status = "in_flight"
+        first = (f"Retomar o run {active_run['run_id']} do ticket {active_run['ticket_id']} "
+                 f"na etapa {active_run['stage']}; preservar as evidencias existentes." if active_run and active_run.get("run_id")
+                 else "Aguardar a retomada do trabalho em voo antes de admitir outro ticket.")
+        ticket = None
+        route = None
+        cost = None
+        route_event_id = None
+    elif not eligible:
+        status = "idle"
+        first = "Fila sem trabalho elegível; aguardar evento do despachante."
         ticket = None
         route = None
         cost = None
@@ -127,8 +177,13 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         candidate = eligible[0]
         ticket = candidate.ticket
         status = "ready"
-        route, cost, route_event_id = _route(ticket, selected_harness)
-        first = (f"Delegar {ticket.id} na etapa development pelo roteador." if route
+        status_name = str(getattr(ticket.status, "value", ticket.status)).lower()
+        stage = {
+            "planned": "planning", "implementing": "development",
+            "validating": "review", "reviewing": "review",
+        }.get(status_name, "development")
+        route, cost, route_event_id = _route(ticket, selected_harness, stage)
+        first = (f"Delegar {ticket.id} na etapa {stage} pelo roteador." if route
                  else f"Persistir espera de rota para {ticket.id}; retomar pelo despachante.")
         if route is None:
             status = "wait"
@@ -136,11 +191,12 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         project_id=ticket.project_id if ticket else _project_id(root), harness=selected_harness,
         role="coordinator", status=status, in_flight=active, ticket_id=ticket.id if ticket else None,
         first_action=first, route=route, route_event_id=route_event_id,
-        cost_available_usd=cost, created_at=datetime.now(timezone.utc).isoformat(),
+        active_run=active_run, cost_available_usd=cost, created_at=datetime.now(timezone.utc).isoformat(),
     )
     target = state_root() / "coordination" / "last_receipt.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(receipt.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    briefing.render_briefing()
     return receipt
 
 

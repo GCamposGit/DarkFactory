@@ -3,7 +3,7 @@
 
 ## Assumir a coordenação
 
-O pedido curto e a entrada explícita pela skill executam `python -m core.ops.coordination` e recebem o mesmo recibo persistido em `DARKFAC_STATE_ROOT/coordination/last_receipt.json`. Use `--entry skill-file` para declarar a segunda entrada e `--harness` somente quando o harness não puder ser detectado. O recibo contém projeto, papel, trabalho em voo, primeira ação, ticket, decisão de rota, evento e custo disponível. A seleção lê a elegibilidade pelo feeder canônico. Fila sem trabalho elegível persiste `idle` (ou `in_flight` durante recuperação), e rota indisponível persiste `wait`; esses estados não iniciam agente nem repetem chamadas de LLM.
+O pedido curto e a entrada explícita pela skill executam `python -m core.ops.coordination` e recebem o mesmo recibo persistido em `DARKFAC_STATE_ROOT/coordination/last_receipt.json`. Use `--entry skill-file` para declarar a segunda entrada e `--harness` somente quando o harness não puder ser detectado. O recibo contém projeto, papel, trabalho em voo, run/etapa/evidências recuperados, primeira ação, ticket, decisão de rota, referência de uso quando disponível e custo disponível. Se existir run em voo, a coordenação aguarda essa retomada antes de rotear outro ticket. O briefing e as lições são contexto complementar, lidos após a persistência do recibo. A seleção lê a elegibilidade pelo feeder canônico. Fila sem trabalho elegível persiste `idle` (ou `in_flight` durante recuperação), e rota indisponível persiste `wait`; esses estados não iniciam agente nem repetem chamadas de LLM.
 
 Abra o checkout da fábrica ou do produto adotado e diga **“assuma a fábrica”** em uma sessão com descoberta da skill `coordenar-fabrica`. Para qualquer harness com acesso ao checkout da DarkFac, a entrada explícita é **“Leia `.agents/skills/coordenar-fabrica/SKILL.md` e assuma a coordenação deste projeto”**. As duas entradas iniciam `python -m core.ops.coordination`, leem `DARKFAC_STATE_ROOT/coordination/last_receipt.json` antes de despachar e usam briefing e lições para contexto complementar. A execução fora do chat depende do modo e da disponibilidade do despachante. [Guia do coordenador](../../.agents/skills/coordenar-fabrica/SKILL.md)
 
@@ -42,7 +42,10 @@ Antigravity e Codex atuam como interfaces de operacao interativa para coordenar 
 
 ```powershell
 $env:DARKFAC_OPERATING_HARNESS = 'antigravity' # ou 'codex'
+python -m core.ops.coordination --harness antigravity --entry short-request
+Get-Content "$env:DARKFAC_STATE_ROOT/coordination/last_receipt.json"
 python -m core.ops.briefing
+python -m core.learning.cli prime --domain coordenacao
 ```
 
 O briefing e UTF-8 e somente leitura. Mostra a fila do control store, acoes abertas do backlog e fontes dinamicas, estado dos workers sem executar atualizacao/convergencia, PRs abertos, snapshots de quota e o handoff versionado em `docs/operacao/HANDOFF.md`. Cada secao tem fallback independente: falha do banco usa a fila local em memoria; `gh` ausente, sem autenticacao, com erro ou timeout informa que PRs estao indisponiveis. Falha de uma secao nao interrompe as demais. O briefing nao executa probes de quota.

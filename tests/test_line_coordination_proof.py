@@ -22,9 +22,11 @@ def test_coordination_proof_keeps_missing_evidence_pending_and_degraded() -> Non
 
 
 def test_coordination_cli_collector_reads_four_harness_refs_and_missing_items_are_pending(tmp_path) -> None:
+    refs = ["claude.json", "codex.json", "grok.json", "antigravity.json"]
+    for ref in refs:
+        (tmp_path / ref).write_text(json.dumps({"harness": ref.removesuffix(".json")}), encoding="utf-8")
     (tmp_path / "harness_entry.json").write_text(
-        json.dumps({"evidence_refs": ["claude.json", "codex.json", "grok.json", "antigravity.json"]}),
-        encoding="utf-8",
+        json.dumps({"evidence_refs": refs}), encoding="utf-8",
     )
     (tmp_path / "continuity.json").write_text("{invalid", encoding="utf-8")
     report = collect_coordination_proof(evidence_dir=tmp_path, now=datetime(2026, 11, 21, tzinfo=UTC))
@@ -33,3 +35,15 @@ def test_coordination_cli_collector_reads_four_harness_refs_and_missing_items_ar
     assert "continuity:evidence_read_failed" in report.degraded_sources
     assert next(item for item in report.criteria if item.id == "continuity").verified is False
 
+
+
+def test_coordination_cli_rejects_nonexistent_evidence_refs(tmp_path) -> None:
+    (tmp_path / "priority.json").write_text(
+        json.dumps({"evidence_refs": ["missing-priority-proof.json"]}), encoding="utf-8"
+    )
+    report = collect_coordination_proof(evidence_dir=tmp_path, now=datetime(2026, 11, 21, tzinfo=UTC))
+
+    criterion = next(item for item in report.criteria if item.id == "priority")
+    assert criterion.verified is False
+    assert criterion.evidence_refs == []
+    assert "priority:invalid_evidence_ref" in report.degraded_sources

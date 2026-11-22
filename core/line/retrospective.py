@@ -195,9 +195,12 @@ def record_lessons_in_learning_tracker(
     try:
         active_tracker = tracker or ContinuousLearningTracker()
         for lesson in lessons:
+            cause = str(lesson.cause_code or "").lower()
+            runtime_markers = ("harness", "runtime", "worker", "infra", "route", "quota", "host", "launcher")
+            observation_project = "darkfac" if any(marker in cause for marker in runtime_markers) else project_id
             record_observation(
-                project_id=project_id,
-                identity=f"failure:{project_id}:{run_id}:{lesson.stage}:{lesson.cause_code}",
+                project_id=observation_project,
+                identity=f"failure:{observation_project}:{run_id}:{lesson.stage}:{lesson.cause_code}",
                 kind="harness_failure",
                 summary=lesson.rule,
                 intention="prevent recurrence of a production-line failure",
