@@ -8,6 +8,10 @@ pré-teste focal duplicado. O perfil roda compileall, typecheck, `lint-imports`,
 O perfil PR força `--no-cache --local`; o veredito continua exigindo candidato
 limpo e imutável, testes descobertos/executados e `[HARNESS_PASS]`.
 
+O subprocesso de testes afetados usa um prazo compartilhado para seleção, coleta e execução
+quando chamado pelo portão. A margem final permite devolver a saída parcial e indicar a fase
+do timeout antes de o runner encerrar o passo.
+
 A seleção compara o candidato inteiro ao merge-base com `origin/main`, incluindo
 alterações staged, unstaged e untracked na CLI. Não compara só o último commit.
 Usa imports transitivos, referências de texto e guards de repositório. Quando

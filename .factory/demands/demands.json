@@ -15027,5 +15027,34 @@
     "dependencies": [],
     "created_at": "2026-11-22T18:42:47.750568Z",
     "updated_at": "2026-11-22T20:04:37.382470Z"
+  },
+  {
+    "id": "USR-540",
+    "project_id": "darkfac",
+    "title": "Investigar timeout recorrente nos testes afetados do Notebook",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21/11 os candidatos dos USR-480 e USR-537 preservaram a worktree e sairam com gate_timeout no passo affected_tests do perfil PR local. USR-537 selecionou 34 testes em 3,97 s e ficou 1800 s sem contagem nem resumo, inclusive na retomada. Evidencia: .factory/runs/outcomes/USR-480.json, .factory/runs/outcomes/USR-537.json e logs de step-timeouts nas worktrees. USR-502 ja foi concluido e a causa deste travamento ainda precisa ser isolada.",
+    "core_journey": [
+      "Em 21/11 os candidatos dos USR-480 e USR-537 preservaram a worktree e sairam com gate_timeout no passo affected_tests do perfil PR local. USR-537 selecionou 34 testes em 3,97 s e ficou 1800 s sem contagem nem resumo, inclusive na retomada. Evidencia: .factory/runs/outcomes/USR-480.json, .factory/runs/outcomes/USR-537.json e logs de step-timeouts nas worktrees. USR-502 ja foi concluido e a causa deste travamento ainda precisa ser isolada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar com evidencia o processo ou teste que impede o encerramento. No Notebook o perfil PR dos candidatos afetados termina com veredito e contagem real ou falha diagnosticavel e delimitada. Preservar os candidatos e a retomada de entrega, mantendo os contratos do portao e os limites de concorrencia."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T17:55:28.544261Z",
+    "updated_at": "2026-11-21T17:55:28.544261Z"
   }
 ]

@@ -942,6 +942,8 @@ def _pr_contract_tests(repo_root: Path) -> list[str]:
 PR_TIMEOUT_BASE_S = 120.0
 PR_TIMEOUT_PER_TEST_S = 20.0
 PR_TIMEOUT_MAX_S = 1800.0
+PR_FINALIZATION_RESERVE_S = 20.0
+AFFECTED_DEADLINE_ENV = "DARKFAC_AFFECTED_DEADLINE"
 
 
 def select_pr_tests(repo_root: Path, base_ref: str = "origin/main") -> Selection:
@@ -1001,9 +1003,9 @@ def _xdist_available() -> bool:
     return importlib.util.find_spec("xdist") is not None
 
 
-def _collect_test_count(repo_root: Path, command: list[str]) -> tuple[int, int]:
+def _collect_test_count(repo_root: Path, command: list[str], timeout: float) -> tuple[int, int]:
     result = subprocess.run(
-        [*command, "--collect-only"], cwd=repo_root, timeout=PR_TIMEOUT_BASE_S,
+        [*command, "--collect-only"], cwd=repo_root, timeout=timeout,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
     )
     if result.returncode:
@@ -1014,7 +1016,9 @@ def _collect_test_count(repo_root: Path, command: list[str]) -> tuple[int, int]:
     return (0, count) if count else (5, 0)
 
 
-def run_pytest(repo_root: Path, selection: Selection, extra_args: Sequence[str]) -> int:
+def run_pytest(
+    repo_root: Path, selection: Selection, extra_args: Sequence[str], *, deadline: float | None = None,
+) -> int:
     """Run a bounded selection with RAM-aware serial degradation and one crash retry."""
     from core.harness.pytest_runtime import run_with_serial_retry
     from core.line import gate_ram
@@ -1039,13 +1043,22 @@ def run_pytest(repo_root: Path, selection: Selection, extra_args: Sequence[str])
     command = [sys.executable, "-m", "pytest", *targets, "-q", *extra_args]
     if xdist:
         command += ["-n", "0"]
+    if deadline is None:
+        deadline = time.monotonic() + PR_TIMEOUT_MAX_S - PR_FINALIZATION_RESERVE_S
+    phase = "collection"
     try:
-        code, count = _collect_test_count(repo_root, command)
+        collection_timeout = min(PR_TIMEOUT_BASE_S, deadline - time.monotonic())
+        if collection_timeout <= 0:
+            raise subprocess.TimeoutExpired(command, 0)
+        print(f"[TEST_PHASE] collection files={len(targets)} timeout_sec={collection_timeout:.0f}", flush=True)
+        code, count = _collect_test_count(repo_root, command, collection_timeout)
         if code:
             return code
-        timeout = selected_test_timeout(count)
-        print(f"[TEST_BUDGET] selected={count} timeout_sec={timeout:.0f} workers={workers}")
-        deadline = time.monotonic() + timeout
+        phase = "execution"
+        now = time.monotonic()
+        deadline = min(deadline, now + selected_test_timeout(count))
+        timeout = deadline - now
+        print(f"[TEST_BUDGET] selected={count} timeout_sec={max(0, timeout):.0f} workers={workers}", flush=True)
         passes = [(workers, "not serial"), (0, "serial")] if xdist and workers > 1 else [(0, None)]
         codes = []
         for worker_count, marker in passes:
@@ -1056,16 +1069,24 @@ def run_pytest(repo_root: Path, selection: Selection, extra_args: Sequence[str])
                 cmd += ["--dist", "worksteal"]
             if marker:
                 cmd += ["-m", marker]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, 0)
+            print(f"[TEST_PHASE] execution marker={marker or 'all'} workers={worker_count}", flush=True)
             result = run_with_serial_retry(
-                cmd, cwd=repo_root, timeout=max(0.01, deadline - time.monotonic()),
+                cmd, cwd=repo_root, timeout=remaining,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
             )
             print(result.stdout or "")
             codes.append(0 if marker and result.returncode == PYTEST_EXIT_NO_TESTS_COLLECTED else result.returncode)
         return next((code for code in codes if code), 0)
     except subprocess.TimeoutExpired as exc:
-        print(exc.stdout or "")
-        print("[STEP_TIMEOUT] affected tests")
+        stdout = exc.stdout
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if stdout:
+            print(stdout)
+        print(f"[STEP_TIMEOUT] affected tests phase={phase}", flush=True)
         return 124
 
 
@@ -1151,7 +1172,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.run:
         extra = _strip_leading_double_dash(list(args.extra_args))
-        return run_pytest(repo_root, selection, extra)
+        raw_deadline = os.environ.get(AFFECTED_DEADLINE_ENV)
+        deadline = float(raw_deadline) if raw_deadline else None
+        return run_pytest(repo_root, selection, extra, deadline=deadline)
 
     return 0
 

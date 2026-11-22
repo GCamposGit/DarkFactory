@@ -425,6 +425,10 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         child_env = dict(os.environ)
         if step.name in ("affected_tests", "smoke_tests"):
             child_env["DARKFAC_GATE_SCOPE"] = "pr"
+        if step.name == "affected_tests":
+            from core.harness.affected import AFFECTED_DEADLINE_ENV, PR_FINALIZATION_RESERVE_S
+
+            child_env[AFFECTED_DEADLINE_ENV] = str(time.monotonic() + step_timeout - PR_FINALIZATION_RESERVE_S)
         if worker_count is not None:
             child_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] = str(worker_count)
 
