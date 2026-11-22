@@ -1,7 +1,12 @@
 <!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/line/admission_store.py, core/line/failure_taxonomy.py, core/line/run_outcome.py, core/line/failure_alerts.py, core/line/stale_active.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 <!-- covers: core/line/fleet_policy.py, core/line/operational_context.py -->
+<!-- covers: core/harness/remote_worker.py -->
 # Operação da frota
+
+O `/health` de cada worker remoto publica `workers`, `available_gib` e `observed_at`
+medidos no próprio host com o critério de RAM do portão. Um host ocupado, sem capacidade
+positiva ou sem leitura válida permanece fora da admissão.
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
 Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,
