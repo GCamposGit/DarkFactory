@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import logging
@@ -68,10 +69,9 @@ def _active_run_details(active: list[str]) -> dict[str, Any] | None:
     try:
         from core.paths import state_root
 
-        journal = state_root() / "fleet_dispatcher_state.json"
-        journal = journal.with_name("pending_deliveries.json")
+        journal = state_root() / "runs" / "pending_deliveries.json"
         if journal.is_file():
-            rows = __import__("json").loads(journal.read_text(encoding="utf-8"))
+            rows = json.loads(journal.read_text(encoding="utf-8"))
             pending = [row for row in rows if isinstance(row, dict) and row.get("status") == "awaiting_deploy"] \
                 if isinstance(rows, list) else []
             for row in pending:
@@ -185,7 +185,7 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         }.get(status_name, "development")
         route, cost, route_event_id = _route(ticket, selected_harness, stage)
         first = (f"Delegar {ticket.id} na etapa {stage} pelo roteador." if route
-                 else f"Persistir espera de rota para {ticket.id}; retomar pelo despachante.")
+                 else f"Aguardar rota para {ticket.id} no despachante.")
         if route is None:
             status = "wait"
     receipt = CoordinationReceipt(

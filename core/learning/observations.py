@@ -155,6 +155,7 @@ def record_observation(
 def load_observations(project_id: str, *, root: Path | None = None) -> list[dict[str, Any]]:
     """Load one project's observations after process restart or repository sync."""
     path = _project_path(project_id, root)
+    normalized_project_id = sanitize_text(project_id).strip()
     if not path.exists():
         return []
     observations: list[dict[str, Any]] = []
@@ -165,7 +166,7 @@ def load_observations(project_id: str, *, root: Path | None = None) -> list[dict
                     item = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if item.get("project_id") == project_id:
+                if item.get("project_id") == normalized_project_id:
                     observations.append(item)
     return observations
 

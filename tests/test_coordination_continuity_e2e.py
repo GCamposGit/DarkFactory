@@ -26,7 +26,7 @@ def test_restart_finishes_persisted_delivery_before_admitting_next_ticket(
     tmp_path: Path, monkeypatch,
 ) -> None:
     now = datetime(2026, 11, 21, tzinfo=timezone.utc).timestamp()
-    state_path = tmp_path / "fleet.json"
+    state_path = tmp_path / "runs" / "fleet_dispatcher_state.json"
     config = fd.DispatcherConfig(
         hosts=[fd.HostSpec("notebook", 1)], state_path=state_path,
         deploy_window_sec=30,
@@ -106,7 +106,7 @@ def test_restart_finishes_persisted_delivery_before_admitting_next_ticket(
 
     assert deploys == ["canonical-deploy"]
     assert launches and launches[0][0] == "USR-539-B"
-    saved = __import__("json").loads((tmp_path / "pending_deliveries.json").read_text(encoding="utf-8"))
+    saved = json.loads(state_path.with_name("pending_deliveries.json").read_text(encoding="utf-8"))
     assert saved[0]["run_id"] == "run-admitted-before-session-close"
     assert saved[0]["candidate_digest"] == "candidate-sha256"
     assert saved[0]["gate_sha"] == "gate-sha-539"

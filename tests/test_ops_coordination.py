@@ -27,7 +27,9 @@ def test_cli_entries_share_coordinator_and_persist_receipt_before_briefing(tmp_p
 
 def test_in_flight_run_blocks_new_ticket_and_recovers_durable_evidence(tmp_path, monkeypatch):
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
-    (tmp_path / "pending_deliveries.json").write_text(json.dumps([{
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "pending_deliveries.json").write_text(json.dumps([{
         "ticket_id": "USR-539-A", "run_id": "run-123", "status": "awaiting_deploy",
         "stage": "deploy", "evidence_refs": ["validation.json"],
     }]), encoding="utf-8")
