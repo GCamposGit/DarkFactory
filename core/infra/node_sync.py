@@ -886,7 +886,10 @@ def sync(
                 notebook.reason = notebook.reason or (
                     "checkout is not behind the fixed candidate; no git operation attempted"
                 )
-            elif git(root, ["status", "--porcelain"]):
+            elif any(
+                not entry.startswith("?? ") or not is_fleet_runtime_untracked_file(entry[3:])
+                for entry in git(root, ["status", "--porcelain", "--untracked-files=all"]).splitlines()
+            ):
                 notebook.reason = "dirty worktree; no git operation attempted"
             else:
                 # Fast-forward only when classification compared HEAD with the immutable candidate.
