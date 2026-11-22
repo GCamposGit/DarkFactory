@@ -3686,8 +3686,16 @@ def test_deploy_exit_3_switches_to_bounded_convergence_recovery_with_backoff_and
 
 def test_convergence_recovery_success_completes_deploy_and_clears_pending(tmp_path: Path, monkeypatch):
     import json
+    from types import SimpleNamespace
+
+    from core.infra import node_sync
 
     e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1, 0])
+    monkeypatch.setattr(node_sync, "verify", lambda *, expected_sha: SimpleNamespace(
+        expected_sha=expected_sha,
+        nodes=[SimpleNamespace(name=name, state="converged", git_sha=expected_sha)
+               for name in ("Notebook", "Desktop", "VPS")],
+    ))
     assert e.d._maybe_deploy() is False
     e.now += 101
     assert e.d._maybe_deploy() is False
@@ -3699,6 +3707,55 @@ def test_convergence_recovery_success_completes_deploy_and_clears_pending(tmp_pa
     assert calls == {"deploy": 1, "converge": 2}
     assert e.d.pending_deploy is False and e.d.deploys == 1
     assert node_sync.load_pending_convergence() is None
+
+
+def test_convergence_retry_zero_without_target_evidence_stays_pending(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.infra import node_sync
+
+    e, calls, _sha, node_sync = _deferred_env(tmp_path, monkeypatch, [0])
+    assert e.d._maybe_deploy() is False
+    monkeypatch.setattr(node_sync, "verify", lambda *, expected_sha: SimpleNamespace(
+        expected_sha=expected_sha,
+        nodes=[SimpleNamespace(name="VPS", state="converged", git_sha="d" * 40)],
+    ))
+    e.now += 301
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+    assert e.d.pending_deploy is True and e.d.deploys == 0
+    record = e.d._load_deferrals()[_sha]
+    assert record["recovery_attempts"] == 1
+    assert record["recovery_last_exit_code"] == fd.DEPLOY_PENDING_CONVERGENCE_EXIT_CODE
+
+
+def test_dispatcher_restores_persisted_deferral_and_keeps_recovery_backoff(tmp_path: Path, monkeypatch):
+    import json
+
+    from core.infra import node_sync
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1, 1])
+    assert e.d._maybe_deploy() is False
+    e.now += 301
+    e.d.last_merge_at = e.now - 101
+    assert e.d._maybe_deploy() is False
+    record_path = tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    record = json.loads(record_path.read_text(encoding="utf-8"))[sha]
+    assert record["recovery_attempts"] == 1
+
+    restored = fd.FleetDispatcher(
+        e.d.config, demands_loader=lambda: [], probe=lambda h: fd.HostProbe(True, "x"),
+        launch=e.d.launch, deploy=e.d.deploy, converge=e.d.converge,
+        clock=lambda: e.now,
+        admission_store=AdmissionStore(tmp_path / "admission-restored.sqlite3"),
+    )
+    assert restored._deferred_sha == sha
+    assert restored.pending_deploy is True
+    assert restored._load_deferrals()[sha]["recovery_attempts"] == 1
+    e.now = record["recovery_next_at"] - 1
+    restored.last_merge_at = e.now - 101
+    assert restored._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
 
 
 def test_new_merge_reopens_full_deploy_after_convergence_deferral(tmp_path: Path, monkeypatch):
@@ -3776,20 +3833,35 @@ def test_default_converge_requires_node_retry_then_backup(monkeypatch):
 
     class Proc:
         def __init__(self, argv, **_kw):
-            launched.append(argv[2])
-            self.pid, self.rc = 1, rcs[argv[2]]
+            launched.append(tuple(argv[2:]))
+            self.pid, self.rc = 1, rcs[tuple(argv[2:])]
 
         def wait(self, timeout=None):
             return self.rc
 
     monkeypatch.setattr(fd.subprocess, "Popen", Proc)
-    rcs = {"core.infra.node_sync": 0, "core.infra.backup_cron": 0}
-    assert fd.default_converge() == 0 and launched == ["core.infra.node_sync", "core.infra.backup_cron"]
+    sha = "e" * 40
+    rcs = {
+        ("core.infra.node_sync", "retry"): 0,
+        ("core.infra.node_sync", "verify", "--expected-sha", sha): 0,
+        ("core.infra.backup_cron", "--once"): 0,
+    }
+    assert fd.default_converge(expected_sha=sha) == 0 and launched == [
+        ("core.infra.node_sync", "retry"),
+        ("core.infra.node_sync", "verify", "--expected-sha", sha),
+        ("core.infra.backup_cron", "--once"),
+    ]
 
     launched.clear()
-    rcs["core.infra.node_sync"] = 1
-    assert fd.default_converge() == 1 and launched == ["core.infra.node_sync"]  # sem convergencia, sem backup
+    rcs[("core.infra.node_sync", "retry")] = 1
+    assert fd.default_converge(expected_sha=sha) == 1 and launched == [
+        ("core.infra.node_sync", "retry"),
+    ]  # sem convergencia, sem backup
 
     launched.clear()
-    rcs.update({"core.infra.node_sync": 0, "core.infra.backup_cron": 1})
-    assert fd.default_converge() == 1
+    rcs.update({
+        ("core.infra.node_sync", "retry"): 0,
+        ("core.infra.node_sync", "verify", "--expected-sha", sha): 0,
+        ("core.infra.backup_cron", "--once"): 1,
+    })
+    assert fd.default_converge(expected_sha=sha) == 1

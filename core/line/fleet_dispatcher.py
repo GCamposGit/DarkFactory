@@ -656,13 +656,23 @@ def default_deploy(timeout: Optional[float] = None) -> int:
         return DEPLOY_TIMEOUT_EXIT_CODE
 
 
-def default_converge(timeout: Optional[float] = None) -> int:
+def default_converge(timeout: Optional[float] = None, expected_sha: str | None = None) -> int:
     """Recuperacao delimitada: ``node_sync retry`` sobre o candidato imutavel pendente, depois o backup pos-deploy."""
+    from core.infra import node_sync
+
+    pending = node_sync.load_pending_convergence()
+    candidate = normalize_sha(expected_sha) or normalize_sha((pending or {}).get("expected_sha"))
+    if candidate is None:
+        logger.error("Recuperacao sem SHA alvo valido; mantendo deploy pendente")
+        return 1
     bound = CONVERGENCE_RECOVERY_TIMEOUT_SEC if timeout is None else timeout
     deadline = time.monotonic() + bound
-    # `retry` so devolve 0 com VPS e demais nos no SHA (SyncReport.ok); o backup pos-deploy
-    # segue exigido e roda aqui, pois o deploy original pode te-lo pulado por no sujo.
-    for module, args in (("core.infra.node_sync", ["retry"]), ("core.infra.backup_cron", ["--once"])):
+    # retry pode sair 0 sem pendencia; a verificacao explicita do candidato fecha essa corrida.
+    for module, args in (
+        ("core.infra.node_sync", ["retry"]),
+        ("core.infra.node_sync", ["verify", "--expected-sha", candidate]),
+        ("core.infra.backup_cron", ["--once"]),
+    ):
         proc = subprocess.Popen(
             [sys.executable, "-m", module, *args], cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW,
         )
@@ -972,6 +982,7 @@ class FleetDispatcher:
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
         self.last_merge_at: Optional[float] = None
         self.pending_deploy = False
+        self._restore_deploy_deferral()
         self.pending_release_path = self.config.state_path.with_name("pending_recovery_releases.json")
         self.pending_releases = json.loads(self.pending_release_path.read_text(encoding="utf-8")) if self.pending_release_path.exists() else []
         if self.pending_releases:
@@ -1238,6 +1249,23 @@ class FleetDispatcher:
             return {}
         return loaded if isinstance(loaded, dict) else {}
 
+    def _restore_deploy_deferral(self) -> None:
+        """Restaura somente adiamentos cujo registro e pendencia node_sync confirmam o mesmo SHA."""
+        from core.infra import node_sync
+
+        try:
+            pending = node_sync.load_pending_convergence()
+            sha = normalize_sha((pending or {}).get("expected_sha"))
+            record = self._load_deferrals().get(sha) if sha else None
+            if not sha or not isinstance(record, dict) or normalize_sha(record.get("target_sha")) != sha:
+                return
+            self._deferred_sha = sha
+            self.pending_deploy = True
+            # recovery_next_at continua governando o backoff; o ciclo pode retomar logo.
+            self.last_merge_at = self.clock() - self.config.deploy_window_sec
+        except Exception:  # estado corrompido/inacessivel nao pode derrubar o dispatcher
+            logger.exception("Falha ao restaurar adiamento de deploy")
+
     def _save_deferrals(self, records: dict[str, Any]) -> None:
         if len(records) > FAILURE_HISTORY_LIMIT:
             newest = sorted(records.items(), key=lambda kv: str(kv[1].get("timestamp", "")))
@@ -1314,7 +1342,7 @@ class FleetDispatcher:
         Retorna True quando a convergencia foi comprovada (deploy concluido), False quando o
         ciclo deve apenas esperar (backoff, teto esgotado ou falha) e None quando o SHA alvo
         mudou ou a pendencia sumiu sem prova e o caminho normal de deploy completo deve ser reaberto.
-        Verdadeiro so com ``converge`` em 0: VPS e nos no SHA comprovados e backup concluido.
+        Verdadeiro somente com evidencia explicita de todos os nos no SHA alvo e backup concluido.
         """
         from core.infra import node_sync
 
@@ -1349,28 +1377,42 @@ class FleetDispatcher:
         if self.clock() < float(record.get("recovery_next_at", 0.0)):
             return False
         try:
-            rc = self.converge()
+            rc = self.converge(expected_sha=sha) if self.converge is default_converge else self.converge()
         except Exception:  # noqa: BLE001 - falha da recuperacao conta como tentativa
             logger.exception("Recuperacao de convergencia levantou excecao")
             rc = 1
+        verified = False
         if rc == 0:
+            try:
+                report = node_sync.verify(expected_sha=sha)
+                included = [node for node in report.nodes if node.state != "excluded"]
+                verified = (
+                    normalize_sha(report.expected_sha) == sha
+                    and bool(included)
+                    and any(node.name == "VPS" for node in included)
+                    and all(node.state == "converged" and normalize_sha(node.git_sha) == sha for node in included)
+                )
+            except Exception:  # noqa: BLE001 - sem prova explicita, preservar a pendencia
+                logger.exception("Verificacao explicita de convergencia falhou para %s", sha[:12])
+        if rc == 0 and verified:
             node_sync.clear_pending_convergence()
             records.pop(sha, None)
             self._save_deferrals(records)
             self._deferred_sha = None
             return True
+        recovery_rc = rc if rc != 0 else DEPLOY_PENDING_CONVERGENCE_EXIT_CODE
         attempts += 1
         backoff = min(CONVERGENCE_RECOVERY_BACKOFF_BASE_SEC * 2 ** (attempts - 1), CONVERGENCE_RECOVERY_BACKOFF_MAX_SEC)
         record.update(
             recovery_attempts=attempts, recovery_next_at=self.clock() + backoff,
-            recovery_last_exit_code=rc, recovery_last_at=datetime.now(timezone.utc).isoformat(),
+            recovery_last_exit_code=recovery_rc, recovery_last_at=datetime.now(timezone.utc).isoformat(),
         )
         records[sha] = record
         self._save_deferrals(records)
-        self._note_failure(rc, f"convergence_recovery_exit:{rc}")
+        self._note_failure(recovery_rc, f"convergence_recovery_exit:{recovery_rc}")
         logger.error(
-            "Recuperacao de convergencia falhou: exit_code=%s tentativa=%s/%s",
-            rc, attempts, CONVERGENCE_RECOVERY_MAX_ATTEMPTS,
+            "Recuperacao de convergencia falhou ou ficou sem prova: exit_code=%s tentativa=%s/%s",
+            recovery_rc, attempts, CONVERGENCE_RECOVERY_MAX_ATTEMPTS,
         )
         self.last_merge_at = self.clock()
         self._write_state()
