@@ -203,6 +203,29 @@ def _ref_exists(cwd: Path, ref: str) -> bool:
     return proc.returncode == 0
 
 
+def _remote_ref_shas(cwd: Path, refs: tuple[str, ...]) -> dict[str, str]:
+    """Return requested remote-tracking ref SHAs with one Git process.
+
+    `checkout()` is called repeatedly during a run. Resolving the default and
+    run branches separately adds avoidable process startup overhead on Windows,
+    where a full line run can otherwise spend its test deadline launching Git.
+    """
+    proc = _run_git(
+        ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin"],
+        cwd=cwd,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return {}
+    requested = {f"refs/remotes/{ref}": ref for ref in refs}
+    found: dict[str, str] = {}
+    for line in (proc.stdout or "").splitlines():
+        refname, _, sha = line.partition(" ")
+        if refname in requested and sha:
+            found[requested[refname]] = sha
+    return found
+
+
 def _remote_url(cwd: Path) -> Optional[str]:
     proc = _run_git(["remote", "get-url", "origin"], cwd=cwd, check=False)
     if proc.returncode != 0:
@@ -245,8 +268,9 @@ def _sync_existing_worktree(
     run_dir: Path,
     branch: str,
     remote_ref: Optional[str],
+    remote_sha: Optional[str],
     repo_url: Optional[str],
-) -> None:
+) -> str:
     """Reconcile an already-checked-out run worktree with the remote branch.
 
     Fast-forwards to the remote tip when the remote is strictly ahead.
@@ -254,11 +278,10 @@ def _sync_existing_worktree(
     from) the remote, it is left untouched and a warning is logged.
     """
     if remote_ref is None:
-        return  # nothing pushed for this run yet; local state is authoritative
+        return _rev_parse(run_dir, "HEAD")  # nothing pushed; local state is authoritative
     local_sha = _rev_parse(run_dir, "HEAD")
-    remote_sha = _rev_parse(run_dir, remote_ref)
     if not remote_sha or local_sha == remote_sha:
-        return
+        return local_sha
     ancestor_check = _run_git(
         ["merge-base", "--is-ancestor", "HEAD", remote_ref], cwd=run_dir, check=False
     )
@@ -268,12 +291,14 @@ def _sync_existing_worktree(
             "workspace %s: fast-forwarded %s from %s to remote tip %s",
             run_dir, branch, local_sha, remote_sha,
         )
+        return remote_sha
     else:
         logger.warning(
             "workspace %s: local %s (%s) is ahead of or has diverged from %s (%s); "
             "keeping local commits, not resetting",
             run_dir, branch, local_sha, remote_ref, remote_sha,
         )
+        return local_sha
 
 
 def checkout(project: ProjectDescriptor, run_id: str) -> RunWorkspace:
@@ -297,22 +322,30 @@ def checkout(project: ProjectDescriptor, run_id: str) -> RunWorkspace:
     mirror = _ensure_mirror(project.id, repo_url, root)
 
     remote_default_ref = f"origin/{default_branch}"
-    if not _ref_exists(mirror, remote_default_ref):
+    remote_branch_ref = f"origin/{branch}"
+    remote_ref_shas = _remote_ref_shas(mirror, (remote_default_ref, remote_branch_ref))
+    if remote_default_ref not in remote_ref_shas:
         raise WorkspaceError(
             f"remote default branch '{default_branch}' not found at {repo_url} "
             f"for project '{project.id}'"
         )
-    remote_branch_ref = f"origin/{branch}"
-    has_remote_branch = _ref_exists(mirror, remote_branch_ref)
+    remote_branch_sha = remote_ref_shas.get(remote_branch_ref)
+    has_remote_branch = remote_branch_sha is not None
 
     run_dir = _run_dir(root, project.id, run_id)
-    _run_git(["worktree", "prune"], cwd=mirror, check=False)
 
     if (run_dir / ".git").exists():
-        _sync_existing_worktree(
-            run_dir, branch, remote_branch_ref if has_remote_branch else None, repo_url,
+        head_sha = _sync_existing_worktree(
+            run_dir,
+            branch,
+            remote_branch_ref if has_remote_branch else None,
+            remote_branch_sha,
+            repo_url,
         )
     else:
+        # Pruning only matters before adding a worktree. Running it on every
+        # checkout made each stage pay for a full extra Git process.
+        _run_git(["worktree", "prune"], cwd=mirror, check=False)
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)  # stale non-worktree leftover
         run_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -322,14 +355,14 @@ def checkout(project: ProjectDescriptor, run_id: str) -> RunWorkspace:
             cwd=mirror,
             repo_url=repo_url,
         )
+        head_sha = _rev_parse(run_dir, "HEAD")
         if has_remote_branch:
             _run_git(
                 ["branch", f"--set-upstream-to={remote_branch_ref}", branch],
                 cwd=run_dir, check=False,
             )
 
-    head_sha = _rev_parse(run_dir, "HEAD")
-    base_sha = _merge_base(run_dir, "HEAD", remote_default_ref) or head_sha
+    base_sha = _merge_base(run_dir, head_sha, remote_default_ref) or head_sha
 
     return RunWorkspace(
         project_id=project.id, run_id=run_id, branch=branch, path=run_dir, base_sha=base_sha,
