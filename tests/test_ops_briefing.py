@@ -105,7 +105,7 @@ def test_handoff_is_versioned_and_has_operational_sections() -> None:
         assert expected in handoff
 
 
-def test_coordination_receipt_persists_route_and_cost(monkeypatch, tmp_path: Path) -> None:
+def test_coordination_receipt_persists_project_while_in_flight(monkeypatch, tmp_path: Path) -> None:
     from types import SimpleNamespace
     from core.ops import coordination
 
@@ -116,8 +116,8 @@ def test_coordination_receipt_persists_route_and_cost(monkeypatch, tmp_path: Pat
         SimpleNamespace(eligible=True, ticket=ticket),
     ])
     monkeypatch.setattr(coordination, "_in_flight", lambda: ["USR-500"])
-    monkeypatch.setattr(coordination, "_route", lambda *_args: (
-        {"stage": "development", "harness": "codex", "model": "route-alias"}, 1.25, "event-1",
+    monkeypatch.setattr(coordination, "_route", lambda *_args: (_ for _ in ()).throw(
+        AssertionError("coordination must not admit work while another ticket is in flight"),
     ))
 
     receipt = coordination.coordinate(harness="codex")
@@ -125,8 +125,9 @@ def test_coordination_receipt_persists_route_and_cost(monkeypatch, tmp_path: Pat
     saved = json.loads((tmp_path / "state/coordination/last_receipt.json").read_text(encoding="utf-8"))
     assert receipt.project_id == "darkfac"
     assert receipt.role == "coordinator" and receipt.in_flight == ["USR-500"]
-    assert receipt.ticket_id == "USR-539" and receipt.first_action.startswith("Delegar")
-    assert receipt.route_event_id == "event-1" and receipt.cost_available_usd == 1.25
+    assert receipt.ticket_id is None and receipt.status == "in_flight"
+    assert "Aguardar" in receipt.first_action
+    assert receipt.route is None and receipt.route_event_id is None and receipt.cost_available_usd is None
     assert saved == receipt.model_dump(mode="json")
 
 
@@ -145,7 +146,7 @@ def test_coordination_selects_highest_priority_eligible_ticket(monkeypatch, tmp_
     ])
     monkeypatch.setattr(coordination, "_in_flight", lambda: [])
     routed = []
-    monkeypatch.setattr(coordination, "_route", lambda ticket, _harness: (
+    monkeypatch.setattr(coordination, "_route", lambda ticket, _harness, _stage: (
         routed.append(ticket.id) or {"stage": "development", "harness": "codex", "model": None},
         None, "event",
     ))

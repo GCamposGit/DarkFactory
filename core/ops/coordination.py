@@ -177,7 +177,8 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         candidate = eligible[0]
         ticket = candidate.ticket
         status = "ready"
-        status_name = str(getattr(ticket.status, "value", ticket.status)).lower()
+        ticket_status = getattr(ticket, "status", "implementing")
+        status_name = str(getattr(ticket_status, "value", ticket_status)).lower()
         stage = {
             "planned": "planning", "implementing": "development",
             "validating": "review", "reviewing": "review",
@@ -188,7 +189,12 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         if route is None:
             status = "wait"
     receipt = CoordinationReceipt(
-        project_id=ticket.project_id if ticket else _project_id(root), harness=selected_harness,
+        project_id=(
+            ticket.project_id if ticket else
+            next((item.ticket.project_id for item in eligible
+                  if getattr(item.ticket, "project_id", None)), _project_id(root))
+        ),
+        harness=selected_harness,
         role="coordinator", status=status, in_flight=active, ticket_id=ticket.id if ticket else None,
         first_action=first, route=route, route_event_id=route_event_id,
         active_run=active_run, cost_available_usd=cost, created_at=datetime.now(timezone.utc).isoformat(),
