@@ -105,6 +105,14 @@ ROUTE_WAIT_MARKERS = ("harness_infra_error: route_wait", '"cause": "route_wait"'
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 FAILURE_HISTORY_LIMIT = 20
+DEPLOY_PENDING_CONVERGENCE_EXIT_CODE = 3
+DEPLOY_PENDING_CONVERGENCE_REASON = "canonical_deploy_pending_convergence"
+DEPLOY_DEFERRAL_FILE = "deploy_deferrals.json"
+DEPLOY_DEFERRAL_TEXT_LIMIT = 500
+CONVERGENCE_RECOVERY_MAX_ATTEMPTS = 6
+CONVERGENCE_RECOVERY_BACKOFF_BASE_SEC = 300.0
+CONVERGENCE_RECOVERY_BACKOFF_MAX_SEC = 3600.0
+CONVERGENCE_RECOVERY_TIMEOUT_SEC = 900.0
 DEFAULT_PROGRESS_WINDOW_SEC = 120.0
 
 
@@ -648,6 +656,31 @@ def default_deploy(timeout: Optional[float] = None) -> int:
         return DEPLOY_TIMEOUT_EXIT_CODE
 
 
+def default_converge(timeout: Optional[float] = None) -> int:
+    """Recuperacao delimitada: ``node_sync retry`` sobre o candidato imutavel pendente, depois o backup pos-deploy."""
+    bound = CONVERGENCE_RECOVERY_TIMEOUT_SEC if timeout is None else timeout
+    deadline = time.monotonic() + bound
+    # `retry` so devolve 0 com VPS e demais nos no SHA (SyncReport.ok); o backup pos-deploy
+    # segue exigido e roda aqui, pois o deploy original pode te-lo pulado por no sujo.
+    for module, args in (("core.infra.node_sync", ["retry"]), ("core.infra.backup_cron", ["--once"])):
+        proc = subprocess.Popen(
+            [sys.executable, "-m", module, *args], cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW,
+        )
+        try:
+            rc = proc.wait(timeout=max(1.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            logger.error("default_converge excedeu %.0fs em %s; encerrando a subarvore do processo", bound, module)
+            from core.execution.sandbox import kill_process_tree
+
+            kill_process_tree(proc.pid)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=10)
+            return DEPLOY_TIMEOUT_EXIT_CODE
+        if rc != 0:
+            return rc
+    return 0
+
+
 def is_lock_refusal(log_tail: str) -> bool:
     return canonical_cause(log_tail) == "lock"
 
@@ -890,6 +923,7 @@ class FleetDispatcher:
         probe: Optional[Callable[[HostSpec], HostProbe]] = None,
         launch: Optional[Callable[[str, HostSpec], InFlight]] = None,
         deploy: Callable[[], int] = default_deploy,
+        converge: Callable[[], int] = default_converge,
         clock: Callable[[], float] = time.time,
         busy_ids_loader: Callable[[], set[str]] = lambda: set(),
         busy_hosts_loader: Callable[[], set[str]] = lambda: set(),
@@ -911,6 +945,8 @@ class FleetDispatcher:
         self.probe = probe or (lambda h: default_probe(h, self.config.stable_probes))
         self.launch = launch
         self.deploy = deploy
+        self.converge = converge
+        self._deferred_sha: str | None = None  # SHA com deploy ja feito e convergencia pendente (exit 3)
         self.clock = clock
         self.busy_hosts_loader = busy_hosts_loader  # hosts com run --fleet vivo fora deste processo
         self.busy_ids_loader = busy_ids_loader  # tickets com run/worktree de entrega fora deste processo
@@ -1164,6 +1200,7 @@ class FleetDispatcher:
                         self.recovery = self.admission_store.record_recovery_receipt_cause("awaiting_deploy_proof")
                     self.last_merge_at = self.clock()
                     self.pending_deploy = True
+                    self._deferred_sha = None
                 elif not in_recovery:
                     self._record_failure(job, rc, "no_delivery_evidence", tail)
                     self._release_reservation(job)
@@ -1190,6 +1227,155 @@ class FleetDispatcher:
                 self._record_failure(job, rc, "failure", tail)
                 self._release_reservation(job)
 
+    @staticmethod
+    def _deferral_path() -> Path:
+        return state_root() / "runs" / DEPLOY_DEFERRAL_FILE
+
+    def _load_deferrals(self) -> dict[str, Any]:
+        try:
+            loaded = json.loads(self._deferral_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def _save_deferrals(self, records: dict[str, Any]) -> None:
+        if len(records) > FAILURE_HISTORY_LIMIT:
+            newest = sorted(records.items(), key=lambda kv: str(kv[1].get("timestamp", "")))
+            records = dict(newest[-FAILURE_HISTORY_LIMIT:])
+        path = self._deferral_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(records, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(temp, path)
+
+    def _record_deploy_deferral(self, exit_code: int) -> dict[str, Any] | None:
+        """Persiste o adiamento por SHA (idempotente): repeticoes incrementam ``attempts``.
+
+        Garante um registro pendente com candidato imutavel para o ``node_sync retry``.
+        """
+        from core.infra import node_sync
+
+        try:
+            pending = node_sync.load_pending_convergence() or {}
+            target_sha = normalize_sha(pending.get("expected_sha")) or _default_checkout_sha() or "unknown"
+            node = node_sync.redact_worker_output(pending.get("node") or "unknown", limit=80)
+            diagnostic = node_sync.redact_worker_output(
+                pending.get("reason") or "convergence pending; no diagnostic recorded", limit=DEPLOY_DEFERRAL_TEXT_LIMIT
+            )
+            if normalize_sha(pending.get("expected_sha")) is None and normalize_sha(target_sha):
+                node_sync.record_pending_convergence(node, target_sha, diagnostic)
+            records = self._load_deferrals()
+            previous = records.get(target_sha)
+            previous = previous if isinstance(previous, dict) else {}
+            record = {
+                **previous,
+                "target_sha": target_sha, "pending_node": node, "reason": diagnostic,
+                "exit_code": exit_code, "attempts": int(previous.get("attempts", 0)) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            records[target_sha] = record
+            self._save_deferrals(records)
+            return record
+        except Exception:  # diagnostico nunca derruba o ciclo do despachante
+            logger.exception("Falha ao persistir o adiamento do deploy canonico")
+            return None
+
+    def _clear_deploy_deferrals(self) -> None:
+        from core.infra import node_sync
+
+        self._deferred_sha = None
+        if self._load_deferrals():
+            self._save_deferrals({})
+        node_sync.clear_pending_convergence()
+
+    def deploy_deferral_snapshot(self) -> dict[str, Any] | None:
+        """Adiamento por convergencia pendente para o Hub distinguir 'aguardando no' de 'deploy falhou'."""
+        sha = self._deferred_sha
+        record = self._load_deferrals().get(sha) if sha else None
+        if not isinstance(record, dict):
+            return None
+        keys = ("pending_node", "reason", "exit_code", "attempts", "recovery_attempts", "recovery_next_at",
+                "recovery_last_exit_code", "recovery_exhausted", "timestamp")
+        return {
+            "state": "awaiting_node_convergence", "target_sha": sha,
+            "recovery_max_attempts": CONVERGENCE_RECOVERY_MAX_ATTEMPTS,
+            **{key: record.get(key) for key in keys if key in record},
+        }
+
+    def _note_failure(self, rc: int, reason: str) -> None:
+        self.failures = (self.failures + [{
+            "ts": datetime.now(timezone.utc).isoformat(), "ticket": "deploy", "host": "vps",
+            "exit_code": rc, "kind": "deploy", "reason": reason, "log": None,
+        }])[-FAILURE_HISTORY_LIMIT:]
+
+    def _recover_convergence(self) -> bool | None:
+        """Recuperacao delimitada de um deploy com convergencia pendente.
+
+        Retorna True quando a convergencia foi comprovada (deploy concluido), False quando o
+        ciclo deve apenas esperar (backoff, teto esgotado ou falha) e None quando o SHA alvo
+        mudou ou a pendencia sumiu sem prova e o caminho normal de deploy completo deve ser reaberto.
+        Verdadeiro so com ``converge`` em 0: VPS e nos no SHA comprovados e backup concluido.
+        """
+        from core.infra import node_sync
+
+        sha = self._deferred_sha
+        pending = node_sync.load_pending_convergence()
+        records = self._load_deferrals()
+        record = records.get(sha) if sha is not None else None
+        if sha is None or not isinstance(record, dict) or (
+            pending is not None and normalize_sha(pending.get("expected_sha")) != sha
+        ):
+            self._deferred_sha = None
+            return None
+        if pending is None:
+            # Pendencia sumiu sem prova de convergencia da VPS nem backup: o deploy completo reabre.
+            records.pop(sha, None)
+            self._save_deferrals(records)
+            self._deferred_sha = None
+            return None
+        attempts = int(record.get("recovery_attempts", 0))
+        if attempts >= CONVERGENCE_RECOVERY_MAX_ATTEMPTS:
+            if not record.get("recovery_exhausted"):
+                record["recovery_exhausted"] = True
+                records[sha] = record
+                self._save_deferrals(records)
+                self._note_failure(DEPLOY_PENDING_CONVERGENCE_EXIT_CODE, "convergence_recovery_exhausted")
+                logger.error(
+                    "Recuperacao de convergencia esgotada para %s apos %s tentativas; pendencia preservada",
+                    sha[:12], attempts,
+                )
+                self._write_state()
+            return False
+        if self.clock() < float(record.get("recovery_next_at", 0.0)):
+            return False
+        try:
+            rc = self.converge()
+        except Exception:  # noqa: BLE001 - falha da recuperacao conta como tentativa
+            logger.exception("Recuperacao de convergencia levantou excecao")
+            rc = 1
+        if rc == 0:
+            node_sync.clear_pending_convergence()
+            records.pop(sha, None)
+            self._save_deferrals(records)
+            self._deferred_sha = None
+            return True
+        attempts += 1
+        backoff = min(CONVERGENCE_RECOVERY_BACKOFF_BASE_SEC * 2 ** (attempts - 1), CONVERGENCE_RECOVERY_BACKOFF_MAX_SEC)
+        record.update(
+            recovery_attempts=attempts, recovery_next_at=self.clock() + backoff,
+            recovery_last_exit_code=rc, recovery_last_at=datetime.now(timezone.utc).isoformat(),
+        )
+        records[sha] = record
+        self._save_deferrals(records)
+        self._note_failure(rc, f"convergence_recovery_exit:{rc}")
+        logger.error(
+            "Recuperacao de convergencia falhou: exit_code=%s tentativa=%s/%s",
+            rc, attempts, CONVERGENCE_RECOVERY_MAX_ATTEMPTS,
+        )
+        self.last_merge_at = self.clock()
+        self._write_state()
+        return False
+
     def _maybe_deploy(self) -> bool:
         """Um deploy por lote: so apos a janela de silencio desde o ultimo merge."""
         if not self.pending_deploy or self.last_merge_at is None:
@@ -1199,20 +1385,28 @@ class FleetDispatcher:
         if self.dry_run:
             return False
         from core.demands.store import _PathMutex, DemandsLockTimeout
-        try:
-            with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
-                rc = self.deploy()
-        except DemandsLockTimeout:
-            rc = 75
-        if rc != 0:
-            self.failures = (self.failures + [{
-                "ts": datetime.now(timezone.utc).isoformat(), "ticket": "deploy", "host": "vps",
-                "exit_code": rc, "kind": "deploy", "reason": f"canonical_deploy_exit:{rc}", "log": None,
-            }])[-FAILURE_HISTORY_LIMIT:]
-            logger.error("Canonical deployment deferred: exit_code=%s", rc)
-            self.last_merge_at = self.clock()
-            self._write_state()
+        recovered = self._recover_convergence() if self._deferred_sha is not None else None
+        if recovered is False:
             return False
+        if recovered is None:
+            try:
+                with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
+                    rc = self.deploy()
+            except DemandsLockTimeout:
+                rc = 75
+            if rc != 0:
+                reason = f"canonical_deploy_exit:{rc}"
+                if rc == DEPLOY_PENDING_CONVERGENCE_EXIT_CODE:
+                    reason = DEPLOY_PENDING_CONVERGENCE_REASON
+                    record = self._record_deploy_deferral(rc)
+                    self._deferred_sha = normalize_sha(record.get("target_sha")) if record is not None else None
+                self._note_failure(rc, reason)
+                logger.error("Canonical deployment deferred: exit_code=%s reason=%s", rc, reason)
+                self.last_merge_at = self.clock()
+                self._write_state()
+                return False
+        if recovered is None:
+            self._clear_deploy_deferrals()  # deploy completo saiu 0: convergencia e backup comprovados
         if self.pending_releases and not self._complete_pending_releases():
             self.last_merge_at = self.clock()
             return False
@@ -1834,6 +2028,7 @@ class FleetDispatcher:
             "deployed_this_cycle": deployed,
             "demands_error": load_error,
             "recent_failures": self.failures,
+            "deploy_deferral": self.deploy_deferral_snapshot(),
             "ticket_holds": self._ticket_holds(),
             "recovery_list": {k: v for k, v in recovery_list.items() if k != "live"},
             "recovery": {"active": bool(self.recovery.get("active")),

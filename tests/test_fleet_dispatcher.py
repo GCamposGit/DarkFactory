@@ -3584,3 +3584,212 @@ def test_review_child_crash_without_a_known_marker_stays_blocked_and_never_reope
     reopened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]
     assert reopened["status"] == "blocked"
     assert not calls
+
+
+def test_deploy_exit_3_persists_redacted_deferral_idempotent_per_sha(tmp_path: Path, monkeypatch):
+    import json
+
+    from core.infra import node_sync
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "deferral-state"))
+    sha = "b" * 40
+    secret = "ghp_" + "A" * 30
+    node_sync.record_pending_convergence(
+        "notebook", sha, f"behind origin/main; push https://user:{secret}@github.com/x token={secret}"
+    )
+    e = Env(tmp_path, [])
+    e.d.deploy = lambda: 3
+    e.d.pending_deploy, e.d.last_merge_at = True, e.now - 101
+
+    assert e.d._maybe_deploy() is False
+    e.d._deferred_sha = None  # novo merge: o deploy completo volta a rodar e re-adia por exit 3
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+
+    path = tmp_path / "deferral-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    raw = path.read_text(encoding="utf-8")
+    records = json.loads(raw)
+    assert list(records) == [sha]
+    record = records[sha]
+    assert record["target_sha"] == sha and record["pending_node"] == "notebook"
+    assert record["attempts"] == 2 and record["exit_code"] == 3 and record["timestamp"]
+    assert secret not in raw and "user:" not in raw
+    assert not list(path.parent.glob("*.tmp"))
+    assert [f["reason"] for f in e.d.failures] == [fd.DEPLOY_PENDING_CONVERGENCE_REASON] * 2
+
+    e.d.deploy = lambda: 1
+    e.d._deferred_sha = None
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    assert e.d.failures[-1]["reason"] == "canonical_deploy_exit:1"
+    assert json.loads(path.read_text(encoding="utf-8"))[sha]["attempts"] == 2
+
+
+def _deferred_env(tmp_path: Path, monkeypatch, converge_rcs):
+    from core.infra import node_sync
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "recovery-state"))
+    sha = "c" * 40
+    node_sync.record_pending_convergence("notebook", sha, "behind origin/main")
+    e = Env(tmp_path, [])
+    calls = {"deploy": 0, "converge": 0}
+    rcs = iter(converge_rcs)
+
+    def deploy():
+        calls["deploy"] += 1
+        return 3
+
+    def converge():
+        calls["converge"] += 1
+        return next(rcs)
+
+    e.d.deploy, e.d.converge = deploy, converge
+    e.d.pending_deploy, e.d.last_merge_at = True, e.now - 101
+    return e, calls, sha, node_sync
+
+
+def test_deploy_exit_3_switches_to_bounded_convergence_recovery_with_backoff_and_cap(tmp_path: Path, monkeypatch):
+    import json
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1] * 20)
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 0}
+
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+
+    e.now += 101  # dentro do backoff (300 s): nada roda
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+
+    path = tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    waits = []
+    for _ in range(fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS - 1):
+        record = json.loads(path.read_text(encoding="utf-8"))[sha]
+        waits.append(record["recovery_next_at"] - e.now)
+        e.now = record["recovery_next_at"] + 1
+        e.d.last_merge_at = e.now - 101
+        assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS}
+    assert waits == sorted(waits) and waits[-1] > waits[0]
+
+    for _ in range(5):  # teto esgotado: sem deploy nem recuperacao, pendencia preservada
+        e.now += 10_000
+        assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS}
+    assert e.d.pending_deploy is True
+    assert node_sync.load_pending_convergence()["expected_sha"] == sha
+    assert json.loads(path.read_text(encoding="utf-8"))[sha]["recovery_exhausted"] is True
+    assert [f["reason"] for f in e.d.failures].count("convergence_recovery_exhausted") == 1
+
+
+def test_convergence_recovery_success_completes_deploy_and_clears_pending(tmp_path: Path, monkeypatch):
+    import json
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1, 0])
+    assert e.d._maybe_deploy() is False
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    record = json.loads((tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE).read_text(encoding="utf-8"))[sha]
+    e.now = record["recovery_next_at"] + 1
+    e.d.last_merge_at = e.now - 101
+
+    assert e.d._maybe_deploy() is True
+    assert calls == {"deploy": 1, "converge": 2}
+    assert e.d.pending_deploy is False and e.d.deploys == 1
+    assert node_sync.load_pending_convergence() is None
+
+
+def test_new_merge_reopens_full_deploy_after_convergence_deferral(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1] * 5)
+    assert e.d._maybe_deploy() is False
+    assert e.d._deferred_sha == sha
+    e.d._deferred_sha = None  # o merge de um ticket zera o marcador em _reap
+    e.d.last_merge_at = e.now - 101
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 2, "converge": 0}
+
+
+def test_pending_record_for_another_sha_reopens_full_deploy(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1] * 5)
+    assert e.d._maybe_deploy() is False
+    node_sync.record_pending_convergence("desktop", "d" * 40, "busy")
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 2, "converge": 0}
+
+
+@pytest.mark.parametrize("rc", [1, 2, 75, 124])
+def test_non_convergence_exit_codes_keep_full_deploy_each_cycle(tmp_path: Path, monkeypatch, rc):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [])
+    e.d.deploy = lambda: calls.__setitem__("deploy", calls["deploy"] + 1) or rc
+    for _ in range(3):
+        assert e.d._maybe_deploy() is False
+        e.now += 101
+    assert calls == {"deploy": 3, "converge": 0}
+    assert e.d.failures[-1]["reason"] == f"canonical_deploy_exit:{rc}"
+
+
+def test_deferral_snapshot_distinguishes_waiting_node_from_failed_deploy(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1])
+    assert e.d.deploy_deferral_snapshot() is None
+    assert e.d._maybe_deploy() is False
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+
+    snap = e.d.deploy_deferral_snapshot()
+    assert snap["state"] == "awaiting_node_convergence" and snap["target_sha"] == sha
+    assert snap["pending_node"] == "notebook" and snap["recovery_attempts"] == 1
+    assert snap["recovery_max_attempts"] == fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS
+
+
+def test_pending_record_vanishing_without_proof_reopens_full_deploy(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [0])
+    assert e.d._maybe_deploy() is False
+    node_sync.clear_pending_convergence()
+    e.now += 101
+    assert e.d._maybe_deploy() is False  # sem prova, nunca conclui: o deploy completo (e o backup) volta
+    assert calls == {"deploy": 2, "converge": 0}
+    assert e.d.pending_deploy is True and e.d.deploys == 0
+
+
+def test_later_full_deploy_exit_0_clears_deferral_and_completes(tmp_path: Path, monkeypatch):
+    import json
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1])
+    assert e.d._maybe_deploy() is False
+    e.d._deferred_sha = None  # novo merge reabre o deploy completo
+    e.d.deploy = lambda: 0
+    e.d.last_merge_at = e.now - 101
+
+    assert e.d._maybe_deploy() is True
+    assert e.d.pending_deploy is False and e.d.deploys == 1
+    assert node_sync.load_pending_convergence() is None
+    path = tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    assert json.loads(path.read_text(encoding="utf-8")) == {}
+    assert e.d.deploy_deferral_snapshot() is None
+
+
+def test_default_converge_requires_node_retry_then_backup(monkeypatch):
+    launched = []
+
+    class Proc:
+        def __init__(self, argv, **_kw):
+            launched.append(argv[2])
+            self.pid, self.rc = 1, rcs[argv[2]]
+
+        def wait(self, timeout=None):
+            return self.rc
+
+    monkeypatch.setattr(fd.subprocess, "Popen", Proc)
+    rcs = {"core.infra.node_sync": 0, "core.infra.backup_cron": 0}
+    assert fd.default_converge() == 0 and launched == ["core.infra.node_sync", "core.infra.backup_cron"]
+
+    launched.clear()
+    rcs["core.infra.node_sync"] = 1
+    assert fd.default_converge() == 1 and launched == ["core.infra.node_sync"]  # sem convergencia, sem backup
+
+    launched.clear()
+    rcs.update({"core.infra.node_sync": 0, "core.infra.backup_cron": 1})
+    assert fd.default_converge() == 1

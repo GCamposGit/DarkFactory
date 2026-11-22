@@ -96,6 +96,12 @@ O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só
 a espera após verificar o SHA saudável de produção incluindo o candidato. Falha de
 deploy permanece pendente para nova tentativa, sem chamar um agente para supervisionar.
 
+### Deploy com convergencia de nos pendente (USR-541)
+
+O deploy canonico que sai com codigo 3 (`EXIT_NODE_DIRTY`: VPS saudavel, mas Desktop ou Notebook ainda fora do SHA) deixa de ser repetido por inteiro a cada ciclo. O despachante grava o adiamento por SHA em `<state_root>/runs/deploy_deferrals.json` (SHA alvo, no pendente, motivo redigido, codigo, `attempts`) e preserva `node_sync` pending. Daí em diante usa so a recuperacao delimitada: `python -m core.infra.node_sync retry` seguido de `python -m core.infra.backup_cron --once`, com backoff exponencial (300 s ate 3600 s) e teto de 6 tentativas. A recuperacao so conclui o deploy (`pending_deploy` falso, `deploys` +1, `pending_releases` fechados) quando os dois comandos saem 0: `retry` so devolve 0 com VPS e nos incluidos no SHA candidato, e o backup pos-deploy segue exigido. Pendencia sumida sem essa prova, ou novo merge, reabre o deploy completo; um deploy completo que sai 0 limpa registro e contador. Teto esgotado grava `convergence_recovery_exhausted` em `recent_failures` uma vez e mantem a pendencia.
+
+O estado do despachante expoe `deploy_deferral` (`state: awaiting_node_convergence`, `target_sha`, `pending_node`, `recovery_attempts`, `recovery_next_at`, `recovery_exhausted`), para o Hub e o briefing separarem "aguardando no" de "deploy falhou" (`canonical_deploy_exit:<codigo>` em `recent_failures`). Equivalente manual: `Set-Location C:\dev\DarkFac; python -m core.infra.node_sync retry; python -m core.infra.backup_cron --once`.
+
 ## CI vermelho sem recibo de merge (USR-509)
 
 Uma espera com causa `ci_fix_requires_revalidation` ou `ci_fix_route_wait`, sem

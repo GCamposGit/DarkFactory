@@ -14998,5 +14998,34 @@
     "dependencies": [],
     "created_at": "2026-11-21T06:06:02.537134Z",
     "updated_at": "2026-11-21T10:31:39.281633Z"
+  },
+  {
+    "id": "USR-541",
+    "project_id": "darkfac",
+    "title": "Parar repeticao de deploy quando a convergencia dos nos fica pendente",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21-22/11 o log .factory/runs/fleet_dispatcher_logs/fleet-dispatcher.log registrou 279 adiamentos do deploy canonico em 24 horas, 278 com codigo 3. O DarkHub servia 39ef4a60 com health ok. A verificacao contemporanea de node_sync mostrou Desktop e VPS convergentes e Notebook um commit atras; falta ligar cada codigo 3 ao no e arquivos vistos pelo processo agendado. USR-535 trata ledger de aprendizagem no Desktop e USR-519 trata perda da solicitacao, sem cobrir o ciclo de redeploy repetido.",
+    "core_journey": [
+      "Em 21-22/11 o log .factory/runs/fleet_dispatcher_logs/fleet-dispatcher.log registrou 279 adiamentos do deploy canonico em 24 horas, 278 com codigo 3. O DarkHub servia 39ef4a60 com health ok. A verificacao contemporanea de node_sync mostrou Desktop e VPS convergentes e Notebook um commit atras; falta ligar cada codigo 3 ao no e arquivos vistos pelo processo agendado. USR-535 trata ledger de aprendizagem no Desktop e USR-519 trata perda da solicitacao, sem cobrir o ciclo de redeploy repetido."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir o codigo 3 e persistir SHA, no e motivo diagnostico sem expor segredos. Com VPS ja no SHA e apenas convergencia pendente, o dispatcher deve preservar a pendencia e usar recuperacao delimitada, sem redisparar deploy completo para o mesmo SHA a cada ciclo. Provar retomada autonoma quando a causa cessa e preservar a exigencia de backup e evidencia de convergencia."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-22T18:42:47.750568Z",
+    "updated_at": "2026-11-22T18:42:47.750568Z"
   }
 ]
