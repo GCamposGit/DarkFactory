@@ -227,6 +227,14 @@ pendencia persistir depois que a outra sessao terminar, rode
 secao "Checkout compartilhado do Notebook e disciplina de worktree (USR-222)"
 em `docs/HARNESS_INTEROP.md`.
 
+**Saida com codigo 3 (`[PENDING] ... divergent`, USR-541)**
+O deploy da VPS foi concluido, mas Desktop ou Notebook seguem fora do SHA. O despachante da frota nao repete o deploy completo para o mesmo SHA: grava o adiamento em `runs/deploy_deferrals.json` (no, motivo redigido, tentativas), expoe `deploy_deferral` no estado (`awaiting_node_convergence`) e tenta so a convergencia, com backoff, ate 6 vezes. Ao convergir, ele roda o backup pos-deploy e so entao conclui o deploy; se a causa nao cessar, a pendencia fica registrada em `recent_failures` (`convergence_recovery_exhausted`). Comando manual equivalente (cwd `C:\dev\DarkFac`):
+
+```powershell
+python -m core.infra.node_sync retry
+python -m core.infra.backup_cron --once
+```
+
 **Quero rodar em outra maquina (por exemplo a VPS) alem da que configurei
 primeiro**
 Repita a secao 2 (variante Linux/macOS, se for o caso) naquela maquina --
