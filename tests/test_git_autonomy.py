@@ -376,6 +376,9 @@ def test_git_autonomy_marks_completed_only_after_verified_merge(test_remote_pair
     assert report.ok
     assert store.get_ticket("USR-58").status == DeliveryStatus.COMPLETED
     assert store.get_ticket("USR-58").delivery_evidence == f"{merge_sha}:merged"
+    mgr._record_completion("USR-58", "Merge evidence gate", local)
+    assert store.get_ticket("USR-58").status == DeliveryStatus.COMPLETED
+    assert store.get_ticket("USR-58").delivery_evidence == f"{merge_sha}:merged"
 
 
 def test_run_ticket_parser_supports_git_autonomy_flags():

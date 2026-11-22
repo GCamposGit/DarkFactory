@@ -992,7 +992,7 @@ class GitAutonomyManager:
         if ticket is None:
             raise TicketAbsentError(ticket_id)
         evidence = ticket.delivery_evidence or ""
-        has_merge_proof = ":merged:" in evidence
+        has_merge_proof = bool(re.match(r"^[0-9a-fA-F]{40}:merged(?=[:\n]|$)", evidence))
         has_live_proof = any(marker in evidence for marker in ("live_converged", "live_verified"))
         if ticket.status == DeliveryStatus.COMPLETED and has_merge_proof and (
             not ticket.is_live_deploy or has_live_proof
