@@ -1,55 +1,48 @@
 # Handoff operacional
 
-Versao: 12
-Atualizado em: 2026-11-11 (Claude Code, coordenador de 09/11 a 11/11)
+Versao: 13
+Atualizado em: 2026-11-23 (Claude Code, coordenador)
 
 ## Estado
 
-- Fase: V0 da Dark Factory (0/5 entregas qualificadas; piloto M1 bloqueado na OA-082).
-- `main` em `ac848437` (#850) em 11/11 10:35Z, CI do merge anterior verde.
-- Despachante: tarefa agendada `DarkFac-Fleet-Dispatcher` (loop) com `--recovery-tickets USR-510,USR-509,USR-508,USR-506,USR-498,USR-503,USR-499,USR-500,USR-502,USR-492,USR-483,USR-504`. Desde o USR-508 ele se reinicia sozinho quando o `main` muda.
-- Hosts: Desktop executa; Grokbox oscila (cai e volta); Notebook frequentemente com `workers=0` porque a RAM livre fica abaixo de 4 GiB com os apps do owner abertos.
-- Cotas (11/11 ~07:36 BRT): Claude semanal 5% e Grok 12,6% (ambos abaixo do piso), Codex 15% (no piso, renova 12/11 09:58 BRT; Grok renova 12/11 14:50 BRT). Toda escrita agora cai no OpenRouter. Abaixo do piso, a escrita vai para o OpenRouter (teto US$ 2 por execucao, US$ 10 por mes).
-- Revisao: cascata do USR-488 (outra familia por harness; outra familia via OpenRouter; mesma familia com outro modelo; mesmo modelo com persona adversarial). Admissao compara familia do modelo, nao nome do harness (#834).
+- Fase: V0 da Dark Factory (ver `docs/FASE_ATUAL.md`).
+- `main` em `299fe0cb` (#919), CI verde, deploy verificado em `darkfac-cloud` (coordinator e worker no sha).
+- Despachante `DarkFac-Fleet-Dispatcher` ativo e reiniciado no sha novo. USR-537 e USR-538 em voo no Notebook e no Desktop.
+- Hosts: Notebook e Desktop executam. O Desktop voltou depois que o `/health` passou a publicar capacidade (#920). O Grokbox ainda não publica capacidade (`worker_capacity_missing_or_zero`): precisa subir o worker no sha atual.
+- Cotas (23/11 09:46Z): Claude 94%, Codex 56%, Grok 49,5%. Antigravity com leitura vencida (transporte RPC).
 
-## Decisoes do owner em vigor (09-10/11)
+## Incidente de 22-23/11: frota parada por PRs em rascunho
 
-- Prioridade: funcionamento estavel, autonomo e paralelo; corrigir na hora o que for pequeno, ticket para o resto, reaproveitando tickets do roadmap.
-- OpenRouter e fallback de cota baixa; revisao na mesma familia so sem alternativa.
-- Grok preferido para escrita enquanto houver saldo.
-- Politica de portao: PR com testes afetados e contratos; suite completa em Linux ou CI; CI noturno Windows permanece. Ainda depende da assinatura da OA-089 para entrar no `AGENTS.md` (PR #832).
-- Subagentes leves para tarefas simples e leitura de testes; o coordenador recebe so resumo e acoes.
+Uma sessão de coordenação abriu sete PRs em rascunho fora da esteira e não os promoveu. O despachante relançava USR-542, USR-543 e USR-544 a cada ~6 min. O `run_ticket` recusava com `[RECUSA] ja possui PR ativo` (código 75, conta como espera). Era um laço sem progresso no único host livre. O reparo durável está no USR-545.
 
-## O que foi entregue (09-11/11)
+Ao assumir a coordenação, cruze `gh pr list --json number,isDraft` com `recent_failures` em `.factory/runs/fleet_dispatcher_state.json`. Um PR em rascunho de ticket com CI verde deve ser revisado, promovido e mesclado.
 
-- Correcoes feitas pela coordenacao via subagente: #831 e #834 (USR-488, cascata de revisao e familia do modelo), #833 (estado runtime no `.gitignore`), #835/#836/#837/#838 (espera 75, trava de linha, reserva de frota e PR ativo nao contam como falha), #839 (falha repetida segura so o ticket; `set_recovery` saiu de `_record_failure`), #830 (plano Frente 7).
-- Entregas da propria frota, sem toque humano: USR-501 (#841, sentinela de fila ociosa), USR-497 (#842, fechar falhas quando o `main` muda), USR-494 (#843, via expressa de autorreparo), USR-508 (#848, despachante reinicia ao mudar o `main`), USR-510 (#849, admissao considera todos os workers de portao), USR-489 (#850).
-- Varredura de 09/11: 159 worktrees removidas (84 commits soltos preservados em tags `archive/worktree-*`), 5 PRs antigos fechados, 6 tickets orfaos devolvidos a fila.
+## Entregue em 23/11
 
-## O que esta em voo
+- #920 (USR-542), #924 (USR-543), #925 (USR-544), #923 e #919 (USR-540): revisão cruzada Claude, CI verde, squash.
+- USR-447 fechado: já estava no main (#875, #884, #893). O hold era o próprio defeito agindo sobre trabalho mesclado.
+- USR-535 reaberto: o #923 só libera artefatos não rastreados. O `learning_ledger.json` rastreado continua deixando o Notebook "divergente" mesmo com HEAD no sha esperado.
 
-- USR-483 (Grokbox): identidade de sessao e papel de coordenador. O processo do USR-489 no Desktop pode seguir vivo apos o merge; confirmar e encerrar se for orfao.
-- Conferir que o USR-510 (#849) acabou com as esperas `gate_capacity_zero` vindas de `gate://local` quando o Notebook esta sem RAM.
-- Em seguida na prioridade: USR-509 (entregas com PR de CI vermelho ficam `blocked deploy_evidence_missing` e nao corrigem: USR-447 #845, USR-449 #846, USR-493 #844, USR-486 #847), USR-506 (motivo de falha grava trecho de codigo).
+## Tickets registrados em 23/11
 
-## Pendencias
+- USR-545: não relançar ticket com PR ativo; adotar o PR na entrega.
+- USR-546: backoff para a varredura de worktrees que falha sempre.
+- USR-547: `build_evidence_mismatch` falso sem PLAN (USR-462, USR-476) ou com trabalho já mesclado (USR-447).
+- USR-548: rebase por cherry-pick para tickets antigos com 1 ou 2 commits (USR-517, USR-520, USR-522).
+- USR-549: alertas de hold no Telegram com `missing_destination`.
+- O revisor que grava texto de progresso como veredito (USR-446, USR-535) é o USR-537, em voo.
 
-- OA-089 (owner): assinar a autorizacao do `AGENTS.md` (secoes 3 e 5). Passo a passo no DarkHub.
-- PRs antigos #825 (USR-468), #822 (USR-448) e #821: com conflito e CI vermelho; decidir retomar ou fechar.
-- Tickets abertos relevantes: USR-496 (ids de gateway do Grok), USR-498..USR-504, USR-506, USR-509, USR-510.
+## Holds restantes e próximo passo
 
-## Armadilhas novas
+- Retrabalho delimitado: USR-446 (rebase e nova revisão), USR-483 (#912: `core/line/coordination.py:111`, `core/line/operating_harness.py:94`, CI vermelho), USR-519 (`core/line/pending_delivery.py:691`, `core/line/fleet_dispatcher.py:1231` e `:1251`), USR-539 (#918 com conflito; skill e caminho `runs/pending_deliveries.json`), USR-480 (`tests/line/test_agent_failure_visibility.py`).
+- Conflito de rebase: USR-517, USR-520 e USR-522. Os dois últimos dividem `docs/manual/learning_pack.md`.
+- USR-462 e USR-476 dependem do USR-547.
+- PR #921 (USR-538) com conflito; o USR-538 está em voo pela frota.
 
-1. Recusa nao e falha: saidas 75, `[TRAVA DE LINHA]`, `[RESERVA DE FROTA]` e "ja possui PR ativo" sao espera e nao devem acender recuperacao. Se surgir outro tipo de recusa contando como falha, adicione o marcador em `LOCK_MARKERS` de `core/line/fleet_dispatcher.py`.
-2. Com recuperacao ativa, `run_ticket.py` usa teto de frota 1; a recuperacao global so deve ser acionada explicitamente.
-3. Cota do Grok: queda de uso no mesmo periodo e marcada como leitura suspeita e o roteador exclui o Grok. O mecanismo existente de confirmacao e `.factory/usage/history/xai.confirmation.json` (quota_id, period_start, used_percent da leitura atual). USR-504 trata de forma duravel.
-4. `admission.sqlite3`: falhas antigas de causa ja corrigida podem ser fechadas (`update failures set open=0`) e `dispatcher_recovery.active=0`, sempre com backup em `.factory/backups/`. O USR-497 automatiza o fechamento quando o `main` muda.
-5. CI de PR leva de 3 a 5 minutos para criar o run do `DarkFac CI`; antes disso so aparece `trusted-pr-policy`.
-6. `gh pr close` pode ser negado pelo classificador de permissoes; peca autorizacao explicita ao owner.
-7. Id literal de modelo neste arquivo quebra o censo de modelos (baseline 0). Use alias.
+## Armadilhas
 
-## Proximo passo
-
-- Acompanhar a entrega do USR-510 e, em seguida, do USR-509; com os dois, a frota deve rodar nos tres hosts e retomar as entregas presas.
-- Quando o Grok cair abaixo de 15%, conferir que a escrita passa ao OpenRouter sem travar e que o gasto respeita o teto mensal.
-- Retomar a V0 depois da Fase 1 do plano (USR-497..USR-503).
+1. Recusa não é falha, mas recusa repetida no mesmo sha é laço: veja o USR-545.
+2. Para fechar um ticket entregue fora da esteira: `register_ticket` com `status=completed` e evidência, mais `AdmissionStore(state_root() / "admission.sqlite3").reset_budget("darkfac", id)`.
+3. `learning.cli record-turn` altera o `learning_ledger.json` rastreado no checkout compartilhado. Antes de avançar o checkout: `git stash push -- .factory/learning/learning_ledger.json`, depois `merge --ff-only` e `stash pop`.
+4. `dokploy_redeploy.py` sai com código 3 quando só o Notebook não converge; os serviços podem estar corretos. Confira as linhas `[RUNTIME IMAGE]`.
+5. Id literal de modelo neste arquivo quebra o censo de modelos. Use alias.
