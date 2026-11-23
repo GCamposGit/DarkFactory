@@ -2452,10 +2452,11 @@ class PostgresControlStore:
                           AND run_id IN (
                               SELECT run_id FROM jobs
                               WHERE status = 'waiting_dependency'
-                                 OR (status = 'pending' AND updated_at >= %s)
+                                 OR (status = 'pending' AND updated_at >= %s
+                                     AND (not_before IS NULL OR not_before <= %s))
                           )
                         """,
-                        (now_utc, expires_utc, now_utc, cutoff_utc),
+                        (now_utc, expires_utc, now_utc, cutoff_utc, now_utc),
                     )
                     renewed = cur.rowcount
                     conn.commit()
@@ -2540,10 +2541,12 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL reconcile_unknown_operations failed: {exc}") from exc
 
-    def list_eligible_admission_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_eligible_admission_jobs(self, limit: int = 50, *, now: datetime | None = None) -> list[dict[str, Any]]:
         """List pending jobs of active runs eligible for fleet cycle admission (USR-282)."""
         if self.mock_mode:
-            return self._backend.list_eligible_admission_jobs(limit=limit)
+            return self._backend.list_eligible_admission_jobs(limit=limit, now=now)
+
+        now_utc = (now or datetime.now(UTC)).astimezone(UTC)
 
         try:
             with self._connect() as conn:
@@ -2554,10 +2557,11 @@ class PostgresControlStore:
                         FROM jobs j
                         JOIN runs r ON j.run_id = r.run_id
                         WHERE j.status = 'pending' AND r.status = 'active'
+                          AND (j.not_before IS NULL OR j.not_before <= %s)
                         ORDER BY j.created_at ASC
                         LIMIT %s
                         """,
-                        (limit,),
+                        (now_utc, limit),
                     )
                     rows = cur.fetchall()
                     cols = [desc[0] for desc in cur.description]
