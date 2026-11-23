@@ -19,7 +19,7 @@ O recibo lista em `stalls` o que impede a fila de andar. Trate cada item antes d
 
 | Sinal | Ação |
 |---|---|
-| `dispatcher_blocked_with_free_host` | A frota tem host livre e nada executável. Leia `skipped` e `idle_reasons` em `runs/fleet_dispatcher_state.json` e resolva a causa dominante. |
+| `dispatcher_blocked_with_free_host` | A frota tem host livre e nada executável. Leia `skipped` e `idle_reasons` em `fleet_dispatcher_state.json`, no diretório `runs` da raiz de estado, e resolva a causa dominante. |
 | `ticket_pr_open` com CI verde | Revise com família diferente da do implementador, promova o rascunho (`gh pr ready`) e mescle em série. Uma recusa repetida "já possui PR ativo" (`refusal_loop`) é laço, não espera. |
 | `ticket_pr_open` com CI vermelho ou conflito | Delegue a correção ou o rebase com escopo do PR e aceite do ticket. |
 | `hold_already_delivered` | Confira o aceite contra o diff mesclado e feche com o comando `complete` da seção Fechamento. |
