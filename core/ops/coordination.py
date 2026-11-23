@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -33,7 +35,134 @@ class CoordinationReceipt(BaseModel):
     route_event_id: str | None = None
     active_run: dict[str, Any] | None = None
     cost_available_usd: float | None = None
+    stalls: list[dict[str, Any]] = []
     created_at: str
+
+
+Runner = Callable[[list[str]], str]
+_REFUSAL = "ja possui PR ativo"
+_RED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+_GREEN = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+
+
+def _run(argv: list[str]) -> str:
+    """Run gh or git read-only; any failure raises so callers can fail closed."""
+    done = subprocess.run(argv, cwd=project_root(), capture_output=True, text=True, encoding="utf-8",
+                          timeout=60, check=True)
+    return done.stdout
+
+
+def _ci_state(rollup: Any) -> str:
+    states = [str((row or {}).get("conclusion") or (row or {}).get("state") or "").upper()
+              for row in (rollup or []) if isinstance(row, dict)]
+    if any(state in _RED for state in states):
+        return "red"
+    return "green" if states and all(state in _GREEN for state in states) else "pending"
+
+
+def _is_terminal(ticket_id: str) -> bool:
+    try:
+        from core.demands.queue_store import get_ticket, is_terminal_ticket
+
+        ticket = get_ticket(ticket_id)
+        return ticket is not None and is_terminal_ticket(ticket)
+    except Exception:  # noqa: BLE001 - unknown status keeps the PR visible
+        return False
+
+
+def _unavailable(source: str, exc: Exception) -> dict[str, Any]:
+    logger.warning("Fonte de stall indisponivel: %s (%s)", source, type(exc).__name__)
+    return {"kind": "source_unavailable", "source": source, "error": type(exc).__name__}
+
+
+def _dispatcher_stalls() -> list[dict[str, Any]]:
+    path = state_root() / "runs" / "fleet_dispatcher_state.json"
+    try:
+        if not path.is_file():
+            return []
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if state.get("activity") == "blocked" and state.get("free_hosts"):
+            return [{"kind": "dispatcher_blocked_with_free_host", "free_hosts": list(state["free_hosts"]),
+                     "failures": list(state.get("recent_failures") or [])[-5:]}]
+        return []
+    except (OSError, ValueError, AttributeError) as exc:
+        return [_unavailable("dispatcher_state", exc)]
+
+
+def _pr_stalls(runner: Runner) -> list[dict[str, Any]]:
+    try:
+        state = json.loads((state_root() / "runs" / "fleet_dispatcher_state.json").read_text(encoding="utf-8"))
+        failures = state.get("recent_failures") or []
+    except (OSError, ValueError, AttributeError):
+        failures = []
+    try:
+        prs = json.loads(runner(["gh", "pr", "list", "--state", "open", "--json",
+                                 "number,title,isDraft,headRefName,statusCheckRollup"]))
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return [_unavailable("gh_pr_list", exc)]
+    stalls: list[dict[str, Any]] = []
+    for pr in prs:
+        found = re.search(r"\[(USR-\d+)\]", pr.get("title") or "") or re.search(
+            r"usr-(\d+)", pr.get("headRefName") or "", re.IGNORECASE)
+        if not found:
+            continue
+        ticket_id = found.group(1) if found.group(1).startswith("USR-") else f"USR-{found.group(1)}"
+        if _is_terminal(ticket_id):
+            continue
+        loop = any(row.get("ticket") == ticket_id and _REFUSAL in str(row.get("reason") or "")
+                   for row in failures if isinstance(row, dict))
+        stalls.append({"kind": "ticket_pr_open", "ticket_id": ticket_id, "pr": pr.get("number"),
+                       "draft": bool(pr.get("isDraft")), "ci": _ci_state(pr.get("statusCheckRollup")),
+                       "refusal_loop": loop})
+    return stalls
+
+
+def _hold_stalls(runner: Runner) -> list[dict[str, Any]]:
+    try:
+        from core.line.admission_store import AdmissionStore
+
+        holds = AdmissionStore(state_root() / "admission.sqlite3").ticket_holds()
+    except Exception as exc:  # noqa: BLE001 - store errors must not break the receipt
+        return [_unavailable("admission_store", exc)]
+    stalls: list[dict[str, Any]] = []
+    for hold in holds:
+        ticket_id = str(hold.get("ticket_id") or "")
+        try:
+            rows = runner(["git", "log", "origin/main", "-F", f"--grep=[{ticket_id}]", "--format=%H%x09%s"])
+        except (OSError, subprocess.SubprocessError) as exc:
+            stalls.append(_unavailable("git_log", exc))
+            stalls.append({"kind": "hold", "ticket_id": ticket_id, "cause": hold.get("cause")})
+            continue
+        sha = next((line.split("\t", 1)[0] for line in rows.splitlines() if f"[{ticket_id}]" in line), "")
+        stalls.append({"kind": "hold_already_delivered", "ticket_id": ticket_id, "sha": sha,
+                       "project_id": hold.get("project_id")} if sha
+                      else {"kind": "hold", "ticket_id": ticket_id, "cause": hold.get("cause")})
+    return stalls
+
+
+def detect_stalls(runner: Runner | None = None) -> list[dict[str, Any]]:
+    """Read-only scan for a stopped factory; every external source fails closed."""
+    run = runner or _run
+    return _dispatcher_stalls() + _pr_stalls(run) + _hold_stalls(run)
+
+
+def _stall_action(stalls: list[dict[str, Any]]) -> str | None:
+    prs = [s for s in stalls if s["kind"] == "ticket_pr_open"]
+    for stall in prs:
+        if stall["ci"] == "green":
+            return (f"Revisar (outra familia), promover e mesclar o PR #{stall['pr']} do ticket "
+                    f"{stall['ticket_id']}.")
+    for stall in prs:
+        if stall["ci"] == "red":
+            return f"Corrigir o CI do PR #{stall['pr']} do ticket {stall['ticket_id']}."
+    for stall in stalls:
+        if stall["kind"] == "hold_already_delivered":
+            return (f"Fechar {stall['ticket_id']}: python -m core.demands.cli complete "
+                    f"{stall['ticket_id']} --sha {stall['sha']} --evidence \"<texto>\"")
+    for stall in stalls:
+        if stall["kind"] == "dispatcher_blocked_with_free_host":
+            return "Despachante bloqueado com host livre: diagnosticar recent_failures do estado."
+    return None
 
 
 def _project_id(root: Path) -> str:
@@ -133,7 +262,8 @@ def _route(ticket: Any, harness: str, stage: str) -> tuple[dict[str, str | None]
     return {"stage": stage, "harness": route[0], "model": route[1]}, available, event_id
 
 
-def coordinate(*, harness: str | None = None, entry: str = "short-request") -> CoordinationReceipt:
+def coordinate(*, harness: str | None = None, entry: str = "short-request",
+               runner: Runner | None = None) -> CoordinationReceipt:
     """Run the shared short-request or explicit-skill-file coordination entry."""
     from core.line.operating_harness import resolve_operating_harness
 
@@ -188,6 +318,10 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
                  else f"Aguardar rota para {ticket.id} no despachante.")
         if route is None:
             status = "wait"
+    stalls = detect_stalls(runner)
+    stall_action = _stall_action(stalls)
+    if stall_action and status != "in_flight":
+        first, status = stall_action, "stalled"
     receipt = CoordinationReceipt(
         project_id=(
             ticket.project_id if ticket else
@@ -197,7 +331,7 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request") -> C
         harness=selected_harness,
         role="coordinator", status=status, in_flight=active, ticket_id=ticket.id if ticket else None,
         first_action=first, route=route, route_event_id=route_event_id,
-        active_run=active_run, cost_available_usd=cost, created_at=datetime.now(timezone.utc).isoformat(),
+        active_run=active_run, cost_available_usd=cost, stalls=stalls, created_at=datetime.now(timezone.utc).isoformat(),
     )
     target = state_root() / "coordination" / "last_receipt.json"
     target.parent.mkdir(parents=True, exist_ok=True)

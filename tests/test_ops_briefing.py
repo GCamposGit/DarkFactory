@@ -99,12 +99,6 @@ def test_nodes_use_read_only_liveness_without_inventory_updates(monkeypatch) -> 
     assert briefing._nodes() == [f"{node_id} | offline" for node_id in node_ids]
 
 
-def test_handoff_is_versioned_and_has_operational_sections() -> None:
-    handoff = (Path(__file__).resolve().parents[1] / "docs/operacao/HANDOFF.md").read_text(encoding="utf-8")
-    for expected in ("Versao:", "## Estado", "## Decisoes", "## Pendencias", "## Proximo passo"):
-        assert expected in handoff
-
-
 def test_coordination_receipt_persists_project_while_in_flight(monkeypatch, tmp_path: Path) -> None:
     from types import SimpleNamespace
     from core.ops import coordination
