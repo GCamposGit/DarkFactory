@@ -194,3 +194,34 @@ falta — falha fechada, igual ao resto da fábrica.
 ```powershell
 python -m pytest tests/test_line_v0_proof.py tests/test_line_acceptance.py tests/test_line_pilot_secrets.py -q
 ```
+
+## Intervenções humanas e progresso da meta V0 (USR-539 T6)
+
+Cada slot da prova inclui agora `owner_interventions_count`, `owner_intervention_types` e
+`learning_pack_ref`, além do ticket, run, projeto, canal, SHA do merge e evidência da entrega.
+Zero intervenções aparece como `0` e lista vazia. A decisão permitida de aceite continua
+registrada como `decision`; não é reclassificada como trabalho técnico oculto. Se o backlog de
+ações do owner não puder ser lido, a fonte aparece em `degraded_sources` e a prova não pode ser
+aprovada.
+
+```powershell
+python -m core.line.v0_proof --report
+```
+
+O CLI e `GET /api/line/v0-proof` usam o mesmo coletor e o mesmo `V0ProofReport`. A sequência
+qualificada é cronológica por conclusão do run e mantém exatamente cinco slots, preenchendo os
+mais antigos primeiro. Os requisitos de cinco entregas seguidas, Telegram/Hub/chat, projeto
+externo, merge, smoke, manual e learning pack continuam necessários.
+
+### Evidência operacional da coordenação
+
+```powershell
+python -m core.line.coordination_proof
+```
+
+O relatório consolida referências persistidas em
+`.factory/reports/coordination-proof/evidence/<criterio>.json`. Cada arquivo tem o formato
+`{"evidence_refs": ["caminho-ou-id-da-evidencia"]}`. Os critérios são prioridade, entrada dos
+quatro harnesses, aprendizagem concorrente, reparo de cota e continuidade sem chat. Referência
+ausente ou fonte degradada mantém o item pendente. Código e testes unitários documentam o
+comportamento, mas não preenchem evidência operacional de ensaio real.

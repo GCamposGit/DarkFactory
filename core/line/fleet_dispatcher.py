@@ -242,7 +242,7 @@ def select_tickets(
 ) -> tuple[list[str], dict[str, str]]:
     """Tickets ``planned`` executaveis, em ordem estavel (id), mais o motivo de cada exclusao."""
     done = {d["id"] for d in demands if d.get("status") == "completed"}
-    eligible: list[tuple[str, str]] = []
+    eligible: list[tuple[int, str, str]] = []
     skipped: dict[str, str] = {}
     for d in demands:
         tid = str(d.get("id", ""))
@@ -267,8 +267,12 @@ def select_tickets(
             if reason:
                 skipped[tid] = reason
             else:
-                eligible.append((str(d.get("created_at", "")), tid))
-    return [t for _, t in sorted(eligible)], skipped
+                try:
+                    priority = int(d.get("priority", 0) or 0)
+                except (TypeError, ValueError):
+                    priority = 0
+                eligible.append((-priority, str(d.get("created_at", "")), tid))
+    return [tid for _, _, tid in sorted(eligible)], skipped
 
 
 def demand_has_line_block(demand: Mapping[str, Any]) -> bool:
@@ -1014,6 +1018,15 @@ class FleetDispatcher:
         self._restore_deploy_deferral()
         self.pending_release_path = self.config.state_path.with_name("pending_recovery_releases.json")
         self.pending_releases = json.loads(self.pending_release_path.read_text(encoding="utf-8")) if self.pending_release_path.exists() else []
+        # A dispatcher can disappear after a child has merged but before canonical
+        # deploy. Keep that boundary durable so a fresh process does not lose it.
+        self.delivery_journal_path = self.config.state_path.with_name("pending_deliveries.json")
+        self.delivery_journal = self._read_delivery_journal()
+        if any(row.get("status") == "awaiting_deploy" for row in self.delivery_journal):
+            self.pending_deploy = True
+            latest = max(float(row.get("merged_at_epoch", 0)) for row in self.delivery_journal
+                          if row.get("status") == "awaiting_deploy")
+            self.last_merge_at = latest or self.clock()
         if self.pending_releases:
             self.pending_deploy = True
             self.last_merge_at = self.clock() - self.config.deploy_window_sec
@@ -1232,6 +1245,7 @@ class FleetDispatcher:
                     self.admission_store.reset_budget(job.project_id, job.ticket_id)
                     self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
+                    self._record_pending_delivery(job)
                     if in_recovery:
                         pending = {"ticket_id": job.ticket_id, "run_id": job.run_id}
                         if pending not in self.pending_releases:
@@ -1455,6 +1469,17 @@ class FleetDispatcher:
             return False
         if self.dry_run:
             return False
+        already_deployed = bool(self.pending_releases) and any(
+            row.get("status") == "deployed"
+            and float(row.get("deployed_at_epoch") or 0) >= float(self.last_merge_at)
+            for row in self.delivery_journal
+        )
+        if already_deployed:
+            if not self._complete_pending_releases():
+                self.last_merge_at = self.clock()
+                return False
+            self.pending_deploy = False
+            return True
         from core.demands.store import _PathMutex, DemandsLockTimeout
         recovered = self._recover_convergence() if self._deferred_sha is not None else None
         if recovered is False:
@@ -1478,12 +1503,112 @@ class FleetDispatcher:
                 return False
         if recovered is None:
             self._clear_deploy_deferrals()  # deploy completo saiu 0: convergencia e backup comprovados
+        # Persist the successful deploy boundary before recovery receipt checks:
+        # those checks may need another pass, but must not redeploy a proven run.
+        if any(row.get("status") == "awaiting_deploy" for row in self.delivery_journal):
+            self._complete_delivery_journal()
         if self.pending_releases and not self._complete_pending_releases():
             self.last_merge_at = self.clock()
             return False
         self.pending_deploy = False
         self.deploys += 1
         return True
+
+    def _read_delivery_journal(self) -> list[dict[str, Any]]:
+        try:
+            rows = json.loads(self.delivery_journal_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [row for row in rows if isinstance(row, dict) and row.get("ticket_id") and row.get("run_id")]
+
+    def _save_delivery_journal(self) -> None:
+        self.delivery_journal_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.delivery_journal_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.delivery_journal, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, self.delivery_journal_path)
+
+    def _record_pending_delivery(self, job: InFlight) -> None:
+        """Persist candidate-bound delivery identity before the process can restart."""
+        run_id = job.run_id or ""
+        if not run_id or any(row.get("run_id") == run_id for row in self.delivery_journal):
+            return
+        outcome = run_outcome.read_outcome(job.ticket_id, run_id)
+        cost_usd: float | None = None
+        try:
+            from core.usage.ledger import ModelUsageLedger
+
+            usage_events = ModelUsageLedger()._store.read().get("events", [])
+            cost_usd = round(sum(
+                float(event.get("cost_usd") or 0.0)
+                for event in usage_events if event.get("ticket_id") == job.ticket_id
+            ), 8)
+        except (AttributeError, OSError, TypeError, ValueError):
+            logger.info("cost evidence unavailable for run %s", run_id)
+        row = {
+            "ticket_id": job.ticket_id,
+            "project_id": job.project_id,
+            "run_id": run_id,
+            "candidate_digest": job.candidate_digest,
+            "stage": "deploy",
+            "status": "awaiting_deploy",
+            "merged_at": datetime.now(timezone.utc).isoformat(),
+            "merged_at_epoch": float(self.clock()),
+            "gate_sha": getattr(outcome, "candidate_sha", None) if outcome else None,
+            "evidence_refs": [str(job.log_path)] if job.log_path else [],
+            "interventions": self._owner_interventions(job),
+            "cost_usd": cost_usd,
+        }
+        self.delivery_journal.append(row)
+        self._save_delivery_journal()
+
+    @staticmethod
+    def _owner_interventions(job: InFlight) -> list[dict[str, Any]]:
+        """Snapshot owner actions and decisions linked to this ticket into its delivery proof."""
+        try:
+            from core.owner_actions.store import OwnerActionStore
+
+            actions = OwnerActionStore().list_actions()
+            result: list[dict[str, Any]] = []
+            for action in actions:
+                if job.ticket_id not in action.blocks:
+                    continue
+                result.append({
+                    "id": action.id, "kind": action.kind.value,
+                    "status": action.status.value,
+                    "resolved_at": action.resolved_at.isoformat() if action.resolved_at else None,
+                    "answer": action.answer.model_dump(mode="json") if action.answer else None,
+                })
+            return result
+        except Exception as exc:  # noqa: BLE001 - delivery persists with explicit evidence degradation
+            logger.warning("owner intervention evidence unavailable for %s (%s)", job.ticket_id, type(exc).__name__)
+            return [{"evidence": "unavailable"}]
+
+    def _complete_delivery_journal(self) -> None:
+        """Mark journal entries deployed only after the canonical deploy returned success."""
+        completed_at = datetime.now(timezone.utc).isoformat()
+        for row in self.delivery_journal:
+            if row.get("status") != "awaiting_deploy":
+                continue
+            row["status"] = "deployed"
+            row["deployed_at"] = completed_at
+            row["deployed_at_epoch"] = float(self.clock())
+            row["deploy_sha"] = run_outcome.main_sha(PROJECT_ROOT)
+            try:
+                from core.line.recovery_receipt import build_receipt
+
+                receipt = build_receipt(str(row["ticket_id"]), str(row["run_id"]), PROJECT_ROOT)
+                if receipt.get("candidate_digest") == row.get("candidate_digest"):
+                    row["receipt"] = receipt
+                    row["evidence_refs"] = sorted({
+                        str(evidence["evidence_ref"])
+                        for evidence in receipt.values()
+                        if isinstance(evidence, dict) and evidence.get("evidence_ref")
+                    })
+            except Exception as exc:  # delivery already succeeded; keep its journal and expose missing proof
+                row["receipt_error"] = type(exc).__name__
+                logger.warning("candidate-bound delivery receipt unavailable for %s (%s)",
+                               row.get("ticket_id"), type(exc).__name__)
+        self._save_delivery_journal()
 
     def _save_pending_releases(self) -> None:
         self.pending_release_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2005,9 +2130,18 @@ class FleetDispatcher:
         awaiting_deploy = any(r["status"] == "merged_awaiting_deploy" for r in resumptions)
         if awaiting_deploy and not self.pending_deploy:
             self.pending_deploy, self.last_merge_at = True, self.clock()
-        deployed_resume = self._maybe_deploy() if awaiting_deploy else False
-        if deployed_resume:
+        # A new dispatcher must close a previously journaled delivery before it
+        # admits regular work. This also keeps --resume-only from becoming a build
+        # mode: it may complete this continuation, then returns below.
+        durable_delivery_wait = any(row.get("status") == "awaiting_deploy" for row in self.delivery_journal)
+        deployed_resume = self._maybe_deploy() if self.pending_deploy else False
+        if deployed_resume and awaiting_deploy:
             acknowledge_deploy(PROJECT_ROOT, resumptions)
+        if durable_delivery_wait and not deployed_resume:
+            return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(),
+                                       "resumptions": resumptions, "dispatched": [],
+                                       "deployed": False, "deployed_this_cycle": False,
+                                       "delivery_wait": True, "recovery": self._recovery_summary()})
         if self.config.resume_only:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
                                        "resumptions": resumptions, "dispatched": [],
@@ -2096,21 +2230,24 @@ class FleetDispatcher:
             "queue_remaining": queue,
             "cooldown": sorted(tid for tid, reason in skipped.items() if reason == "backoff_infra"),
             "deploys_total": self.deploys,
-            "deployed_this_cycle": deployed,
+            "deployed_this_cycle": deployed or deployed_resume,
             "demands_error": load_error,
             "recent_failures": self.failures,
             "deploy_deferral": self.deploy_deferral_snapshot(),
             "ticket_holds": self._ticket_holds(),
             "recovery_list": {k: v for k, v in recovery_list.items() if k != "live"},
-            "recovery": {"active": bool(self.recovery.get("active")),
-                         "cause": self.recovery.get("cause", ""),
-                         "fingerprint": self.recovery.get("fingerprint", ""),
-                         "successes": self.recovery.get("successes", 0),
-                         "receipt_cause": self.recovery.get("receipt_cause", ""),
-                         "receipt_digest": self.recovery.get("receipt_digest", ""),
-                         "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")},
+            "recovery": self._recovery_summary(),
             "reconciled": reconciled,
         })
+
+    def _recovery_summary(self) -> dict[str, Any]:
+        return {"active": bool(self.recovery.get("active")),
+                "cause": self.recovery.get("cause", ""),
+                "fingerprint": self.recovery.get("fingerprint", ""),
+                "successes": self.recovery.get("successes", 0),
+                "receipt_cause": self.recovery.get("receipt_cause", ""),
+                "receipt_digest": self.recovery.get("receipt_digest", ""),
+                "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")}
 
     def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
         self._record_queue_blockage(cycle)

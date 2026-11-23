@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 # Ensure UTF-8 on Windows
@@ -23,7 +25,7 @@ from core.paths import state_root
 from core.roadmap.models import DeliveryStatus, PlanningHorizon, RoadmapItemType
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Dark Factory User Demands & Backlog CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -35,6 +37,7 @@ def main() -> int:
     guide_p.add_argument("--non-goals", nargs="*", default=[], help="List of non-goals")
     guide_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     guide_p.add_argument("--project", default="darkfac", help="Project identifier")
+    guide_p.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     guide_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script without Ollama")
     guide_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
@@ -46,6 +49,7 @@ def main() -> int:
     create_p.add_argument("--non-goals", nargs="*", default=[], help="List of non-goals")
     create_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     create_p.add_argument("--project", default="darkfac", help="Project identifier")
+    create_p.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     create_p.add_argument("--horizon", default="now", choices=["now", "next", "later", "exploratory", "unscheduled"])
     create_p.add_argument("--type", default="feature", choices=["feature", "quality", "infrastructure", "operations", "documentation"])
     create_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script without Ollama")
@@ -88,11 +92,18 @@ def main() -> int:
     intake_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     intake_p.add_argument("--audio-file", default=None, help="Audio file to transcribe via Skill 09")
     intake_p.add_argument("--project", default="darkfac", help="Project identifier")
+    intake_p.add_argument("--priority", type=int, default=0, help="Queue priority (larger values run first)")
     intake_p.add_argument("--mode", choices=["autonomous", "documentary"], default="autonomous", help="Intake execution mode")
     intake_p.add_argument("--external-id", default=None, help="External ID for idempotency and replay")
     intake_p.add_argument("--store-path", default=None, help="Path to control database")
     intake_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script")
     intake_p.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    complete_p = subparsers.add_parser("complete", help="Close a ticket delivered to origin/main, proving the sha")
+    complete_p.add_argument("ticket_id", help="Ticket ID (e.g. USR-447)")
+    complete_p.add_argument("--sha", required=True, help="Delivery commit sha, ancestor of origin/main")
+    complete_p.add_argument("--evidence", required=True, help="Short evidence text")
+    complete_p.add_argument("--project", default="darkfac", help="Project identifier")
 
     # plan command (HF-08)
     plan_p = subparsers.add_parser("plan", help="Resolve dependencies (G2), generate manifest and WorkflowHandoff")
@@ -106,12 +117,50 @@ def main() -> int:
     boot_p.add_argument("--kind", choices=["greenfield", "brownfield"], default="greenfield", help="Bootstrap mode")
     boot_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    args = parser.parse_args()
+    return parser
+
+
+def _git(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *argv], cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8")
+
+
+def complete_ticket(ticket_id: str, sha: str, evidence: str, project: str = "darkfac",
+                    git: Callable[[list[str]], subprocess.CompletedProcess[str]] = _git) -> int:
+    """Close ``ticket_id`` only when ``sha`` is on origin/main and its range cites the ticket."""
+    from core.demands.queue_store import get_ticket, register_ticket
+    from core.line.admission_store import AdmissionStore
+
+    git(["fetch", "-q", "origin"])
+    if git(["merge-base", "--is-ancestor", sha, "origin/main"]).returncode != 0:
+        print(f"[RECUSA] {sha} nao e ancestral de origin/main.", file=sys.stderr)
+        return 2
+    cited = git(["log", "-F", f"--grep=[{ticket_id}]", "--format=%H", f"{sha}~50..{sha}"])
+    if cited.returncode != 0 or not cited.stdout.strip():
+        cited = git(["log", "-F", f"--grep=[{ticket_id}]", "--format=%H", "-n1", sha])
+    if cited.returncode != 0 or not cited.stdout.strip():
+        print(f"[RECUSA] nenhum commit ate {sha} cita [{ticket_id}].", file=sys.stderr)
+        return 2
+    ticket = get_ticket(ticket_id)
+    if ticket is None:
+        print(f"[ERRO] Ticket {ticket_id} nao encontrado na fila.", file=sys.stderr)
+        return 1
+    done = ticket.model_copy(update={"status": DeliveryStatus.COMPLETED, "delivery_evidence": f"{sha} {evidence}"})
+    register_ticket(done, source="cli-complete")
+    AdmissionStore(state_root() / "admission.sqlite3").reset_budget(project, ticket_id)
+    print(f"[OK] {ticket_id} concluido com {sha}; hold e orcamento liberados.")
+    return 0
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+    if args.command == "complete":
+        return complete_ticket(args.ticket_id, args.sha, args.evidence, args.project)
     service = build_default_demands_service(PROJECT_ROOT)
 
     if args.command == "guide":
         inp = DemandInput(
             project_id=args.project,
+            priority=args.priority,
             title=args.title,
             problem_statement=args.problem,
             core_journey=args.journey,
@@ -169,6 +218,7 @@ def main() -> int:
                         "journey": args.journey,
                         "non_goals": args.non_goals,
                         "criteria": args.criteria,
+                        "priority": args.priority,
                     },
                     mode="autonomous",
                     policy_ref="policy-v1",
@@ -201,6 +251,7 @@ def main() -> int:
 
         inp = DemandInput(
             project_id=args.project,
+            priority=args.priority,
             title=args.title,
             problem_statement=args.problem,
             core_journey=args.journey,
@@ -354,6 +405,7 @@ def main() -> int:
                     "journey": args.journey,
                     "non_goals": args.non_goals,
                     "criteria": args.criteria,
+                    "priority": args.priority,
                 },
                 mode=args.mode,
                 policy_ref="policy-v1",

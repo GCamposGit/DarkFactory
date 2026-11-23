@@ -1,9 +1,13 @@
 <!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/notifications/telegram_delivery.py, scripts/telegram_delivery_check.py -->
-# Operacao interativa por Antigravity e Codex (USR-431, USR-433)
+# Operacao interativa por Claude Code, Codex, Grok Build e Antigravity (USR-431, USR-433, USR-539)
 
 ## Assumir a coordenação
 
-Abra o checkout da fábrica ou do produto adotado e diga **“assuma a fábrica”** em uma sessão com descoberta da skill `coordenar-fabrica`. Para qualquer harness com acesso ao checkout da DarkFac, a entrada explícita é **“Leia `.agents/skills/coordenar-fabrica/SKILL.md` e assuma a coordenação deste projeto”**. A skill começa pelo briefing e pelas lições anteriores, identifica o projeto e delega o próximo trabalho elegível. A execução fora do chat depende do modo e da disponibilidade do despachante. [Guia do coordenador](../../.agents/skills/coordenar-fabrica/SKILL.md)
+O pedido curto e a entrada explícita pela skill executam `python -m core.ops.coordination` e recebem o mesmo recibo persistido em `DARKFAC_STATE_ROOT/coordination/last_receipt.json`. Use `--entry skill-file` para declarar a segunda entrada e `--harness` somente quando o harness não puder ser detectado. O recibo contém projeto, papel, trabalho em voo, run/etapa/evidências recuperados, primeira ação, ticket, decisão de rota, referência de uso quando disponível e custo disponível. Se existir run em voo, a coordenação aguarda essa retomada antes de rotear outro ticket. O briefing e as lições são contexto complementar, lidos após a persistência do recibo. A seleção lê a elegibilidade pelo feeder canônico. Fila sem trabalho elegível persiste `idle` (ou `in_flight` durante recuperação), e rota indisponível persiste `wait`; esses estados não iniciam agente nem repetem chamadas de LLM.
+
+**Fábrica parada (stalls).** O recibo traz `stalls`, lidos de forma somente leitura e que falham fechados: `dispatcher_blocked_with_free_host` (estado do despachante `blocked` com host livre), `ticket_pr_open` (PR aberto de ticket não terminal, com `draft`, CI `green`/`red`/`pending` e `refusal_loop` quando o `run_ticket` recusa por "ja possui PR ativo"), `hold_already_delivered` (hold cujo `[TICKET]` já está em `origin/main`, com o sha), `hold` (demais, com a causa) e `source_unavailable` (gh, git ou admissão fora do ar; nunca derruba o recibo). Com stall acionável e sem run em voo, o status vira `stalled` e a `first_action` vem antes de admitir trabalho novo: revisar e mesclar o PR com CI verde, corrigir o CI vermelho, fechar o hold já entregue (`complete`, ver [fila.md](fila.md)) ou diagnosticar o despachante.
+
+Abra o checkout da fábrica ou do produto adotado e diga **“assuma a fábrica”** em uma sessão com descoberta da skill `coordenar-fabrica`. Para qualquer harness com acesso ao checkout da DarkFac, a entrada explícita é **“Leia `.agents/skills/coordenar-fabrica/SKILL.md` e assuma a coordenação deste projeto”**. As duas entradas iniciam `python -m core.ops.coordination`, leem `DARKFAC_STATE_ROOT/coordination/last_receipt.json` antes de despachar e usam briefing e lições para contexto complementar. A execução fora do chat depende do modo e da disponibilidade do despachante. [Guia do coordenador](../../.agents/skills/coordenar-fabrica/SKILL.md)
 
 
 O briefing le OAs apenas da fonte configurada pelo `OwnerActionStore`: control store
@@ -40,7 +44,10 @@ Antigravity e Codex atuam como interfaces de operacao interativa para coordenar 
 
 ```powershell
 $env:DARKFAC_OPERATING_HARNESS = 'antigravity' # ou 'codex'
+python -m core.ops.coordination --harness antigravity --entry short-request
+Get-Content "$env:DARKFAC_STATE_ROOT/coordination/last_receipt.json"
 python -m core.ops.briefing
+python -m core.learning.cli prime --domain coordenacao
 ```
 
 O briefing e UTF-8 e somente leitura. Mostra a fila do control store, acoes abertas do backlog e fontes dinamicas, estado dos workers sem executar atualizacao/convergencia, PRs abertos, snapshots de quota e o handoff versionado em `docs/operacao/HANDOFF.md`. Cada secao tem fallback independente: falha do banco usa a fila local em memoria; `gh` ausente, sem autenticacao, com erro ou timeout informa que PRs estao indisponiveis. Falha de uma secao nao interrompe as demais. O briefing nao executa probes de quota.

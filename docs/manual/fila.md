@@ -93,6 +93,10 @@ numa linha nova. A linha igual nao e repetida. Ticket que ja esta `planned` nao 
 regravado e nao ganha outra linha. Branch, worktree e trava de linha nao entram
 nesse metodo.
 
+## Fechar entrega com prova (USR-539)
+
+`python -m core.demands.cli complete USR-447 --sha <sha> --evidence "<texto>" [--project darkfac]` fecha um ticket cujo commit já está no main. Faz `git fetch -q origin` e recusa com código 2 se o sha não for ancestral de `origin/main` ou se nenhum commit do intervalo citar `[USR-447]`. Se passar, grava `completed` com `delivery_evidence` iniciado pelo sha e libera hold e orçamento (`AdmissionStore.reset_budget`).
+
 ## Limpeza ao encerrar ticket (USR-500)
 
 `DemandsStore.update_status` primeiro persiste a transicao e libera o lock do ledger. Ao
@@ -251,3 +255,6 @@ tratar o store como desconfigurado.
 - `OwnerActionDraft` (`core/owner_actions/models.py`) valida comandos em passos destinados ao owner para
   rejeitar invocacoes relativas dependentes de `CWD` (`git <subcmd>` sem `-C <abs>`, script `.py` relativo
   ou `python -m core.*` sem `Set-Location <abs>`), mantendo leitura retrocompatível de `OwnerAction` historicas.
+# Prioridade explícita na entrada
+
+Demandas podem carregar `priority` numérico. O intake autônomo do Hub encaminha esse valor ao registro da demanda, e `run_ticket.py --create --priority <valor>` permite defini-lo na criação pela CLI (padrão `0`). Valores maiores indicam prioridade maior. A prioridade afeta a ordem de seleção do dispatcher entre tickets elegíveis; não remove dependências nem critérios de admissão.

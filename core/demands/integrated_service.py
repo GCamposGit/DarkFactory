@@ -102,6 +102,7 @@ class IntegratedIntakeService:
         raw_ticket = UserTicket(
             id=ticket_id,
             project_id=demand.project_id,
+            priority=demand.priority,
             title=demand.title,
             problem_statement=demand.problem_statement or demand.title,
             core_journey=[demand.core_journey] if demand.core_journey else [],

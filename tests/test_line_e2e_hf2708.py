@@ -281,6 +281,10 @@ def _line_stage_names() -> tuple[str, ...]:
     return bindings.LINE_STAGES
 
 
+# A complete run intentionally crosses multiple real local-Git and fake-gh
+# process boundaries. On the Windows gate host this takes ~170s; keep the
+# full-stage assertion and give this integration test its own bounded budget.
+@pytest.mark.timeout(240)
 def test_full_line_e2e_all_stages_real_output_refs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
 ) -> None:

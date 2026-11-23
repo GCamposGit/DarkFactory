@@ -624,6 +624,34 @@ def _stale_until_reset_headroom(snapshot_file: Path, now: datetime) -> Optional[
         return None
 
 
+def _record_unknown_quota(provider_id: str, reason: str, provider_dir: Optional[Path] = None) -> None:
+    """Request one durable re-sample; create a repair only after that sample was published."""
+    try:
+        from core.usage.refresh_requests import RefreshRequestStore, RefreshStatus
+
+        provider_dir = provider_dir or (state_root() / "usage" / "providers")
+        snapshot = provider_dir / f"{provider_id}.json"
+        target_node = None
+        try:
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            target_node = payload.get("source_node")
+        except (OSError, ValueError, AttributeError):
+            pass
+        store = RefreshRequestStore(provider_dir.parent / "refresh_requests.json")
+        latest = store.latest_for_provider(provider_id, target_node)
+        if latest is None or latest.status in (RefreshStatus.PENDING, RefreshStatus.IN_PROGRESS):
+            store.create(target_node, provider_id)
+            return
+        # DONE proves a publication later than the request. This diagnosis follows that publication.
+        if latest.status == RefreshStatus.DONE:
+            store.fail_provider_request(provider_id, reason)
+        from core.line.quota_repair import ensure_quota_repair
+
+        ensure_quota_repair(provider_id, reason)
+    except Exception as exc:  # a repair registry outage must not make an unknown route usable
+        logger.warning("Could not persist quota refresh/repair for %s (%s)", provider_id, type(exc).__name__)
+
+
 def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaDiagnosisReason]:
     """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing.
 
@@ -679,6 +707,7 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
                 if held is not None:
                     return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
+                _record_unknown_quota(provider_id, "probe_timeout", provider_dir)
                 return None, "probe_timeout"
             try:
                 usage = run_with_deadline(provider_id, lambda a=adapter: a.inspect(force=snapshot_stale))
@@ -688,6 +717,7 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 held = _stale_until_reset_headroom(snapshot_file, datetime.now(timezone.utc))
                 if held is not None:
                     return max(0.0, held - QuotaReservationManager().get_active_reserved_percent(provider_id)), "healthy"
+                _record_unknown_quota(provider_id, "probe_timeout", provider_dir)
                 return None, "probe_timeout"
             checked = _parse_iso_utc(usage.checked_at)
             if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
@@ -700,17 +730,22 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
                 logger.warning(
                     "Quota data for %s is older than %ss (%s); failing closed", provider_id, max_age, reason
                 )
+                _record_unknown_quota(provider_id, reason, provider_dir)
                 return None, reason
             raw_headroom = _quota_headroom(usage)
             if raw_headroom is None:
                 reason = "suspicious_reading" if usage.plausibility_flags else "probe_unavailable"
                 logger.info("Quota for %s is not usable (%s); failing closed", provider_id, reason)
+                _record_unknown_quota(provider_id, reason, provider_dir)
                 return None, reason
             _probe_negative_clear(provider_dir, provider_id)
             reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
             return max(0.0, raw_headroom - reserved), "healthy"
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("Quota lookup failed for provider %s: %s", provider_id, exc)
+        _record_unknown_quota(provider_id, "unknown", locals().get("provider_dir"))
+        return None, "unknown"
+    _record_unknown_quota(provider_id, "unknown", locals().get("provider_dir"))
     return None, "unknown"
 
 

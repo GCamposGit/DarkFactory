@@ -27,7 +27,8 @@ from core.learning.models import (
     PolicyOrigin,
     PolicyStatus,
 )
-from core.paths import state_root
+from core.paths import project_root, state_root
+from core.learning.observations import load_observations, record_observation, sanitize_text
 
 DEFAULT_LEARNING_DIR = state_root() / "learning"
 DEFAULT_LEDGER_FILE = DEFAULT_LEARNING_DIR / "learning_ledger.json"
@@ -87,7 +88,7 @@ class ContinuousLearningTracker:
     # -------------------------------------------------------------
     # System 1: Fast Context Priming for Zero-Iteration One-Shot
     # -------------------------------------------------------------
-    def get_active_system1_context(self, domain: Optional[str] = None) -> str:
+    def get_active_system1_context(self, domain: Optional[str] = None, project_id: Optional[str] = None) -> str:
         """
         Synthesizes a high-signal, compact prompt preamble containing:
         - Active user preferences (highest confidence first).
@@ -122,6 +123,19 @@ class ContinuousLearningTracker:
             for t in relevant_transfers[-3:]:
                 lines.append(f"- {t.generalized_principle}")
 
+        # Durable observations are project-scoped and append-only. Keep the
+        # legacy ledger above readable while priming new processes from the
+        # synchronized observation stream.
+        resolved_project = project_id or os.environ.get("DARKFAC_PROJECT_ID") or project_root().name
+        observations = load_observations(resolved_project, root=self.learning_dir.parent)
+        if observations:
+            lines.append("### RECOVERED PROJECT OBSERVATIONS:")
+            for item in observations[-8:]:
+                detail = item.get("summary", "")
+                if item.get("cause") and item.get("cause") != "unspecified":
+                    detail = f"[{item['cause']}] {detail}"
+                lines.append(f"- {detail}")
+
         lines.append("[END SYSTEM 1 PRIMING]")
         return "\n".join(lines)
 
@@ -136,21 +150,38 @@ class ContinuousLearningTracker:
         one_shot_success: bool = True,
         missing_context_or_gap: Optional[str] = None,
         target_skill: Optional[str] = None,
+        project_id: Optional[str] = None,
+        harness: str = "unknown",
+        run_id: str = "",
+        cause: str = "interaction",
+        identity: Optional[str] = None,
     ) -> InteractionTurn:
         """Records a new prompt turn and increments prompt counter."""
         self.ledger.prompt_count += 1
         turn = InteractionTurn(
             turn_id=self.ledger.prompt_count,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            user_prompt_summary=user_prompt_summary,
-            perceived_intent=perceived_intent,
+            user_prompt_summary=sanitize_text(user_prompt_summary),
+            perceived_intent=sanitize_text(perceived_intent),
             was_followup=was_followup,
             one_shot_success=one_shot_success,
-            missing_context_or_gap=missing_context_or_gap,
-            target_skill=target_skill,
+            missing_context_or_gap=sanitize_text(missing_context_or_gap) or None,
+            target_skill=sanitize_text(target_skill) or None,
         )
         self.ledger.turns.append(turn)
         self.save()
+        resolved_project = project_id or os.environ.get("DARKFAC_PROJECT_ID") or project_root().name
+        record_observation(
+            project_id=resolved_project,
+            identity=identity or f"interaction:{self.session_id}:{turn.turn_id}",
+            kind="interaction",
+            summary=turn.user_prompt_summary,
+            intention=turn.perceived_intent,
+            harness=harness,
+            run_id=run_id or self.session_id,
+            cause=cause,
+            root=self.learning_dir.parent,
+        )
         return turn
 
     # -------------------------------------------------------------

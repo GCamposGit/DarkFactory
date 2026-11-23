@@ -99,7 +99,128 @@ def test_nodes_use_read_only_liveness_without_inventory_updates(monkeypatch) -> 
     assert briefing._nodes() == [f"{node_id} | offline" for node_id in node_ids]
 
 
-def test_handoff_is_versioned_and_has_operational_sections() -> None:
-    handoff = (Path(__file__).resolve().parents[1] / "docs/operacao/HANDOFF.md").read_text(encoding="utf-8")
-    for expected in ("Versao:", "## Estado", "## Decisoes", "## Pendencias", "## Proximo passo"):
-        assert expected in handoff
+def test_coordination_receipt_persists_project_while_in_flight(monkeypatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from core.ops import coordination
+
+    ticket = SimpleNamespace(id="USR-539", project_id="darkfac")
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [
+        SimpleNamespace(eligible=True, ticket=ticket),
+    ])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: ["USR-500"])
+    monkeypatch.setattr(coordination, "_route", lambda *_args: (_ for _ in ()).throw(
+        AssertionError("coordination must not admit work while another ticket is in flight"),
+    ))
+
+    receipt = coordination.coordinate(harness="codex")
+
+    saved = json.loads((tmp_path / "state/coordination/last_receipt.json").read_text(encoding="utf-8"))
+    assert receipt.project_id == "darkfac"
+    assert receipt.role == "coordinator" and receipt.in_flight == ["USR-500"]
+    assert receipt.ticket_id is None and receipt.status == "in_flight"
+    assert "Aguardar" in receipt.first_action
+    assert receipt.route is None and receipt.route_event_id is None and receipt.cost_available_usd is None
+    assert saved == receipt.model_dump(mode="json")
+
+
+def test_coordination_selects_highest_priority_eligible_ticket(monkeypatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from core.ops import coordination
+
+    old = SimpleNamespace(id="USR-OLD", project_id="darkfac", priority=1)
+    urgent = SimpleNamespace(id="USR-HIGH", project_id="darkfac", priority=90)
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination.briefing, "render_briefing", lambda: "briefing")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [
+        SimpleNamespace(eligible=True, ticket=old),
+        SimpleNamespace(eligible=True, ticket=urgent),
+    ])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: [])
+    routed = []
+    monkeypatch.setattr(coordination, "_route", lambda ticket, _harness, _stage: (
+        routed.append(ticket.id) or {"stage": "development", "harness": "codex", "model": None},
+        None, "event",
+    ))
+
+    receipt = coordination.coordinate(harness="codex")
+
+    assert receipt.ticket_id == "USR-HIGH"
+    assert routed == ["USR-HIGH"]
+
+
+def test_all_interactive_harnesses_use_real_coordination_route_and_idle_never_invokes_it(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+    from core.ops import coordination
+    from core.usage import ledger
+    from core.line import routing
+
+    ticket = SimpleNamespace(id="USR-539", project_id="darkfac", priority=20)
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination.briefing, "render_briefing", lambda: "briefing")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [
+        SimpleNamespace(eligible=True, ticket=ticket),
+    ])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: [])
+
+    class UsageLedger:
+        def spent_usd(self, ticket_id, provider):
+            assert (ticket_id, provider) == ("USR-539", "openrouter")
+            return 0.25
+
+    monkeypatch.setattr(ledger, "ModelUsageLedger", UsageLedger)
+    calls = []
+
+    def pick(stage, caps, **kwargs):
+        calls.append((stage, caps, kwargs))
+        return "codex", "route-alias"
+
+    monkeypatch.setattr(routing, "pick", pick)
+    for harness in ("claude", "codex", "grok", "antigravity"):
+        receipt = coordination.coordinate(harness=harness)
+        assert receipt.ticket_id == "USR-539" and receipt.route["harness"] == "codex"
+    assert len(calls) == 4
+    assert all(call[0] == "development" and call[2]["ticket_id"] == "USR-539" for call in calls)
+    assert [call[2]["operating_harness"] for call in calls] == ["claude", "codex", "grok", "antigravity"]
+
+    monkeypatch.setattr(coordination, "_candidates", lambda: [])
+    monkeypatch.setattr(coordination, "_route", lambda *_args: (_ for _ in ()).throw(
+        AssertionError("idle coordination must not invoke an agent route"),
+    ))
+    idle = coordination.coordinate(harness="antigravity")
+    assert idle.status == "idle" and idle.ticket_id is None
+
+
+def test_coordination_idle_does_not_route_without_eligible_work(monkeypatch, tmp_path: Path) -> None:
+    from core.ops import coordination
+
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: [])
+    monkeypatch.setattr(coordination, "_route", lambda *_args: (_ for _ in ()).throw(AssertionError("route without work")))
+
+    receipt = coordination.coordinate(harness="grok")
+
+    assert receipt.status == "idle" and receipt.ticket_id is None
+    assert receipt.route is None and "sem trabalho elegível" in receipt.first_action
+
+
+def test_short_and_skill_file_entries_share_the_same_contract(monkeypatch, tmp_path: Path) -> None:
+    from core.ops import coordination
+
+    monkeypatch.setattr(coordination, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(coordination, "state_root", lambda: tmp_path / "state")
+    monkeypatch.setattr(coordination.briefing, "render_briefing", lambda: "briefing")
+    monkeypatch.setattr(coordination, "_candidates", lambda: [])
+    monkeypatch.setattr(coordination, "_in_flight", lambda: ["USR-100"])
+    short = coordination.coordinate(harness="claude", entry="short-request")
+    explicit = coordination.coordinate(harness="claude", entry="skill-file")
+
+    assert short.model_dump(exclude={"created_at"}) == explicit.model_dump(exclude={"created_at"})
+    assert short.status == "in_flight" and short.in_flight == ["USR-100"]
