@@ -1781,9 +1781,9 @@ class FleetDispatcher:
         if key not in self._pr_cache:
             try:
                 self._pr_cache[key] = self.pr_inspector(tid, demand)
-            except Exception:  # noqa: BLE001 - sem consulta, o launcher recusa pela propria causa
+            except Exception:  # noqa: BLE001 - consulta incerta nunca confirma ausencia de PR
                 logger.exception("consulta de PR ativo de %s falhou", tid)
-                self._pr_cache[key] = None
+                self._pr_cache[key] = PullRequestInspectionUnavailable("consulta de PR falhou")
         return self._pr_cache[key]
 
     def _route_open_pull_request(self, tid: str, demand: Mapping[str, Any], skipped: dict[str, str]) -> bool:
