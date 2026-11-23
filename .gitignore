@@ -131,6 +131,7 @@ hub/data/owner_actions/
 /.factory/runs/fleet_dispatcher_logs/
 .factory/runs/cleanup_pending/
 .factory/runs/fleet_dispatcher_state.json
+.factory/coordination/
 .factory/runs/orphan_worktree_cleanup.json
 .factory/runs/orphan_worktree_cleanup.sweep.lock
 .factory/actionable_failures.json
