@@ -3234,6 +3234,41 @@ def test_run_forever_keeps_dispatching_and_reloads_during_worktree_cleanup(
     assert len(execs) == 1
 
 
+def test_scheduled_cleanup_hook_does_not_relaunch_during_persisted_backoff(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.git.orphan_worktree_cleanup import SCHEDULE_STATE
+
+    monkeypatch.setattr(fd, "PROJECT_ROOT", tmp_path)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    launches: list[list[str]] = []
+    state_path = tmp_path / SCHEDULE_STATE
+
+    class FailedMaintenance:
+        def poll(self) -> int:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                '{"status":"failed","last_attempt_at":"2026-11-23T00:00:00+00:00",'
+                '"failure_count":1,"next_attempt_at":"2099-01-01T00:00:00+00:00",'
+                '"last_failure":"synthetic failure"}',
+                encoding="utf-8",
+            )
+            return 1
+
+    def launch(command, **_kwargs):
+        launches.append(command)
+        return FailedMaintenance()
+
+    monkeypatch.setattr(fd.subprocess, "Popen", launch)
+    hook = fd.scheduled_cleanup_hook(log_dir)
+    hook()
+    hook()
+    hook()
+
+    assert len(launches) == 1
+
+
 def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(
     tmp_path: Path, monkeypatch,
 ) -> None:

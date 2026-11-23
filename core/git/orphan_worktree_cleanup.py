@@ -220,6 +220,8 @@ def _read_schedule_state(path: Path) -> dict[str, Any]:
     try:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
+        if path.exists():
+            logger.warning("could not read orphan worktree schedule state path=%s; recovering", path, exc_info=True)
         return {}
     return state if isinstance(state, dict) else {}
 
@@ -246,15 +248,6 @@ def _next_failure_count(state: Mapping[str, Any]) -> int:
         return max(0, int(state.get("failure_count", 0))) + 1
     except (TypeError, ValueError):
         return 1
-
-
-def _failure_cause(summary: CleanupSummary) -> str:
-    details = [
-        ": ".join(part for part in (item.get("reason"), item.get("detail")) if part)
-        for item in summary.details
-        if item.get("reason") or item.get("detail")
-    ]
-    return f"sweep reported {summary.errors} error(s)" + (f": {'; '.join(details)}" if details else "")
 
 
 def schedule_due(root: Path, now: datetime) -> bool:
@@ -307,7 +300,7 @@ def maybe_run_scheduled(
             try:
                 summary = sweep_fn(root)
             except Exception as exc:  # noqa: BLE001 - persist failures so dispatchers honor backoff
-                cause = f"{type(exc).__name__}: {exc}"
+                cause = f"{type(exc).__name__}: {exc}"[:500]
                 logger.exception("scheduled orphan worktree sweep failed: %s", cause)
                 if not force:
                     previous = _read_schedule_state(state_path)
@@ -325,31 +318,14 @@ def maybe_run_scheduled(
                     )
                 return CleanupSummary(errors=1, details=[{"path": str(root), "reason": "sweep_exception", "detail": cause}])
             if not force:
-                if summary.errors:
-                    previous = _read_schedule_state(state_path)
-                    failure_count = _next_failure_count(previous)
-                    cause = _failure_cause(summary)
-                    retry_at = started_at + _failure_backoff(failure_count)
-                    _write_schedule_state(
-                        state_path,
-                        {
-                            "status": "failed",
-                            "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
-                            "failure_count": failure_count,
-                            "next_attempt_at": retry_at.astimezone(timezone.utc).isoformat(),
-                            "last_failure": cause,
-                        },
-                    )
-                    logger.error("scheduled orphan worktree sweep failed; retry_at=%s cause=%s", retry_at, cause)
-                else:
-                    _write_schedule_state(
-                        state_path,
-                        {
-                            "status": "succeeded",
-                            "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
-                            "failure_count": 0,
-                        },
-                    )
+                _write_schedule_state(
+                    state_path,
+                    {
+                        "status": "succeeded",
+                        "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
+                        "failure_count": 0,
+                    },
+                )
             return summary
     except Exception:  # noqa: BLE001 - a failed sweep must be retried and visible
         logger.exception("scheduled orphan worktree sweep failed")
