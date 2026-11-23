@@ -41,7 +41,9 @@ class FakeGh:
 
     def add_open_pr(self, branch: str) -> int:
         number = len(self.prs) + 1
-        self.prs[number] = {"head": branch, "state": "OPEN", "oid": None, "tip": None}
+        self.prs[number] = {
+            "head": branch, "state": "OPEN", "oid": None, "tip": None, "isDraft": False,
+        }
         return number
 
     def _bare(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -75,7 +77,11 @@ class FakeGh:
             return ok(json.dumps([{"bucket": "pass", "name": "build", "link": "", "workflow": "CI"}]))
         if a[:2] == ["pr", "view"]:
             p = self.prs[int(a[2])]
-            return ok(json.dumps({"state": p["state"], "mergeCommit": {"oid": p["oid"]} if p["oid"] else None}))
+            return ok(json.dumps({
+                "state": p["state"],
+                "mergeCommit": {"oid": p["oid"]} if p["oid"] else None,
+                "isDraft": p["isDraft"],
+            }))
         if a[:2] == ["pr", "merge"]:
             n = int(a[2])
             p = self.prs[n]
