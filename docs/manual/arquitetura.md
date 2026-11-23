@@ -38,6 +38,11 @@ de trabalho. Antes de aceitar outro run, o intake tambem consulta a reserva cano
 retorna o run e o host que a possuem. A consulta e informativa; a exclusao entre canais e garantida pela
 reserva transacional unica em `reserve_cycle`, liberada ao encerrar a execucao.
 
+O despachante da frota nao deixa essa recusa virar laco (USR-545): antes de reservar admissao ou host, consulta o
+PR aberto do ticket (`core.line.active_pull_request.classify_pull_request_disposition`) e, em vez de lancar BUILD,
+encaminha PR com CI verde ou vermelho para a retomada de entrega (`pending_delivery.schedule(..., 'review',
+resume_delivery=True)` numa worktree no head do PR) ou registra espera persistida com o numero do PR.
+
 ## ReadinessGate (USR-385)
 
 `ReadinessGate.evaluate` avalia o handoff com o `VerificationContext` recebido, sem rede e sem arquivo. `require_delivery` e `mark_delivered` passam por ele. USR-385 partiu `evaluate` nos passos abaixo; o `ReadinessReport` (elegibilidade, razoes, evidencia faltante e dependencias bloqueantes) permanece o contrato publico.

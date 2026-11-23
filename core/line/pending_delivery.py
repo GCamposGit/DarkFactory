@@ -127,12 +127,16 @@ def _save(path: Path, row: PendingDelivery) -> None:
 
 
 def schedule(ticket_id: str, worktree: Path, stage: str, *, resume_delivery: bool = False,
-             cause: str = "route_wait", directory: Path | None = None) -> PendingDelivery:
-    """Persist a wait before the launcher exits; writing is required, never best-effort."""
+             cause: str = "route_wait", directory: Path | None = None,
+             implementing_harness: str | None = None) -> PendingDelivery:
+    """Persist a wait before the launcher exits; writing is required, never best-effort.
+
+    ``implementing_harness`` is explicit for a PR adopted from outside the line (no progress.json).
+    """
     from core.line.ticket_engine import artifacts_root
-    harness = None
+    harness = implementing_harness
     progress = artifacts_root() / ticket_id / ".darkfac" / "runs" / ticket_id / "progress.json"
-    if progress.is_file():
+    if not harness and progress.is_file():
         harness = json.loads(progress.read_text(encoding="utf-8")).get("harness")
     row = PendingDelivery(ticket_id=ticket_id, worktree=str(worktree.resolve()), stage=stage,
                           project_id=run_outcome.current_project(), run_id=run_outcome.current_run_id(),

@@ -249,6 +249,13 @@ lanca `run_ticket.py <ID> --fleet`) executa os estagios em ordem e chama `requir
    bem-sucedido, gravado em `learning_pack.json` e no `LearningPackStore` (`.factory/learning_packs/`,
    `packs_index.json`), de onde o Hub (`/api/learning-packs/<id>/html`) e o resumo diario o leem; falha na
    geracao ou na gravacao so e registrada e nao derruba a entrega. Projeto externo tambem gera o pack (base `origin/<default_branch>`), gravado so no estado da DarkFac, nunca no repositorio do produto. DEPLOY_SMOKE de projeto externo grava `smoke_ok=true` so quando um smoke (comando local ou probe HTTP) realmente executou e passou (`ReleaseStageHandler.smoke_ran` ou o smoke HTTP do projeto); deploy `none` sem smoke nao conta. Sem smoke grava `smoke_ok=null` com `smoke_applicable=false`: estado final, nao pendente (sem `merged_awaiting_deploy`, sem `[DELIVERY_MERGED]`, sem redeploy da DarkFac) e que a prova da V0 nao conta.
+   **PR rascunho na entrega autonoma:** na fase MERGE da entrega Git, o gate de CI precisa aprovar
+   o candidato antes de qualquer promocao. Depois do gate verde, `core/git/autonomy.py` consulta
+   `isDraft` no PR. Se estiver em rascunho, executa `gh pr ready <numero>` e registra a promocao no
+   relatorio antes de chamar `gh pr merge`. Um PR ja pronto segue direto ao merge, sem chamada a
+   `gh pr ready`; gate pendente ou vermelho mantem o PR em rascunho e aberto. Falha ao consultar ou
+   promover o PR encerra a entrega como erro estruturado, sem tentar o merge.
+
 6. **Sem rota elegivel** (nenhum modelo de nivel alto para PLAN, nenhum revisor de outra familia para REVIEW):
    o resultado do `RouteWaiter` (`no_route_available not_before=...`) vira espera, nao falha. O `run_ticket`
    sai com o codigo 75 (`EXIT_ROUTE_WAIT`, de `fleet_dispatcher.INFRA_EXIT_CODES`), com o marcador

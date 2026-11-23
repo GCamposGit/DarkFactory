@@ -788,7 +788,9 @@ falha de `git status` seguem PLAN/BUILD, sem reaproveitar a prova antiga.
 
 Saida com codigo 75 (route_wait, no_build_route) e espera estruturada: aplica backoff persistido por ticket, mas nunca ativa a recuperacao global da frota. O mesmo vale para recusa por trava de linha ou reserva de outro ticket vivo (kind lock): fica registrada por ticket, sem recuperacao global.
 
-A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: aplica backoff infra sem consumir candidato nem acender a recuperacao global. O mesmo vale para a recusa `ja possui PR ativo` (ticket com PR aberto, codigo 2).
+A recusa `[RESERVA DE FROTA]` (teto de frota atingido) conta como trava, nao como falha: aplica backoff infra sem consumir candidato nem acender a recuperacao global.
+
+Ticket com PR aberto (USR-545): o despachante consulta o PR do ticket antes de reservar admissao ou host (`_dispatch_ticket`), uma vez por ticket e sha do main em cada ciclo, e nao relanca BUILD. PR da propria branch `ticket/<id>` com CI verde (rascunho ou nao) ou vermelho vira retomada de entrega: o despachante abre uma worktree no head do PR e agenda `pending_delivery.schedule(ticket, worktree, 'review', resume_delivery=True)` com a causa `pr_ativo:#<PR>:<adopt_delivery|fix>:<motivo>`; o host fica livre para o proximo ticket e uma linha de entrega ativa impede segundo agendamento. PR de fork, de outra branch, com CI pendente, consulta inconclusiva ou sem worktree seguro vira espera: o ticket sai do rodizio com o motivo `pr_ativo:#<PR>:<motivo>` em `skipped`, em `pr_waits` e em `ticket_holds` do `last_cycle` (lidos pelo Hub), sem reserva, sem launch e sem gastar orcamento de candidato, reavaliado a cada ciclo. A recusa `ja possui PR ativo` do `run_ticket` (codigo 2) fica como rede de seguranca; ciclos repetidos no mesmo sha do main nao a produzem.
 
 O laço do despachante publica as cotas no Hub a cada 5 minutos por `core.usage.sync_task.publish_once()`, sem sonda paga. Falha de publicação fica só no log e não interrompe o ciclo.
 

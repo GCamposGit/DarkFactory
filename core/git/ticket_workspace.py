@@ -365,6 +365,18 @@ def _ref_exists(ref: str, cwd: Path, run_git: GitRunner) -> bool:
     return run_git(["rev-parse", "--verify", "--quiet", ref], cwd).returncode == 0
 
 
+def _allocate_worktree_path(main_root: Path, slug: str, now: datetime) -> Path:
+    """Next free ``<main>/.worktrees/<slug>-<UTC stamp>[-n]``; an existing directory is never reused."""
+    root_dir = main_root / WORKTREES_DIRNAME
+    root_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _stamp(now)
+    name, suffix = f"{slug}-{stamp}", 1
+    while (root_dir / name).exists():
+        suffix += 1
+        name = f"{slug}-{stamp}-{suffix}"
+    return root_dir / name
+
+
 def create_workspace(
     ticket_id: str,
     *,
@@ -400,14 +412,9 @@ def create_workspace(
         raise WorkspaceError(f"cannot resolve {base_ref}: {sha_res.stderr.strip()}")
     base_sha = sha_res.stdout.strip()
 
-    slug, stamp = _slug(ticket_id), _stamp(now)
-    root_dir = main_root / WORKTREES_DIRNAME
-    root_dir.mkdir(parents=True, exist_ok=True)
-    name, suffix = f"{slug}-{stamp}", 1
-    while (root_dir / name).exists():
-        suffix += 1
-        name = f"{slug}-{stamp}-{suffix}"
-    path = root_dir / name
+    slug = _slug(ticket_id)
+    path = _allocate_worktree_path(main_root, slug, now)
+    name = path.name
 
     branch = f"ticket/{slug}"
     taken = _ref_exists(f"refs/heads/{branch}", main_root, runner) or _ref_exists(
@@ -427,6 +434,93 @@ def create_workspace(
     return TicketWorkspace(
         ticket_id=ticket_id, path=path, branch=branch, main_root=main_root, base_ref=base_ref, base_sha=base_sha
     )
+
+
+def ensure_pr_delivery_workspace(
+    ticket_id: str,
+    head_ref: str,
+    *,
+    cwd: Path,
+    base: str = "main",
+    remote: str = "origin",
+    cross_repository: bool = False,
+    now_fn: Optional[NowFn] = None,
+    run_git: Optional[GitRunner] = None,
+) -> Optional[TicketWorkspace]:
+    """Worktree on the head of the ticket's open PR, ready for a delivery resume (USR-545).
+
+    Reuses the worktree already registered for ``head_ref`` when it is clean and at the remote head;
+    otherwise fetches ``<remote>/<head_ref>`` and adds a dedicated ``.worktrees/<id>-<stamp>`` the same
+    way :func:`create_workspace` does. Returns ``None`` (caller waits) for fork heads, heads that are not
+    this ticket's branch, a dirty / locked / divergent worktree or branch, or any git/fetch failure.
+    Never resets, force-checks-out or removes anything that already existed.
+    """
+    runner = run_git or _git
+    branch = head_ref.strip()
+    slug = _slug(ticket_id)
+    if cross_repository or re.fullmatch(rf"ticket/{re.escape(slug)}(?:-[A-Za-z0-9._-]+)?", branch.lower()) is None:
+        return None
+    try:
+        main_root = main_checkout_root(cwd, runner)
+    except WorkspaceError:
+        return None
+    if runner(["check-ref-format", "--branch", branch], main_root).returncode != 0:
+        return None
+    ensure_local_excludes(main_root, runner)
+
+    tracking = f"refs/remotes/{remote}/{branch}"
+    if runner(["fetch", "--no-tags", remote, f"+refs/heads/{branch}:{tracking}"], main_root).returncode != 0:
+        return None
+    runner(["fetch", "--no-tags", remote, base], main_root)  # best effort: only feeds base_sha
+    head_res = runner(["rev-parse", "--verify", f"{tracking}^{{commit}}"], main_root)
+    base_ref = f"{remote}/{base}"
+    base_res = runner(["rev-parse", "--verify", f"{base_ref}^{{commit}}"], main_root)
+    if head_res.returncode != 0 or base_res.returncode != 0:
+        return None
+    head_sha = head_res.stdout.strip()
+
+    def workspace(path: Path) -> TicketWorkspace:
+        merge_base = runner(["merge-base", base_ref, head_sha], main_root)
+        base_sha = merge_base.stdout.strip() if merge_base.returncode == 0 else ""
+        return TicketWorkspace(
+            ticket_id=ticket_id, path=path, branch=branch, main_root=main_root,
+            base_ref=base_ref, base_sha=base_sha or base_res.stdout.strip(),
+        )
+
+    entries = list_worktrees(main_root, runner)
+    for index, entry in enumerate(entries):
+        if entry.get("branch", "").removeprefix("refs/heads/") != branch:
+            continue
+        path = Path(entry["worktree"])
+        if index == 0 or "locked" in entry or "prunable" in entry or not path.is_dir():
+            return None
+        git_dir = runner(["rev-parse", "--absolute-git-dir"], path)
+        if git_dir.returncode != 0 or (Path(git_dir.stdout.strip()) / "index.lock").exists():
+            return None
+        status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+        if status.returncode != 0 or status.stdout.strip("\0"):
+            return None
+        local = runner(["rev-parse", "--verify", "HEAD^{commit}"], path)
+        if local.returncode != 0 or local.stdout.strip() != head_sha:
+            return None
+        return workspace(path)
+
+    local_sha = runner(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"], main_root)
+    path = _allocate_worktree_path(main_root, slug, (now_fn or utc_now)())
+    if local_sha.returncode == 0:
+        if local_sha.stdout.strip() != head_sha:
+            return None
+        add_args = ["worktree", "add", str(path), branch]
+    else:
+        add_args = ["worktree", "add", "--no-track", "-b", branch, str(path), head_sha]
+    add = runner(add_args, main_root)
+    if add.returncode != 0:
+        logger.warning("git worktree add para o PR de %s falhou: %s", ticket_id, add.stderr.strip())
+        if path.exists():
+            cleanup(path, main_root, sleep_fn=lambda _s: None, run_git=run_git, retries=1, now_fn=now_fn)
+        return None
+    logger.info("Worktree de entrega %s em %s (head %s)", path, branch, head_sha[:12])
+    return workspace(path)
 
 
 # ----------------------------------------------------------------------

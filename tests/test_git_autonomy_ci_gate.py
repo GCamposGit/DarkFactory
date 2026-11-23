@@ -483,10 +483,16 @@ def _ident(repo: Path) -> None:
 class FakeRepoGh(GhScript):
     """``GhScript`` plus the PR lifecycle, simulated against a local bare repository."""
 
-    def __init__(self, bare: Path, checks: Sequence[Any], *, policy_blocks: int = 0, **kwargs: Any) -> None:
+    def __init__(
+        self, bare: Path, checks: Sequence[Any], *, policy_blocks: int = 0,
+        draft_on_create: bool = False, ready_rc: int = 0, ready_error: str = "", **kwargs: Any,
+    ) -> None:
         super().__init__(checks, **kwargs)
         self.bare = bare
         self.policy_blocks = policy_blocks  # merges refused by the base-branch ruleset
+        self.draft_on_create = draft_on_create
+        self.ready_rc = ready_rc
+        self.ready_error = ready_error
         self.prs: dict[int, dict[str, Any]] = {}
 
     def _bare(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -509,8 +515,17 @@ class FakeRepoGh(GhScript):
         if a[:2] == ["pr", "create"]:
             self.calls.append(a)
             number = len(self.prs) + 1
-            self.prs[number] = {"head": a[a.index("--head") + 1], "state": "OPEN", "oid": None}
+            self.prs[number] = {
+                "head": a[a.index("--head") + 1], "state": "OPEN", "oid": None,
+                "isDraft": self.draft_on_create,
+            }
             return self.result(a, 0, f"https://github.com/x/y/pull/{number}\n")
+        if a[:2] == ["pr", "ready"]:
+            self.calls.append(a)
+            if self.ready_rc:
+                return self.result(a, self.ready_rc, "", self.ready_error)
+            self.prs[int(a[2])]["isDraft"] = False
+            return self.result(a, 0)
         if a[:2] == ["pr", "edit"] or a[:2] == ["label", "create"]:
             self.calls.append(a)
             return self.result(a, 0)
@@ -518,7 +533,9 @@ class FakeRepoGh(GhScript):
             self.calls.append(a)
             p = self.prs[int(a[2])]
             merge_commit = {"oid": p["oid"]} if p["state"] == "MERGED" else None
-            return self.result(a, 0, json.dumps({"state": p["state"], "mergeCommit": merge_commit}))
+            return self.result(a, 0, json.dumps({
+                "state": p["state"], "mergeCommit": merge_commit, "isDraft": p["isDraft"],
+            }))
         if a[:2] == ["pr", "merge"]:
             self.calls.append(a)
             p = self.prs[int(a[2])]
@@ -602,6 +619,49 @@ def test_delivery_without_checks_merges(repo: tuple[Path, Path]) -> None:
     assert rep.ok and rep.action == "merged", rep.message
     assert "ci_gate=no_checks" in rep.message
     assert gh.count(["pr", "checks"]) >= 1  # the gate did look
+    assert gh.count(["pr", "ready"]) == 0
+
+
+def test_draft_pr_is_promoted_after_green_gate_before_merge(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    gh = FakeRepoGh(bare, [[check("pass")]], draft_on_create=True)
+
+    rep = deliver(local, gh, FakeClock())
+
+    assert rep.ok and rep.action == "merged", rep.message
+    assert "draft promoted with gh pr ready" in rep.message
+    assert gh.count(["pr", "ready"]) == 1
+    assert gh.count(["pr", "merge"]) == 1
+    names = [call[:2] for call in gh.calls]
+    assert names.index(["pr", "checks"]) < names.index(["pr", "ready"]) < names.index(["pr", "merge"])
+
+
+def test_draft_pr_ready_failure_is_sanitized_and_never_merges(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    secret = "ghp_" + "A" * 36
+    gh = FakeRepoGh(bare, [[check("pass")]], draft_on_create=True, ready_rc=1, ready_error=f"failed {secret}")
+
+    rep = deliver(local, gh, FakeClock())
+
+    assert not rep.ok and rep.action == "error"
+    assert "gh pr ready failed" in rep.message and "[REDACTED_TOKEN]" in rep.message
+    assert secret not in rep.message
+    assert gh.count(["pr", "merge"]) == 0
+    assert gh.prs[1]["state"] == "OPEN"
+
+
+def test_red_ci_draft_is_not_promoted(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    gh = FakeRepoGh(bare, [[check("fail")]], draft_on_create=True)
+
+    rep = deliver(local, gh, FakeClock())
+
+    assert not rep.ok and rep.action == "ci_failed"
+    assert gh.count(["pr", "ready"]) == 0
+    assert gh.count(["pr", "merge"]) == 0
 
 
 def test_delivery_with_workflows_and_no_checks_stays_open(repo: tuple[Path, Path]) -> None:

@@ -440,11 +440,26 @@ def _admission_workers_for_pin(previous: str | None, pin_url: str) -> str:
     return ",".join(urls)
 
 
-def resumable_delivery_worktree(ticket_id: str, project_id: str = "darkfac") -> Optional[Path]:
+def _adopted_pr_worktree(ticket_id: str, pr: Any) -> Optional[Path]:
+    """Worktree no head do PR aberto do ticket (USR-545), ou None (o chamador espera)."""
+    from core.git.ticket_workspace import ensure_pr_delivery_workspace
+
+    try:
+        workspace = ensure_pr_delivery_workspace(
+            ticket_id, pr.head_ref, cwd=PROJECT_ROOT, cross_repository=bool(getattr(pr, "cross_repository", False)),
+        )
+    except Exception as exc:  # noqa: BLE001 - sem arvore, o chamador trata como espera
+        logger.warning("worktree de entrega do PR de %s falhou: %s", ticket_id, exc)
+        return None
+    return workspace.path if workspace is not None else None
+
+
+def resumable_delivery_worktree(ticket_id: str, project_id: str = "darkfac", pr: Any = None) -> Optional[Path]:
     """Worktree preservada com commits a frente de origin/main e plano valido, ou None (USR-447).
 
     Nesse caso o ticket nao precisa replanejar nem reconstruir: o launcher retoma a entrega.
-    Qualquer falha na busca cai no relancamento completo.
+    Qualquer falha na busca cai no relancamento completo. Sem candidato preservado e com ``pr``
+    (PR aberto do ticket, adotado na entrega), materializa uma worktree no head do PR (USR-545).
     """
     from core.git.ticket_workspace import find_preserved_workspaces
 
@@ -463,19 +478,18 @@ def resumable_delivery_worktree(ticket_id: str, project_id: str = "darkfac") -> 
         ).chosen
     except Exception as exc:  # noqa: BLE001 - sem busca, relancamento completo
         logger.warning("busca de worktree preservada de %s falhou: %s", ticket_id, exc)
-        return None
-    if chosen is None or chosen.commits_ahead < 1 or chosen.changed_paths:
-        return None
-    candidate_roots = (
-        chosen.workspace.path,
-        state_root() / "artifacts" / "ticket_runs" / ticket_id,
-    )
-    if not any(
-        all(((root / ".darkfac" / "runs" / ticket_id) / name).is_file() for name in ("SPEC.md", "tickets.json"))
-        for root in candidate_roots
-    ):
-        return None
-    return chosen.workspace.path
+        chosen = None
+    if chosen is not None and chosen.commits_ahead >= 1 and not chosen.changed_paths:
+        candidate_roots = (
+            chosen.workspace.path,
+            state_root() / "artifacts" / "ticket_runs" / ticket_id,
+        )
+        if any(
+            all(((root / ".darkfac" / "runs" / ticket_id) / name).is_file() for name in ("SPEC.md", "tickets.json"))
+            for root in candidate_roots
+        ):
+            return chosen.workspace.path
+    return _adopted_pr_worktree(ticket_id, pr) if pr is not None else None
 
 
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
@@ -806,10 +820,42 @@ def daemon_demands_store() -> Any:
     return DemandsStore()
 
 
+#: Ticket com PR aberto nao e relancado como BUILD (USR-545): o motivo carrega o numero do PR.
+PR_ACTIVE_PREFIX = "pr_ativo:"
+#: O autor de um PR aberto fora da linha e desconhecido; assume-se Claude para que a revisao cruzada
+#: exclua a propria familia (um PR da fabrica traz a familia real em progress.json).
+ADOPTED_PR_IMPLEMENTING_HARNESS = "claude"
+
+
+def default_pr_inspector(ticket_id: str, demand: Mapping[str, Any]) -> Any:
+    """``(PR, disposicao)`` do PR aberto do ticket, ou None sem PR ou sem consulta possivel.
+
+    Falha de consulta devolve None: o lancamento segue e o launcher recusa com a propria causa.
+    """
+    from core.line.active_pull_request import (
+        PullRequestLookupError,
+        classify_pull_request_disposition,
+        find_active_pull_request,
+    )
+    from core.projects.registry import ProjectRegistry
+
+    project_id = str(demand.get("project_id") or demand.get("project") or "darkfac")
+    try:
+        pr = find_active_pull_request(
+            project_id, ticket_id, project_registry=ProjectRegistry(PROJECT_ROOT / ".factory" / "projects.json"),
+        )
+    except PullRequestLookupError as exc:
+        logger.warning("consulta de PR ativo de %s indisponivel: %s", ticket_id, exc)
+        return None
+    if pr is None:
+        return None
+    return pr, classify_pull_request_disposition(pr, ticket_id, cwd=PROJECT_ROOT)
+
+
 def _ticket_failure_isolates(reason: str) -> bool:
     """Hold or technical failure of one ticket leaves the rest of the queue eligible."""
     return reason == "backoff_infra" or reason.startswith(
-        ("ticket_hold:", "pending_delivery:", "lancamento_falhou:"))
+        ("ticket_hold:", "pending_delivery:", "lancamento_falhou:", PR_ACTIVE_PREFIX))
 
 
 def _progress_epoch(value: Any) -> float | None:
@@ -911,6 +957,7 @@ class FleetDispatcher:
         launch_argv: Optional[Sequence[str]] = None,
         demands_store_factory: Optional[Callable[[], Any]] = None,
         control_store_factory: Optional[Callable[[], Any]] = None,
+        pr_inspector: Optional[Callable[[str, Mapping[str, Any]], Any]] = None,
     ) -> None:
         self.config = config or DispatcherConfig()
         self.demands_loader = demands_loader
@@ -972,6 +1019,13 @@ class FleetDispatcher:
         self.demands_store_factory = demands_store_factory
         self.control_store_factory = control_store_factory or _default_control_store_factory
         self._control_store: Any = None
+        self.pr_inspector = pr_inspector  # None: sem consulta de PR (testes); o processo real injeta
+        self._pr_cache: dict[tuple[str, str], Any] = {}  # (ticket, sha do main) -> (PR, disposicao) | None
+        self._pr_deliveries: list[dict[str, Any]] = []  # encaminhamentos feitos neste ciclo
+        self._pr_waits: dict[str, dict[str, Any]] = {
+            str(row["ticket"]): row for row in self.last_cycle.get("pr_waits", [])
+            if isinstance(row, dict) and row.get("ticket")
+        }
 
     def _read_canonical_reservations(self, now: float) -> dict[str, Any]:
         """Reconcile expired leases and return currently occupied hosts.
@@ -1609,6 +1663,8 @@ class FleetDispatcher:
         if self.dry_run:
             dispatched.append({"ticket": tid, "host": host.id, "dry_run": "1"})
             return
+        if self._route_open_pull_request(tid, demand, skipped):
+            return
         recovery_token = None
         token = None
         run_id = ""
@@ -1708,6 +1764,77 @@ class FleetDispatcher:
                 host, tid, project_id, candidate, context, resource_version,
                 candidate_key, context_key, resource_key, token, recovery_token, exc, idle, skipped, now,
             )
+
+    def _open_pull_request(self, tid: str, demand: Mapping[str, Any]) -> Any:
+        """``(PR, disposicao)`` memorizado por ticket e sha do main durante o ciclo; None sem PR."""
+        if self.pr_inspector is None:
+            return None
+        key = (tid, self._main_sha)
+        if key not in self._pr_cache:
+            try:
+                self._pr_cache[key] = self.pr_inspector(tid, demand)
+            except Exception:  # noqa: BLE001 - sem consulta, o launcher recusa pela propria causa
+                logger.exception("consulta de PR ativo de %s falhou", tid)
+                self._pr_cache[key] = None
+        return self._pr_cache[key]
+
+    def _route_open_pull_request(self, tid: str, demand: Mapping[str, Any], skipped: dict[str, str]) -> bool:
+        """True quando o ticket tem PR aberto e nao deve ser lancado como BUILD (USR-545).
+
+        PR com CI verde ou vermelho vira retomada de entrega (revisao, CI, merge) via pending_delivery;
+        qualquer duvida vira espera persistida com o numero do PR. A espera e reavaliada a cada ciclo,
+        e o resultado so e consultado uma vez por ticket e sha do main.
+        """
+        inspected = self._open_pull_request(tid, demand)
+        if inspected is None:
+            self._pr_waits.pop(tid, None)
+            if skipped.get(tid, "").startswith(PR_ACTIVE_PREFIX):
+                del skipped[tid]
+            return False
+        pr, disposition = inspected
+        from core.line import pending_delivery
+
+        reason = disposition.reason
+        if disposition.action != "wait":
+            try:
+                active_row = (pending_delivery.queue_dir() / f"{tid}.json").is_file()
+            except Exception:  # noqa: BLE001 - fila ilegivel: nao agenda segunda vez
+                logger.exception("fila de entrega pendente ilegivel para %s", tid)
+                active_row = True
+            if active_row:
+                skipped[tid] = f"pending_delivery:PR #{disposition.pr_number}"
+                return True
+            worktree = resumable_delivery_worktree(tid, pr=pr)
+            if worktree is None:
+                reason = f"{disposition.action}: sem worktree de entrega para o head do PR"
+            else:
+                try:
+                    pending_delivery.schedule(
+                        tid, worktree, "review", resume_delivery=True,
+                        cause=f"pr_ativo:#{disposition.pr_number}:{disposition.action}:{disposition.reason}",
+                        implementing_harness=ADOPTED_PR_IMPLEMENTING_HARNESS,
+                    )
+                except Exception:  # noqa: BLE001 - sem linha persistida a espera e o unico estado seguro
+                    logger.exception("agendamento da entrega do PR de %s falhou", tid)
+                    reason = f"{disposition.action}: agendamento da entrega falhou"
+                else:
+                    self._pr_waits.pop(tid, None)
+                    self._pr_deliveries.append({
+                        "ticket": tid, "pr": disposition.pr_number, "action": disposition.action,
+                        "reason": disposition.reason, "worktree": str(worktree), "main_sha": self._main_sha,
+                    })
+                    skipped[tid] = f"{PR_ACTIVE_PREFIX}#{disposition.pr_number}:entrega_agendada"
+                    logger.info("%s: PR #%s encaminhado para a entrega (%s)", tid, disposition.pr_number,
+                                disposition.action)
+                    return True
+        wait = skipped[tid] = f"{PR_ACTIVE_PREFIX}#{disposition.pr_number}:{reason}"
+        previous = self._pr_waits.get(tid, {})
+        self._pr_waits[tid] = {
+            "ticket": tid, "project_id": str(demand.get("project_id") or demand.get("project") or "darkfac"),
+            "pr": disposition.pr_number, "reason": wait, "main_sha": self._main_sha,
+            "since": previous.get("since") or datetime.now(timezone.utc).isoformat(),
+        }
+        return True
 
     def _launch_with_contract(self, tid: str, host: HostSpec, run_id: str, candidate: str) -> InFlight:
         kwargs = {"run_id": run_id, "recovery": bool(self.recovery.get("active")),
@@ -2061,6 +2188,7 @@ class FleetDispatcher:
     def run_cycle(self) -> dict[str, Any]:
         self._load_cycle_fleet_config()
         self.resource_readings = {}
+        self._pr_cache, self._pr_deliveries = {}, []
         self._reap()
         from core.line.pending_delivery import acknowledge_deploy
         resumptions = self._resumptions()
@@ -2108,6 +2236,11 @@ class FleetDispatcher:
         queue, skipped = select_tickets(demands, busy_ids=busy, admission_store=self.admission_store,
                                         main_sha=self._main_sha, now=now)
         self._pending_skip_reasons(resumptions, demands, skipped, now)
+        planned = {str(d.get("id")) for d in demands if d.get("status") == "planned"}
+        self._pr_waits = {t: w for t, w in self._pr_waits.items() if t in planned}
+        for tid, wait in self._pr_waits.items():
+            if tid in queue:
+                skipped.setdefault(tid, str(wait.get("reason", "")))
         terminal = {str(d.get("id")) for d in demands if d.get("status") in _TERMINAL_STATUSES}
         recovery_list = self._recovery_list_status(terminal, busy, queue, now)
         queue, preempt_skips = order_fleet_queue(
@@ -2175,6 +2308,8 @@ class FleetDispatcher:
             "recent_failures": self.failures,
             "deploy_deferral": self.deploy_deferral_snapshot(),
             "ticket_holds": self._ticket_holds(),
+            "pr_waits": list(self._pr_waits.values()),
+            "pr_deliveries": self._pr_deliveries,
             "recovery_list": {k: v for k, v in recovery_list.items() if k != "live"},
             "recovery": self._recovery_summary(),
             "reconciled": reconciled,
@@ -2246,6 +2381,8 @@ class FleetDispatcher:
                 key = reason
             elif reason.startswith("pending_delivery:"):
                 key = "delivery_failure"
+            elif reason.startswith(PR_ACTIVE_PREFIX):
+                key = "active_pull_request"
             else:
                 blockers = {}
                 break
@@ -2287,10 +2424,16 @@ class FleetDispatcher:
 
     def _ticket_holds(self) -> list[dict[str, Any]]:
         try:
-            return self.admission_store.ticket_holds() if self.admission_store is not None else []
+            holds = self.admission_store.ticket_holds() if self.admission_store is not None else []
         except Exception:  # noqa: BLE001
             logger.exception("falha ao ler holds por ticket")
-            return []
+            holds = []
+        waits = [
+            {"project_id": w.get("project_id", "darkfac"), "ticket_id": t, "cause": str(w.get("reason", "")),
+             "occurrences": 1, "held_at": w.get("since", ""), "main_sha": w.get("main_sha", "")}
+            for t, w in self._pr_waits.items()
+        ]
+        return [*holds, *waits]
 
     def _write_state(self) -> None:
         try:
@@ -2403,6 +2546,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         orphan_worktree_cleanup_hook=scheduled_cleanup_hook(log_dir),
                         usage_hook=publish_once,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
+                        pr_inspector=default_pr_inspector,
                         launch_argv=list(sys.argv[1:] if argv is None else argv),
                         demands_store_factory=daemon_demands_store)
     if args.loop and not args.once:

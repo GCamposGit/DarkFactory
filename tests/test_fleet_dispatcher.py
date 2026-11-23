@@ -1179,7 +1179,7 @@ def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
 
 @pytest.fixture(autouse=True)
 def _no_preserved_worktree_lookup(monkeypatch):
-    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda *_a: None)
+    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda _tid, *_a, **_k: None)
 
 
 def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
@@ -1248,6 +1248,53 @@ def test_resumable_delivery_worktree_needs_commits_and_plan(tmp_path: Path, monk
     (ext_context / "tickets.json").write_text("[]", encoding="utf-8")
     lookup(2)
     assert fd.resumable_delivery_worktree("USR-9") == wt_path
+
+
+def test_resumable_delivery_worktree_adopts_the_open_pr_head_as_fallback(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.git import ticket_workspace as tw
+
+    monkeypatch.undo()  # remove o stub autouse
+    adopted_calls: list[tuple] = []
+    adopted = SimpleNamespace(path=tmp_path / "pr-wt")
+
+    def adopt(ticket_id, head_ref, **kwargs):
+        adopted_calls.append((ticket_id, head_ref, kwargs["cross_repository"]))
+        return adopted
+
+    monkeypatch.setattr(tw, "ensure_pr_delivery_workspace", adopt)
+    monkeypatch.setattr(tw, "find_preserved_workspaces", lambda *_a, **_k: SimpleNamespace(chosen=None))
+    pr = SimpleNamespace(head_ref="ticket/usr-9", cross_repository=False)
+
+    assert fd.resumable_delivery_worktree("USR-9") is None  # sem PR: comportamento anterior
+    assert fd.resumable_delivery_worktree("USR-9", pr=pr) == adopted.path
+    assert adopted_calls == [("USR-9", "ticket/usr-9", False)]
+
+    # busca preservada quebrada: ainda cai no PR adotado, sem propagar a excecao
+    def broken(*_a, **_k):
+        raise RuntimeError("git quebrado")
+
+    monkeypatch.setattr(tw, "find_preserved_workspaces", broken)
+    assert fd.resumable_delivery_worktree("USR-9", pr=pr) == adopted.path
+
+    # sem arvore (suja, divergente, fork, falha de git): espera, nada e criado
+    monkeypatch.setattr(tw, "ensure_pr_delivery_workspace", lambda *_a, **_k: None)
+    assert fd.resumable_delivery_worktree("USR-9", pr=pr) is None
+    monkeypatch.setattr(tw, "ensure_pr_delivery_workspace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("x")))
+    assert fd.resumable_delivery_worktree("USR-9", pr=pr) is None
+
+    # worktree preservada valida continua tendo prioridade sobre o PR
+    wt_path = tmp_path / "wt"
+    context = wt_path / ".darkfac" / "runs" / "USR-9"
+    context.mkdir(parents=True)
+    (context / "SPEC.md").write_text("x", encoding="utf-8")
+    (context / "tickets.json").write_text("[]", encoding="utf-8")
+    chosen = SimpleNamespace(commits_ahead=1, changed_paths=(), workspace=SimpleNamespace(path=wt_path))
+    monkeypatch.setattr(tw, "find_preserved_workspaces", lambda *_a, **_k: SimpleNamespace(chosen=chosen))
+    monkeypatch.setattr(tw, "ensure_pr_delivery_workspace", adopt)
+    assert fd.resumable_delivery_worktree("USR-9", pr=pr) == wt_path
+    assert len(adopted_calls) == 2  # a preservada valida nao consultou o PR
 
 
 def _arm_completed_wait(tmp_path: Path, monkeypatch, *, cause: str, status: str = "completed"):
@@ -4079,7 +4126,6 @@ def test_default_converge_requires_node_retry_then_backup(monkeypatch):
     })
     assert fd.default_converge(expected_sha=sha) == 1
 
-
 def test_external_delivery_marker_clears_budget_without_darkfac_deploy_or_failure(tmp_path: Path):
     demand = {**_d("MDL-01"), "project_id": "mansaodolago"}
     e = Env(tmp_path, [demand], free=("desktop",))
@@ -4112,3 +4158,114 @@ def test_external_commercial_acceptance_log_never_sets_pending_deploy(tmp_path: 
     assert e.d.failures == []
     assert e.d.pending_deploy is False
     assert e.d.admission_store.budget("mansaodolago", "MDL-02")["candidate_failures"] == 0
+
+# --- USR-545: ticket com PR aberto nao e relancado como BUILD ------------------------------------
+
+
+def _pr_env(tmp_path: Path, monkeypatch, dispositions: dict[str, str], *, worktree: bool = True):
+    """Dispatcher com um host livre, inspetor de PR falso e fila de entrega isolada."""
+    import json
+    from types import SimpleNamespace
+
+    from core.line import pending_delivery
+    from core.line.active_pull_request import ActivePullRequest, PullRequestDisposition
+
+    queue = tmp_path / "pending_delivery"
+    scheduled: list[dict] = []
+
+    def schedule(ticket_id, wt, stage, **kwargs):
+        queue.mkdir(exist_ok=True)
+        (queue / f"{ticket_id}.json").write_text("{}", encoding="utf-8")
+        scheduled.append({"ticket": ticket_id, "worktree": wt, "stage": stage, **kwargs})
+        return SimpleNamespace()
+
+    monkeypatch.setattr(pending_delivery, "queue_dir", lambda: queue)
+    monkeypatch.setattr(pending_delivery, "schedule", schedule)
+    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda _tid, *_a, **_k: tmp_path / "wt" if worktree else None)
+    env = Env(tmp_path, [_d(tid) for tid in [*dispositions, "USR-90"]], free=("notebook",))
+    calls: list[str] = []
+
+    def inspect(ticket_id, _demand):
+        calls.append(ticket_id)
+        action = dispositions.get(ticket_id)
+        if action is None:
+            return None
+        pr = ActivePullRequest(920, "https://github.com/o/r/pull/920", ticket_id, f"ticket/{ticket_id.lower()}", draft=True)
+        return pr, PullRequestDisposition(action, 920, "CI verde" if action == "adopt_delivery" else action)
+
+    env.d.pr_inspector = inspect
+    def state():
+        return json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+
+    return env, scheduled, calls, state
+
+
+def _finish_filler(env) -> None:
+    """USR-90 sai do ar: o host fica livre para reavaliar o ticket com PR no proximo ciclo."""
+    next(d for d in env.d.demands_loader() if d["id"] == "USR-90")["status"] = "completed"
+    env.d.in_flight.clear()
+
+
+@pytest.mark.parametrize("action", ["adopt_delivery", "fix"])
+def test_open_pr_is_forwarded_to_delivery_and_frees_the_host(tmp_path: Path, monkeypatch, action: str):
+    env, scheduled, calls, state = _pr_env(tmp_path, monkeypatch, {"USR-01": action})
+
+    cycle = env.d.run_cycle()
+
+    assert env.launched == [("USR-90", "notebook")]  # o host segue para outro ticket
+    assert [(s["ticket"], s["stage"], s["resume_delivery"]) for s in scheduled] == [("USR-01", "review", True)]
+    assert "#920" in scheduled[0]["cause"] and action in scheduled[0]["cause"]
+    assert scheduled[0]["worktree"] == tmp_path / "wt"
+    assert scheduled[0]["implementing_harness"] == fd.ADOPTED_PR_IMPLEMENTING_HARNESS
+    assert cycle["pr_deliveries"][0]["pr"] == 920 and cycle["pr_deliveries"][0]["action"] == action
+    assert cycle["skipped"]["USR-01"].startswith("pr_ativo:#920")
+
+    _finish_filler(env)
+    env.d.run_cycle()  # linha de entrega ativa: nenhum segundo agendamento nem BUILD
+    assert len(scheduled) == 1 and ("USR-01", "notebook") not in env.launched
+    assert state()["skipped"]["USR-01"].startswith("pending_delivery:")
+
+
+def test_open_pr_wait_is_persisted_with_the_pr_number_and_never_launches(tmp_path: Path, monkeypatch):
+    env, scheduled, calls, state = _pr_env(tmp_path, monkeypatch, {"USR-01": "wait"})
+    env.d.run_cycle()
+    _finish_filler(env)
+
+    for _ in range(3):  # ciclos repetidos no mesmo sha do main: reavalia, nunca lanca
+        env.now += 400
+        cycle = env.d.run_cycle()
+
+    assert calls.count("USR-01") == 4
+    assert scheduled == []
+    assert ("USR-01", "notebook") not in env.launched
+    assert cycle["dispatched"] == []
+    assert cycle["skipped"]["USR-01"].startswith("pr_ativo:#920")
+    holds = [h for h in cycle["ticket_holds"] if h["ticket_id"] == "USR-01"]
+    assert len(holds) == 1 and "#920" in holds[0]["cause"] and holds[0]["main_sha"] == env.d._main_sha
+    assert state()["pr_waits"][0]["pr"] == 920
+    assert state()["recent_failures"] == []
+    assert env.d.admission_store.retry_reason("darkfac", "USR-01", main_sha=env.d._main_sha) == ""
+
+    env.d.pr_inspector = lambda *_: None  # PR fechado: a espera some e o ticket volta a ser lancavel
+    cycle = env.d.run_cycle()
+    assert env.d._pr_waits == {} and cycle["pr_waits"] == []
+    assert env.launched[-1] == ("USR-01", "notebook")
+
+
+def test_open_pr_without_delivery_worktree_waits_instead_of_scheduling(tmp_path: Path, monkeypatch):
+    env, scheduled, _calls, _state = _pr_env(tmp_path, monkeypatch, {"USR-01": "adopt_delivery"}, worktree=False)
+
+    cycle = env.d.run_cycle()
+
+    assert scheduled == [] and ("USR-01", "notebook") not in env.launched
+    assert "#920" in cycle["skipped"]["USR-01"] and "worktree" in cycle["skipped"]["USR-01"]
+    assert env.launched == [("USR-90", "notebook")]
+
+
+def test_open_pr_lookup_is_memoized_per_ticket_and_main_sha_across_hosts(tmp_path: Path, monkeypatch):
+    env, _scheduled, calls, _state = _pr_env(tmp_path, monkeypatch, {"USR-01": "wait", "USR-02": "wait"})
+    env.free = {"notebook", "grokbox", "desktop"}
+
+    env.d.run_cycle()
+
+    assert sorted(calls) == ["USR-01", "USR-02", "USR-90"]  # uma consulta por ticket, nao por host

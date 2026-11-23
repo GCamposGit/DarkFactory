@@ -12,7 +12,12 @@ import pytest
 
 from core.demands import DemandsStore, UserTicket
 from core.line import line_lock, owner_intake
-from core.line.active_pull_request import ActivePullRequest, PullRequestLookupError, find_active_pull_request
+from core.line.active_pull_request import (
+    ActivePullRequest,
+    PullRequestLookupError,
+    classify_pull_request_disposition,
+    find_active_pull_request,
+)
 import run_ticket
 from core.workflow.control_contracts import TicketAlreadyActiveError
 from core.workflow.control_store import SQLiteControlStore
@@ -31,13 +36,18 @@ def test_active_pr_lookup_is_ticket_exact_and_fails_closed() -> None:
             {"number": 94, "url": "https://github.com/org/repo/pull/94", "title": "USR-419 follow-up",
              "headRefName": "ticket/usr-419", "body": ""},
             {"number": 92, "url": "https://github.com/org/repo/pull/92", "title": "Parallel work",
-             "headRefName": "ticket/usr-418", "body": ""},
+             "headRefName": "ticket/usr-418", "body": "", "isDraft": True, "isCrossRepository": False},
         ]))
 
     registry = SimpleNamespace(get_project=lambda _project: SimpleNamespace(repo_url="https://github.com/org/repo.git"))
     result = find_active_pull_request("darkfac", "USR-418", project_registry=registry, run=fake_run)
-    assert result == ActivePullRequest(92, "https://github.com/org/repo/pull/92", "Parallel work", "ticket/usr-418")
+    assert result == ActivePullRequest(
+        92, "https://github.com/org/repo/pull/92", "Parallel work", "ticket/usr-418", draft=True
+    )
+    assert result is not None and result.cross_repository is False
+    assert set(result.to_dict()) == {"number", "url", "title", "head_ref"}
     assert "org/repo" in calls[0]
+    assert "number,url,title,headRefName,body,isDraft,isCrossRepository" in calls[0]
 
     def unavailable(*_: object, **__: object) -> None:
         raise OSError("offline")
@@ -48,6 +58,51 @@ def test_active_pr_lookup_is_ticket_exact_and_fails_closed() -> None:
     missing_repo = SimpleNamespace(get_project=lambda _project: None)
     with pytest.raises(PullRequestLookupError, match="cannot be verified"):
         find_active_pull_request("darkfac", "USR-418", project_registry=missing_repo, run=fake_run)
+
+
+def _checks_runner(rows: object, returncode: int = 0) -> object:
+    def runner(_args: object, _cwd: Path) -> SimpleNamespace:
+        return SimpleNamespace(returncode=returncode, stdout=json.dumps(rows), stderr="")
+
+    return runner
+
+
+def _pr(head_ref: str = "ticket/usr-545", **kwargs: bool) -> ActivePullRequest:
+    return ActivePullRequest(920, "https://github.com/org/repo/pull/920", "USR-545", head_ref, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("pr", "rows", "action"),
+    [
+        (_pr(draft=True), [{"bucket": "pass", "name": "pr-validation", "workflow": "DarkFac CI"}], "adopt_delivery"),
+        (_pr("ticket/usr-545-20261123T105238Z"), [], "adopt_delivery"),
+        (_pr(), [{"bucket": "fail", "name": "pr-validation", "workflow": "DarkFac CI"}], "fix"),
+        (_pr(), [{"bucket": "pending", "name": "pr-validation"}], "wait"),
+        (_pr("ticket/usr-5450"), [{"bucket": "pass", "name": "x"}], "wait"),
+        (_pr("feature/other"), [{"bucket": "pass", "name": "x"}], "wait"),
+        (_pr(cross_repository=True), [{"bucket": "pass", "name": "x"}], "wait"),
+        (_pr(), "not-a-list", "wait"),
+    ],
+)
+def test_pull_request_disposition_from_ci_state(pr: ActivePullRequest, rows: object, action: str) -> None:
+    disposition = classify_pull_request_disposition(pr, "USR-545", runner=_checks_runner(rows))
+    assert disposition.action == action
+    assert disposition.pr_number == 920
+    assert disposition.reason
+
+
+def test_pull_request_disposition_fails_closed_without_leaking_secrets() -> None:
+    def broken(_args: object, _cwd: Path) -> SimpleNamespace:
+        raise OSError("boom ghp_secrettoken123")
+
+    disposition = classify_pull_request_disposition(_pr(), "USR-545", runner=broken)
+    assert (disposition.action, disposition.pr_number) == ("wait", 920)
+    assert "ghp_" not in disposition.reason
+
+    errored = SimpleNamespace(returncode=1, stdout="", stderr="HTTP 502 ghp_secrettoken123")
+    disposition = classify_pull_request_disposition(_pr(), "USR-545", runner=lambda *_: errored)
+    assert disposition.action == "wait"
+    assert "ghp_" not in disposition.reason
 
 
 def test_launcher_and_owner_intake_refuse_active_pr_before_creating_work(
