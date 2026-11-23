@@ -131,6 +131,9 @@ python -m core.line.stale_active --dry-run
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
   USR-394: no `/system/update` a edicao local e guardada e reaplicada apos o pull se o arquivo nao mudou no
   upstream; se mudou, vale o upstream e a copia local vai para `.factory/runs/node_sync_conflicts/`.
+  Antes de avançar o Notebook, a checagem final do Git permite somente os artefatos não rastreados
+  de runtime já reconhecidos pela classificação do checkout. Arquivos rastreados com alterações e
+  os demais arquivos não rastreados continuam bloqueando o avanço.
 - USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
   O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
   `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou
