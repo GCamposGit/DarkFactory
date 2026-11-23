@@ -6,8 +6,6 @@ import argparse
 import json
 import logging
 import os
-import sys
-import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,8 +19,6 @@ logger = logging.getLogger("darkfac.git.orphan_worktree_cleanup")
 
 SWEEP_INTERVAL = timedelta(days=1)
 SCHEDULE_STATE = Path(".factory") / "runs" / "orphan_worktree_cleanup.json"
-_LOCK_STALE_S = 300.0
-_LOCK_WAIT_S = 2.0
 
 _BLOCKED_REASONS = frozenset({"dirty", "holder", "locked", "index_lock", "detached_outside_base"})
 _ERROR_REASONS = frozenset(
@@ -228,49 +224,33 @@ def _write_schedule_state(path: Path, attempted_at: datetime) -> None:
     os.replace(temp, path)
 
 
-def _claim_due_run(state_path: Path, now: datetime) -> bool:
-    """Atomically claim one scheduled attempt; the lock protects only the state update."""
-    lock_path = state_path.with_name(state_path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + _LOCK_WAIT_S
-    descriptor: Optional[int] = None
-    while descriptor is None:
-        try:
-            descriptor = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                if time.time() - lock_path.stat().st_mtime > _LOCK_STALE_S:
-                    lock_path.unlink(missing_ok=True)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.05)
-
+def schedule_due(root: Path, now: datetime) -> bool:
+    """Read the daily schedule without waiting for active maintenance."""
     try:
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            logger.warning("schedule state unreadable; running a recovery sweep: %s", exc)
-            state = {}
-        previous = _parse_time(state.get("last_attempt_at") if isinstance(state, dict) else None)
-        current = now.astimezone(timezone.utc)
-        elapsed = current - previous if previous is not None else SWEEP_INTERVAL
-        if previous is not None and timedelta(0) <= elapsed < SWEEP_INTERVAL:
-            return False
-        try:
-            _write_schedule_state(state_path, current)
-        except OSError:
-            logger.exception("could not persist orphan worktree sweep schedule state")
-            return False
+        state = json.loads((root / SCHEDULE_STATE).read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return True
-    finally:
-        os.close(descriptor)
-        try:
-            lock_path.unlink(missing_ok=True)
-        except OSError:
-            logger.warning("could not remove orphan worktree schedule lock %s", lock_path)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        logger.warning("schedule state unreadable; running a recovery sweep: %s", exc)
+        return True
+    previous = _parse_time(state.get("last_attempt_at") if isinstance(state, dict) else None)
+    return previous is None or not timedelta(0) <= now - previous < SWEEP_INTERVAL
+
+
+def _try_lock(handle: Any) -> bool:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
 
 
 def maybe_run_scheduled(
@@ -278,36 +258,38 @@ def maybe_run_scheduled(
     *,
     now_fn: Callable[[], datetime] = utc_now,
     sweep_fn: Callable[..., CleanupSummary] = sweep_orphan_worktrees,
+    force: bool = False,
 ) -> Optional[CleanupSummary]:
     """Run at most once per day; wired into the boot-scheduled fleet dispatcher."""
     state_path = root / SCHEDULE_STATE
+    lock_path = state_path.with_suffix(".sweep.lock")
     try:
-        due = _claim_due_run(state_path, now_fn())
-    except OSError:
-        logger.exception("could not claim scheduled orphan worktree sweep")
-        return None
-    if not due:
-        return None
-    try:
-        summary = sweep_fn(root)
-    except Exception:  # noqa: BLE001 - the fleet loop must continue after maintenance failure
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as handle:
+            if not _try_lock(handle):
+                return None
+            started_at = now_fn()
+            if not force and not schedule_due(root, started_at):
+                return None
+            summary = sweep_fn(root)
+            if not force:
+                _write_schedule_state(state_path, started_at)
+            return summary
+    except Exception:  # noqa: BLE001 - a failed sweep must be retried and visible
         logger.exception("scheduled orphan worktree sweep failed")
         return CleanupSummary(errors=1, details=[{"path": str(root), "reason": "sweep_exception"}])
-    return summary
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scheduled", action="store_true", help="honor the persistent daily schedule guard")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.scheduled:
-        summary = maybe_run_scheduled(args.root)
-        if summary is None:
-            print(json.dumps({"status": "not_due", "interval_hours": SWEEP_INTERVAL.total_seconds() / 3600}))
-            return 0
-    else:
-        summary = sweep_orphan_worktrees(args.root)
+    summary = maybe_run_scheduled(args.root, force=not args.scheduled)
+    if summary is None:
+        print(json.dumps({"status": "skipped", "reason": "not_due_or_already_running"}))
+        return 0
     print(json.dumps(summary.to_dict(), ensure_ascii=False))
     return 1 if summary.errors else 0
 

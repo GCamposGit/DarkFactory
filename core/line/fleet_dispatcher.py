@@ -135,6 +135,35 @@ def configure_logging(log_dir: Path, *, stream: Any = None) -> RotatingFileHandl
     return file_handler
 
 
+def scheduled_cleanup_hook(log_dir: Path) -> Callable[[], None]:
+    """Start or poll maintenance without holding up a fleet cycle or a reload."""
+    from core.git.orphan_worktree_cleanup import schedule_due
+
+    process: subprocess.Popen[bytes] | None = None
+
+    def tick() -> None:
+        nonlocal process
+        if process is not None:
+            result = process.poll()
+            if result is None:
+                return
+            if result != 0:
+                logger.warning("varredura de worktrees encerrou com codigo %s; consulte o log de manutencao", result)
+            process = None
+        if not schedule_due(PROJECT_ROOT, datetime.now(timezone.utc)):
+            return
+        with (log_dir / "orphan-worktree-cleanup.log").open("ab") as output:
+            process = subprocess.Popen(
+                [sys.executable, str(PROJECT_ROOT / "scripts" / "cleanup_orphan_worktrees.py"), "--scheduled"],
+                cwd=PROJECT_ROOT,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                creationflags=CREATE_NO_WINDOW,
+            )
+
+    return tick
+
+
 @dataclass
 class HostSpec:
     id: str
@@ -2283,7 +2312,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
     from core.usage.sync_task import publish_once
-    from core.git.orphan_worktree_cleanup import maybe_run_scheduled
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
@@ -2295,7 +2323,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                         policy_path=DEFAULT_CONFIG_PATH), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
-                        orphan_worktree_cleanup_hook=lambda: maybe_run_scheduled(PROJECT_ROOT),
+                        orphan_worktree_cleanup_hook=scheduled_cleanup_hook(log_dir),
                         usage_hook=publish_once,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
                         launch_argv=list(sys.argv[1:] if argv is None else argv),

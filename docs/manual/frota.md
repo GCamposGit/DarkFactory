@@ -253,8 +253,12 @@ worktree. A deduplicação do deploy continua agrupando merges pela janela de si
 
 O dispatcher de frota, iniciado pela tarefa persistente `DarkFac-Fleet-Dispatcher` no
 checkout principal, chama `scripts/cleanup_orphan_worktrees.py` pelo seu gancho de manutenção.
-Uma trava de estado em `.factory/runs/orphan_worktree_cleanup.json` limita a execução a uma
-tentativa por dia, inclusive após reinício do processo. A rotina considera uma
+O processo de manutenção roda em paralelo aos ciclos e registra a saída em
+`orphan-worktree-cleanup.log` no diretório de logs do despachante. Uma trava do
+sistema operacional impede duas varreduras simultâneas no checkout. A marca diária
+é gravada quando a varredura retorna. Se o processo for interrompido antes disso,
+um ciclo posterior pode retomar a manutenção, inclusive após recarregar o despachante.
+A rotina considera uma
 worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não existe
 registro `cleanup_pending` e não há processo, alteração, lock ou commit detached sem
 referência segura. O limite é 48 horas; worktrees com idade igual ou inferior ao limite e
