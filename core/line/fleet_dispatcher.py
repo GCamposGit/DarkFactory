@@ -827,10 +827,18 @@ PR_ACTIVE_PREFIX = "pr_ativo:"
 ADOPTED_PR_IMPLEMENTING_HARNESS = "claude"
 
 
+@dataclass(frozen=True)
+class PullRequestInspectionUnavailable:
+    """A consulta nao confirmou ausencia de PR; mantem o ticket em espera, sem relancar BUILD."""
+
+    reason: str
+
+
 def default_pr_inspector(ticket_id: str, demand: Mapping[str, Any]) -> Any:
     """``(PR, disposicao)`` do PR aberto do ticket, ou None sem PR ou sem consulta possivel.
 
-    Falha de consulta devolve None: o lancamento segue e o launcher recusa com a propria causa.
+    Falha de consulta e distinta de ausencia confirmada: o despachante persiste uma espera e
+    reavalia no proximo ciclo, sem consumir host ou lancar BUILD.
     """
     from core.line.active_pull_request import (
         PullRequestLookupError,
@@ -846,7 +854,7 @@ def default_pr_inspector(ticket_id: str, demand: Mapping[str, Any]) -> Any:
         )
     except PullRequestLookupError as exc:
         logger.warning("consulta de PR ativo de %s indisponivel: %s", ticket_id, exc)
-        return None
+        return PullRequestInspectionUnavailable(str(exc))
     if pr is None:
         return None
     return pr, classify_pull_request_disposition(pr, ticket_id, cwd=PROJECT_ROOT)
@@ -1791,6 +1799,19 @@ class FleetDispatcher:
             if skipped.get(tid, "").startswith(PR_ACTIVE_PREFIX):
                 del skipped[tid]
             return False
+        if isinstance(inspected, PullRequestInspectionUnavailable):
+            wait = f"{PR_ACTIVE_PREFIX}desconhecido:consulta_indisponivel:{inspected.reason}"
+            skipped[tid] = wait
+            previous = self._pr_waits.get(tid, {})
+            self._pr_waits[tid] = {
+                "ticket": tid,
+                "project_id": str(demand.get("project_id") or demand.get("project") or "darkfac"),
+                "pr": None,
+                "reason": wait,
+                "main_sha": self._main_sha,
+                "since": previous.get("since") or datetime.now(timezone.utc).isoformat(),
+            }
+            return True
         pr, disposition = inspected
         from core.line import pending_delivery
 

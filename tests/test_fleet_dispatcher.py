@@ -4252,6 +4252,24 @@ def test_open_pr_wait_is_persisted_with_the_pr_number_and_never_launches(tmp_pat
     assert env.launched[-1] == ("USR-01", "notebook")
 
 
+def test_open_pr_lookup_failure_is_persisted_and_does_not_launch_build(tmp_path: Path, monkeypatch):
+    from core.line.fleet_dispatcher import PullRequestInspectionUnavailable
+
+    env, _scheduled, _calls, state = _pr_env(tmp_path, monkeypatch, {"USR-01": "wait"})
+    env.d.pr_inspector = lambda ticket_id, *_: (
+        PullRequestInspectionUnavailable("GitHub indisponivel") if ticket_id == "USR-01" else None
+    )
+
+    cycle = env.d.run_cycle()
+
+    assert env.launched == [("USR-90", "notebook")]
+    assert cycle["skipped"]["USR-01"].startswith("pr_ativo:desconhecido:consulta_indisponivel"), cycle
+    hold = next(h for h in cycle["ticket_holds"] if h["ticket_id"] == "USR-01")
+    assert hold["main_sha"] == env.d._main_sha and "GitHub indisponivel" in hold["cause"]
+    assert state()["pr_waits"][0]["pr"] is None
+    assert state()["recent_failures"] == []
+
+
 def test_open_pr_without_delivery_worktree_waits_instead_of_scheduling(tmp_path: Path, monkeypatch):
     env, scheduled, _calls, _state = _pr_env(tmp_path, monkeypatch, {"USR-01": "adopt_delivery"}, worktree=False)
 
