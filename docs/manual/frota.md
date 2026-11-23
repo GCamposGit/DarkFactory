@@ -260,9 +260,16 @@ O dispatcher de frota, iniciado pela tarefa persistente `DarkFac-Fleet-Dispatche
 checkout principal, chama `scripts/cleanup_orphan_worktrees.py` pelo seu gancho de manutenção.
 O processo de manutenção roda em paralelo aos ciclos e registra a saída em
 `orphan-worktree-cleanup.log` no diretório de logs do despachante. Uma trava do
-sistema operacional impede duas varreduras simultâneas no checkout. A marca diária
-é gravada quando a varredura retorna. Se o processo for interrompido antes disso,
-um ciclo posterior pode retomar a manutenção, inclusive após recarregar o despachante.
+sistema operacional impede duas varreduras simultâneas no checkout. O estado persistente
+fica em `.factory/runs/orphan_worktree_cleanup.json`, com `status`, `last_attempt_at`,
+`failure_count`, `next_attempt_at` e `last_failure` quando aplicável. Uma exceção na
+varredura grava `status=failed` e agenda nova tentativa em `next_attempt_at` com backoff
+exponencial de 1 hora, dobrando a cada falha e limitado a 24 horas. O gancho não inicia
+outro subprocesso antes desse horário. Depois que a varredura retorna, inclusive quando
+há erro isolado de classificação ou limpeza de uma worktree, o estado registra sucesso,
+zera `failure_count` e mantém a cadência diária. Se o processo for interrompido antes de
+gravar o resultado, um ciclo posterior pode retomar a manutenção, inclusive após recarregar
+o despachante.
 A rotina considera uma
 worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não existe
 registro `cleanup_pending` e não há processo, alteração, lock ou commit detached sem

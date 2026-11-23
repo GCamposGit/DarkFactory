@@ -15090,5 +15090,35 @@
     "dependencies": [],
     "created_at": "2026-11-21T06:33:51.048827Z",
     "updated_at": "2026-11-21T06:33:51.048827Z"
+  },
+  {
+    "id": "USR-546",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Varredura de worktrees que falha sempre e relancada a cada ciclo do despachante",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "171269c128739ae8f167a4682f24dbf57a91c6e7",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Apos o #925 (USR-544), maybe_run_scheduled so grava o horario da varredura quando ela termina sem excecao. Se a varredura falhar de forma persistente, schedule_due continua verdadeiro e scheduled_cleanup_hook lanca um novo processo a cada ciclo do despachante. O log enche e a falha fica sem backoff. Achado na revisao cruzada do #925 em 23/11.",
+    "core_journey": [
+      "Apos o #925 (USR-544), maybe_run_scheduled so grava o horario da varredura quando ela termina sem excecao. Se a varredura falhar de forma persistente, schedule_due continua verdadeiro e scheduled_cleanup_hook lanca um novo processo a cada ciclo do despachante. O log enche e a falha fica sem backoff. Achado na revisao cruzada do #925 em 23/11."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Falha da varredura aplica backoff persistido (ex.: nova tentativa em 1 h, com teto) e registra a causa; teste de comportamento mostra que duas falhas seguidas no mesmo intervalo nao lancam dois processos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-23T09:50:47.390853Z",
+    "updated_at": "2026-11-23T17:48:36.783734Z"
   }
 ]
