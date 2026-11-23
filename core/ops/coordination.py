@@ -157,7 +157,8 @@ def _stall_action(stalls: list[dict[str, Any]]) -> str | None:
             return f"Corrigir o CI do PR #{stall['pr']} do ticket {stall['ticket_id']}."
     for stall in stalls:
         if stall["kind"] == "hold_already_delivered":
-            return (f"Fechar {stall['ticket_id']}: python -m core.demands.cli complete "
+            return (f"Conferir o aceite de {stall['ticket_id']} contra o diff de {stall['sha'][:8]}; se cumprido: "
+                    f"python -m core.demands.cli complete "
                     f"{stall['ticket_id']} --sha {stall['sha']} --evidence \"<texto>\"")
     for stall in stalls:
         if stall["kind"] == "dispatcher_blocked_with_free_host":
