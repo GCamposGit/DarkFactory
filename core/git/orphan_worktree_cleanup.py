@@ -18,6 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger("darkfac.git.orphan_worktree_cleanup")
 
 SWEEP_INTERVAL = timedelta(days=1)
+INITIAL_FAILURE_BACKOFF = timedelta(hours=1)
+MAX_FAILURE_BACKOFF = timedelta(hours=24)
 SCHEDULE_STATE = Path(".factory") / "runs" / "orphan_worktree_cleanup.json"
 
 _BLOCKED_REASONS = frozenset({"dirty", "holder", "locked", "index_lock", "detached_outside_base"})
@@ -214,25 +216,56 @@ def _parse_time(value: object) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def _write_schedule_state(path: Path, attempted_at: datetime) -> None:
+def _read_schedule_state(path: Path) -> dict[str, Any]:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _write_schedule_state(path: Path, state: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     temp.write_text(
-        json.dumps({"last_attempt_at": attempted_at.astimezone(timezone.utc).isoformat()}, ensure_ascii=False) + "\n",
+        json.dumps(dict(state), ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     os.replace(temp, path)
 
 
+def _failure_backoff(failure_count: int) -> timedelta:
+    # Five doublings already exceed the 24-hour cap; bound before exponentiation.
+    exponent = min(max(0, failure_count - 1), 5)
+    seconds = INITIAL_FAILURE_BACKOFF.total_seconds() * (2**exponent)
+    return timedelta(seconds=min(seconds, MAX_FAILURE_BACKOFF.total_seconds()))
+
+
+def _next_failure_count(state: Mapping[str, Any]) -> int:
+    try:
+        return max(0, int(state.get("failure_count", 0))) + 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def _failure_cause(summary: CleanupSummary) -> str:
+    details = [
+        ": ".join(part for part in (item.get("reason"), item.get("detail")) if part)
+        for item in summary.details
+        if item.get("reason") or item.get("detail")
+    ]
+    return f"sweep reported {summary.errors} error(s)" + (f": {'; '.join(details)}" if details else "")
+
+
 def schedule_due(root: Path, now: datetime) -> bool:
     """Read the daily schedule without waiting for active maintenance."""
-    try:
-        state = json.loads((root / SCHEDULE_STATE).read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    path = root / SCHEDULE_STATE
+    state = _read_schedule_state(path)
+    if not state and not path.exists():
         return True
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        logger.warning("schedule state unreadable; running a recovery sweep: %s", exc)
-        return True
+    if state.get("status") == "failed":
+        retry_at = _parse_time(state.get("next_attempt_at"))
+        return retry_at is None or now.astimezone(timezone.utc) >= retry_at
     previous = _parse_time(state.get("last_attempt_at") if isinstance(state, dict) else None)
     return previous is None or not timedelta(0) <= now - previous < SWEEP_INTERVAL
 
@@ -271,9 +304,52 @@ def maybe_run_scheduled(
             started_at = now_fn()
             if not force and not schedule_due(root, started_at):
                 return None
-            summary = sweep_fn(root)
+            try:
+                summary = sweep_fn(root)
+            except Exception as exc:  # noqa: BLE001 - persist failures so dispatchers honor backoff
+                cause = f"{type(exc).__name__}: {exc}"
+                logger.exception("scheduled orphan worktree sweep failed: %s", cause)
+                if not force:
+                    previous = _read_schedule_state(state_path)
+                    failure_count = _next_failure_count(previous)
+                    retry_at = started_at + _failure_backoff(failure_count)
+                    _write_schedule_state(
+                        state_path,
+                        {
+                            "status": "failed",
+                            "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
+                            "failure_count": failure_count,
+                            "next_attempt_at": retry_at.astimezone(timezone.utc).isoformat(),
+                            "last_failure": cause,
+                        },
+                    )
+                return CleanupSummary(errors=1, details=[{"path": str(root), "reason": "sweep_exception", "detail": cause}])
             if not force:
-                _write_schedule_state(state_path, started_at)
+                if summary.errors:
+                    previous = _read_schedule_state(state_path)
+                    failure_count = _next_failure_count(previous)
+                    cause = _failure_cause(summary)
+                    retry_at = started_at + _failure_backoff(failure_count)
+                    _write_schedule_state(
+                        state_path,
+                        {
+                            "status": "failed",
+                            "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
+                            "failure_count": failure_count,
+                            "next_attempt_at": retry_at.astimezone(timezone.utc).isoformat(),
+                            "last_failure": cause,
+                        },
+                    )
+                    logger.error("scheduled orphan worktree sweep failed; retry_at=%s cause=%s", retry_at, cause)
+                else:
+                    _write_schedule_state(
+                        state_path,
+                        {
+                            "status": "succeeded",
+                            "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
+                            "failure_count": 0,
+                        },
+                    )
             return summary
     except Exception:  # noqa: BLE001 - a failed sweep must be retried and visible
         logger.exception("scheduled orphan worktree sweep failed")
