@@ -1735,7 +1735,7 @@ _GROK_INTERIM_REVIEW_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _GROK_FINAL_REVIEW_PATTERN = re.compile(
-    r"\b(?:approve(?:d)?|changes?[_ ]required|reject(?:ed)?|blocking findings?)\b",
+    r"\b(?:approve(?:d)?|changes?[_ ]required|reject(?:ed)?)\b",
     re.IGNORECASE,
 )
 

@@ -656,6 +656,24 @@ def test_structured_output_with_conflicting_text_verdict_is_marked_incomplete(
     assert result.structured_output_incomplete is True
 
 
+def test_progress_text_mentioning_blocking_findings_is_marked_incomplete(
+    install_fake, tmp_path: Path
+) -> None:
+    payload = {
+        "text": "I am still reviewing the changed files and checking for blocking findings before deciding.",
+        "structuredOutput": {"verdict": "changes_required", "blocking": [], "non_blocking": []},
+    }
+    install_fake(stdout=json.dumps(payload))
+    schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+
+    result = run_agent(AgentRequest(
+        prompt="review this", cwd=tmp_path, mode="read", harness="grok", output_schema=schema,
+    ))
+
+    assert result.ok is True
+    assert result.structured_output_incomplete is True
+
+
 def test_read_mode_with_output_schema_classifies_json_error_object(
     install_fake, tmp_path: Path
 ) -> None:
