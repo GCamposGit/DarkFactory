@@ -1,6 +1,11 @@
 <!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/owner_actions/*.py, hub/backend/service*.py, hub/backend/api.py, hub/backend/main.py, hub/backend/models.py, hub/frontend/interventions.js, core/orchestrator/adapters/control_postgres.py, core/ops/briefing.py, deploy/dokploy/docker-compose.hub.yml, .env.example, core/demands/queue_store.py, core/demands/store.py -->
 # Fila de tickets (USR-343)
 
+Na fila de etapas, `not_before` define quando uma nova tentativa volta a disputar a capacidade da
+frota. Uma etapa pendente com prazo futuro não renova a reserva atual nem causa nova admissão.
+O run e o prazo ficam no control store. No horário marcado, a etapa volta a disputar uma reserva
+pelo coordenador. Os workers continuam renovando as reservas de etapas em execução.
+
 A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
 está definida, senão o SQLite local `.factory/control.db`. Tabelas (criadas com
 `CREATE TABLE IF NOT EXISTS`):
