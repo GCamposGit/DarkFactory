@@ -980,6 +980,28 @@ def test_run_pytest_memory_budget_and_parallel_split(monkeypatch, tmp_path, gib,
         assert len(calls) == (3 if workers > 1 else 2)
 
 
+def test_affected_collection_and_execution_share_the_parent_deadline(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    clock = [0.0]
+    monkeypatch.setattr(affected.time, "monotonic", lambda: clock[0])
+
+    def run(cmd, **kwargs):
+        if "--collect-only" in cmd:
+            assert kwargs["timeout"] == 12
+            clock[0] = 5.0
+            return subprocess.CompletedProcess(cmd, 0, stdout="tests/test_probe.py::test_probe")
+        assert kwargs["timeout"] == 7
+        raise subprocess.TimeoutExpired(cmd, 7, output=b"test_probe started")
+
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    selection = affected.Selection("subset", ["tests/test_probe.py"], {}, [], ["probe.py"])
+
+    assert affected.run_pytest(tmp_path, selection, [], deadline=12) == 124
+    assert "test_probe started\n[STEP_TIMEOUT] affected tests phase=execution" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("changed", ["tests/conftest.py", "conftest.py", "tests/line/conftest.py", "tests/_helper.py", "pytest.ini", "harness.config.json", "requirements.txt"])
 def test_pr_global_change_runs_fixed_smoke_instead_of_full(tmp_path, changed, monkeypatch, capsys):
     repo = tmp_path / "repo"
