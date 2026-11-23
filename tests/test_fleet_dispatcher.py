@@ -3188,16 +3188,34 @@ def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
     assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
 
 
-def test_run_forever_invokes_orphan_worktree_cleanup_hook(tmp_path: Path, monkeypatch) -> None:
+def test_run_forever_keeps_dispatching_and_reloads_during_worktree_cleanup(
+    tmp_path: Path, monkeypatch,
+) -> None:
     events: list[str] = []
-    dispatcher, _execs = _sha_dispatcher(tmp_path / "state", lambda: _SHA_A)
+    dispatcher, execs = _sha_dispatcher(tmp_path / "state", lambda: _SHA_A)
     dispatcher.run_cycle = lambda: events.append("cycle") or {}
-    dispatcher.orphan_worktree_cleanup_hook = lambda: events.append("cleanup")
+    from core.git import orphan_worktree_cleanup
+
+    monkeypatch.setattr(orphan_worktree_cleanup, "schedule_due", lambda *_args: True)
+
+    class Maintenance:
+        def poll(self) -> None:
+            events.append("still_running")
+
+    def launch(command, **_kwargs):
+        assert command[-1] == "--scheduled"
+        events.append("cleanup_started")
+        return Maintenance()
+
+    monkeypatch.setattr(fd.subprocess, "Popen", launch)
+    dispatcher.orphan_worktree_cleanup_hook = fd.scheduled_cleanup_hook(tmp_path)
     monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+    dispatcher._read_checkout_sha = lambda: _SHA_B if events.count("sleep") == 2 else _SHA_A
 
-    dispatcher.run_forever(stop=_stop_after(1))
+    dispatcher.run_forever(stop=_stop_after(3))
 
-    assert events == ["cycle", "cleanup", "sleep"]
+    assert events == ["cycle", "cleanup_started", "sleep", "cycle", "still_running", "sleep"]
+    assert len(execs) == 1
 
 
 def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(

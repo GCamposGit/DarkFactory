@@ -6,6 +6,7 @@ import json
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -282,4 +283,26 @@ def test_scheduler_guard_runs_daily_and_skips_repeated_calls(tmp_path: Path) -> 
         tmp_path, now_fn=lambda: start + timedelta(days=1), sweep_fn=fake_sweep
     ) is not None
     assert runs == [tmp_path, tmp_path]
+
+
+def test_scheduler_serializes_active_sweep_and_retries_after_failure(tmp_path: Path) -> None:
+    started = Event()
+    release = Event()
+
+    def interrupted(_root: Path) -> sweep.CleanupSummary:
+        started.set()
+        assert release.wait(timeout=10)
+        raise RuntimeError("interrupted sweep")
+
+    worker = Thread(target=sweep.maybe_run_scheduled, args=(tmp_path,), kwargs={"sweep_fn": interrupted})
+    worker.start()
+    try:
+        assert started.wait(timeout=5)
+        assert sweep.maybe_run_scheduled(tmp_path, force=True) is None
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert sweep.maybe_run_scheduled(tmp_path, sweep_fn=lambda _: sweep.CleanupSummary()) is not None
 
