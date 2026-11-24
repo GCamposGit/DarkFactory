@@ -167,6 +167,7 @@ python -m core.line.stale_active --dry-run
   USR-515: antes da espera de tag, o pin de GHCR, compose, blue-green, `darkfac-cloud` e `/health`
   pode ser o ancestral publicado quando o alvo esta fora dos paths de `hub-image.yml` e ha runtime
   no intervalo. O sync permanece no SHA alvo. O stdout traz `published=` e `reach=`.
+- USR-562: o redeploy passa `track_divergence=True` ao sync; `record_divergence_cycle` grava `node_sync_divergence.json` a cada ciclo (alerta no 2o ciclo divergente seguido) e falhas viram `logger.warning`, nao silencio.
 
 # Fila de demandas (entrada)
 

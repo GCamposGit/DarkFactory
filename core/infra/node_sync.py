@@ -525,15 +525,19 @@ def record_divergence_cycle(
                 # USR-242: alerta uma unica vez ao atingir 2 ciclos; falha de envio nunca perde o contador.
                 try:
                     notifier(f"ALERTA: Nó {node_name} permanece divergente por {cycles} ciclos de deploy consecutivos!")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "divergence alert notifier failed node=%s cycles=%d error=%s", node_name, cycles, type(exc).__name__
+                    )
         else:
             data[node_name] = 0
             cycles = 0
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "record_divergence_cycle failed node=%s error=%s", node_name, type(exc).__name__
+        )
     return cycles
 
 
