@@ -68,6 +68,26 @@ def test_owner_destination_does_not_fall_back_to_shared_ops_chats(
     assert hold_owner.authorized_chat_ids == []
 
 
+def test_hold_owner_destination_does_not_fall_back_to_local_shared_chat_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", TOKEN)
+    monkeypatch.delenv("TELEGRAM_OWNER_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_AUTHORIZED_CHATS", raising=False)
+    monkeypatch.delenv("TELEGRAM_ALLOWED_CHATS", raising=False)
+    config_dir = tmp_path / "telegram"
+    config_dir.mkdir()
+    (config_dir / "owner_config.json").write_text(
+        '{"authorized_chat_ids": [42]}', encoding="utf-8"
+    )
+
+    hold_owner = load_telegram_config(
+        role="owner", config_dir=config_dir, owner_destination_only=True
+    )
+
+    assert hold_owner.authorized_chat_ids == []
+
+
 def test_hold_request_sends_to_configured_owner_and_is_reported_delivered(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

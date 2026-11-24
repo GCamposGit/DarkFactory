@@ -615,7 +615,7 @@ def load_telegram_config(
     else:
         chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
         chats = parse_telegram_chat_ids(chats_raw)
-    if not chats:
+    if not chats and not (role == "owner" and owner_destination_only):
         chats = local_data.get("authorized_chat_ids", [])
 
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or env_vars.get("TELEGRAM_WEBHOOK_SECRET")
