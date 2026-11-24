@@ -42,6 +42,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1486,14 +1487,10 @@ def resolve_ticket_status(
     return file_norm
 
 
-def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
-    """Preserve or mark eligible. Does not touch the disk, git, or :func:`cleanup`.
+def classify_ownerless_cheap(facts: OwnerlessFacts) -> Optional[OwnerlessVerdict]:
+    """Preservation reasons decidable without process inspection; ``None`` to continue.
 
-    Ownership and age are established before reporting retryable local safety
-    blockers. This lets the scheduled sweep send only ownerless, old worktrees
-    to :func:`cleanup`, which records blocked attempts in ``cleanup_pending``.
-    The main checkout, unknown/open tickets, young worktrees, and detached
-    commits outside the base are always preserved.
+    These are the checks that precede the holder step in :func:`classify_ownerless`.
     """
     path = facts.path
     if facts.cleanup_pending:
@@ -1511,6 +1508,22 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
         return _preserved(path, "too_young", f"age {facts.age_s:.0f}s <= {OWNERLESS_MAX_AGE_S}s")
     if facts.detached and facts.head_outside_base:
         return _preserved(path, "detached_outside_base", "detached HEAD is not the base commit")
+    return None
+
+
+def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
+    """Preserve or mark eligible. Does not touch the disk, git, or :func:`cleanup`.
+
+    Ownership and age are established before reporting retryable local safety
+    blockers. This lets the scheduled sweep send only ownerless, old worktrees
+    to :func:`cleanup`, which records blocked attempts in ``cleanup_pending``.
+    The main checkout, unknown/open tickets, young worktrees, and detached
+    commits outside the base are always preserved.
+    """
+    early = classify_ownerless_cheap(facts)
+    if early is not None:
+        return early
+    path = facts.path
     if facts.holders is None:
         return _preserved(path, "psutil_unavailable", "psutil ImportError; cannot prove the worktree is idle")
     if facts.holders:
@@ -1529,7 +1542,9 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
     return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
 
 
-def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
+def probe_worktree_holders(
+    path: Path, *, _cache: Optional[dict[int, dict[str, Any]]] = None
+) -> Optional[tuple[str, ...]]:
     """``name (pid)`` of processes using ``path`` as cwd or through an open file.
 
     ``None`` when ``psutil`` is unavailable or process enumeration fails;
@@ -1559,8 +1574,11 @@ def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
     found: list[str] = []
     try:
         for proc in psutil.process_iter(["pid", "name"]):
+            memo = _cache.setdefault(proc.pid, {}) if _cache is not None else {}
             try:
-                cwd = proc.cwd()
+                if "cwd" not in memo:
+                    memo["cwd"] = proc.cwd()
+                cwd = memo["cwd"]
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
             except psutil.AccessDenied:
@@ -1576,7 +1594,9 @@ def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
             )
             if not using_path and process_cwd_is_related:
                 try:
-                    using_path = any(_is_within(open_file.path, path) for open_file in proc.open_files())
+                    if "files" not in memo:
+                        memo["files"] = tuple(open_file.path for open_file in proc.open_files())
+                    using_path = any(_is_within(open_path, path) for open_path in memo["files"])
                 except (psutil.NoSuchProcess, psutil.ZombieProcess):
                     continue
                 except psutil.AccessDenied:
@@ -1590,6 +1610,16 @@ def probe_worktree_holders(path: Path) -> Optional[tuple[str, ...]]:
         logger.warning("Could not inspect processes for %s; preserving it", path)
         return None
     return tuple(found)
+
+
+def snapshot_holder_probe() -> HolderProbe:
+    """A :func:`probe_worktree_holders` that memoizes per-process cwd and open files.
+
+    For classifying many worktrees in one pass: the slow ``open_files()`` scan runs at
+    most once per process. Never use it for the final pre-delete check.
+    """
+    cache: dict[int, dict[str, Any]] = {}
+    return lambda path: probe_worktree_holders(path, _cache=cache)
 
 
 def _ledger_ticket_status(ledger: Path, ticket_id: str) -> tuple[Optional[str], bool]:
@@ -1756,12 +1786,6 @@ def classify_ownerless_worktree(
             changed = tuple(_status_paths(status.stdout or ""))
     detached = "detached" in entry
     outside = _detached_outside_base(path, entry, runner, f"{remote}/{base}") if detached else False
-    probe = holder_probe or probe_worktree_holders
-    try:
-        holders = probe(path)
-    except Exception as exc:  # noqa: BLE001 -- a broken probe must not look like "no process"
-        logger.warning("Holder probe failed for %s: %s", path, exc)
-        holders = None
     ticket_status, ticket_known = _lookup_ticket_status(
         worktree_ticket_id(path, entry.get("branch", "")),
         main_root=root,
@@ -1769,24 +1793,32 @@ def classify_ownerless_worktree(
         ledger_path=ledger_path,
         queue_lookup=queue_lookup,
     )
-    return classify_ownerless(
-        OwnerlessFacts(
-            path=path,
-            is_main=False,
-            cleanup_pending=cleanup_pending,
-            locked=locked,
-            index_locked=index_locked,
-            git_readable=git_readable,
-            detached=detached,
-            head_outside_base=outside,
-            changed_paths=changed,
-            status_readable=status_readable,
-            ticket_status=ticket_status,
-            ticket_status_known=ticket_known,
-            holders=holders,
-            age_s=age,
-        )
+    facts = OwnerlessFacts(
+        path=path,
+        is_main=False,
+        cleanup_pending=cleanup_pending,
+        locked=locked,
+        index_locked=index_locked,
+        git_readable=git_readable,
+        detached=detached,
+        head_outside_base=outside,
+        changed_paths=changed,
+        status_readable=status_readable,
+        ticket_status=ticket_status,
+        ticket_status_known=ticket_known,
+        holders=(),
+        age_s=age,
     )
+    early = classify_ownerless_cheap(facts)
+    if early is not None:
+        return early  # the process scan is the slow step; skip it when already preserved
+    probe = holder_probe or probe_worktree_holders
+    try:
+        holders = probe(path)
+    except Exception as exc:  # noqa: BLE001 -- a broken probe must not look like "no process"
+        logger.warning("Holder probe failed for %s: %s", path, exc)
+        holders = None
+    return classify_ownerless(dataclasses.replace(facts, holders=holders))
 
 
 def classify_ownerless_worktrees(
