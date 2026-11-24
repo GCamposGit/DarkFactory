@@ -554,9 +554,9 @@ def test_worker_without_harness_never_claims_development(tmp_path: Path, monkeyp
     from core.workflow.control_contracts import JobKey, StageResult
     from core.workflow.successors import materialize_result
 
-    grill_key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="grill", iteration=0)
+    grill_key = JobKey(run_id=run_id, ticket_id=receipt.demand_id, plan_version="1.0", stage="grill", iteration=0)
     materialize_result(grill_key, StageResult(outcome="success", output_refs=["sha1"]), store, now=NOW)
-    planning_key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="planning", iteration=0)
+    planning_key = JobKey(run_id=run_id, ticket_id=receipt.demand_id, plan_version="1.0", stage="planning", iteration=0)
     materialize_result(planning_key, StageResult(outcome="success", output_refs=["sha2"]), store, now=NOW)
 
     conn = store._connect()

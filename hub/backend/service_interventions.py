@@ -54,6 +54,32 @@ def _queue_evidence(task: Any) -> list[dict[str, str]]:
     return out[:12]
 
 
+def _has_valid_grill_session_evidence(task: Any) -> bool:
+    """A line Grill intervention needs durable evidence of questions and its deadline."""
+    values: list[str] = []
+    evidence = task.get("evidence") if isinstance(task, dict) else getattr(task, "evidence", None)
+    for entry in evidence or []:
+        value = entry.get("value") if isinstance(entry, dict) else getattr(entry, "value", "")
+        if value:
+            values.append(str(value))
+    raw_refs = task.get("evidence_refs") if isinstance(task, dict) else getattr(task, "evidence_refs", None)
+    values.extend(str(ref) for ref in raw_refs or [])
+    count = next((value.split(":", 1)[1] for value in values if value.startswith("grill_question_count:")), None)
+    deadline = next((value.split(":", 1)[1] for value in values if value.startswith("grill_deadline:")), None)
+    if count is None or deadline is None:
+        return False
+    try:
+        return int(count) > 0 and bool(datetime.fromisoformat(deadline))
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_unproven_grill(task: Any) -> bool:
+    """A waiting Grill job without durable question/deadline evidence is not an owner block."""
+    is_grill = _queue_text(task, "stage").lower() == "grill" or "grill" in _queue_text(task, "cause_code").lower()
+    return is_grill and not _has_valid_grill_session_evidence(task)
+
+
 def _queue_project(task: Any) -> str:
     """Project of a dashboard row. The row itself has no project_id; the evidence does."""
     explicit = _queue_text(task, "project_id")
@@ -130,7 +156,7 @@ class InterventionsMixin:
                 for task in task_rep.queue:
                     terminal_runs.update(_terminal_run_id(task))
                     t_status = getattr(task, "status", None) if not isinstance(task, dict) else task.get("status")
-                    if str(t_status or "").upper() == "WAITING_HUMAN":
+                    if str(t_status or "").upper() == "WAITING_HUMAN" and not _is_unproven_grill(task):
                         t_id = _queue_text(task, "task_id", "id")
                         t_ticket = _queue_text(task, "ticket_id") or t_id
                         t_run = _queue_text(task, "run_id")

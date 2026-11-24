@@ -26,6 +26,10 @@ def test_active_pr_lookup_is_ticket_exact_and_fails_closed() -> None:
         return SimpleNamespace(returncode=0, stdout=json.dumps([
             {"number": 91, "url": "https://github.com/org/repo/pull/91", "title": "USR-4184 follow-up",
              "headRefName": "ticket/usr-4184", "body": ""},
+            {"number": 93, "url": "https://github.com/org/repo/pull/93", "title": "darkfac maintenance",
+             "headRefName": "ticket/darkfac-maintenance", "body": ""},
+            {"number": 94, "url": "https://github.com/org/repo/pull/94", "title": "USR-419 follow-up",
+             "headRefName": "ticket/usr-419", "body": ""},
             {"number": 92, "url": "https://github.com/org/repo/pull/92", "title": "Parallel work",
              "headRefName": "ticket/usr-418", "body": ""},
         ]))

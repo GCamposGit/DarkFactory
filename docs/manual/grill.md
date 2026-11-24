@@ -28,3 +28,5 @@ Qualquer outra pergunta (arquitetura, biblioteca, teste, resiliencia) e descarta
 - **Botoes de selecao**: exibem apenas o numero da opcao e um resumo conciso de 2 a 3 palavras (ex.: `1. Usar o Grok`), otimizados para telas de celular sem quebra de layout.
 - **Botao recomendado one-tap**: formato `⭐ Opção X: <resumo>` para aceite imediato com um toque.
 - **Links publicos funcionais**: todos os links apontam exclusivamente para endpoints publicos acessiveis externamente (`https://darkhub.ggcampos.com`), eliminando qualquer referencia a `127.0.0.1` ou `localhost`.
+
+**Sessao orfa e prazo vencido**: `inspect_pending_grill` valida `GRILL_PENDING.json` (ao menos uma pergunta e prazo). Sem sessao valida, o worker retoma o job uma vez para reconstruir; se a reconstrucao falhar, o stage termina com `grill_session_unrecoverable`. Com prazo vencido, o sweep retoma o job para aplicar respostas/defaults, nunca espera indefinida.

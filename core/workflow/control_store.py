@@ -88,6 +88,10 @@ class ControlStore(Protocol):
         """Accept an intake command transactionally with idempotency checking."""
         ...
 
+    def reconcile_dependencies(self, now: datetime) -> int:
+        """Release children of successful runs and cancel children of failed runs."""
+        ...
+
     def claim(
         self, worker: str, capabilities: list[str], now: datetime, ready_age_sec: float = 0.0
     ) -> Claim | None:
@@ -227,6 +231,15 @@ class ControlStore(Protocol):
     def reconcile_fleet_reservations(self, now: datetime) -> list[FleetReservation]:
         """Sweep expired fleet reservations and release slots (USR-281)."""
         ...
+
+
+def dependency_plan(parent_run_id: str | None, parent_status: str | None) -> tuple[str, str, str | None]:
+    """Return (run_status, grill_job_status, cause_code) for a run that may depend on a parent run."""
+    if not parent_run_id or parent_status == "completed":
+        return "active", "pending", None
+    if parent_status in ("failed", "cancelled"):
+        return "cancelled", "cancelled", f"parent_run_terminal:{parent_run_id}:{parent_status}"
+    return "active", "waiting_dependency", f"parent_run_pending:{parent_run_id}:{parent_status}"
 
 
 class SQLiteControlStore:
@@ -485,7 +498,27 @@ class SQLiteControlStore:
         for column in ("not_before", "ready_at"):
             if column not in existing:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+        run_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "parent_run_id" not in run_columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
 
+    # HF-27-08 review item 9: attempted (see git history) to
+    # stamp the initial grill job's required_capabilities from
+    # the registered project, mirroring every later line stage.
+    # REVERTED: ControlStore.accept() is the shared HF-05 intake
+    # entrypoint, used by many non-line callers/tests with
+    # project_id="darkfac" as a convenient default string, and
+    # the *real* registered "darkfac" project (.factory/projects.json)
+    # legitimately has its own repo_url/deploy/smoke config --
+    # the factory manages itself through the line. There is no
+    # reliable signal at accept() time to tell "a genuine line
+    # demand for a line-capable project" apart from "a generic
+    # HF-05 test/caller that happens to reuse project_id=darkfac
+    # with no intention of the line's capability gating"; gating
+    # unconditionally broke 25 pre-existing, unrelated tests
+    # across test_control_store.py, test_public_autonomous_intake.py,
+    # etc. Left as a documented gap for a future ticket to close
+    # properly (e.g. an explicit is_line flag on IntakeCommand).
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         """Accept an intake command transactionally with idempotency checking."""
         now_iso = now.isoformat()
@@ -525,13 +558,22 @@ class SQLiteControlStore:
             if command.mode == "autonomous":
                 run_id = f"run-{uuid4().hex[:12]}"
                 initial_job_id = f"job-{uuid4().hex[:12]}"
+                parent_run_id = str(command.payload.get("depends_on") or "").strip() or None
+                parent = None
+                if parent_run_id:
+                    cur.execute("SELECT status FROM runs WHERE run_id = ?", (parent_run_id,))
+                    parent = cur.fetchone()
+                run_status, job_status, dependency_cause = dependency_plan(
+                    parent_run_id, str(parent["status"]) if parent else "unknown"
+                )
 
                 cur.execute(
                     """
                     INSERT INTO runs (
                         run_id, project_id, demand_id, demand_version, runtime_owner,
-                        mode, status, plan_digest, config_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, '1.0', ?, ?)
+                        mode, status, plan_digest, config_version, created_at, updated_at,
+                        parent_run_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '1.0', ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -540,30 +582,15 @@ class SQLiteControlStore:
                         demand_version,
                         self.runtime_owner,
                         command.mode,
+                        run_status,
                         digest,
                         now_iso,
                         now_iso,
+                        parent_run_id,
                     ),
                 )
 
-                # HF-27-08 review item 9: attempted (see git history) to
-                # stamp the initial grill job's required_capabilities from
-                # the registered project, mirroring every later line stage.
-                # REVERTED: ControlStore.accept() is the shared HF-05 intake
-                # entrypoint, used by many non-line callers/tests with
-                # project_id="darkfac" as a convenient default string, and
-                # the *real* registered "darkfac" project (.factory/projects.json)
-                # legitimately has its own repo_url/deploy/smoke config --
-                # the factory manages itself through the line. There is no
-                # reliable signal at accept() time to tell "a genuine line
-                # demand for a line-capable project" apart from "a generic
-                # HF-05 test/caller that happens to reuse project_id=darkfac
-                # with no intention of the line's capability gating"; gating
-                # unconditionally broke 25 pre-existing, unrelated tests
-                # across test_control_store.py, test_public_autonomous_intake.py,
-                # etc. Left as a documented gap for a future ticket to close
-                # properly (e.g. an explicit is_line flag on IntakeCommand).
-                ticket_id = str(command.payload.get("ticket_id") or command.project_id)
+                ticket_id = str(command.payload.get("ticket_id") or demand_id)
                 cur.execute(
                     """
                     INSERT INTO jobs (
@@ -571,11 +598,12 @@ class SQLiteControlStore:
                         role, required_capabilities, fencing_token, timeout_seconds,
                         retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                         created_at, updated_at, ready_at
-                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
+                    ) VALUES (?, ?, '1.0', 'grill', 0, ?, 'grill_engine', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
                     """,
                     (
                         run_id,
                         ticket_id,
+                        job_status,
                         now_iso,
                         now_iso,
                         now_iso,
@@ -590,15 +618,18 @@ class SQLiteControlStore:
                         "stage": "grill",
                     }
                 )
-                cur.execute(
-                    """
-                    INSERT INTO outbox (
-                        event_type, aggregate_type, aggregate_id, payload,
-                        target_system, status, retry_count, created_at
-                    ) VALUES ('intake_accepted', 'run', ?, ?, 'cloud_dbos', 'pending', 0, ?)
-                    """,
-                    (run_id, outbox_payload, now_iso),
-                )
+                if job_status == "pending":
+                    cur.execute(
+                        """
+                        INSERT INTO outbox (
+                            event_type, aggregate_type, aggregate_id, payload,
+                            target_system, status, retry_count, created_at
+                        ) VALUES ('intake_accepted', 'run', ?, ?, 'cloud_dbos', 'pending', 0, ?)
+                        """,
+                        (run_id, outbox_payload, now_iso),
+                    )
+                if dependency_cause:
+                    cur.execute("UPDATE jobs SET cause_code = ? WHERE run_id = ?", (dependency_cause, run_id))
             else:
                 # Documentary mode
                 run_id = None
@@ -656,6 +687,64 @@ class SQLiteControlStore:
                 mode=command.mode,
                 committed_at=now_iso,
             )
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def reconcile_dependencies(self, now: datetime) -> int:
+        """Apply parent-run outcomes to every waiting descendant, atomically and idempotently."""
+        now_iso = now.isoformat()
+        changed_runs = 0
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            # Iterate to a fixed point so a failed child also cancels its own descendants
+            # during the same pass, regardless of row ordering.
+            while True:
+                cur.execute(
+                    """SELECT child.run_id, child.parent_run_id, parent.status
+                       FROM runs AS child LEFT JOIN runs AS parent ON parent.run_id = child.parent_run_id
+                       WHERE child.parent_run_id IS NOT NULL AND child.status = 'active'
+                         AND EXISTS (SELECT 1 FROM jobs WHERE jobs.run_id = child.run_id AND jobs.status = 'waiting_dependency')
+                       ORDER BY child.created_at, child.run_id"""
+                )
+                rows = cur.fetchall()
+                round_changed = 0
+                for row in rows:
+                    child_id, parent_id = str(row["run_id"]), str(row["parent_run_id"])
+                    parent_status = str(row["status"] or "unknown")
+                    if parent_status == "completed":
+                        cur.execute(
+                            "UPDATE jobs SET status = 'pending', cause_code = NULL, ready_at = ?, updated_at = ? "
+                            "WHERE run_id = ? AND status = 'waiting_dependency'",
+                            (now_iso, now_iso, child_id),
+                        )
+                        if cur.rowcount:
+                            cur.execute("UPDATE runs SET updated_at = ? WHERE run_id = ? AND status = 'active'", (now_iso, child_id))
+                            round_changed += 1
+                    elif parent_status in ("failed", "cancelled"):
+                        cause = f"parent_run_terminal:{parent_id}:{parent_status}"
+                        cur.execute(
+                            "UPDATE jobs SET status = 'cancelled', cause_code = ?, finished_at = ?, updated_at = ?, "
+                            "current_lease_id = NULL WHERE run_id = ? AND status IN ('pending','running','waiting_human','waiting_dependency')",
+                            (cause, now_iso, now_iso, child_id),
+                        )
+                        cur.execute("UPDATE claims SET status = 'released' WHERE run_id = ? AND status IN ('active','draining')", (child_id,))
+                        cur.execute(
+                            "UPDATE runs SET status = 'cancelled', completed_at = ?, updated_at = ? "
+                            "WHERE run_id = ? AND status = 'active'",
+                            (now_iso, now_iso, child_id),
+                        )
+                        if cur.rowcount:
+                            round_changed += 1
+                changed_runs += round_changed
+                if not round_changed:
+                    break
+            conn.commit()
+            return changed_runs
         except Exception:
             conn.rollback()
             raise
@@ -1147,6 +1236,10 @@ class SQLiteControlStore:
                         """,
                         (result.cause_code or "MAX_RETRIES_EXCEEDED", now_iso, now_iso, jk.run_id, jk.ticket_id, jk.plan_version, jk.stage, jk.iteration, claim.fencing_token),
                     )
+                    cur.execute(
+                        "UPDATE runs SET status = 'failed', completed_at = ?, updated_at = ? WHERE run_id = ? AND status = 'active'",
+                        (now_iso, now_iso, jk.run_id),
+                    )
                 cur.execute(
                     "UPDATE claims SET status = 'released' WHERE lease_id = ?",
                     (claim.lease_id,),
@@ -1169,6 +1262,10 @@ class SQLiteControlStore:
                 cur.execute(
                     "UPDATE claims SET status = 'released' WHERE lease_id = ?",
                     (claim.lease_id,),
+                )
+                cur.execute(
+                    "UPDATE runs SET status = ?, completed_at = ?, updated_at = ? WHERE run_id = ? AND status = 'active'",
+                    (result.outcome, now_iso, now_iso, jk.run_id),
                 )
 
             else:

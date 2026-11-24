@@ -1168,6 +1168,27 @@ class CloudWorker:
                     continue
 
                 if job_key.stage == "grill":
+                    from core.line.stage_grill import inspect_pending_grill
+
+                    session = inspect_pending_grill(project, run_id)
+                    if session is None:
+                        # Orphaned/legacy Grill rows have no owner question to wait on.
+                        # Resume the exact job once; run_grill reconstructs the session or
+                        # records grill_session_unrecoverable if reconstruction fails.
+                        if resume_blocked_job(self.store, run_id, "grill", now=effective_now):
+                            resumed_runs.append(run_id)
+                        continue
+                    _, deadline = session
+                    if effective_now.tzinfo is None:
+                        sweep_now = effective_now.replace(tzinfo=UTC)
+                    else:
+                        sweep_now = effective_now
+                    if sweep_now >= deadline:
+                        # Re-enter the ordinary Grill handler to apply answers/defaults;
+                        # job state transition is atomic/idempotent in ControlStore.
+                        if resume_blocked_job(self.store, run_id, "grill", now=effective_now):
+                            resumed_runs.append(run_id)
+                        continue
                     resender = self._grill_resender
                     if resender is None:
                         from core.line.stage_grill import resend_unnotified_grill
@@ -1177,6 +1198,9 @@ class CloudWorker:
                         resender(project, run_id)
                     except Exception as exc:
                         logger.warning("Error resending unnotified grill for run %s: %s", run_id, exc)
+                    # A valid, unexpired Grill owns its own notification lifecycle;
+                    # it is not a generic HumanRequest/probe.
+                    continue
 
                 loader = self._request_loader or load_request
                 request = loader(project, run_id)
@@ -1361,6 +1385,14 @@ class CloudWorker:
             return False
 
         effective_now = now or datetime.now(UTC)
+        dependency_sweeper = getattr(self.store, "reconcile_dependencies", None)
+        if dependency_sweeper is not None:
+            try:
+                released_or_cancelled = dependency_sweeper(effective_now)
+                if released_or_cancelled:
+                    logger.info("Dependency reconciliation updated %d run(s)", released_or_cancelled)
+            except Exception as exc:
+                logger.warning("Dependency reconciliation failed: %s", exc)
         if (
             self._last_human_probe_at is None
             or (effective_now - self._last_human_probe_at).total_seconds() >= self._human_probe_interval_s

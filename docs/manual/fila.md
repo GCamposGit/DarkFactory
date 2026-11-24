@@ -269,3 +269,5 @@ Demandas podem carregar `priority` numérico. O intake autônomo do Hub encaminh
 
 
 A leitura de um ticket (`queue_store.get_ticket`) consulta uma unica linha no control store e levanta `ControlStoreUnavailableError` quando o store configurado esta inacessivel, distinguindo falha de ticket ausente (`None`); `demands cli complete` sai com codigo 3 nesse caso.
+
+O DarkHub so lista um job `grill` como bloqueio do owner quando as evidencias `grill_question_count` (> 0) e `grill_deadline` estao presentes; Grill `waiting_human` sem sessao de perguntas nao aparece como pendencia (o sweep o retoma, ver `motor.md`).

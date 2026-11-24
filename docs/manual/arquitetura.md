@@ -132,3 +132,5 @@ Sem sessao, o Hub remoto mostra "Modo leitura" no rodape. Tocar nele ja chama `P
 - `_reconcile_superseded_run` encerra runs ativos cujo ticket canonico ja esta `completed` ou `cancelled` (descartando fantasmas fora da janela de 7 dias), respeitando janela de carencia para `run_ticket`.
 - `_resolve_run_reservation` vincula reservas ativas da frota por `(project_id, ticket_id)` quando `run_id` difere (`fleet-...` vs `local-...`), e `_local_execution_stall` detecta runs `run_ticket` parados quando o heartbeat no `execution_registry` passa a `lost` sem reserva com batimento recente.
 - `_OFF_LINE_STATUSES` inclui `validating` alem de `implementing` e `in_progress`.
+
+O control store registra `parent_run_id` (vindo de `depends_on` no intake). Run filho de pai `failed`/`cancelled` nasce `cancelled` com causa `parent_run_terminal:<pai>:<status>`; filho de pai ainda aberto nasce com job `waiting_dependency`. `reconcile_dependencies` (chamado a cada sweep do worker) libera filhos de pais `completed` e cancela filhos de pais terminais com falha. Falha ou cancelamento terminal de job fecha tambem o run.
