@@ -402,11 +402,11 @@ def test_delivery_in_fresh_process_prevents_stale_module_value_error(tmp_path: P
 
 def _git(repo: Path, *args: str) -> None:
     # GIT_EDITOR from the parent process overrides ``-c core.editor`` and, on Windows, a
-    # ``cmd.exe /c exit 0`` value is not executable from Git's shell. ``rebase --continue``
-    # must still be able to finish.
+    # command name such as ``true`` is not executable from Git's shell. ``:`` is a portable
+    # no-op in Git's shell and lets ``rebase --continue`` finish without an interactive editor.
     env = os.environ.copy()
-    env["GIT_EDITOR"] = "true"
-    env["GIT_SEQUENCE_EDITOR"] = "true"
+    env["GIT_EDITOR"] = ":"
+    env["GIT_SEQUENCE_EDITOR"] = ":"
     subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True, env=env)
 
 
@@ -500,12 +500,91 @@ def test_code_rebase_conflict_goes_to_agent_once_and_agent_resolution_is_kept(
         assert stage == "rebase-conflito" and "mod.py" in feedback
         (worktree / "mod.py").write_text("a = 3\n", encoding="utf-8")
         _git(worktree, "add", "mod.py")
-        _git(worktree, "-c", "core.editor=true", "rebase", "--continue")
+        # The controller validates the agent's staged resolution and continues.
 
     with patch.object(run_ticket, "_invoke_fix_agent", side_effect=fake_agent) as agent:
         ok, files, _ = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
     assert ok is True and agent.call_count == 1
     assert (repo / "mod.py").read_text(encoding="utf-8") == "a = 3\n"
+
+
+def test_small_ticket_rebase_conflict_replays_commit_and_limits_agent_to_ticket_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "_registered_ticket_rebase_worktree", lambda *_args: True)
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
+    repo = _conflict_repo(tmp_path, {"mod.py": ("value = 1\n", "value = 2\n")})
+    (repo / "extra.py").write_text("ticket follow-up\n", encoding="utf-8")
+    _git(repo, "add", "extra.py")
+    _git(repo, "commit", "-m", "ticket follow-up")
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    ok, files, message = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == ["mod.py"]
+
+    def resolve_cherry_pick(
+        worktree: Path, ticket: UserTicket, stage: str, feedback: str, *, route: tuple[str, str],
+    ) -> None:
+        assert ticket.id == "USR-412" and stage == "rebase-conflito"
+        assert route == ("codex", "test-model")
+        assert "Escopo permitido" in feedback and "mod.py" in feedback and "extra.py" in feedback
+        assert "git add" in feedback and "cherry-pick --continue" in feedback
+        (worktree / "mod.py").write_text("value = 3\n", encoding="utf-8")
+        _git(worktree, "add", "mod.py")
+
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", resolve_cherry_pick)
+    done, remaining, reason = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, message)
+
+    assert done is True and remaining == [] and "cherry-picked" in reason
+    assert (repo / "mod.py").read_text(encoding="utf-8") == "value = 3\n"
+    assert (repo / "extra.py").read_text(encoding="utf-8") == "ticket follow-up\n"
+    assert subprocess.run(
+        ["git", "merge-base", "--is-ancestor", "main", "HEAD"], cwd=repo, capture_output=True,
+    ).returncode == 0
+    rebased_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert rebased_head != candidate
+
+
+def test_small_ticket_cherry_pick_conflict_that_agent_cannot_resolve_goes_to_hold_with_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "_registered_ticket_rebase_worktree", lambda *_args: True)
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
+    from core.line import failure_alerts
+
+    monkeypatch.setattr(failure_alerts, "notify_deterministic_failure", lambda **_kwargs: None)
+    repo = _conflict_repo(tmp_path, {"mod.py": ("value = 1\n", "value = 2\n")})
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    ok, files, message = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == ["mod.py"]
+    def fail_resolution(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("resolution executor failed")
+
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", fail_resolution)
+
+    done, remaining, reason = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, message)
+
+    assert done is False and remaining == ["mod.py"]
+    assert reason.startswith("cherry_pick_resolution_failed:")
+    restored_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert restored_head == candidate
+    assert not _rebase_in_progress(repo)
+    assert (repo / "mod.py").read_text(encoding="utf-8") == "value = 1\n"
+    from core.line.admission_store import AdmissionStore
+
+    rows = AdmissionStore(tmp_path / "state" / "admission.sqlite3").rebase_recovery_rows(
+        project_id="darkfac", ticket_id="USR-412",
+    )
+    assert len(rows) == 1 and rows[0]["cause"] == "rebase_conflict"
 
 
 def test_unresolved_rebase_conflict_preserves_technical_failure_with_rc_1(
@@ -681,6 +760,7 @@ def test_missing_rebase_route_does_not_spend_the_fingerprint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "_registered_ticket_rebase_worktree", lambda *_args: True)
     repo = _conflict_repo_from_base(
         tmp_path,
         {"mod.py": "a = 0\n"},
@@ -717,6 +797,7 @@ def test_interrupted_rebase_recovery_is_reconciled_after_restart_without_repeati
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "_registered_ticket_rebase_worktree", lambda *_args: True)
     repo = _conflict_repo_from_base(
         tmp_path,
         {"mod.py": "value = 0\n"},
@@ -740,6 +821,11 @@ def test_interrupted_rebase_recovery_is_reconciled_after_restart_without_repeati
         raise SystemExit("simulated process stop")
 
     monkeypatch.setattr(rebase_recovery, "repair_compatible_conflicts", stop_after_reservation)
+    monkeypatch.setattr(
+        run_ticket,
+        "_try_cherry_pick_ticket_commits",
+        lambda *_args, **_kwargs: (False, [], "", False),
+    )
     with pytest.raises(SystemExit, match="simulated process stop"):
         run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, msg)
     assert _rebase_in_progress(repo)

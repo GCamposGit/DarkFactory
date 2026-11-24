@@ -93,6 +93,12 @@ segue para a entrega sem repetir PLAN ou BUILD. Worktree suja em outro caminho,
 ausencia de commit ou artefato invalido mantem o fluxo normal de planejamento e
 implementacao.
 
+Se o rebase de entrega encontrar conflito, tickets com ate dois commits podem ser
+reaplicados por cherry-pick sobre `origin/main` atualizado. A recuperacao fica
+limitada aos arquivos do diff do ticket; caminhos protegidos e ledgers ficam fora
+da resolucao automatica. Sem rota ou se o cherry-pick falhar, a esteira preserva
+o candidato e registra hold tecnico. Veja [merge autonomo](merge_autonomo.md#recuperacao-de-conflitos-de-rebase-pequenos-usr-548).
+
 ## Retomada na etapa certa (USR-447)
 
 Um ticket relancado nao refaz o que ja esta pronto. Se o diretorio de artefatos do run guarda um

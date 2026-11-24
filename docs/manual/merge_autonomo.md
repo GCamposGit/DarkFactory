@@ -68,3 +68,7 @@ da classificação de órfãos e não são retentados pela varredura diária.
 
 Bloqueio pela politica da branch (USR-475): com a branch atras do `origin/main` a entrega roda `gh pr update-branch`, reespera o CI e tenta o merge mais uma vez; se continuar bloqueado devolve a acao `merge_blocked`.
 `check-main --open-ticket` mantém no máximo um ticket aberto com título `CI vermelho no ...`: se já existe (outro sha ou mesmo sha), ele é atualizado com o sha e os jobs atuais em vez de abrir outro; só tickets `completed` ou `cancelled` liberam um novo.
+
+### Recuperacao de conflitos de rebase pequenos (USR-548)
+
+Quando o rebase de entrega conflita, `run_ticket.py` tenta reaplicar por `cherry-pick` os commits da branch do ticket sobre a nova base se o candidato tiver um ou dois commits desde o ancestral comum. O caminho e limitado aos arquivos do diff do ticket e recusa arquivos protegidos ou do ledger. Se o cherry-pick tambem conflitar, o agente recebe apenas esses caminhos como escopo e a automacao valida o resultado antes de continuar. Sem rota ou se a resolucao falhar, o candidato original e restaurado e o conflito permanece em hold com os arquivos identificados; tickets com mais de dois commits continuam pelo fluxo de recuperacao existente.

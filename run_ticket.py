@@ -655,10 +655,13 @@ def _rebase_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     from core.git.autonomy import _win_kwargs
 
     env = os.environ.copy()
-    env["GIT_EDITOR"] = "true"
-    env["GIT_SEQUENCE_EDITOR"] = "true"
+    # ``true`` is not reliably available in the Git for Windows shell. The
+    # POSIX no-op builtin is portable there and prevents --continue from
+    # waiting for an interactive commit-message editor.
+    env["GIT_EDITOR"] = ":"
+    env["GIT_SEQUENCE_EDITOR"] = ":"
     return subprocess.run(
-        ["git", "-c", "core.editor=true", *args],
+        ["git", "-c", "core.editor=:", *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -734,6 +737,119 @@ def _abort_rebase(cwd: Path) -> None:
     from core.git.autonomy import _run_git
 
     _run_git(["rebase", "--abort"], cwd=cwd)
+
+
+def _try_cherry_pick_ticket_commits(
+    ticket: UserTicket, cwd: Path, *, route: Optional[tuple[str, str]] = None,
+) -> tuple[bool, list[str], str, bool]:
+    """Replay a small ticket diff on the current rebase base, resolving only its own paths.
+
+    The candidate SHA is retained until the replay completes, so a failed attempt can restore
+    the original branch exactly. The boolean indicates whether this bounded path was eligible.
+    """
+    from core.git.autonomy import _run_git
+
+    git_dir = Path(_run_git(["rev-parse", "--git-dir"], cwd=cwd).stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = cwd / git_dir
+    rebase_dir = git_dir / "rebase-merge"
+    if not rebase_dir.is_dir():
+        rebase_dir = git_dir / "rebase-apply"
+    try:
+        candidate = (rebase_dir / "orig-head").read_text(encoding="utf-8").strip()
+        upstream = (rebase_dir / "onto").read_text(encoding="utf-8").strip()
+    except OSError:
+        return False, [], "", False
+    if not candidate or not upstream:
+        return False, [], "", False
+
+    base_result = _run_git(["merge-base", upstream, candidate], cwd=cwd)
+    if base_result.returncode != 0:
+        return False, [], "", False
+    base = base_result.stdout.strip()
+    commits_result = _run_git(["rev-list", "--reverse", f"{base}..{candidate}"], cwd=cwd)
+    if commits_result.returncode != 0:
+        return False, [], "", False
+    commits = [sha.strip() for sha in commits_result.stdout.splitlines() if sha.strip()]
+    if not commits or len(commits) > 2:
+        return False, [], "", False
+    paths_result = _run_git(["diff", "--name-only", "-z", base, candidate], cwd=cwd)
+    if paths_result.returncode != 0:
+        return False, [], "", False
+    ticket_paths = sorted({path for path in paths_result.stdout.split("\0") if path})
+    if not ticket_paths:
+        return False, [], "", False
+    if set(ticket_paths) & _LEDGER_CONFLICT_FILES:
+        return False, [], "", False
+    from core.orchestrator.guard import audit_paths
+
+    if any(audit_paths([path]) for path in ticket_paths):
+        return False, [], "", False
+
+    _abort_rebase(cwd)
+    reset = _run_git(["reset", "--hard", upstream], cwd=cwd)
+    if reset.returncode != 0:
+        _run_git(["reset", "--hard", candidate], cwd=cwd)
+        return True, ticket_paths, "cherry_pick_reset_failed", True
+
+    for commit in commits:
+        picked = _run_git(["cherry-pick", commit], cwd=cwd)
+        if picked.returncode == 0:
+            continue
+        conflicts = _unmerged_files(cwd)
+        if not conflicts or any(path not in ticket_paths for path in conflicts):
+            _run_git(["cherry-pick", "--abort"], cwd=cwd)
+            _run_git(["reset", "--hard", candidate], cwd=cwd)
+            return False, conflicts or ticket_paths, "cherry_pick_conflict_outside_ticket_diff", True
+
+        chosen_route = route or _rebase_development_route(ticket)
+        if chosen_route is None:
+            _run_git(["cherry-pick", "--abort"], cwd=cwd)
+            _run_git(["reset", "--hard", candidate], cwd=cwd)
+            return False, conflicts, "cherry_pick_conflict_no_route", True
+
+        allowed_paths = set(ticket_paths)
+        feedback = (
+            f"Resolva o cherry-pick do ticket {ticket.id} sobre origin/main.\n"
+            "Escopo permitido: somente arquivos que pertencem ao diff deste ticket.\n"
+            f"Arquivos do diff do ticket: {', '.join(ticket_paths)}\n"
+            f"Arquivos em conflito agora: {', '.join(conflicts)}\n"
+            "Nao altere nenhum outro arquivo, nao crie commits e nao execute cherry-pick --continue/--abort. "
+            "Resolva os marcadores e deixe os arquivos resolvidos staged com git add."
+        )
+        try:
+            _invoke_fix_agent(cwd, ticket, "rebase-conflito", feedback, route=chosen_route)
+        except Exception as exc:  # noqa: BLE001 - always leave the ticket branch recoverable
+            _run_git(["cherry-pick", "--abort"], cwd=cwd)
+            _run_git(["reset", "--hard", candidate], cwd=cwd)
+            logger.warning("cherry-pick conflict resolution failed for %s: %s", ticket.id, exc)
+            return False, conflicts, "cherry_pick_resolution_failed", True
+        status = _run_git(["status", "--porcelain", "-z"], cwd=cwd)
+        changed_paths: set[str] = set()
+        entries = status.stdout.split("\0")
+        for entry in entries:
+            if len(entry) >= 4:
+                changed_paths.add(entry[3:])
+        unresolved = _unmerged_files(cwd)
+        marker_paths = [
+            path for path in conflicts
+            if (cwd / path).is_file()
+            and "<<<<<<<" in (cwd / path).read_text(encoding="utf-8", errors="replace")
+        ]
+        if changed_paths - allowed_paths or unresolved or marker_paths:
+            _run_git(["cherry-pick", "--abort"], cwd=cwd)
+            _run_git(["reset", "--hard", candidate], cwd=cwd)
+            return False, sorted(set(conflicts + unresolved + marker_paths)), "cherry_pick_resolution_failed", True
+
+        for path in conflicts:
+            _run_git(["add", "--", path], cwd=cwd)
+        continued = _rebase_git(cwd, "cherry-pick", "--continue")
+        if continued.returncode != 0:
+            _run_git(["cherry-pick", "--abort"], cwd=cwd)
+            _run_git(["reset", "--hard", candidate], cwd=cwd)
+            return False, conflicts, "cherry_pick_continue_failed", True
+
+    return True, [], "cherry-picked ticket commits onto updated base", True
 
 
 def _default_rebase_resume(ticket: UserTicket, cwd: Path) -> str:
@@ -902,6 +1018,31 @@ def resolve_rebase_conflict(
         if not claimed:
             # A concurrent process or a restart saw the same fingerprint first. Do not race it.
             return technical_failure(f"rebase_recovery_already_claimed:{fingerprint.sha256[:16]}")
+        replay_ok, replay_files, replay_reason, replay_eligible = _try_cherry_pick_ticket_commits(
+            ticket, cwd,
+        )
+        if replay_eligible:
+            if replay_ok:
+                try:
+                    store.record_rebase_recovery_result(fingerprint, result="resolved")
+                except Exception as exc:  # noqa: BLE001 - the cherry-pick already completed safely
+                    logger.warning("could not persist cherry-pick recovery for %s: %s", ticket.id, exc)
+                return True, [], replay_reason
+            if replay_reason == "cherry_pick_conflict_no_route":
+                # The candidate was restored by the bounded replay helper. Keep
+                # this fingerprint retryable when a development route becomes
+                # available; route exhaustion is not a technical failure.
+                _rebase_fix_skipped_no_route = True
+                try:
+                    store.record_rebase_recovery_result(fingerprint, result="route_wait")
+                except Exception as exc:  # noqa: BLE001 - retain the conflict for the next eligible route
+                    logger.warning("could not persist rebase route wait for %s: %s", ticket.id, exc)
+                return False, replay_files or remaining, (
+                    f"rebase_conflict_route_wait:{fingerprint.sha256[:16]}"
+                )
+            return technical_failure(
+                f"{replay_reason}:{','.join(sorted(set(replay_files)))}"
+            )
         try:
             repair_compatible_conflicts(cwd)
             remaining = _continue_rebase_taking_ledgers(cwd, ticket)
