@@ -118,33 +118,12 @@ hub/data/owner_actions/
 .factory/owner_actions/OA-*.jsonl
 .factory/owner_actions/OA-*.ps1
 
-# Sidecars recomputaveis e logs operacionais; ledgers, benchmarks e outras
-# evidencias sob .factory/runs continuam visiveis ao gate.
-/.factory/runs/fleet_policy_snapshot.json
-/.factory/runs/model_audit_receipt.json
-/.factory/runs/.fleet_policy_snapshot.json.*.tmp
-/.factory/runs/.model_audit_receipt.json.*.tmp
-/.factory/runs/fleet_policy_snapshot.json.tmp
-/.factory/runs/model_audit_receipt.json.tmp
-/.factory/runs/fleet_policy_snapshot.tmp
-/.factory/runs/model_audit_receipt.tmp
-/.factory/runs/fleet_dispatcher_logs/
-.factory/runs/cleanup_pending/
-.factory/runs/fleet_dispatcher_state.json
-.factory/runs/deploy_deferrals.json
-.factory/runs/pending_deliveries.json
-.factory/runs/express_episodes.json
+# Estado de runtime da frota (USR-561): tudo nao rastreado em .factory/runs/ e gerado; o
+# arquivo de evidencia ja rastreado continua rastreado.
+.factory/runs/
 .factory/coordination/
-.factory/runs/orphan_worktree_cleanup.json
-.factory/runs/orphan_worktree_cleanup.sweep.lock
 .factory/actionable_failures.json
 .factory/failure_alert_fingerprints.json
-.factory/runs/sentinel_state.json
-.factory/runs/fleet_policy_snapshot.json
-.factory/runs/model_audit_receipt.json
-.factory/runs/recovery_list_state.json
-.factory/runs/outcomes/
-.factory/runs/ci_recovery/
 .factory/daily_digest_state.json
 .factory/queue_snapshot.json
 
