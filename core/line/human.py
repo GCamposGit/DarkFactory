@@ -116,7 +116,9 @@ def _default_sender() -> Optional[NotifySender]:
     except Exception:  # pragma: no cover - defensive
         return None
 
-    service = NotificationService()
+    # Holds always target the owner bot, even if NotificationService's default
+    # role changes for other operational notifications.
+    service = NotificationService(telegram_role="owner", owner_destination_only=True)
 
     def _send(text: str) -> bool:
         event = service.notify(
@@ -126,9 +128,42 @@ def _default_sender() -> Optional[NotifySender]:
             message=text,
             force=True,
         )
-        return event is not None
+        if event is None:
+            return False
+        if "telegram" in event.delivered_channels:
+            return True
+        _record_missing_owner_telegram_destination()
+        return False
 
     return _send
+
+
+def _record_missing_owner_telegram_destination() -> None:
+    """Expose missing owner-chat configuration in the Hub action queue."""
+    try:
+        from core.integrations.telegram import load_telegram_config, resolve_telegram_destinations
+        from core.owner_actions.models import ActionPriority, ActionStep, OwnerAction
+        from core.owner_actions.store import OwnerActionStore
+
+        config = load_telegram_config(role="owner", owner_destination_only=True)
+        if not config.bot_token or resolve_telegram_destinations(config):
+            return
+        action = OwnerAction(
+            id="OA-TELEGRAM-OWNER-DESTINATION",
+            title="Configure o destino Telegram do owner",
+            priority=ActionPriority.HIGH,
+            why="Alertas de hold nao chegam ao owner porque o bot owner nao tem destino configurado.",
+            steps=[
+                ActionStep(
+                    text="Configure TELEGRAM_OWNER_CHAT_ID no ambiente do servico que executa a linha com o ID numerico do chat privado do owner; depois reinicie o servico."
+                )
+            ],
+            verify="Um novo hold deve gerar uma entrega Telegram confirmada para o bot owner.",
+            created_by="production-line",
+        )
+        OwnerActionStore().upsert(action)
+    except Exception as exc:  # best effort: the blocked job remains persisted independently
+        logger.warning("Failed to publish missing owner Telegram destination action: %s", type(exc).__name__)
 
 
 def notify_human_request(

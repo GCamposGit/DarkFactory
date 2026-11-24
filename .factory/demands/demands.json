@@ -15120,5 +15120,35 @@
     "dependencies": [],
     "created_at": "2026-11-23T09:50:47.390853Z",
     "updated_at": "2026-11-23T17:48:36.783734Z"
+  },
+  {
+    "id": "USR-549",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Alertas de hold nao chegam ao owner: Telegram missing_destination",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "86e9076a0e3ade3122ae0ea0c49c95fb819c70d7",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Logs dos USR-517/520/522 (22/11) mostram notificacao Telegram com category=missing_destination; o hold so aparece no Hub e o owner nao e avisado. USR-536 restaurou alertas apos HTTP 400, mas o destino continua ausente nesse caminho.",
+    "core_journey": [
+      "Logs dos USR-517/520/522 (22/11) mostram notificacao Telegram com category=missing_destination; o hold so aparece no Hub e o owner nao e avisado. USR-536 restaurou alertas apos HTTP 400, mas o destino continua ausente nesse caminho."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Notificacao de hold resolve o destino configurado do owner e chega ao Telegram em teste real de ponta a ponta; se o destino faltar, o erro vira acao visivel no Hub com a variavel a configurar."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-23T10:00:31.423637Z",
+    "updated_at": "2026-11-24T07:19:32.558821Z"
   }
 ]

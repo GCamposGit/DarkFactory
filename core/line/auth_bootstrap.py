@@ -44,7 +44,7 @@ from pydantic import BaseModel
 
 from core.common.tempdirs import probe_sandbox
 from core.harness.remote_worker import find_codex_binary
-from core.line.agent_cli import AgentRequest, redact_secrets, run_agent
+from core.line.agent_cli import AgentRequest, hidden_popen_kwargs, redact_secrets, run_agent
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,7 @@ def probe_codex_status(timeout_s: int = 30) -> HarnessProbeResult:
             timeout=timeout_s,
             encoding="utf-8",
             errors="replace",
+            **hidden_popen_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return HarnessProbeResult(harness="codex", ok=False, detail="timeout")
