@@ -712,3 +712,5 @@ A varredura diaria de worktrees orfas (`maybe_run_scheduled`) reside no dominio 
 Na seleção regular, o dispatcher ordena tickets elegíveis por prioridade numérica decrescente. Empates preservam a ordem de criação e, em seguida, o ID, mantendo o resultado estável. A prioridade não altera dependências, reservas, bloqueios, faixas de recuperação ou o modo `resume-only`.
 
 Após um merge que ainda aguarda deploy, o dispatcher grava a entrega em `pending_deliveries.json`, vinculada ao ticket, run e digest do candidato. Um processo novo recupera esse diário e conclui o deploy pendente antes de admitir trabalho regular. Só um deploy canônico bem-sucedido marca a entrada como entregue e permite anexar recibo/evidências; falhas preservam a espera para uma nova tentativa.
+
+Sessao interativa que tenta operar o despachante precisa ser a coordenadora (USR-483): sem lease vigente o `fleet_dispatcher` sai com codigo 78 e informa o coordenador ou a causa. O servico do despachante, sem sinal de sessao, nao e afetado.
