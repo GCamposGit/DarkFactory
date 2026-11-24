@@ -127,7 +127,7 @@ def _git(argv: list[str]) -> subprocess.CompletedProcess[str]:
 def complete_ticket(ticket_id: str, sha: str, evidence: str, project: str = "darkfac",
                     git: Callable[[list[str]], subprocess.CompletedProcess[str]] = _git) -> int:
     """Close ``ticket_id`` only when ``sha`` is on origin/main and its range cites the ticket."""
-    from core.demands.queue_store import get_ticket, register_ticket
+    from core.demands.queue_store import ControlStoreUnavailableError, get_ticket, register_ticket
     from core.line.admission_store import AdmissionStore
 
     git(["fetch", "-q", "origin"])
@@ -140,7 +140,11 @@ def complete_ticket(ticket_id: str, sha: str, evidence: str, project: str = "dar
     if cited.returncode != 0 or not cited.stdout.strip():
         print(f"[RECUSA] nenhum commit ate {sha} cita [{ticket_id}].", file=sys.stderr)
         return 2
-    ticket = get_ticket(ticket_id)
+    try:
+        ticket = get_ticket(ticket_id)
+    except ControlStoreUnavailableError as exc:
+        print(f"[ERRO] control store indisponivel ao buscar {ticket_id}: {exc}", file=sys.stderr)
+        return 3
     if ticket is None:
         print(f"[ERRO] Ticket {ticket_id} nao encontrado na fila.", file=sys.stderr)
         return 1

@@ -1483,6 +1483,18 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL list_tickets failed: {exc}") from exc
 
+    def get_ticket(self, ticket_id: str) -> dict[str, Any] | None:
+        if self.mock_mode:
+            return self._backend.get_ticket(ticket_id)
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT payload::text FROM tickets WHERE ticket_id = %s LIMIT 1", (ticket_id,))
+                    row = cur.fetchone()
+                    return json.loads(row[0]) if row else None
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL get_ticket failed: {exc}") from exc
+
     def upsert_owner_action(self, action_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
         if self.mock_mode:
             return self._backend.upsert_owner_action(action_id, status, payload, now)

@@ -650,3 +650,13 @@ def test_complete_requires_sha_on_origin_main_and_closes_with_proof(queue_env, m
     done = queue_env["queue"].get_ticket("USR-447")
     assert done.status == DeliveryStatus.COMPLETED and "deadbeef" in done.delivery_evidence
     assert reset == [("darkfac", "USR-447")]
+
+    # USR-565: single-row lookup distinguishes absent from unreachable store.
+    assert queue_env["queue"].get_ticket("USR-000") is None
+    monkeypatch.setattr(
+        queue_env["queue"].control_store().__class__, "get_ticket",
+        lambda self, tid: (_ for _ in ()).throw(OSError("tailnet down")),
+    )
+    with pytest.raises(queue_env["queue"].ControlStoreUnavailableError):
+        queue_env["queue"].get_ticket("USR-447")
+    assert cli.complete_ticket("USR-447", "deadbeef", "ev", git=fake_git(True, True)) == 3

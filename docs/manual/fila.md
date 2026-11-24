@@ -266,3 +266,6 @@ tratar o store como desconfigurado.
 # Prioridade explícita na entrada
 
 Demandas podem carregar `priority` numérico. O intake autônomo do Hub encaminha esse valor ao registro da demanda, e `run_ticket.py --create --priority <valor>` permite defini-lo na criação pela CLI (padrão `0`). Valores maiores indicam prioridade maior. A prioridade afeta a ordem de seleção do dispatcher entre tickets elegíveis; não remove dependências nem critérios de admissão.
+
+
+A leitura de um ticket (`queue_store.get_ticket`) consulta uma unica linha no control store e levanta `ControlStoreUnavailableError` quando o store configurado esta inacessivel, distinguindo falha de ticket ausente (`None`); `demands cli complete` sai com codigo 3 nesse caso.
