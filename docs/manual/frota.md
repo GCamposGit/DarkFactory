@@ -115,6 +115,25 @@ O deploy canonico que sai com codigo 3 (`EXIT_NODE_DIRTY`: VPS saudavel, mas Des
 
 O estado do despachante expoe `deploy_deferral` (`state: awaiting_node_convergence`, `target_sha`, `pending_node`, `recovery_attempts`, `recovery_next_at`, `recovery_exhausted`), para o Hub e o briefing separarem "aguardando no" de "deploy falhou" (`canonical_deploy_exit:<codigo>` em `recent_failures`). Equivalente manual: `Set-Location C:\dev\DarkFac; python -m core.infra.node_sync retry; python -m core.infra.backup_cron --once`.
 
+### Conclusao sem merge verificavel (USR-538)
+
+Uma conclusão legada em REVIEW sem recibos de merge/deploy só volta a `planned` quando
+o SHA do candidato está registrado e `git merge-base --is-ancestor <candidato> origin/main`
+confirma que ele ainda está fora da main. A fila registra `completed_without_merge`, o
+ledger de reconciliação recebe evento idempotente e o dispatcher retoma com
+`--resume-delivery` na mesma worktree. Falha ao ler Git ou atualizar a fila mantém a
+pendência bloqueada e preserva candidato e artefatos. Portão e revisão independente
+vinculados ao digest atual continuam obrigatórios; somente merge confirmado em
+`origin/main` e saúde de produção no SHA correspondente concluem e removem a espera.
+
+O status `completed` também não é gravado durante a preparação do candidato. A
+implementação registra `candidate:<sha>` e mantém o ticket aberto enquanto CI, PR ou
+merge estiverem pendentes, falhos ou em conflito. A conclusão canônica exige recibo
+de PR em estado `merged` com SHA confirmado em `origin/main`; tickets com deploy ao
+vivo também exigem a verificação de convergência. A origem histórica da conclusão
+prematura de USR-483 foi o commit `c64f1d9c`, que registrou `completed` com a evidência
+`83f480ec659dd38032e5dbd1e1d83ea8bd4afd10` antes do merge.
+
 ## CI vermelho sem recibo de merge (USR-509)
 
 Uma espera com causa `ci_fix_requires_revalidation` ou `ci_fix_route_wait`, sem
