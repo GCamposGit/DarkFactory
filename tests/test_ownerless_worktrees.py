@@ -157,6 +157,8 @@ def test_scratch_and_demands_ledger_are_not_substantive_changes() -> None:
             "./.factory/demands/demands.json",
             ".factory/demands/demands.json",
             ".factory\\demands\\demands.json",
+            ".factory/learning/learning_ledger.json",
+            ".factory/owner_actions/owner_actions.json",
         ]
     ) == []
     assert substantive_worktree_changes([".tmpfile", "src/.tmp/a", ".factory/demands/other.json", "keep.txt"]) == [
@@ -178,7 +180,6 @@ def test_ticket_id_comes_from_the_branch_or_the_directory_stamp() -> None:
     ("overrides", "reason"),
     [
         ({"is_main": True}, "main_checkout"),
-        ({"cleanup_pending": True}, "cleanup_pending"),
         ({"holders": None}, "psutil_unavailable"),
         ({"holders": ("python (pid 7)",)}, "holder"),
         ({"locked": True}, "locked"),
@@ -269,7 +270,7 @@ def test_reader_age_boundary_follows_the_stamp_not_mtime(repo: SimpleNamespace, 
     assert "ticket/usr-500" in _git(repo.local, "branch", "--list", "ticket/usr-500")
 
 
-def test_reader_preserves_worktree_registered_as_cleanup_pending(repo: SimpleNamespace) -> None:
+def test_cleanup_pending_record_does_not_block_an_eligible_worktree(repo: SimpleNamespace) -> None:
     path = _old_worktree(repo.local)
     pending_dir = repo.local / ticket_workspace.CLEANUP_PENDING_RELATIVE
     pending_dir.mkdir(parents=True)
@@ -285,7 +286,7 @@ def test_reader_preserves_worktree_registered_as_cleanup_pending(repo: SimpleNam
         run_git=_forbid_removal,
     )
 
-    assert verdict.reason == "cleanup_pending" and not verdict.eligible
+    assert verdict.reason == "ownerless" and verdict.eligible
     assert path.exists()
 
 
