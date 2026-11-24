@@ -141,8 +141,10 @@ python -m core.line.stale_active --dry-run
   os demais arquivos não rastreados continuam bloqueando o avanço. USR-535: os ledgers gerados
   (`GENERATED_LEDGER_FILES`, incluindo o ledger de aprendizagem que o `record-turn` grava) não sujam
   o Notebook; o avanço guarda a edição local antes do `merge --ff-only` e a reaplica depois, com a
-  mesma regra de conflito do USR-394. `deploy_deferrals.json`, `pending_deliveries.json` e
-  `express_episodes.json` do despachante entram nos artefatos de runtime e no `.gitignore`.
+  mesma regra de conflito do USR-394. USR-561: qualquer arquivo ou
+  diretorio NAO rastreado sob `.factory/runs/` e runtime da frota (`FLEET_RUNTIME_UNTRACKED_PREFIX`,
+  e uma unica entrada `.factory/runs/` no `.gitignore`), nunca codigo; um novo arquivo de estado do
+  despachante nao bloqueia mais a convergencia. Arquivo rastreado ali com alteracao continua `dirty`.
 - USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
   O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
   `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou

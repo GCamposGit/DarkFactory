@@ -330,13 +330,12 @@ def test_notebook_clean_main_fast_forwards() -> None:
 @pytest.mark.parametrize(
     ("late_status", "can_sync"),
     [
-        ("?? .factory/runs/model_audit/audit.json\n?? .factory/runs/review_benchmark.jsonl", True),
-        ("?? .factory/runs/deploy_deferrals.json\n?? .factory/runs/pending_deliveries.json\n?? .factory/runs/express_episodes.json", True),
+        ("?? .factory/runs/brand_new_state.json\n?? .factory/runs/some_dir/audit.json", True),
         (" M .factory/learning/learning_ledger.json", True),
         # run_git strips the output: the only dirty line arrives without its leading blank.
         ("M .factory/learning/learning_ledger.json", True),
         (" M .factory/learning/learning_ledger.json\n M core/app.py", False),
-        ("?? .factory/runs/review_benchmark.jsonl\n?? local.py", False),
+        ("?? .factory/runs/brand_new_state.json\n?? core/new_module.py", False),
         ("M  .factory/runs/review_benchmark.jsonl", False),
     ],
 )
