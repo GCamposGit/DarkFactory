@@ -219,6 +219,19 @@ def _win_kwargs() -> dict[str, Any]:
     return kwargs
 
 
+FACTORY_GIT_NAME = "DarkFac"
+FACTORY_GIT_EMAIL = "darkfac@localhost"
+
+
+def _fallback_identity_args(cwd: Path) -> list[str]:
+    """Factory identity for repos with no configured author (USR-570); never overrides one."""
+    if _run_git(["config", "user.name"], cwd=cwd).stdout.strip() and _run_git(
+        ["config", "user.email"], cwd=cwd
+    ).stdout.strip():
+        return []
+    return ["-c", f"user.name={FACTORY_GIT_NAME}", "-c", f"user.email={FACTORY_GIT_EMAIL}"]
+
+
 def _run_git(
     args: Sequence[str],
     cwd: Path = PROJECT_ROOT,
@@ -599,7 +612,7 @@ class GitAutonomyManager:
             )
 
         # 4. Commit
-        res = _run_git(["commit", "-m", commit_msg], cwd=target_dir)
+        res = _run_git([*_fallback_identity_args(target_dir), "commit", "-m", commit_msg], cwd=target_dir)
         if res.returncode != 0:
             logger.error("Git commit failed: %s", res.stderr)
             raise RuntimeError(f"Git commit failed: {res.stderr.strip()}")

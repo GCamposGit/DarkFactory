@@ -1061,12 +1061,18 @@ def test_pr_global_change_runs_fixed_smoke_instead_of_full(tmp_path, changed, mo
     repo = tmp_path / "repo"
     _init_repo(repo)
     _write(repo, "tests/test_a.py", "def test_a(): assert True\n")
+    _write(repo, "tests/test_ignore_rules.py", "RULES = '.gitignore'\ndef test_rules(): assert RULES\n")
+    _write(repo, ".gitignore", "*.log\n")
     _commit_all(repo, "baseline")
     _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     _write(repo, changed, "# changed\n")
     selection = affected.select_pr_tests(repo)
     assert selection.mode == "affected_fallback"
     assert selection.tests == list(affected.PR_SMOKE_TESTS)
+    # USR-575: a non-module change in the same diff keeps its precise text hits.
+    _write(repo, ".gitignore", "*.log\n.factory/runs/\n")
+    selection = affected.select_pr_tests(repo)
+    assert selection.tests == sorted([*affected.PR_SMOKE_TESTS, "tests/test_ignore_rules.py"])
     assert affected.selected_test_timeout(1000) == 1800
 
 
