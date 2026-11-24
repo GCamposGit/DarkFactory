@@ -267,6 +267,8 @@ python C:\dev\DarkFac\scripts\telegram_delivery_check.py --notification-id notif
 
 Estado consolidado do canal Telegram: o alerta usa o bot owner e o primeiro destino efetivo de `load_telegram_config` (ambiente do processo ou `.env` do checkout; id zero fica de fora). Sem token ou sem destino o comando recusa e nao chama `sendMessage`. O diagnostico de `notif_3e46d90ee946` neste processo encontrou o evento e recusou com `missing_token`, sem imprimir titulo, texto, token ou chat. Quando token e destino existem, o replay imprime `notification_id`, `role`, `message_id` e `timestamp`; a execucao seguinte do mesmo id devolve `already_delivered`.
 
+Pedidos de hold (`HumanRequest`) passam explicitamente pelo papel `owner` do `NotificationService`, usando `TELEGRAM_OWNER_CHAT_ID` como destino dedicado quando configurado. Se nenhum destino efetivo estiver disponivel, o hold continua visivel no Hub e registra a acao `OA-TELEGRAM-OWNER-DESTINATION` com o nome da variavel a configurar; essa lacuna nao e reportada como entrega Telegram.
+
 ## Checkpoint de BUILD e recuperacao de rebase (USR-475)
 
 Na operacao interativa e na retomada pelo launcher, `run_ticket.py` vincula `progress.json` ao

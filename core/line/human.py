@@ -116,7 +116,9 @@ def _default_sender() -> Optional[NotifySender]:
     except Exception:  # pragma: no cover - defensive
         return None
 
-    service = NotificationService()
+    # Holds always target the owner bot, even if NotificationService's default
+    # role changes for other operational notifications.
+    service = NotificationService(telegram_role="owner")
 
     def _send(text: str) -> bool:
         event = service.notify(

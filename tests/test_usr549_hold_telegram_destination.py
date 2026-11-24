@@ -98,3 +98,25 @@ def test_missing_owner_destination_creates_hub_action_with_setting_name(
     assert setup.priority.value == "high"
     assert "TELEGRAM_OWNER_CHAT_ID" in setup.steps[0].text
     assert "TELEGRAM_OWNER_BOT_TOKEN" not in setup.model_dump_json()
+
+
+def test_default_hold_sender_selects_owner_notification_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    roles: list[str] = []
+
+    class _Event:
+        delivered_channels = ["telegram"]
+
+    class _NotificationService:
+        def __init__(self, *, telegram_role: str) -> None:
+            roles.append(telegram_role)
+
+        def notify(self, **_kwargs: object) -> _Event:
+            return _Event()
+
+    monkeypatch.setattr("core.notifications.service.NotificationService", _NotificationService)
+
+    sender = human._default_sender()
+
+    assert sender is not None
+    assert sender("hold alert") is True
+    assert roles == ["owner"]
