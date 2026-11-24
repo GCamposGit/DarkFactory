@@ -19,6 +19,7 @@ O recibo lista em `stalls` o que impede a fila de andar. Trate cada item antes d
 
 | Sinal | Ação |
 |---|---|
+| `deploy_convergence_exhausted` | `DARKFAC_STATE_ROOT/runs/deploy_deferrals.json` registra `recovery_exhausted`. Leia as linhas `[NODE SYNC]` para o sha e o nó pendente, limpe a causa e execute `python C:\dev\DarkFac\scripts\dokploy_redeploy.py`. Se `delivery_wait` mantiver o deploy em voo, preserve o run e priorize essa ação de convergência em `first_action` antes de admitir trabalho novo. |
 | `dispatcher_blocked_with_free_host` | A frota tem host livre e nada executável. Leia `skipped` e `idle_reasons` em `fleet_dispatcher_state.json`, no diretório `runs` da raiz de estado, e resolva a causa dominante. |
 | `ticket_pr_open` com CI verde | Revise com família diferente da do implementador, promova o rascunho (`gh pr ready`) e mescle em série. Uma recusa repetida "já possui PR ativo" (`refusal_loop`) é laço, não espera. |
 | `ticket_pr_open` com CI vermelho ou conflito | Delegue a correção ou o rebase com escopo do PR e aceite do ticket. |
