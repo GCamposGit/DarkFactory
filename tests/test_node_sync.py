@@ -331,6 +331,11 @@ def test_notebook_clean_main_fast_forwards() -> None:
     ("late_status", "can_sync"),
     [
         ("?? .factory/runs/model_audit/audit.json\n?? .factory/runs/review_benchmark.jsonl", True),
+        ("?? .factory/runs/deploy_deferrals.json\n?? .factory/runs/pending_deliveries.json", True),
+        (" M .factory/learning/learning_ledger.json", True),
+        # run_git strips the output: the only dirty line arrives without its leading blank.
+        ("M .factory/learning/learning_ledger.json", True),
+        (" M .factory/learning/learning_ledger.json\n M core/app.py", False),
         ("?? .factory/runs/review_benchmark.jsonl\n?? local.py", False),
         ("M  .factory/runs/review_benchmark.jsonl", False),
     ],
@@ -351,6 +356,37 @@ def test_notebook_sync_rechecks_changes_without_blocking_known_runtime_state(
     assert (["merge", "--ff-only", SHA] in git.calls) is can_sync
     if not can_sync:
         assert report.nodes[0].reason == "dirty worktree; no git operation attempted"
+
+
+def test_modified_learning_ledger_is_behind_and_reapplied_after_fast_forward(tmp_path: Path) -> None:
+    ledger = ".factory/learning/learning_ledger.json"
+    local = b'{"local": true}'
+    (tmp_path / ".factory/learning").mkdir(parents=True)
+    (tmp_path / ledger).write_bytes(local)
+
+    class _LedgerGit(FakeGit):
+        def __call__(self, root: Path, args: list[str]) -> str:
+            if args[:2] == ["status", "--porcelain"]:
+                return f"M {ledger}"  # as run_git returns it: stripped
+            if args == ["diff", "--name-only"]:
+                return ledger
+            if args[:2] == ["ls-files", "--others"]:
+                return ""
+            if args == ["rev-parse", f"HEAD:{ledger}"]:
+                return "blob1"
+            if args == ["checkout", "--", ledger]:
+                (tmp_path / ledger).write_bytes(b"head")
+                return ""
+            return super().__call__(root, args)
+
+    git = _LedgerGit(old=True)
+    kind, _commits, dirty, _reason = mod.classify_checkout(tmp_path, git, SHA)
+    assert kind == "behind" and dirty["tracked_modified"] == [ledger]
+
+    report = mod.sync(root=tmp_path, git=git, http=FakeHttp())
+    assert report.ok
+    assert ["merge", "--ff-only", SHA] in git.calls
+    assert (tmp_path / ledger).read_bytes() == local
 
 
 class _RelationGit(FakeGit):

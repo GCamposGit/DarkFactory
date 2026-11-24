@@ -137,7 +137,11 @@ python -m core.line.stale_active --dry-run
   upstream; se mudou, vale o upstream e a copia local vai para `.factory/runs/node_sync_conflicts/`.
   Antes de avançar o Notebook, a checagem final do Git permite somente os artefatos não rastreados
   de runtime já reconhecidos pela classificação do checkout. Arquivos rastreados com alterações e
-  os demais arquivos não rastreados continuam bloqueando o avanço.
+  os demais arquivos não rastreados continuam bloqueando o avanço. USR-535: os ledgers gerados
+  (`GENERATED_LEDGER_FILES`, incluindo o ledger de aprendizagem que o `record-turn` grava) não sujam
+  o Notebook; o avanço guarda a edição local antes do `merge --ff-only` e a reaplica depois, com a
+  mesma regra de conflito do USR-394. `deploy_deferrals.json` e `pending_deliveries.json` do
+  despachante entram nos artefatos de runtime e no `.gitignore`.
 - USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
   O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
   `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou
