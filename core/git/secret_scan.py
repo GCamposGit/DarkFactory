@@ -93,7 +93,7 @@ _PLACEHOLDER_PASSWORD_MAX_LEN = 3
 # A real PEM key is followed by base64 lines; a header followed by a quote, a
 # concatenation or prose is a fixture or documentation (USR-571). Escaped newlines
 # (a literal backslash-n inside JSON/env values) are skipped so serialized keys still match.
-_PEM_BODY = re.compile(r"(?:\s|\\[rn])*[A-Za-z0-9+/]{40}")
+_PEM_BODY = re.compile(r"(?:\s|\\[rn])*(?:[A-Za-z0-9+/]{40}|Proc-Type:)")
 
 
 def _is_pem_header_without_key_body(match: re.Match[str]) -> bool:
