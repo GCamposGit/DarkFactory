@@ -617,7 +617,12 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     from core.line.operating_harness import AUTODETECT_ENV_SIGNALS, OPERATING_HARNESS_ENV
 
-    for name in (OPERATING_HARNESS_ENV, *(name for name, _harness in AUTODETECT_ENV_SIGNALS)):
+    session_only = (
+        "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_SESSION_ID", "ANTIGRAVITY_SESSION_ID",
+        "CODEX_SANDBOX_NETWORK_DISABLED", "TERM_PROGRAM", "DARKFAC_SESSION_ID",
+    )
+    names = (OPERATING_HARNESS_ENV, *(name for name, _harness in AUTODETECT_ENV_SIGNALS), *session_only)
+    for name in names:
         monkeypatch.delenv(name, raising=False)
 
 

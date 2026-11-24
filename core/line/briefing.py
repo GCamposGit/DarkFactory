@@ -288,7 +288,7 @@ def load_pull_request_section(now: datetime) -> SectionReading:
         observed_at=_iso(now),
         source_time=_newest_stamp(item.get("updated_at") for item in items),
         age_seconds=max(ages) if ages else 0,
-        freshness="current",
+        freshness="stale" if any(item["freshness"] == "stale" for item in items) else "current",
         cause=None,
         items=items,
     )

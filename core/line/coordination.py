@@ -33,6 +33,35 @@ LEASE_TTL_SECONDS = 900
 STORED_UNKNOWN_HARNESS = "unknown"
 
 
+class CoordinationRefused(RuntimeError):
+    """An exclusive coordination action was requested by a session that is not the coordinator."""
+
+    def __init__(
+        self,
+        action: str,
+        *,
+        coordinator: dict[str, Any] | None,
+        absence_reason: str | None,
+        session_id: str,
+    ) -> None:
+        self.action = action
+        self.coordinator = coordinator
+        self.absence_reason = absence_reason
+        self.session_id = session_id
+        if coordinator is not None:
+            detail = (
+                f"coordenador atual: harness={coordinator['harness']} host={coordinator['host']} "
+                f"sessao={coordinator['session_id']} heartbeat={coordinator['last_heartbeat']}"
+            )
+        else:
+            detail = f"sem coordenador: causa={absence_reason}"
+        super().__init__(
+            f"acao exclusiva da coordenacao recusada ({action}): {detail}. "
+            "Sessao paralela segue o fluxo normal de ticket; o owner assume com "
+            "`python scripts/line_briefing.py assumir --decisao-owner`."
+        )
+
+
 class AssumptionRefused(RuntimeError):
     """The caller asked to take coordination without an explicit owner decision."""
 
@@ -103,9 +132,91 @@ def consult(
     moment = _aware(now)
     with state.transaction(immediate=True) as connection:
         _touch_session(connection, identity, moment)
+        _record_expiry(connection, moment)
         _refresh_lease_if_holder(connection, identity, moment)
         view = _read_view(connection, identity, moment)
     return view
+
+
+def authorize(
+    state: SharedState,
+    identity: SessionIdentity,
+    action: str,
+    *,
+    now: datetime,
+) -> dict[str, Any]:
+    """Allow an exclusive coordination action only for the session holding a valid lease.
+
+    The comparison runs in one immediate transaction. The coordinator's heartbeat is renewed;
+    any other session gets ``CoordinationRefused`` naming the current coordinator or the cause
+    of the absence. Ordinary work (tickets, planning, analysis) never calls this.
+    """
+
+    moment = _aware(now)
+    with state.transaction(immediate=True) as connection:
+        _touch_session(connection, identity, moment)
+        _record_expiry(connection, moment)
+        _refresh_lease_if_holder(connection, identity, moment)
+        view = _read_view(connection, identity, moment)
+    coordinator = view["coordinator"]
+    if coordinator is not None and coordinator["session_id"] == identity.session_id:
+        return view
+    raise CoordinationRefused(
+        action,
+        coordinator=coordinator,
+        absence_reason=view["absence_reason"],
+        session_id=identity.session_id,
+    )
+
+
+def require_coordinator(
+    action: str,
+    *,
+    state: SharedState | None = None,
+    identity: SessionIdentity | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Central guard for the exclusive actions: dispatcher, fleet policy and coordination handoff.
+
+    A process without a live harness session signal (the dispatcher service, a fleet worker, the
+    pump) is not an interactive session and is not subject to the lease. A detected session must
+    be the coordinator, otherwise ``CoordinationRefused`` is raised.
+    """
+
+    from core.line.line_lock import is_fleet_mode
+    from core.line.session_identity import current_session_identity
+
+    declared = os.environ.get("DARKFAC_EXECUTION_CONTEXT", "").strip().lower()
+    if identity is None and (declared == "headless" or is_fleet_mode()):
+        return
+    who = identity or current_session_identity()
+    if who.harness is None:
+        return
+    authorize(
+        state or open_state(),
+        who,
+        action,
+        now=now or datetime.now(timezone.utc),
+    )
+
+
+def publish_handoff(
+    path: Any,
+    content: str,
+    *,
+    state: SharedState | None = None,
+    identity: SessionIdentity | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Write the coordination handoff file. Reserved to the coordinator."""
+
+    from pathlib import Path
+
+    require_coordinator("publicar_handoff", state=state, identity=identity, now=now)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
 
 
 def assume(
@@ -230,6 +341,53 @@ def _touch_session(connection: Any, identity: SessionIdentity, now: datetime) ->
             started,
             heartbeat,
             expires,
+        ),
+    )
+
+
+def _record_expiry(connection: Any, now: datetime) -> None:
+    """Persist ``heartbeat_expired`` and one ``lease_expired`` event for an expired lease."""
+
+    moment = _epoch(now)
+    row = connection.execute(
+        "SELECT lease_id, session_id, harness, host, expires_at FROM coordination_lease WHERE singleton_id = 1"
+    ).fetchone()
+    if row is None or float(row["expires_at"]) > moment:
+        return
+    already = connection.execute(
+        "SELECT 1 FROM coordination_events WHERE event_type = 'lease_expired' AND lease_id = ?",
+        (row["lease_id"],),
+    ).fetchone()
+    if already is not None:
+        return
+    connection.execute(
+        """
+        INSERT INTO coordination_status (singleton_id, absence_reason, changed_at)
+        VALUES (1, ?, ?)
+        ON CONFLICT(singleton_id) DO UPDATE SET
+            absence_reason = excluded.absence_reason,
+            changed_at = excluded.changed_at
+        """,
+        (ABSENCE_HEARTBEAT_EXPIRED, moment),
+    )
+    details = {
+        "session_id": row["session_id"],
+        "harness": row["harness"],
+        "host": row["host"],
+        "expired_at": _iso(float(row["expires_at"])),
+    }
+    connection.execute(
+        """
+        INSERT INTO coordination_events (
+            event_type, session_id, lease_id, actor_session_id, cause, created_at, details_json
+        ) VALUES ('lease_expired', ?, ?, NULL, ?, ?, ?)
+        """,
+        (
+            row["session_id"],
+            row["lease_id"],
+            ABSENCE_HEARTBEAT_EXPIRED,
+            moment,
+            json.dumps(details, ensure_ascii=False),
         ),
     )
 

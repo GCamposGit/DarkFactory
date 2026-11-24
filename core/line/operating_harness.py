@@ -8,9 +8,11 @@ above the critical floor. `core.line.routing.pick` asks this module for that har
 Source, in precedence order:
 
 1. an explicit argument (`pick(operating_harness=...)`), handled by `resolve_operating_harness`;
-2. the `DARKFAC_OPERATING_HARNESS` variable (`claude|codex|grok|antigravity`; invalid values fail closed);
-3. autodetection from the variables the parent harness exports (`AUTODETECT_ENV_SIGNALS`);
-4. nothing (`None`).
+2. autodetection from the variables the live session exports (`AUTODETECT_ENV_SIGNALS`);
+3. nothing (`None`).
+
+`DARKFAC_OPERATING_HARNESS` (USR-483) no longer selects a harness: a value persisted in the user
+environment must not beat the live session signal, and without a reliable signal it is not reused.
 
 Autodetection never guesses: signals that point at more than one harness are ambiguous and yield `None`.
 
@@ -46,10 +48,9 @@ KNOWN_PROCESS_HARNESSES: tuple[str, ...] = (*KNOWN_HARNESSES, "openrouter")
 #   * Grok Build 1.0.46: `grok -p ... --permission-mode bypassPermissions` asked to list the variable NAMES
 #     containing GROK/CURSOR/SAND/AGENT/XAI reported GROK_AGENT and GROK_SESSION_ID (plus names inherited
 #     from the Claude Code parent). GROK_CLI, which suite_lock assumes, is NOT exported.
-# NOT CONFIRMED (best guess, no real session checked yet): CODEX_SANDBOX / CODEX_THREAD_ID for Codex and
-# ANTIGRAVITY_SESSION for Antigravity. Correct this table, not the callers, once a real session of each
-# harness shows what it exports. Until then the explicit DARKFAC_OPERATING_HARNESS override is the
-# reliable way to declare the harness for those two.
+# Codex (CODEX_THREAD_ID) and Antigravity (ANTIGRAVITY_SESSION_ID) are confirmed by the recorded session
+# fixtures in tests/fixtures/harness_sessions (USR-483). Without a reliable signal the router prefers no
+# harness; the explicit `pick(operating_harness=...)` argument is the only per-invocation override.
 AUTODETECT_ENV_SIGNALS: tuple[tuple[str, str], ...] = (
     ("CLAUDECODE", "claude"),
     ("CLAUDE_CODE_ENTRYPOINT", "claude"),
@@ -61,6 +62,7 @@ AUTODETECT_ENV_SIGNALS: tuple[tuple[str, str], ...] = (
     ("ANTIGRAVITY_AGENT", "antigravity"),
     ("ANTIGRAVITY_CONVERSATION_ID", "antigravity"),
     ("ANTIGRAVITY_SESSION", "antigravity"),
+    ("ANTIGRAVITY_SESSION_ID", "antigravity"),
 )
 
 
@@ -91,18 +93,14 @@ def _resolve_with_origin(
 
     env = os.environ if environ is None else environ
 
-    override = (env.get(OPERATING_HARNESS_ENV) or "").strip()
-    if override:
-        normalized = normalize_harness(override)
-        if normalized is not None:
-            return normalized, "explicit"
-        logger.warning(
-            "Ignoring invalid %s=%r (expected one of: %s)",
-            OPERATING_HARNESS_ENV, override, ", ".join(KNOWN_HARNESSES),
+    stale = (env.get(OPERATING_HARNESS_ENV) or "").strip()
+    if stale:
+        # USR-483: a persisted value never decides the harness. Only the live session signal
+        # (below) or an explicit invocation argument does.
+        logger.info(
+            "Ignoring %s=%r: only the live session signal or an explicit argument selects a harness",
+            OPERATING_HARNESS_ENV, stale,
         )
-        # A malformed explicit declaration is still a signal. Do not silently replace
-        # it with an inferred identity from unrelated variables in the same environment.
-        return None, ORIGIN_NONE
 
     signalled = {harness for name, harness in AUTODETECT_ENV_SIGNALS if (env.get(name) or "").strip()}
     if len(signalled) > 1:

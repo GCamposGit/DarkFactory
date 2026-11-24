@@ -177,7 +177,7 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--ticket", required=True, help="id do ticket (ex.: USR-164)")
         p.add_argument("--title", default="", help="titulo mostrado no quadro")
         p.add_argument("--project", default="darkfac", help="projeto (padrao: %(default)s)")
-        p.add_argument("--harness", default=None, help=f"harness (padrao: ${ENV_HARNESS} ou deteccao da sessao)")
+        p.add_argument("--harness", default=None, help=f"harness (padrao: deteccao da sessao)")
         p.add_argument("--worker", default=None, help="maquina (padrao: nome do host)")
         p.add_argument("--json", action="store_true", help="saida JSON em vez de texto")
 

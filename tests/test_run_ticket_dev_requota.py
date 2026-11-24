@@ -444,7 +444,7 @@ def test_fleet_slice_pick_is_headless_and_does_not_start_antigravity(
     launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """--fleet re-picks in headless context, so the operating Antigravity harness does not start."""
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("ANTIGRAVITY_SESSION_ID", "session-1")
     launcher.after = {"openai": 12.0, "anthropic": 15.0, "xai": 7.97, "google": 90.0}
 
     code = main(["USR-428", "--fleet", "--skip-validation", "--no-commit", "--json"])
@@ -513,7 +513,7 @@ def test_three_slices_pick_before_each_agent_and_the_third_without_a_route_waits
 def test_a_pin_that_stays_above_the_floor_is_kept_on_every_slice(
     launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "claude")
+    monkeypatch.setenv("CLAUDECODE", "1")
     launcher.slices = list(_THREE_SLICES)
     launcher.after = {"openai": 20.0, "anthropic": 40.0, "xai": 8.0, "google": 90.0}
     launcher.after_slices = [

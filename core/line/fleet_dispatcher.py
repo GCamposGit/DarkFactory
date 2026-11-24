@@ -2446,6 +2446,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         ap.error("informe --recovery-tickets uma unica vez com todos os IDs em um valor CSV")
     if args.unexpected_args:
         ap.error("argumentos posicionais inesperados; passe --recovery-tickets como um unico valor separado por virgulas")
+    if not args.dry_run:
+        from core.line.coordination import CoordinationRefused, require_coordinator
+
+        try:
+            require_coordinator("operar_despachante")
+        except CoordinationRefused as exc:
+            print(f"[COORDENACAO] {exc}", file=sys.stderr)
+            return 78
     log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
     configure_logging(log_dir)
     from core.line.sentinel import maybe_run_sentinel

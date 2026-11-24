@@ -9,14 +9,24 @@ must not disguise the harness that is actually executing this session.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import socket
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Mapping
 
+
+logger = logging.getLogger("darkfac.line.session_identity")
+
+# A harness session without a native id keeps one stable id per harness and host while it stays
+# active. After this much idle time (the lease TTL) the next invocation is a new session.
+FALLBACK_SESSION_IDLE_SECONDS = 900
+_FALLBACK_REGISTRY = ("coordination", "session_ids.json")
 
 _PROCESS_SESSION_ID = str(uuid.uuid4())
 _PROCESS_STARTED_AT = datetime.now(timezone.utc)
@@ -175,10 +185,59 @@ def _first_nonempty(env: Mapping[str, str], *keys: str) -> str | None:
     return None
 
 
-def _session_id(env: Mapping[str, str], detection: HarnessDetection) -> str:
+def _fallback_registry_path() -> Path:
+    from core.paths import state_root
+
+    return state_root().joinpath(*_FALLBACK_REGISTRY)
+
+
+def _stable_fallback_session(
+    harness: str, host: str, now: datetime
+) -> tuple[str, str] | None:
+    """`(session_id, started_at)` kept across CLI processes for one harness on one host.
+
+    Claude Code only exports CLAUDECODE/CLAUDE_CODE_ENTRYPOINT to its children, so each
+    ``python scripts/line_briefing.py`` is a new process of the same session. The id is
+    persisted under the state root and renewed on every use; it rolls over after
+    ``FALLBACK_SESSION_IDLE_SECONDS`` without use. Returns None when the registry cannot be
+    read or written (the caller then uses the per-process id).
+    """
+
+    path = _fallback_registry_path()
+    key = f"{harness}@{host}"
+    moment = now.timestamp()
+    try:
+        records = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        if not isinstance(records, dict):
+            records = {}
+        record = records.get(key)
+        fresh = (
+            isinstance(record, dict)
+            and isinstance(record.get("id"), str)
+            and isinstance(record.get("last_seen"), (int, float))
+            and 0 <= moment - float(record["last_seen"]) <= FALLBACK_SESSION_IDLE_SECONDS
+        )
+        if not fresh:
+            record = {"id": f"{harness}-{uuid.uuid4()}", "created_at": moment}
+        record["last_seen"] = moment
+        records[key] = record
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+        created = datetime.fromtimestamp(float(record.get("created_at", moment)), timezone.utc)
+        return str(record["id"]), created.isoformat().replace("+00:00", "Z")
+    except (OSError, ValueError) as exc:
+        logger.warning("session id registry unavailable (%s); using the per-process id", exc)
+        return None
+
+
+def _session_id(
+    env: Mapping[str, str], detection: HarnessDetection, host: str, now: datetime
+) -> tuple[str, str | None]:
     explicit = _first_nonempty(env, "DARKFAC_SESSION_ID")
     if explicit:
-        return explicit
+        return explicit, None
     native_keys = {
         Harness.CODEX.value: ("CODEX_THREAD_ID", "CODEX_SESSION_ID"),
         Harness.CLAUDE.value: ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"),
@@ -187,7 +246,13 @@ def _session_id(env: Mapping[str, str], detection: HarnessDetection) -> str:
     }
     keys = native_keys.get(detection.harness or "", ())
     native = _first_nonempty(env, *keys) if keys else None
-    return native or _PROCESS_SESSION_ID
+    if native:
+        return native, None
+    if detection.harness:
+        stable = _stable_fallback_session(detection.harness, host, now)
+        if stable is not None:
+            return stable
+    return _PROCESS_SESSION_ID, None
 
 
 def _model(env: Mapping[str, str], harness: str | None) -> str | None:
@@ -217,12 +282,16 @@ def build_session_identity(
     current_env = os.environ if env is None else env
     detection = detect_session_harness(current_env, override=harness_override)
     effective_host = host or _first_nonempty(current_env, "DARKFAC_SESSION_HOST") or socket.gethostname()
-    effective_started_at = started_at or _PROCESS_STARTED_AT
+    now = datetime.now(timezone.utc)
+    session_id, stable_started = _session_id(current_env, detection, effective_host, now)
+    effective_started_at = started_at or (
+        datetime.fromisoformat(stable_started.replace("Z", "+00:00")) if stable_started else _PROCESS_STARTED_AT
+    )
     if effective_started_at.tzinfo is None:
         effective_started_at = effective_started_at.replace(tzinfo=timezone.utc)
     effective_started_at = effective_started_at.astimezone(timezone.utc)
     return SessionIdentity(
-        session_id=_session_id(current_env, detection),
+        session_id=session_id,
         harness=detection.harness,
         model=_model(current_env, detection.harness),
         host=effective_host,

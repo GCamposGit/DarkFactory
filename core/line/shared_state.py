@@ -23,7 +23,11 @@ class SharedState:
     def __init__(self, path: str | os.PathLike[str] | None = None) -> None:
         configured_path = path or os.environ.get(DEFAULT_SHARED_STATE_ENV)
         if configured_path is None:
-            configured_path = Path(".factory") / "state" / "shared.sqlite3"
+            from core.paths import state_root
+
+            # Same default as core.line.coordination.resolve_state_path, so every client on a
+            # host opens the same registry regardless of the current directory.
+            configured_path = state_root() / "state" / "shared.sqlite3"
 
         self.path = Path(configured_path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)

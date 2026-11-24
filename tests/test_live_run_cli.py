@@ -303,7 +303,7 @@ def test_usage_errors_are_the_only_non_zero_exit(cli: Any, capsys: pytest.Captur
 
 def test_harness_comes_from_session_signal_without_a_guessed_default(cli: Any) -> None:
     sink = RecordingSink()
-    cli("open", "--ticket", "USR-164", sink=sink, environ={"DARKFAC_OPERATING_HARNESS": "codex"})
+    cli("open", "--ticket", "USR-164", sink=sink, environ={"CODEX_THREAD_ID": "thread-1"})
     cli("open", "--ticket", "USR-165", sink=sink)
     assert [e.harness for e in sink.events] == ["codex", None]
 

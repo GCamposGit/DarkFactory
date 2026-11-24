@@ -142,32 +142,31 @@ def test_signals_for_more_than_one_harness_are_ambiguous_and_never_guessed(
     assert any("ambiguous" in record.getMessage() for record in caplog.records)
 
 
-def test_the_explicit_variable_beats_autodetection_and_is_normalized() -> None:
-    environ = {OPERATING_HARNESS_ENV: "  Grok ", "CLAUDECODE": "1"}
+def test_the_live_session_signal_beats_a_stale_variable() -> None:
+    environ = {OPERATING_HARNESS_ENV: "  Antigravity ", "CLAUDECODE": "1"}
 
-    assert detect_operating_harness(environ) == "grok"
+    assert detect_operating_harness(environ) == "claude"
+    assert detect_operating_harness({OPERATING_HARNESS_ENV: "antigravity", "CODEX_THREAD_ID": "t"}) == "codex"
+    assert detect_operating_harness({"ANTIGRAVITY_SESSION_ID": "s"}) == "antigravity"
 
 
-def test_the_explicit_variable_resolves_what_autodetection_finds_ambiguous() -> None:
+def test_a_stale_variable_cannot_resolve_an_ambiguous_signal() -> None:
     environ = {OPERATING_HARNESS_ENV: "codex", "CLAUDECODE": "1", "GROK_AGENT": "1"}
 
-    assert detect_operating_harness(environ) == "codex"
+    assert detect_operating_harness(environ) is None
 
 
-def test_an_invalid_variable_fails_closed_with_a_warning(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="core.line.operating_harness"):
-        assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini", "CLAUDECODE": "1"}) is None
-        assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini"}) is None
-    assert sum("gemini" in record.getMessage() for record in caplog.records) == 2
+def test_without_a_session_signal_the_old_variable_is_not_reused() -> None:
+    assert detect_operating_harness({OPERATING_HARNESS_ENV: "codex"}) is None
+    assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini"}) is None
+    assert detect_operating_harness({OPERATING_HARNESS_ENV: "gemini", "CLAUDECODE": "1"}) == "claude"
 
 
-def test_the_explicit_argument_beats_the_variable_and_autodetection() -> None:
+def test_the_explicit_argument_beats_the_session_signal_and_the_variable() -> None:
     environ = {OPERATING_HARNESS_ENV: "grok", "CLAUDECODE": "1"}
 
     assert resolve_operating_harness("Codex", environ) == "codex"
-    assert resolve_operating_harness("", environ) == "grok"  # empty argument falls through to the variable
+    assert resolve_operating_harness("", environ) == "claude"  # empty argument falls through to the signal
     assert resolve_operating_harness(None, {"CLAUDECODE": "1"}) == "claude"
     assert resolve_operating_harness(None, {}) is None
 
@@ -180,13 +179,15 @@ def test_an_invalid_explicit_argument_prefers_nobody_instead_of_falling_back(
     assert any("gemini" in record.getMessage() for record in caplog.records)
 
 
-def test_pick_reads_the_variable_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pick_ignores_a_persisted_variable_without_a_session_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     lookup = _lookup(claude=95.0, codex=40.0)
     assert _pick(tmp_path, lookup) == ("claude", "sonnet")  # no signal: highest headroom
 
     monkeypatch.setenv(OPERATING_HARNESS_ENV, "codex")
 
-    assert _pick(tmp_path, lookup) == ("codex", None)
+    assert _pick(tmp_path, lookup) == ("claude", "sonnet")
 
 
 def test_pick_autodetects_the_parent_harness_from_its_environment(
@@ -210,7 +211,7 @@ def test_pick_with_an_ambiguous_environment_keeps_the_headroom_rule(
     assert _pick(tmp_path, _lookup(claude=95.0, codex=40.0)) == ("claude", "sonnet")
 
 
-def test_pick_argument_beats_the_variable_which_beats_autodetection(
+def test_pick_argument_beats_the_session_signal_which_beats_the_variable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lookup = _lookup(claude=50.0, codex=50.0, grok=50.0)
@@ -218,7 +219,7 @@ def test_pick_argument_beats_the_variable_which_beats_autodetection(
     assert _pick(tmp_path, lookup) == ("claude", "sonnet")
 
     monkeypatch.setenv(OPERATING_HARNESS_ENV, "codex")
-    assert _pick(tmp_path, lookup) == ("codex", None)  # variable over autodetection
+    assert _pick(tmp_path, lookup) == ("claude", "sonnet")  # live signal over a stale variable
 
     assert _pick(tmp_path, lookup, operating_harness="claude") == ("claude", "sonnet")  # argument over both
 
@@ -409,7 +410,7 @@ def test_antigravity_operator_is_preferred_interactively_but_excluded_headless(
     monkeypatch.delenv(OPERATING_HARNESS_ENV, raising=False)
     monkeypatch.delenv("ANTIGRAVITY_AGENT", raising=False)
     if signal == "explicit":
-        monkeypatch.setenv(OPERATING_HARNESS_ENV, "antigravity")
+        monkeypatch.setenv("ANTIGRAVITY_SESSION_ID", "session-1")
     else:
         monkeypatch.setenv("ANTIGRAVITY_AGENT", "1")
 
@@ -569,13 +570,13 @@ def test_a_harness_outside_a_non_development_cascade_is_not_added_to_it(
         assert choice is not None and choice[0] != "grok", stage
 
 
-def test_the_environment_variable_does_not_change_other_stages_either(
+def test_the_session_signal_does_not_change_other_stages_either(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lookup = _lookup(claude=90.0, codex=30.0)
     baseline = {stage: _pick(tmp_path, lookup, stage=stage) for stage in ("planning", "grill", "integration")}
 
-    monkeypatch.setenv(OPERATING_HARNESS_ENV, "codex")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
 
     assert {stage: _pick(tmp_path, lookup, stage=stage) for stage in baseline} == baseline
     assert _pick(tmp_path, lookup) == ("codex", None)  # while development does follow it
@@ -758,11 +759,12 @@ def test_interactive_antigravity_is_write() -> None:
     [
         ({}, None, None, "none"),
         ({"CLAUDECODE": "1"}, None, "claude", "autodetect"),
-        ({"DARKFAC_OPERATING_HARNESS": "codex"}, None, "codex", "explicit"),
+        ({"DARKFAC_OPERATING_HARNESS": "codex"}, None, None, "none"),
+        ({"DARKFAC_OPERATING_HARNESS": "codex", "CLAUDECODE": "1"}, None, "claude", "autodetect"),
         ({"DARKFAC_OPERATING_HARNESS": "codex", "CLAUDECODE": "1"}, "grok", "grok", "explicit"),
     ],
 )
-def test_interactive_process_keeps_the_usr_109_precedence(
+def test_interactive_process_precedence_is_argument_then_live_signal(
     environ: dict[str, str], explicit: Optional[str], harness: Optional[str], origin: str
 ) -> None:
     identity = resolve_process_identity(environ=environ, execution_context="interactive", explicit=explicit)
@@ -775,7 +777,7 @@ def test_process_identity_is_separate_from_operating_preference() -> None:
     identity = resolve_process_identity(
         environ={
             "DARKFAC_EXECUTION_CONTEXT": "interactive",
-            "DARKFAC_OPERATING_HARNESS": "antigravity",
+            "ANTIGRAVITY_SESSION_ID": "session-1",
             "DARKFAC_PROCESS_HARNESS": "codex",
         },
     )
@@ -803,18 +805,14 @@ def test_invalid_process_harness_and_conflicting_roots_fail_closed(tmp_path: Pat
         })
 
 
-def test_invalid_interactive_override_does_not_infer_from_other_environment_signals(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="core.line.operating_harness"):
-        identity = resolve_process_identity(
-            environ={"DARKFAC_OPERATING_HARNESS": "antigravity-ish", "CODEX_THREAD_ID": "session"},
-            execution_context="interactive",
-        )
+def test_invalid_stale_variable_never_overrides_the_live_session_signal() -> None:
+    identity = resolve_process_identity(
+        environ={"DARKFAC_OPERATING_HARNESS": "antigravity-ish", "CODEX_THREAD_ID": "session"},
+        execution_context="interactive",
+    )
 
-    assert identity.harness is None
-    assert identity.origin == "none"
-    assert any("antigravity-ish" in record.getMessage() for record in caplog.records)
+    assert identity.harness == "codex"
+    assert identity.origin == "autodetect"
 
 
 def test_execution_context_defaults_from_fleet_mode_env() -> None:
@@ -945,7 +943,7 @@ def test_each_headless_harness_gets_the_same_explicit_process_contract(
 
 def test_interactive_harness_child_preserves_preference_but_sets_process_identity(tmp_path: Path) -> None:
     env = harness_executor_env(
-        {"DARKFAC_OPERATING_HARNESS": "antigravity", "DARKFAC_FLEET_MODE": "1"},
+        {"ANTIGRAVITY_SESSION_ID": "chat-1", "DARKFAC_FLEET_MODE": "1"},
         process_harness="codex",
         project_root=tmp_path,
         state_root=tmp_path / ".factory",
@@ -956,7 +954,7 @@ def test_interactive_harness_child_preserves_preference_but_sets_process_identit
     assert identity.harness == "antigravity"
     assert identity.process_harness == "codex"
     assert identity.execution_context == "interactive"
-    assert env["DARKFAC_OPERATING_HARNESS"] == "antigravity"
+    assert env["ANTIGRAVITY_SESSION_ID"] == "chat-1"
     assert "DARKFAC_FLEET_MODE" not in env
 
 
@@ -965,7 +963,7 @@ def test_agent_capability_check_uses_process_identity_not_parent_chat_preference
 ) -> None:
     from core.line.agent_cli import supports
 
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("ANTIGRAVITY_SESSION_ID", "chat-1")
     monkeypatch.setenv("DARKFAC_FLEET_MODE", "1")
     assert not supports("antigravity", "write")
 

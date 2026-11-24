@@ -677,7 +677,7 @@ def test_dry_run_json_reports_the_operating_harness_and_why_it_was_elected(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
 
     assert main(["USR-99", "--dry-run", "--json"]) == 0
 
@@ -691,7 +691,7 @@ def test_ticket_complexity_does_not_gate_the_interactive_operating_harness(
 ) -> None:
     """The operating chat is preferred for development at every ticket complexity."""
     _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
     selected = {}
     for complexity in ("high", "medium"):
         monkeypatch.setattr(_TICKET, "estimated_complexity", complexity, raising=False)
@@ -716,7 +716,7 @@ def test_dry_run_shows_the_detected_harness_and_the_preference_in_the_selection_
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
 
     assert main(["USR-99", "--dry-run"]) == 0
 
@@ -729,7 +729,7 @@ def test_fleet_dry_run_never_routes_to_antigravity_operator(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _real_router_with(monkeypatch, anthropic=90.0, openai=80.0, xai=70.0, google=30.0)
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("ANTIGRAVITY_SESSION_ID", "session-1")
 
     assert main(["USR-99", "--fleet", "--host-id", "desktop", "--dry-run", "--json"]) == 0
 
@@ -743,7 +743,7 @@ def test_fleet_mode_env_repicks_by_quota_and_ignores_the_parent_preference(
 ) -> None:
     """DARKFAC_FLEET_MODE is headless context even without --fleet on this process."""
     _real_router_with(monkeypatch, anthropic=90.0, openai=40.0, xai=80.0, google=95.0)
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "grok")
+    monkeypatch.setenv("GROK_SESSION_ID", "session-1")
     monkeypatch.setenv("GROK_SESSION_ID", "parent-session")
     monkeypatch.setenv("DARKFAC_FLEET_MODE", "1")
 
@@ -765,7 +765,7 @@ def test_fleet_mode_env_rejects_explicit_antigravity(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("DARKFAC_FLEET_MODE", "1")
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("ANTIGRAVITY_SESSION_ID", "session-1")
 
     assert main(["USR-99", "--harness", "antigravity", "--dry-run"]) == 2
     assert "nao e elegivel para desenvolvimento headless/frota" in capsys.readouterr().err
@@ -782,7 +782,7 @@ def test_a_critical_operating_harness_is_reported_but_not_preferred(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _real_router_with(monkeypatch, anthropic=70.0, openai=10.0)  # codex is under the 15% floor
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
 
     assert main(["USR-99", "--dry-run"]) == 0
     out = capsys.readouterr().out
@@ -798,7 +798,7 @@ def test_a_critical_operating_harness_is_reported_but_not_preferred(
 def test_an_explicit_harness_is_reported_as_the_reason_and_the_operating_harness_stays_visible(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "claude")
+    monkeypatch.setenv("CLAUDECODE", "1")
 
     assert main(["USR-99", "--harness", "codex", "--dry-run", "--json"]) == 0
 
@@ -1032,7 +1032,7 @@ def test_declared_headless_context_survives_resume_without_fleet_flag(
 ) -> None:
     monkeypatch.delenv("DARKFAC_FLEET_MODE", raising=False)
     monkeypatch.setenv("DARKFAC_EXECUTION_CONTEXT", "headless")
-    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "antigravity")
+    monkeypatch.setenv("ANTIGRAVITY_SESSION_ID", "session-1")
     args = argparse.Namespace(fleet=False)
 
     assert run_ticket._execution_context(args) == "headless"

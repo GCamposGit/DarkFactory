@@ -696,6 +696,7 @@ def effective_policy_snapshot(
 
 def _cli(argv: Optional[Sequence[str]] = None) -> int:
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(description="DarkFac fleet policy (USR-471)")
     parser.add_argument(
@@ -707,6 +708,13 @@ def _cli(argv: Optional[Sequence[str]] = None) -> int:
     if not args.effective:
         parser.print_help()
         return 1
+    from core.line.coordination import CoordinationRefused, require_coordinator
+
+    try:
+        require_coordinator("politica_da_frota")
+    except CoordinationRefused as exc:
+        print(f"[COORDENACAO] {exc}", file=sys.stderr)
+        return 78
     config = load_fleet_config(args.config) if args.config is not None else None
     report = effective_policy_snapshot(config, config_source=args.config or DEFAULT_CONFIG_PATH)
     print(json.dumps(report, indent=2, ensure_ascii=False))

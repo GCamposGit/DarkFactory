@@ -75,6 +75,9 @@ def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
         encoding="utf-8",
     )
     (bin_dir / "gh.cmd").write_text('@echo off\r\ntype "%~dp0pr.json"\r\n', encoding="ascii")
+    posix_gh = bin_dir / "gh"
+    posix_gh.write_bytes(b'#!/bin/sh\ncat "$(dirname "$0")/pr.json"\n')
+    posix_gh.chmod(0o755)
     env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
     env["DARKFAC_STATE_ROOT"] = str(state)
     env["DARKFAC_SHARED_STATE_PATH"] = str(state / "shared.sqlite3")
@@ -186,3 +189,17 @@ def test_unknown_harness_consults_and_assumes_only_for_the_owner(tmp_path: Path)
     assert body["coordinator"]["harness"] == "unknown"
     assert body["coordinator"]["session_id"] == "sess-unknown"
     assert body["coordinator"]["origin"] == "owner_decision"
+
+
+def test_two_invocations_of_one_claude_session_share_id_and_renew_the_lease(tmp_path: Path) -> None:
+    env = _env(tmp_path, CLAUDECODE="1", CLAUDE_CODE_ENTRYPOINT="claude-desktop")
+    assumed = _run(tmp_path, "assumir", "--decisao-owner", "--json", env=env)
+    assert assumed.returncode == 0, assumed.stderr
+    first = json.loads(assumed.stdout)
+    consulted = _run(tmp_path, "--json", env=env)
+    assert consulted.returncode == 0, consulted.stderr
+    second = json.loads(consulted.stdout)
+
+    assert second["caller"]["session_id"] == first["caller"]["session_id"]
+    assert second["caller"]["is_coordinator"] is True
+    assert second["coordinator"]["expires_at"] >= first["coordinator"]["expires_at"]
