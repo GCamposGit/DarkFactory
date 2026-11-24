@@ -276,6 +276,7 @@ FLEET_RUNTIME_UNTRACKED_FILES = frozenset(
         ".factory/runs/fleet_dispatcher_state.json",  # Dispatcher checkpoint for queued fleet work.
         ".factory/runs/deploy_deferrals.json",  # Dispatcher deploy deferral state.
         ".factory/runs/pending_deliveries.json",  # Dispatcher pending delivery state.
+        ".factory/runs/express_episodes.json",  # Dispatcher express episode state.
         ".factory/runs/sentinel_state.json",  # Sentinel's persisted runtime state.
         ".factory/runs/fleet_policy_snapshot.json",  # Generated snapshot consumed by fleet policy routing.
         ".factory/runs/model_audit_receipt.json",  # Generated receipt from model and quota auditing.
