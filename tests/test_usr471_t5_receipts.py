@@ -95,7 +95,7 @@ def test_line_validate_snapshots_sidecars_but_keeps_changed_tracked_evidence(
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "test@example.invalid")
     _git(root, "config", "user.name", "Test")
-    _git(root, "add", ".gitignore", ".factory/runs/hf01-run/evidence.json", "core/harness/runner.py")
+    _git(root, "add", "-f", ".gitignore", ".factory/runs/hf01-run/evidence.json", "core/harness/runner.py")
     _git(root, "commit", "-qm", "fixture baseline")
     head_before = _git(root, "rev-parse", "HEAD")
 
