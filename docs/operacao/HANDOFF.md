@@ -1,48 +1,53 @@
 # Handoff operacional
 
-Versao: 13
-Atualizado em: 2026-11-23 (Claude Code, coordenador)
+Versao: 14
+Atualizado em: 2026-11-24 (Claude Code, coordenador)
 
 ## Estado
 
-- Fase: V0 da Dark Factory (ver `docs/FASE_ATUAL.md`).
-- `main` em `299fe0cb` (#919), CI verde, deploy verificado em `darkfac-cloud` (coordinator e worker no sha).
-- Despachante `DarkFac-Fleet-Dispatcher` ativo e reiniciado no sha novo. USR-537 e USR-538 em voo no Notebook e no Desktop.
-- Hosts: Notebook e Desktop executam. O Desktop voltou depois que o `/health` passou a publicar capacidade (#920). O Grokbox ainda não publica capacidade (`worker_capacity_missing_or_zero`): precisa subir o worker no sha atual.
-- Cotas (23/11 09:46Z): Claude 94%, Codex 56%, Grok 49,5%. Antigravity com leitura vencida (transporte RPC).
+- Fase: V0 da Dark Factory (ver `docs/FASE_ATUAL.md`). `core.line.v0_proof` em 0/5 (USR-557 em voo corrige o USR-279 marcado completed).
+- `main` em `bb8a1231` (#944). Deploy de 24/11 em `darkfac-cloud`: coordinator e worker `running/healthy` na imagem `d6650ced` (#921). O #944 só muda testes. O `[CHECK-MAIN]` do deploy saiu `unknown` porque não houve CI concluído no main (USR-576).
+- Despachante ativo. Em voo: USR-557 (Notebook). Ainda há 18 holds no recibo de coordenação.
+- Hosts: Notebook e Desktop executam; o Grokbox entra e sai.
+- Cotas (24/11 ~17h): Codex 26%, Grok 24%, Antigravity vencida (RPC). A leitura do Claude ficou desconhecida por 29 h (USR-573).
 
-## Incidente de 22-23/11: frota parada por PRs em rascunho
+## Incidente de 24/11: main vermelho por 5 h sem alerta
 
-Uma sessão de coordenação abriu sete PRs em rascunho fora da esteira e não os promoveu. O despachante relançava USR-542, USR-543 e USR-544 a cada ~6 min. O `run_ticket` recusava com `[RECUSA] ja possui PR ativo` (código 75, conta como espera). Era um laço sem progresso no único host livre. O reparo durável está no USR-545.
+O #934 (USR-561) passou a ignorar todo `.factory/runs/` e quebrou 4 testes de higiene no main em `2f6ada4f`. O pr-tests do PR passou porque os testes afetados não ligam o `.gitignore` aos testes que o leem (USR-575). As 10 execuções seguintes do CI no main terminaram canceladas e esconderam o vermelho (USR-576). O problema só apareceu no PR #912. A correção entrou pelo #944 (USR-574).
 
-Ao assumir a coordenação, cruze `gh pr list --json number,isDraft` com `recent_failures` em `.factory/runs/fleet_dispatcher_state.json`. Um PR em rascunho de ticket com CI verde deve ser revisado, promovido e mesclado.
+Ao assumir a coordenação, confira o último CI **concluído** do main: `gh run list --branch main --workflow "DarkFac CI" --limit 15`.
 
-## Entregue em 23/11
+## Entregue em 24/11
 
-- #920 (USR-542), #924 (USR-543), #925 (USR-544), #923 e #919 (USR-540): revisão cruzada Claude, CI verde, squash.
-- USR-447 fechado: já estava no main (#875, #884, #893). O hold era o próprio defeito agindo sobre trabalho mesclado.
-- USR-535 reaberto: o #923 só libera artefatos não rastreados. O `learning_ledger.json` rastreado continua deixando o Notebook "divergente" mesmo com HEAD no sha esperado.
+- #921 (USR-538): `completed` só com prova `<sha>:merged` (e live quando exigido). Sem `gh`, a entrega recusa em vez de fazer push direto ao main. Conclusão legada sem merge volta para `planned`.
+- #944 (USR-574): testes de higiene alinhados ao USR-561. Main verde de novo.
 
-## Tickets registrados em 23/11
+## PR #912 (USR-483) segurado
 
-- USR-545: não relançar ticket com PR ativo; adotar o PR na entrega.
-- USR-546: backoff para a varredura de worktrees que falha sempre.
-- USR-547: `build_evidence_mismatch` falso sem PLAN (USR-462, USR-476) ou com trabalho já mesclado (USR-447).
-- USR-548: rebase por cherry-pick para tickets antigos com 1 ou 2 commits (USR-517, USR-520, USR-522).
-- USR-549: alertas de hold no Telegram com `missing_destination`.
-- O revisor que grava texto de progresso como veredito (USR-446, USR-535) é o USR-537, em voo.
+A revisão cruzada do Codex pediu mudanças de desenho (comentário no PR):
 
-## Holds restantes e próximo passo
+- lease em SQLite local, com dois PCs mantendo coordenadores válidos;
+- despachante direto sai com 78 ou segue com lease vencida;
+- sessões Claude compartilham o ID;
+- Antigravity perde a preferência de `development`;
+- segundo fluxo de coordenação paralelo a `core.ops.coordination`.
 
-- Retrabalho delimitado: USR-446 (rebase e nova revisão), USR-483 (#912: `core/line/coordination.py:111`, `core/line/operating_harness.py:94`, CI vermelho), USR-519 (`core/line/pending_delivery.py:691`, `core/line/fleet_dispatcher.py:1231` e `:1251`), USR-539 (#918 com conflito; skill e caminho `runs/pending_deliveries.json`), USR-480 (`tests/line/test_agent_failure_visibility.py`).
-- Conflito de rebase: USR-517, USR-520 e USR-522. Os dois últimos dividem `docs/manual/learning_pack.md`.
-- USR-462 e USR-476 dependem do USR-547.
-- PR #921 (USR-538) com conflito; o USR-538 está em voo pela frota.
+O próximo passo é redesenhar com um caminho único de coordenação e estado compartilhado entre hosts, não remendar. O CI do head `78780b51` está verde.
+
+## Defeitos registrados em 24/11
+
+- USR-570: commit autônomo falha com `Author identity unknown` em repo de produto sem `user.name` (MDL-02 no Notebook).
+- USR-571: a varredura de segredos bloqueia fixture PEM falsa (MDL-01/03) e sai com `cause=unknown`.
+- USR-572: a retentativa abre worktree nova e cai em `build_evidence_mismatch` contra o progresso preservado (MDL-01/02 acumulam worktrees em `Site_Mansaodolago`).
+- USR-573: a CLI npm do Claude no Notebook (2.1.278) rejeita o id Haiku do registro, e a sonda de cota devolve vazio. Não há npm real no Notebook (o `npm.cmd` é wrapper do Codex).
+- USR-575: o seletor de testes afetados ignora o `.gitignore`.
+- USR-576: o CI do main cancelado em sequência esconde o vermelho (mexe em `.github/workflows`, que é protegido).
 
 ## Armadilhas
 
-1. Recusa não é falha, mas recusa repetida no mesmo sha é laço: veja o USR-545.
-2. Para fechar um ticket entregue fora da esteira: `register_ticket` com `status=completed` e evidência, mais `AdmissionStore(state_root() / "admission.sqlite3").reset_budget("darkfac", id)`.
-3. `learning.cli record-turn` altera o `learning_ledger.json` rastreado no checkout compartilhado. Antes de avançar o checkout: `git stash push -- .factory/learning/learning_ledger.json`, depois `merge --ff-only` e `stash pop`.
-4. `dokploy_redeploy.py` sai com código 3 quando só o Notebook não converge; os serviços podem estar corretos. Confira as linhas `[RUNTIME IMAGE]`.
+1. Recusa não é falha, mas recusa repetida no mesmo sha é laço (USR-545).
+2. Para fechar entrega feita fora do launcher, use `python -m core.demands.cli complete <TICKET> --sha <sha completo do origin/main> --evidence "..."`.
+3. `learning.cli record-turn` altera o `learning_ledger.json` rastreado no checkout compartilhado. Antes de avançar o checkout, rode `git stash push -m <tag> -- .factory/learning/learning_ledger.json`, depois `merge --ff-only` e `stash apply <sha>`.
+4. `dokploy_redeploy.py` sai com código 3 quando só o Notebook não converge. Confira as linhas `[RUNTIME IMAGE]`.
 5. Id literal de modelo neste arquivo quebra o censo de modelos. Use alias.
+6. A frota está rodando MDL-01..03 (Mansão do Lago, cliente) na branch `darkfac/m1-seo`. Nada vai para produção do cliente sem autorização expressa do owner.
