@@ -118,7 +118,7 @@ def _default_sender() -> Optional[NotifySender]:
 
     # Holds always target the owner bot, even if NotificationService's default
     # role changes for other operational notifications.
-    service = NotificationService(telegram_role="owner")
+    service = NotificationService(telegram_role="owner", owner_destination_only=True)
 
     def _send(text: str) -> bool:
         event = service.notify(
@@ -145,7 +145,7 @@ def _record_missing_owner_telegram_destination() -> None:
         from core.owner_actions.models import ActionPriority, ActionStep, OwnerAction
         from core.owner_actions.store import OwnerActionStore
 
-        config = load_telegram_config(role="owner")
+        config = load_telegram_config(role="owner", owner_destination_only=True)
         if not config.bot_token or resolve_telegram_destinations(config):
             return
         action = OwnerAction(

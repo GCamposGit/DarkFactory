@@ -52,6 +52,22 @@ def test_owner_chat_id_is_used_as_owner_destination_and_precedes_shared_chats(
     assert ops.authorized_chat_ids == [42]
 
 
+def test_owner_destination_does_not_fall_back_to_shared_ops_chats(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", TOKEN)
+    monkeypatch.delenv("TELEGRAM_OWNER_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_CHATS", "42")
+
+    owner = load_telegram_config(role="owner", config_dir=tmp_path / "telegram")
+    hold_owner = load_telegram_config(
+        role="owner", config_dir=tmp_path / "telegram", owner_destination_only=True
+    )
+
+    assert owner.authorized_chat_ids == [42]
+    assert hold_owner.authorized_chat_ids == []
+
+
 def test_hold_request_sends_to_configured_owner_and_is_reported_delivered(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -84,7 +100,7 @@ def test_missing_owner_destination_creates_hub_action_with_setting_name(
 ) -> None:
     monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", TOKEN)
     monkeypatch.delenv("TELEGRAM_OWNER_CHAT_ID", raising=False)
-    monkeypatch.delenv("TELEGRAM_AUTHORIZED_CHATS", raising=False)
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_CHATS", "42")
     monkeypatch.delenv("TELEGRAM_ALLOWED_CHATS", raising=False)
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
     actions_path = tmp_path / "owner_actions.json"
@@ -107,8 +123,9 @@ def test_default_hold_sender_selects_owner_notification_role(monkeypatch: pytest
         delivered_channels = ["telegram"]
 
     class _NotificationService:
-        def __init__(self, *, telegram_role: str) -> None:
+        def __init__(self, *, telegram_role: str, owner_destination_only: bool) -> None:
             roles.append(telegram_role)
+            assert owner_destination_only is True
 
         def notify(self, **_kwargs: object) -> _Event:
             return _Event()
