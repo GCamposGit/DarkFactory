@@ -274,6 +274,8 @@ KNOWN_EPHEMERAL_PATTERNS = (
 FLEET_RUNTIME_UNTRACKED_FILES = frozenset(
     {
         ".factory/runs/fleet_dispatcher_state.json",  # Dispatcher checkpoint for queued fleet work.
+        ".factory/runs/deploy_deferrals.json",  # Dispatcher deploy deferral state.
+        ".factory/runs/pending_deliveries.json",  # Dispatcher pending delivery state.
         ".factory/runs/sentinel_state.json",  # Sentinel's persisted runtime state.
         ".factory/runs/fleet_policy_snapshot.json",  # Generated snapshot consumed by fleet policy routing.
         ".factory/runs/model_audit_receipt.json",  # Generated receipt from model and quota auditing.
@@ -449,7 +451,9 @@ def classify_checkout(
         except Exception:
             pass
 
-    has_tracked_or_untracked = bool(dirty_files["tracked_modified"] or dirty_files["untracked"])
+    # Generated ledgers are stashed/restored around the fast-forward, so they never make a checkout dirty.
+    blocking_tracked = [p for p in dirty_files["tracked_modified"] if not is_generated_ledger(p)]
+    has_tracked_or_untracked = bool(blocking_tracked or dirty_files["untracked"])
 
     local_commits: list[str] = []
     ahead_count = 0
@@ -473,7 +477,7 @@ def classify_checkout(
         pass
 
     if has_tracked_or_untracked:
-        tracked_summary = f"{len(dirty_files['tracked_modified'])} tracked modified ({', '.join(dirty_files['tracked_modified'][:3])})" if dirty_files["tracked_modified"] else "0 tracked"
+        tracked_summary = f"{len(blocking_tracked)} tracked modified ({', '.join(blocking_tracked[:3])})" if blocking_tracked else "0 tracked"
         untracked_summary = f"{len(dirty_files['untracked'])} untracked ({', '.join(dirty_files['untracked'][:3])})" if dirty_files["untracked"] else "0 untracked"
         reason = f"dirty worktree: {tracked_summary}, {untracked_summary}; no git operation attempted"
         return "dirty", local_commits, dirty_files, reason
@@ -888,14 +892,21 @@ def sync(
                     "checkout is not behind the fixed candidate; no git operation attempted"
                 )
             elif any(
-                not entry.startswith("?? ") or not is_fleet_runtime_untracked_file(entry[3:])
+                not (
+                    is_generated_ledger(entry[3:])
+                    or (entry.startswith("?? ") and is_fleet_runtime_untracked_file(entry[3:]))
+                )
                 for entry in git(root, ["status", "--porcelain", "--untracked-files=all"]).splitlines()
             ):
                 notebook.reason = "dirty worktree; no git operation attempted"
             else:
                 # Fast-forward only when classification compared HEAD with the immutable candidate.
-                git(root, ["fetch", "origin", expected])
-                git(root, ["merge", "--ff-only", expected])
+                saved = stash_runtime_state(root, git)
+                try:
+                    git(root, ["fetch", "origin", expected])
+                    git(root, ["merge", "--ff-only", expected])
+                finally:
+                    restore_runtime_state(root, saved, git)
                 notebook.state = "converged" if _sha(git(root, ["rev-parse", "HEAD"])) == expected else "divergent"
                 notebook.sync_classification = "converged" if notebook.state == "converged" else "behind"
                 notebook.reason = None if notebook.state == "converged" else "checkout did not reach fixed candidate"
