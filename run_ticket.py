@@ -2134,7 +2134,11 @@ def _resolve_resume_ticket(ticket_id: str, target_worktree: Path) -> Optional[Us
         ticket = _ledger_file_ticket(store, ticket_id)
         if ticket is not None:
             return ticket
-    if queue_store.get_ticket(ticket_id) is not None:
+    try:
+        queued = queue_store.get_ticket(ticket_id)
+    except queue_store.ControlStoreUnavailableError:
+        queued = None
+    if queued is not None:
         writer = store if store is not None else DemandsStore(ledger)
         return writer.resolve_for_delivery(ticket_id)
     shared_ledger = PROJECT_ROOT / ".factory" / "demands" / "demands.json"

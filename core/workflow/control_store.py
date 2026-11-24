@@ -1700,6 +1700,12 @@ class SQLiteControlStore:
         with self._connect() as conn:
             return [json.loads(r["payload"]) for r in conn.execute(sql + " ORDER BY ticket_id", params)]
 
+    def get_ticket(self, ticket_id: str) -> dict[str, Any] | None:
+        """Single-row lookup by ``ticket_id`` (same raw payload ``list_tickets`` returns)."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT payload FROM tickets WHERE ticket_id = ? LIMIT 1", (ticket_id,)).fetchone()
+        return json.loads(row["payload"]) if row else None
+
     def upsert_owner_action(self, action_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
         with self._connect() as conn:
             conn.execute(

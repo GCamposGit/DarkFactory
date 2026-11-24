@@ -18,6 +18,10 @@ from core.demands.models import UserTicket
 
 logger = logging.getLogger("darkfac.demands.queue_store")
 
+class ControlStoreUnavailableError(RuntimeError):
+    """The control store is configured but could not be read (distinct from an absent ticket)."""
+
+
 _TERMINAL = frozenset({"completed", "cancelled", "canceled"})
 
 
@@ -66,17 +70,29 @@ def list_queue_tickets() -> list[UserTicket]:
 
 
 def get_ticket(ticket_id: str) -> UserTicket | None:
-    """Return the control-store ``UserTicket`` for ``ticket_id``.
+    """Return the control-store ``UserTicket`` for ``ticket_id`` (single-row lookup).
 
-    ``None`` when the id is absent or the store does not exist yet. Does not
-    create the store and does not raise for those two cases.
+    ``None`` when the id is absent or the store does not exist yet; does not create the store.
+    Raises ``ControlStoreUnavailableError`` when the store is configured but the read fails, so
+    callers never mistake an outage for an absent ticket.
     """
+    from core.paths import state_root
+
     if not ticket_id:
         return None
-    for ticket in list_queue_tickets():
-        if ticket.id == ticket_id:
-            return ticket
-    return None
+    if not os.environ.get("DARKFAC_HF02_DATABASE_URL") and not (state_root() / "control.db").exists():
+        return None
+    try:
+        raw = control_store().get_ticket(ticket_id)
+    except Exception as exc:  # noqa: BLE001
+        raise ControlStoreUnavailableError(f"control store unavailable reading {ticket_id}: {exc}") from exc
+    if raw is None:
+        return None
+    try:
+        return UserTicket.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Corrupted control-store ticket row for %s: %s", ticket_id, exc)
+        return None
 
 
 def is_terminal_ticket(ticket: UserTicket) -> bool:
