@@ -157,36 +157,49 @@ def test_dirty_and_held_worktrees_are_reported_pending_without_removal(
     assert (dirty / "keep.txt").is_file() and held.is_dir()
 
 
-def test_pending_worktree_is_not_reclassified_as_an_old_orphan(
-    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_worktree_dirty_only_in_generated_ledgers_is_removed(repo: SimpleNamespace) -> None:
     path = _workspace(repo.local, "USR-608")
-    (path / "keep.txt").write_text("working copy\n", encoding="utf-8")
-    real_cleanup = ticket_workspace.cleanup
-    first = real_cleanup(path, repo.local, holder_probe=_idle, now_fn=lambda: BORN + timedelta(hours=50))
+    ledger = path / ticket_workspace.TICKET_LEDGER_RELATIVE
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(path, "add", "-f", ticket_workspace.TICKET_LEDGER_RELATIVE)
+    _git(path, "commit", "--quiet", "-m", "chore: ledger")
+    ledger.write_text('[{"generated": true}]\n', encoding="utf-8")
+    first = ticket_workspace.cleanup(path, repo.local, holder_probe=_idle, now_fn=lambda: BORN + timedelta(hours=50))
     assert not first.removed and len(ticket_workspace.list_cleanup_pending(repo.local)) == 1
-    (path / "keep.txt").unlink()
 
-    calls: list[Path] = []
-
-    def tracked_cleanup(candidate: Path, root: Path, **kwargs: object) -> CleanupResult:
-        calls.append(candidate)
-        return real_cleanup(candidate, root, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
-    retried = sweep.sweep_orphan_worktrees(
-        repo.local,
-        now=BORN + timedelta(hours=51),
-        holder_probe=_idle,
-        statuses={"USR-608": "completed"},
+    swept = sweep.sweep_orphan_worktrees(
+        repo.local, now=BORN + timedelta(hours=51), holder_probe=_idle, statuses={"USR-608": "completed"}
     )
 
-    assert calls == []
-    assert retried.removed == 0 and retried.errors == retried.blocked == 0
-    assert retried.ignored == 2
-    assert any(item["path"] == str(path) and item["reason"] == "cleanup_pending" for item in retried.details)
-    assert len(ticket_workspace.list_cleanup_pending(repo.local)) == 1
-    assert path.exists()
+    assert swept.removed == 1 and swept.errors == swept.blocked == 0
+    assert not path.exists()
+    assert ticket_workspace.list_cleanup_pending(repo.local) == []
+
+
+def test_terminal_worktree_with_a_real_change_is_archived_then_removed(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = repo.tmp / "archive"
+    monkeypatch.setattr(ticket_workspace, "worktree_archive_root", lambda: archive)
+    path = _workspace(repo.local, "USR-610")
+    (path / "README.md").write_text("changed\n", encoding="utf-8")
+    (path / "new.txt").write_text("untracked\n", encoding="utf-8")
+
+    young = sweep.sweep_orphan_worktrees(
+        repo.local, now=BORN + timedelta(days=3), holder_probe=_idle, statuses={"USR-610": "completed"}
+    )
+    assert young.removed == 0 and path.exists() and not archive.exists()
+
+    old = sweep.sweep_orphan_worktrees(
+        repo.local, now=BORN + timedelta(days=8), holder_probe=_idle, statuses={"USR-610": "completed"}
+    )
+
+    assert old.removed == 1 and old.errors == 0
+    assert not path.exists()
+    (saved,) = list(archive.iterdir())
+    assert "+changed" in (saved / "changes.patch").read_text(encoding="utf-8")
+    assert (saved / "untracked" / "new.txt").read_text(encoding="utf-8") == "untracked\n"
 
 
 def test_dirty_worktree_for_an_active_ticket_is_not_sent_to_cleanup(
