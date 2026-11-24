@@ -146,8 +146,8 @@ python -m core.line.stale_active --dry-run
   e uma unica entrada `.factory/runs/` no `.gitignore`), nunca codigo; um novo arquivo de estado do
   despachante nao bloqueia mais a convergencia. Arquivo rastreado ali com alteracao continua `dirty`.
 - USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
-- USR-562: o redeploy passa `track_divergence=True` ao sync; `record_divergence_cycle` grava `node_sync_divergence.json` a cada ciclo (alerta no 2o ciclo divergente seguido) e falhas viram `logger.warning`, nao silencio.
   O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
+- USR-562: o redeploy passa `track_divergence=True` ao sync; `record_divergence_cycle` grava `node_sync_divergence.json` a cada ciclo (alerta no 2o ciclo divergente seguido) e falhas viram `logger.warning`, nao silencio.
   `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou
   depois nao substitui o alvo. Sem SHA valido, `node_sync` nao sonda e nao le `origin/main`.
   Se `rev-list` nao resolve o candidato, a classe nao e `converged` e nao ha `fetch`, salvo quando
