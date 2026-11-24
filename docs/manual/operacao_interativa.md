@@ -286,3 +286,5 @@ ignorados para que artefatos de stage nao alterem `candidate_digest`. Na etapa `
 `ANTIGRAVITY_LS_ADDRESS` configurado (USR-519, USR-531).
 
 `run_ticket.py --create` recusa `--project` desconhecido com exit 2 e `--queue-only` nao sonda cota (USR-560).
+
+Retomada de ticket (USR-547): worktree preservada so com DEMAND/GRILL e sem alteracoes e resetada e replanejada; ticket com todas as fatias concluidas cujo commit ja esta em `origin/main` segue para entrega. Detalhes em [motor.md](motor.md).

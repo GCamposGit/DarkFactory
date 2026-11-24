@@ -4058,55 +4058,72 @@ def _stage_plan(
             )
         return None
     if ticket_engine.has_any(rws):
-        # Older attempts could leave a valid PLAN without `progress.json` (for example, a
-        # restart after PLAN before RESEARCH or BUILD). Reuse it only if the worktree has no
-        # uncheckpointed implementation; otherwise there is no proof which slices produced the diff.
-        try:
-            from core.git.autonomy import GitAutonomyManager
-
-            changed = [p for p in GitAutonomyManager(workspace.main_root).changed_paths(workspace.path)
-                       if p != LEDGER_RELATIVE]
-        except Exception as exc:  # noqa: BLE001 - never erase an incomplete legacy attempt
-            return _stage_build_evidence_mismatch(
-                args, ticket, workspace, progress,
-                f"nao foi possivel verificar worktree com artefatos existentes ({type(exc).__name__}); "
-                f"preservados em {ticket_engine.workspace.context_dir(rws)}",
-            )
-        if not changed and ticket_engine.reusable_plan(rws, ticket):
-            try:
-                for stage in (Stage.INTAKE, Stage.PLAN, Stage.RESEARCH):
-                    require_artifact(stage, rws)
-                planned = ticket_engine.plan_tickets(rws)
-                ticket_engine.write_build(
-                    rws, route.get("harness"), [],
-                    plan_digest=ticket_engine.plan_digest(rws),
-                    candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
-                    worktree=str(workspace.path),
-                )
-                if not args.json:
-                    print(f"[+] Plano legado preservado: {len(planned)} sub-ticket(s); BUILD ainda nao iniciou.")
-                return None
-            except StageArtifactMissing as exc:
-                if exc.stage == Stage.RESEARCH:
-                    ticket_engine.reset_keeping_plan(rws)
-                    plan_reused = True
-                else:
-                    return _stage_build_evidence_mismatch(
-                        args, ticket, workspace, progress,
-                        f"artefatos existentes sem checkpoint valido ({type(exc).__name__}); "
-                        f"preservados em {ticket_engine.workspace.context_dir(rws)}",
-                    )
+        context_dir = ticket_engine.workspace.context_dir(rws)
+        plan_present = (context_dir / ticket_engine.SPEC_FILE).is_file() or (
+            context_dir / ticket_engine.TICKETS_FILE
+        ).is_file()
+        # INTAKE/GRILL can be persisted before PLAN starts. If that attempt stopped before
+        # writing either PLAN artifact, and the candidate is provably untouched, those files
+        # carry no implementation evidence and can be reset for a fresh planning pass.
+        early_artifacts = {entry.name for entry in context_dir.iterdir() if entry.is_file()}
+        if (
+            not plan_present
+            and early_artifacts
+            and early_artifacts.issubset({ticket_engine.DEMAND_FILE, ticket_engine.GRILL_FILE})
+        ):
+            dirty_reason = _clean_worktree_failure_reason(workspace)
+            if dirty_reason:
+                return _stage_build_evidence_mismatch(args, ticket, workspace, progress, dirty_reason)
+            ticket_engine.reset(rws)
         else:
-            if changed:
+            # Older attempts could leave a valid PLAN without `progress.json` (for example, a
+            # restart after PLAN before RESEARCH or BUILD). Reuse it only if the worktree has no
+            # uncheckpointed implementation; otherwise there is no proof which slices produced the diff.
+            try:
+                from core.git.autonomy import GitAutonomyManager
+                changed = [p for p in GitAutonomyManager(workspace.main_root).changed_paths(workspace.path)
+                           if p != LEDGER_RELATIVE]
+            except Exception as exc:  # noqa: BLE001 - never erase an incomplete legacy attempt
                 return _stage_build_evidence_mismatch(
                     args, ticket, workspace, progress,
-                    "worktree tem alteracoes de implementacao sem checkpoint BUILD "
-                    f"(arquivos: {', '.join(changed[:12])}); plano e worktree preservados",
+                    f"nao foi possivel verificar worktree com artefatos existentes ({type(exc).__name__}); "
+                    f"preservados em {ticket_engine.workspace.context_dir(rws)}",
                 )
-            return _stage_build_evidence_mismatch(
-                args, ticket, workspace, progress,
-                f"artefatos existentes sem checkpoint valido; preservados em {ticket_engine.workspace.context_dir(rws)}",
-            )
+            if not changed and ticket_engine.reusable_plan(rws, ticket):
+                try:
+                    for stage in (Stage.INTAKE, Stage.PLAN, Stage.RESEARCH):
+                        require_artifact(stage, rws)
+                    planned = ticket_engine.plan_tickets(rws)
+                    ticket_engine.write_build(
+                        rws, route.get("harness"), [],
+                        plan_digest=ticket_engine.plan_digest(rws),
+                        candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+                        worktree=str(workspace.path),
+                    )
+                    if not args.json:
+                        print(f"[+] Plano legado preservado: {len(planned)} sub-ticket(s); BUILD ainda nao iniciou.")
+                    return None
+                except StageArtifactMissing as exc:
+                    if exc.stage == Stage.RESEARCH:
+                        ticket_engine.reset_keeping_plan(rws)
+                        plan_reused = True
+                    else:
+                        return _stage_build_evidence_mismatch(
+                            args, ticket, workspace, progress,
+                            f"artefatos existentes sem checkpoint valido ({type(exc).__name__}); "
+                            f"preservados em {ticket_engine.workspace.context_dir(rws)}",
+                        )
+            else:
+                if changed:
+                    return _stage_build_evidence_mismatch(
+                        args, ticket, workspace, progress,
+                        "worktree tem alteracoes de implementacao sem checkpoint BUILD "
+                        f"(arquivos: {', '.join(changed[:12])}); plano e worktree preservados",
+                    )
+                return _stage_build_evidence_mismatch(
+                    args, ticket, workspace, progress,
+                    f"artefatos existentes sem checkpoint valido; preservados em {ticket_engine.workspace.context_dir(rws)}",
+                )
     if not plan_reused:
         # Empty canonical artifacts do not prove that a reused worktree is untouched. A prior
         # attempt may have lost or replaced its PLAN/BUILD files after writing implementation code
@@ -4520,7 +4537,7 @@ def _stage_build_fully_resumed(
 
     git_mgr = GitAutonomyManager(workspace.main_root)
     implementation_paths = [p for p in git_mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE]
-    if not implementation_paths:
+    if not implementation_paths and not _completed_build_is_merged(workspace):
         return _stage_build_evidence_mismatch(
             args, ticket, workspace, progress,
             "progress.json preservado marca todas as fatias concluidas mas a worktree nao tem alteracoes",
@@ -4535,6 +4552,53 @@ def _stage_build_fully_resumed(
         "harness": harness, "model": None, "effort": None, "cost_record": {},
         "agent_summary": message,
     }
+
+
+def _completed_build_is_merged(workspace: TicketWorkspace) -> bool:
+    """Prove a completed ticket branch is clean and already contained in ``origin/main``."""
+    from core.git.autonomy import _run_git
+
+    status = _run_git(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=workspace.path)
+    ahead = _run_git(["rev-list", "--count", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
+    merged = _run_git(["merge-base", "--is-ancestor", "HEAD", "origin/main"], cwd=workspace.path)
+    return (
+        status.returncode == 0
+        and not (status.stdout or "").strip()
+        and ahead.returncode == 0
+        and (ahead.stdout or "").strip().isdigit()
+        and int(ahead.stdout.strip()) > 0
+        and merged.returncode == 0
+    )
+
+
+def _merged_completed_build_report(
+    rws: Any,
+    workspace: TicketWorkspace,
+    plan_items: list[Any],
+    worktree_key: str,
+) -> Any:
+    """Keep a complete BUILD checkpoint when its clean committed candidate is already merged.
+
+    Committing a finished worktree changes the candidate digest even though the exact commit is now
+    part of ``origin/main``. In that case the immutable checkpoint remains trustworthy only when
+    its plan/worktree identity and complete ordered slice list still match.
+    """
+    try:
+        report = require_artifact(Stage.BUILD, rws)
+    except StageArtifactMissing:
+        return None
+    planned_ids = [item.id for item in plan_items]
+    if (
+        report.ticket_id != rws.run_id
+        or report.tickets_done != planned_ids
+        or report.completed_slice_count != len(planned_ids)
+        or report.plan_digest != ticket_engine.plan_digest(rws)
+        or report.worktree != worktree_key
+        or not report.candidate_digest
+        or not _completed_build_is_merged(workspace)
+    ):
+        return None
+    return report
 
 
 def _stage_build(
@@ -4572,7 +4636,9 @@ def _stage_build(
         candidate_digest = _build_candidate_digest(ticket.id, workspace.path)
         resumed = ticket_engine.resumable_build(rws, candidate_digest, worktree_key)
     except ticket_engine.BuildEvidenceMismatch as exc:
-        return _stage_build_evidence_mismatch(args, ticket, workspace, progress, str(exc))
+        resumed = _merged_completed_build_report(rws, workspace, plan_items, worktree_key)
+        if resumed is None:
+            return _stage_build_evidence_mismatch(args, ticket, workspace, progress, str(exc))
     if resumed is None:
         # Covers direct/test entry into BUILD as well as a valid plan that predates the
         # checkpoint marker. Bind before invoking an agent, then prove the atomic write landed.

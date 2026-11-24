@@ -740,6 +740,63 @@ def test_relaunch_with_valid_plan_does_not_call_the_planner(
     assert [i.id for i in run_ticket.ticket_engine.plan_tickets(rws)] == ["USR-447-S1", "USR-447-S2"]
 
 
+def test_intake_and_grill_without_plan_are_reset_and_replanned_when_worktree_is_clean(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.line import workspace as line_workspace
+
+    ticket, ws, rws, _ran = _resume_setup(repo, monkeypatch, done=[])
+    run_ticket.ticket_engine.reset(rws)
+    run_ticket.ticket_engine.write_demand(rws, ticket)
+    run_ticket.ticket_engine.write_grill(rws, ticket)
+    context = line_workspace.context_dir(rws)
+    monkeypatch.setattr(run_ticket, "_refuse_plan_outside_host_contract", lambda *a, **k: None)
+    planned: list[str] = []
+
+    def plan(_ticket: Any, _workspace: Any, run_workspace: Any) -> None:
+        planned.append("called")
+        assert (line_workspace.context_dir(run_workspace) / run_ticket.ticket_engine.GRILL_FILE).is_file()
+        run_ticket.ticket_engine.write_minimal_plan(run_workspace, ticket)
+        return None
+
+    monkeypatch.setattr(run_ticket, "_plan_with_agent", plan)
+    monkeypatch.setattr(
+        run_ticket.ticket_extras, "run_research",
+        lambda _ticket, run_workspace, _root: (
+            _write_skipped_research(run_workspace) or SimpleNamespace(kind="research_skipped")
+        ),
+    )
+
+    result = run_ticket._stage_plan(
+        _args(), ticket, ws, {"ticket_size": "large", "harness": "grok"}, _progress(),
+    )
+
+    assert result is None
+    assert planned == ["called"]
+    assert run_ticket.require_artifact(run_ticket.Stage.PLAN, rws).tickets
+    assert run_ticket.require_artifact(run_ticket.Stage.BUILD, rws).tickets_done == []
+
+
+def test_all_completed_slices_with_clean_branch_merged_to_origin_main_resume_for_delivery(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket, ws, rws, ran = _resume_setup(
+        repo, monkeypatch, done=["USR-447-S1", "USR-447-S2"],
+    )
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "feat: implement USR-447")
+    _git(repo.local, "merge", "--quiet", "--ff-only", ws.branch)
+    _git(repo.local, "push", "--quiet", "origin", "main")
+
+    built = run_ticket._stage_build(
+        _args(), ticket, ws, {}, {"harness": "grok", "ticket_size": "large"}, _progress(),
+    )
+
+    assert ran == []
+    assert isinstance(built, dict) and built["agent_result"].ok
+    assert "ja concluida(s)" in built["agent_summary"]
+
+
 def test_plan_of_another_demand_is_not_reused(repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     ticket, _ws, rws, _ran = _resume_setup(repo, monkeypatch, done=[])
     changed = ticket.model_copy(update={"problem_statement": "outro problema"})
