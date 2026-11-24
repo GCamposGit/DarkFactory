@@ -1,13 +1,13 @@
 # Handoff operacional
 
-Versao: 14
+Versao: 15
 Atualizado em: 2026-11-24 (Claude Code, coordenador)
 
 ## Estado
 
 - Fase: V0 da Dark Factory (ver `docs/FASE_ATUAL.md`). `core.line.v0_proof` em 0/5 (USR-557 em voo corrige o USR-279 marcado completed).
-- `main` em `438c5ac8` (#946). Deploy de 24/11 em `darkfac-cloud`: coordinator e worker `running/healthy` na imagem `d6650ced` (#921). O #944 só muda testes. O `[CHECK-MAIN]` do deploy saiu `unknown` porque não houve CI concluído no main (USR-576).
-- Despachante ativo. Em voo: USR-557 (Notebook). Ainda há 18 holds no recibo de coordenação.
+- `main` em `e33e8a39` (#948). Deploy de 24/11 à noite em `darkfac-cloud`: coordinator e worker `running/healthy` nesse sha. O `[CHECK-MAIN]` sai `unknown` porque não houve CI concluído no main (item (c) do USR-572).
+- Despachante ativo. Em voo: USR-572 (consolidado). Holds: de 19 caíram para 9 (veja Holds).
 - Hosts: Notebook e Desktop executam; o Grokbox entra e sai.
 - Cotas (24/11 ~17h): Codex 26%, Grok 24%, Antigravity vencida (RPC). A leitura do Claude ficou desconhecida por 29 h (USR-573).
 
@@ -21,6 +21,17 @@ Ao assumir a coordenação, confira o último CI **concluído** do main: `gh run
 
 - #921 (USR-538): `completed` só com prova `<sha>:merged` (e live quando exigido). Sem `gh`, a entrega recusa em vez de fazer push direto ao main. Conclusão legada sem merge volta para `planned`.
 - #944 (USR-574): testes de higiene alinhados ao USR-561. Main verde de novo.
+- #949 (USR-548): rebase por cherry-pick para tickets com 1 ou 2 commits. Destrava o `rebase_conflict`.
+- #950 (USR-547): artefato só com DEMAND/GRILL e worktree limpa é resetado; trabalho já mesclado segue para entrega.
+- #948 (USR-550): grill órfão, dependência terminal e sessão sem perguntas. A revisão pegou uma regressão de gating de capacidades, corrigida antes do merge.
+- Os runs do USR-573 e do USR-575, obsoletos, foram parados com `run_ticket.py --cancel` (o `taskkill` foi negado pelo classificador de permissões).
+
+## Holds (24/11 à noite)
+
+- Fechados sem trabalho: USR-517 e USR-519 (superados), USR-476 (allow já vigente), USR-462 (duplicado do 547 e do 446), USR-480, USR-551 e USR-552 (escopo grande demais para o valor; worktrees preservadas).
+- Liberados para nova tentativa da frota: USR-520 e USR-522 (agora pelo cherry-pick do #949) e USR-554 (o hold veio de um lock de suíte parado).
+- Restantes: USR-446 (retrabalho do review em `stage_grill.py`/`demands/grill.py`), USR-537 e USR-545 (portão estourou ou falhou; a worktree tem commits), USR-483 (#912, redesenho), MDL-01/02 (dependem do item (a) do USR-572 e do owner).
+- A OA-099 e a OA-100 (via expressa de USR-547/550) ficaram desnecessárias com os merges. A CLI de owner actions neste host não as lista, então feche-as pelo Hub.
 
 ## PR #912 (USR-483) segurado
 
