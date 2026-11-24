@@ -268,29 +268,11 @@ KNOWN_EPHEMERAL_PATTERNS = (
     ".factory/learning/observations/",
 )
 
-# These explicit generated fleet artifacts can be untracked on nodes that do
-# not yet have the matching .gitignore entries. Keep source files dirty and do
-# not ignore .factory/runs as a whole.
-FLEET_RUNTIME_UNTRACKED_FILES = frozenset(
-    {
-        ".factory/runs/fleet_dispatcher_state.json",  # Dispatcher checkpoint for queued fleet work.
-        ".factory/runs/deploy_deferrals.json",  # Dispatcher deploy deferral state.
-        ".factory/runs/pending_deliveries.json",  # Dispatcher pending delivery state.
-        ".factory/runs/express_episodes.json",  # Dispatcher express episode state.
-        ".factory/runs/sentinel_state.json",  # Sentinel's persisted runtime state.
-        ".factory/runs/fleet_policy_snapshot.json",  # Generated snapshot consumed by fleet policy routing.
-        ".factory/runs/model_audit_receipt.json",  # Generated receipt from model and quota auditing.
-        ".factory/runs/recovery_list_state.json",  # Checkpoint for the recovery-list worker.
-        ".factory/runs/review_benchmark.jsonl",  # Local review benchmark observations written during runs.
-    }
-)
-FLEET_RUNTIME_UNTRACKED_DIRECTORIES = (
-    ".factory/runs/fleet_dispatcher_logs",  # Dispatcher execution logs, not inputs to the checkout.
-    ".factory/runs/outcomes",  # Results emitted by fleet runs.
-    ".factory/runs/ci_recovery",  # Persisted CI recovery queue and execution state.
-    ".factory/runs/node_sync_conflicts",  # Local copies preserved when runtime state conflicts upstream.
-    ".factory/runs/model_audit",  # Per-run model audit sidecar files generated locally.
-)
+# USR-561: anything untracked under .factory/runs/ is generated fleet runtime state (dispatcher,
+# sentinel, audits, logs), never source: no code commits files from there (the lone tracked evidence
+# file stays tracked and a modification to it still dirties the checkout). A prefix rule replaces
+# the old per-file allowlist, so a new state file no longer blocks deploy convergence.
+FLEET_RUNTIME_UNTRACKED_PREFIX = ".factory/runs/"
 
 
 # USR-343 S4b / USR-374: these ledgers are generated snapshots (scripts/snapshot_queue.py) or local
@@ -402,12 +384,7 @@ def _porcelain_path(entry: str) -> str:
 def is_fleet_runtime_untracked_file(path_str: str) -> bool:
     """Return whether an untracked path is generated local fleet runtime state."""
     norm = path_str.replace("\\", "/").strip().strip('"').strip("/").casefold()
-    if norm in FLEET_RUNTIME_UNTRACKED_FILES:
-        return True
-    return any(
-        norm == directory or norm.startswith(f"{directory}/")
-        for directory in FLEET_RUNTIME_UNTRACKED_DIRECTORIES
-    )
+    return norm.startswith(FLEET_RUNTIME_UNTRACKED_PREFIX)
 
 
 def classify_checkout(
