@@ -15187,8 +15187,8 @@
     "priority": 0,
     "title": "Recibo de coordenacao nao acusa despachante parado por deploy com recuperacao esgotada",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c70674957b1a5a19431303782cbff9a467ed2f30",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -15209,6 +15209,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-24T00:32:26.067911Z",
-    "updated_at": "2026-11-24T00:32:26.067911Z"
+    "updated_at": "2026-11-24T18:07:31.352821Z"
   }
 ]
