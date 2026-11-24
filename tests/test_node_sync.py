@@ -333,6 +333,8 @@ def test_notebook_clean_main_fast_forwards() -> None:
         ("?? .factory/runs/model_audit/audit.json\n?? .factory/runs/review_benchmark.jsonl", True),
         ("?? .factory/runs/deploy_deferrals.json\n?? .factory/runs/pending_deliveries.json", True),
         (" M .factory/learning/learning_ledger.json", True),
+        # run_git strips the output: the only dirty line arrives without its leading blank.
+        ("M .factory/learning/learning_ledger.json", True),
         (" M .factory/learning/learning_ledger.json\n M core/app.py", False),
         ("?? .factory/runs/review_benchmark.jsonl\n?? local.py", False),
         ("M  .factory/runs/review_benchmark.jsonl", False),
@@ -365,7 +367,7 @@ def test_modified_learning_ledger_is_behind_and_reapplied_after_fast_forward(tmp
     class _LedgerGit(FakeGit):
         def __call__(self, root: Path, args: list[str]) -> str:
             if args[:2] == ["status", "--porcelain"]:
-                return f" M {ledger}"
+                return f"M {ledger}"  # as run_git returns it: stripped
             if args == ["diff", "--name-only"]:
                 return ledger
             if args[:2] == ["ls-files", "--others"]:

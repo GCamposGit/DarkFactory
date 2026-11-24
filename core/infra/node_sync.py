@@ -389,6 +389,15 @@ def is_ephemeral_dirty_file(path_str: str) -> bool:
     return any(pattern in norm for pattern in KNOWN_EPHEMERAL_PATTERNS)
 
 
+def _porcelain_path(entry: str) -> str:
+    """Path of one ``git status --porcelain`` line.
+
+    ``run_git`` strips the output, so the first line loses its leading blank (`` M x`` -> ``M x``);
+    a fixed ``entry[3:]`` would then cut the path's first character.
+    """
+    return entry[2:].strip().strip('"')
+
+
 def is_fleet_runtime_untracked_file(path_str: str) -> bool:
     """Return whether an untracked path is generated local fleet runtime state."""
     norm = path_str.replace("\\", "/").strip().strip('"').strip("/").casefold()
@@ -893,8 +902,8 @@ def sync(
                 )
             elif any(
                 not (
-                    is_generated_ledger(entry[3:])
-                    or (entry.startswith("?? ") and is_fleet_runtime_untracked_file(entry[3:]))
+                    is_generated_ledger(_porcelain_path(entry))
+                    or (entry.startswith("??") and is_fleet_runtime_untracked_file(_porcelain_path(entry)))
                 )
                 for entry in git(root, ["status", "--porcelain", "--untracked-files=all"]).splitlines()
             ):
