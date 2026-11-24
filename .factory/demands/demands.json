@@ -15241,5 +15241,35 @@
     "dependencies": [],
     "created_at": "2026-11-21T06:07:46.758845Z",
     "updated_at": "2026-11-21T06:07:46.758845Z"
+  },
+  {
+    "id": "USR-548",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Rebase automatico por cherry-pick para tickets antigos com commit unico",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Triagem de 23/11: USR-517, USR-520 e USR-522 (de 14-15/11) estao em hold rebase_conflict; conflitos recorrentes em docs/manual/learning_pack.md, run_ticket.py e testes. Os tickets tem 1-2 commits prontos, mas a esteira so tenta rebase e desiste apos 3 vezes.",
+    "core_journey": [
+      "Triagem de 23/11: USR-517, USR-520 e USR-522 (de 14-15/11) estao em hold rebase_conflict; conflitos recorrentes em docs/manual/learning_pack.md, run_ticket.py e testes. Os tickets tem 1-2 commits prontos, mas a esteira so tenta rebase e desiste apos 3 vezes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com conflito de rebase e ate 2 commits do ticket, a esteira tenta reaplicar os commits sobre origin/main novo (cherry-pick, com agente de resolucao delimitado ao diff do ticket) antes de contar falha; teste cobre conflito resolvido e conflito irresolvel (vai a hold com arquivos listados)."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-23T09:58:22.803918Z",
+    "updated_at": "2026-11-23T09:58:22.803918Z"
   }
 ]

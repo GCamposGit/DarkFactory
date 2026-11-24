@@ -126,7 +126,18 @@ def conflict_fingerprint(
     files = [_file_snapshot(cwd, path) for path in sorted(paths)]
     from core.git.autonomy import _run_git
 
-    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).stdout.strip()
+    # HEAD is detached while Git is replaying a commit. The rebase metadata already
+    # records the ticket branch, so avoid starting another Git process just to
+    # identify it (the fingerprint's other inputs already come from this rebase).
+    git_dir = Path(_run_git(["rev-parse", "--git-dir"], cwd=cwd).stdout.strip())
+    git_dir = git_dir if git_dir.is_absolute() else cwd / git_dir
+    rebase_dir = git_dir / "rebase-merge"
+    if not rebase_dir.is_dir():
+        rebase_dir = git_dir / "rebase-apply"
+    try:
+        branch = (rebase_dir / "head-name").read_text(encoding="utf-8").strip()
+    except OSError:
+        branch = ""
     ticket_context = {
         "title": str(getattr(ticket, "title", "") or ""),
         "problem_statement": str(getattr(ticket, "problem_statement", "") or ""),

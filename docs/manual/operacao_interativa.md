@@ -82,6 +82,12 @@ Esse argumento autoriza somente o email de wake do grokbox. Envios autorizados c
 
 Na entrega em frota, `run_ticket.py` executa o portao oficial com a raiz do projeto apontada explicitamente para a worktree candidata (`DARKFAC_PROJECT_ROOT`). Isso impede que um valor herdado do checkout compartilhado direcione o runner para outra arvore. As configuracoes de estado da frota, como `DARKFAC_STATE_ROOT`, continuam no ambiente do processo filho. O portao valida a candidata e falha fechado se ela estiver suja.
 
+Se a entrega de um ticket antigo encontrar conflito no rebase, a recuperacao tenta
+reaplicar ate dois commits do ticket sobre a base atualizada. A resolucao fica
+restrita ao diff do ticket; sem rota ou quando o cherry-pick falha, o candidato
+original permanece preservado em hold tecnico. O fluxo completo esta em
+[merge autonomo](merge_autonomo.md#recuperacao-de-conflitos-de-rebase-pequenos-usr-548).
+
 ## Entrega de ticket so na fila (USR-424)
 
 `--resume-delivery` resolve o id antes de exigir o `demands.json` da worktree, nesta ordem: ledger da worktree, fila duravel do control store, arquivo do checkout compartilhado e `origin/main`. A fila materializa o mesmo id no ledger da worktree, sem `next_ticket_id`, sem o agente de correcao e sem copiar o ledger compartilhado. O arquivo do checkout compartilhado segue para a entrega sem gravar a worktree e sem criar linha na fila. Id so em `origin/main` continua encontrado; o rebase posterior traz a linha. Id ausente nos quatro locais encerra com exit 1, `ok=false`, `cause=ticket_absent` e `error` no formato `Ticket <ID> not found in demands store`. O stderr cita o ledger da worktree, a control store, o checkout compartilhado e `origin/main`. O ledger e o `control.db` permanecem como estavam. `run_ticket.py USR-XXX` carrega o id no ledger do checkout (a fila entra nessa leitura) e, se faltar, em `origin/main`.
