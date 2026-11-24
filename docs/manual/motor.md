@@ -584,3 +584,5 @@ a mesma assinatura estrutural (detalhes operacionais em
 # Prioridade ao criar uma demanda pela CLI
 
 `run_ticket.py --create` aceita `--priority <inteiro>` (padrão `0`) e persiste o valor no ticket criado. Use valores maiores para colocar trabalho elegível antes na fila. O dispatcher aplica a prioridade depois de seus filtros de dependência, reserva e recuperação; o argumento não força a execução de um ticket bloqueado.
+
+`run_ticket.py --create --queue-only` (USR-560) recusa `--project` fora do registro (exit 2, nenhum ticket) e pula a sonda de cota, pois so registra no control store.
