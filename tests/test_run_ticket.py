@@ -6,7 +6,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -122,7 +122,7 @@ def test_queue_only_registers_ticket_without_running_agent(
 ) -> None:
     """--create --queue-only files the ticket in the queue and never invokes an agent."""
     queued = run_ticket.UserTicket(id="USR-99", project_id="darkfac", title="Defeito X", problem_statement="p")
-    with patch("run_ticket._queue_ticket_isolated", return_value=queued) as queue,          patch("run_ticket.run_agent") as agent:
+    with patch("run_ticket._queue_ticket_isolated", return_value=queued) as queue,          patch("run_ticket.run_agent") as agent,          patch("run_ticket.inspect_quotas", side_effect=AssertionError("queue-only nao sonda cota")):
         exit_code = main(["--create", "--queue-only", "--title", "Defeito X", "--problem", "p"])
     assert exit_code == 0
     queue.assert_called_once()
@@ -136,7 +136,13 @@ def test_queue_only_registers_ticket_without_running_agent(
     monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
     queue_store._store.cache_clear()
     args = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--title", "Defeito Y", "--project", "produto", "--priority", "8"])
-    with patch.object(run_ticket.DemandsStore, "next_ticket_id", return_value="USR-998"),             patch("core.git.ticket_workspace.create_workspace") as workspace:
+    # USR-560: projeto fora do registro e recusado (exit 2) sem registrar nada.
+    with patch("run_ticket.inspect_quotas", side_effect=AssertionError("sem sonda")):
+        assert main(["--create", "--queue-only", "--title", "Z", "--project", "produto"]) == 2
+    assert "produto" in capsys.readouterr().err and queue_store.list_queue_tickets() == []
+    registry = MagicMock()
+    registry.get_project.return_value = object()
+    with patch("core.projects.registry.get_project_registry", return_value=registry), patch.object(run_ticket.DemandsStore, "next_ticket_id", return_value="USR-998"),             patch("core.git.ticket_workspace.create_workspace") as workspace:
         ticket = run_ticket._queue_ticket_isolated(args)
     workspace.assert_not_called()
     assert ticket is not None and ticket.id == "USR-998"
