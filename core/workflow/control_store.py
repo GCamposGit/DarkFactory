@@ -233,6 +233,15 @@ class ControlStore(Protocol):
         ...
 
 
+def dependency_plan(parent_run_id: str | None, parent_status: str | None) -> tuple[str, str, str | None]:
+    """Return (run_status, grill_job_status, cause_code) for a run that may depend on a parent run."""
+    if not parent_run_id or parent_status == "completed":
+        return "active", "pending", None
+    if parent_status in ("failed", "cancelled"):
+        return "cancelled", "cancelled", f"parent_run_terminal:{parent_run_id}:{parent_status}"
+    return "active", "waiting_dependency", f"parent_run_pending:{parent_run_id}:{parent_status}"
+
+
 class SQLiteControlStore:
     """Canonical SQLite implementation of ControlStore for local-first execution.
 
@@ -297,7 +306,6 @@ class SQLiteControlStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     completed_at TEXT,
-                    parent_run_id TEXT,
                     CONSTRAINT uq_runs_project_demand UNIQUE (project_id, demand_id, demand_version)
                 );
 
@@ -494,6 +502,23 @@ class SQLiteControlStore:
         if "parent_run_id" not in run_columns:
             conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
 
+    # HF-27-08 review item 9: attempted (see git history) to
+    # stamp the initial grill job's required_capabilities from
+    # the registered project, mirroring every later line stage.
+    # REVERTED: ControlStore.accept() is the shared HF-05 intake
+    # entrypoint, used by many non-line callers/tests with
+    # project_id="darkfac" as a convenient default string, and
+    # the *real* registered "darkfac" project (.factory/projects.json)
+    # legitimately has its own repo_url/deploy/smoke config --
+    # the factory manages itself through the line. There is no
+    # reliable signal at accept() time to tell "a genuine line
+    # demand for a line-capable project" apart from "a generic
+    # HF-05 test/caller that happens to reuse project_id=darkfac
+    # with no intention of the line's capability gating"; gating
+    # unconditionally broke 25 pre-existing, unrelated tests
+    # across test_control_store.py, test_public_autonomous_intake.py,
+    # etc. Left as a documented gap for a future ticket to close
+    # properly (e.g. an explicit is_line flag on IntakeCommand).
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         """Accept an intake command transactionally with idempotency checking."""
         now_iso = now.isoformat()
@@ -534,21 +559,12 @@ class SQLiteControlStore:
                 run_id = f"run-{uuid4().hex[:12]}"
                 initial_job_id = f"job-{uuid4().hex[:12]}"
                 parent_run_id = str(command.payload.get("depends_on") or "").strip() or None
-                parent_status = None
+                parent = None
                 if parent_run_id:
                     cur.execute("SELECT status FROM runs WHERE run_id = ?", (parent_run_id,))
                     parent = cur.fetchone()
-                    parent_status = str(parent["status"]) if parent else "unknown"
-                terminal_parent = parent_run_id and parent_status in ("failed", "cancelled")
-                waiting_parent = parent_run_id and parent_status != "completed" and not terminal_parent
-                run_status = "cancelled" if terminal_parent else "active"
-                job_status = "cancelled" if terminal_parent else ("waiting_dependency" if waiting_parent else "pending")
-                dependency_cause = (
-                    f"parent_run_terminal:{parent_run_id}:{parent_status}"
-                    if terminal_parent
-                    else f"parent_run_pending:{parent_run_id}:{parent_status}"
-                    if waiting_parent
-                    else None
+                run_status, job_status, dependency_cause = dependency_plan(
+                    parent_run_id, str(parent["status"]) if parent else "unknown"
                 )
 
                 cur.execute(
@@ -574,23 +590,6 @@ class SQLiteControlStore:
                     ),
                 )
 
-                # HF-27-08 review item 9: attempted (see git history) to
-                # stamp the initial grill job's required_capabilities from
-                # the registered project, mirroring every later line stage.
-                # REVERTED: ControlStore.accept() is the shared HF-05 intake
-                # entrypoint, used by many non-line callers/tests with
-                # project_id="darkfac" as a convenient default string, and
-                # the *real* registered "darkfac" project (.factory/projects.json)
-                # legitimately has its own repo_url/deploy/smoke config --
-                # the factory manages itself through the line. There is no
-                # reliable signal at accept() time to tell "a genuine line
-                # demand for a line-capable project" apart from "a generic
-                # HF-05 test/caller that happens to reuse project_id=darkfac
-                # with no intention of the line's capability gating"; gating
-                # unconditionally broke 25 pre-existing, unrelated tests
-                # across test_control_store.py, test_public_autonomous_intake.py,
-                # etc. Left as a documented gap for a future ticket to close
-                # properly (e.g. an explicit is_line flag on IntakeCommand).
                 ticket_id = str(command.payload.get("ticket_id") or demand_id)
                 cur.execute(
                     """

@@ -74,6 +74,12 @@ def _has_valid_grill_session_evidence(task: Any) -> bool:
         return False
 
 
+def _is_unproven_grill(task: Any) -> bool:
+    """A waiting Grill job without durable question/deadline evidence is not an owner block."""
+    is_grill = _queue_text(task, "stage").lower() == "grill" or "grill" in _queue_text(task, "cause_code").lower()
+    return is_grill and not _has_valid_grill_session_evidence(task)
+
+
 def _queue_project(task: Any) -> str:
     """Project of a dashboard row. The row itself has no project_id; the evidence does."""
     explicit = _queue_text(task, "project_id")
@@ -150,7 +156,7 @@ class InterventionsMixin:
                 for task in task_rep.queue:
                     terminal_runs.update(_terminal_run_id(task))
                     t_status = getattr(task, "status", None) if not isinstance(task, dict) else task.get("status")
-                    if str(t_status or "").upper() == "WAITING_HUMAN":
+                    if str(t_status or "").upper() == "WAITING_HUMAN" and not _is_unproven_grill(task):
                         t_id = _queue_text(task, "task_id", "id")
                         t_ticket = _queue_text(task, "ticket_id") or t_id
                         t_run = _queue_text(task, "run_id")
@@ -159,9 +165,6 @@ class InterventionsMixin:
                         t_cause = _queue_text(task, "cause_code")
                         t_stage = _queue_text(task, "stage")
                         t_diag = _queue_text(task, "diagnostic")
-                        is_grill_job = t_stage.lower() == "grill" or "grill" in t_cause.lower()
-                        if is_grill_job and not _has_valid_grill_session_evidence(task):
-                            continue
                         label = t_ticket or t_run or t_id
                         if (project_id and t_proj != project_id) or t_ticket in planning_only:
                             continue  # planning-only umbrella tickets have no open question

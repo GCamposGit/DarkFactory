@@ -39,7 +39,9 @@ from core.workflow.control_contracts import (
     fleet_managed_enabled,
     normalize_cause_code,
 )
-from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough, RUN_OPEN_JOB_STATUSES
+from core.workflow.control_store import (
+    ControlStore, SQLiteControlStore, _is_ready_enough, RUN_OPEN_JOB_STATUSES, dependency_plan,
+)
 from core.orchestrator.cloud_db import resolve_control_database
 
 logger = logging.getLogger(__name__)
@@ -299,6 +301,14 @@ class PostgresControlStore:
                 f"Failed to initialize PostgreSQL schema ({type(exc).__name__})"
             ) from exc
 
+        # HF-27-08 review item 9: reverted -- see the
+        # matching (detailed) comment in
+        # core.workflow.control_store.SQLiteControlStore.accept().
+        # Stamping the shared grill job broke 25 pre-existing,
+        # unrelated tests that reuse project_id="darkfac" as a
+        # generic default with no line intent, since the real
+        # registered "darkfac" project legitimately has its
+        # own repo_url/deploy config.
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         if self.mock_mode:
             return self._backend.accept(command, now)
@@ -337,21 +347,12 @@ class PostgresControlStore:
                         run_id = f"run-{uuid4().hex[:12]}"
                         initial_job_id = f"job-{uuid4().hex[:12]}"
                         parent_run_id = str(command.payload.get("depends_on") or "").strip() or None
-                        parent_status = None
+                        parent = None
                         if parent_run_id:
                             cur.execute("SELECT status FROM runs WHERE run_id = %s", (parent_run_id,))
                             parent = cur.fetchone()
-                            parent_status = str(parent[0]) if parent else "unknown"
-                        terminal_parent = parent_run_id and parent_status in ("failed", "cancelled")
-                        waiting_parent = parent_run_id and parent_status != "completed" and not terminal_parent
-                        run_status = "cancelled" if terminal_parent else "active"
-                        job_status = "cancelled" if terminal_parent else ("waiting_dependency" if waiting_parent else "pending")
-                        dependency_cause = (
-                            f"parent_run_terminal:{parent_run_id}:{parent_status}"
-                            if terminal_parent
-                            else f"parent_run_pending:{parent_run_id}:{parent_status}"
-                            if waiting_parent
-                            else None
+                        run_status, job_status, dependency_cause = dependency_plan(
+                            parent_run_id, str(parent[0]) if parent else "unknown"
                         )
 
                         cur.execute(
@@ -376,14 +377,6 @@ class PostgresControlStore:
                             ),
                         )
 
-                        # HF-27-08 review item 9: reverted -- see the
-                        # matching (detailed) comment in
-                        # core.workflow.control_store.SQLiteControlStore.accept().
-                        # Stamping the shared grill job broke 25 pre-existing,
-                        # unrelated tests that reuse project_id="darkfac" as a
-                        # generic default with no line intent, since the real
-                        # registered "darkfac" project legitimately has its
-                        # own repo_url/deploy config.
                         ticket_id = str(command.payload.get("ticket_id") or demand_id)
                         cur.execute(
                             """
@@ -398,12 +391,7 @@ class PostgresControlStore:
                         )
 
                         outbox_payload = json.dumps(
-                            {
-                                "run_id": run_id,
-                                "project_id": command.project_id,
-                                "demand_id": demand_id,
-                                "stage": "grill",
-                            }
+                            {"run_id": run_id, "project_id": command.project_id, "demand_id": demand_id, "stage": "grill"}
                         )
                         if job_status == "pending":
                             cur.execute(
@@ -791,6 +779,18 @@ class PostgresControlStore:
                 f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({reservation_status}). Old owner cannot publish."
             )
 
+    @staticmethod
+    def _complete_run_when_idle(cur: Any, run_id: str, now_utc: datetime) -> None:
+        cur.execute(
+            "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status IN ('pending','running','waiting_human','waiting_dependency')",
+            (run_id,),
+        )
+        if cur.fetchone()[0] == 0:
+            cur.execute(
+                "UPDATE runs SET status = 'completed', completed_at = %s, updated_at = %s WHERE run_id = %s AND status = 'active'",
+                (now_utc, now_utc, run_id),
+            )
+
     def finish(self, claim: Claim, result: StageResult, now: datetime) -> None:
         if self.mock_mode:
             return self._backend.finish(claim, result, now)
@@ -936,7 +936,6 @@ class PostgresControlStore:
                                 "UPDATE runs SET status = %s, completed_at = %s, updated_at = %s WHERE run_id = %s AND status = 'active'",
                                 (result.outcome, now_utc, now_utc, jk.run_id),
                             )
-
                     if result.outcome != "success" and result.evidence_refs:
                         # Same contract as the SQLite store: a failed/retry/waiting stage keeps its evidence
                         # refs (failing test ids, log names); empty refs never clobber a stored value.
@@ -958,15 +957,7 @@ class PostgresControlStore:
                         )
 
                     if result.outcome == "success":
-                        cur.execute(
-                            "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status IN ('pending','running','waiting_human','waiting_dependency')",
-                            (jk.run_id,),
-                        )
-                        if cur.fetchone()[0] == 0:
-                            cur.execute(
-                                "UPDATE runs SET status = 'completed', completed_at = %s, updated_at = %s WHERE run_id = %s AND status = 'active'",
-                                (now_utc, now_utc, jk.run_id),
-                            )
+                        self._complete_run_when_idle(cur, jk.run_id, now_utc)
 
                     conn.commit()
         except (StaleLeaseError, InvalidResultError):
