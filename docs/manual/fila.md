@@ -147,7 +147,6 @@ python -m core.line.stale_active --dry-run
   despachante nao bloqueia mais a convergencia. Arquivo rastreado ali com alteracao continua `dirty`.
 - USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
   O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
-- USR-562: o redeploy passa `track_divergence=True` ao sync; `record_divergence_cycle` grava `node_sync_divergence.json` a cada ciclo (alerta no 2o ciclo divergente seguido) e falhas viram `logger.warning`, nao silencio.
   `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou
   depois nao substitui o alvo. Sem SHA valido, `node_sync` nao sonda e nao le `origin/main`.
   Se `rev-list` nao resolve o candidato, a classe nao e `converged` e nao ha `fetch`, salvo quando
@@ -168,6 +167,7 @@ python -m core.line.stale_active --dry-run
   USR-515: antes da espera de tag, o pin de GHCR, compose, blue-green, `darkfac-cloud` e `/health`
   pode ser o ancestral publicado quando o alvo esta fora dos paths de `hub-image.yml` e ha runtime
   no intervalo. O sync permanece no SHA alvo. O stdout traz `published=` e `reach=`.
+- USR-562: o redeploy passa `track_divergence=True` ao sync; `record_divergence_cycle` grava `node_sync_divergence.json` a cada ciclo (alerta no 2o ciclo divergente seguido) e falhas viram `logger.warning`, nao silencio.
 
 # Fila de demandas (entrada)
 
