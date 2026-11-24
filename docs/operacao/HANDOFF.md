@@ -6,7 +6,7 @@ Atualizado em: 2026-11-24 (Claude Code, coordenador)
 ## Estado
 
 - Fase: V0 da Dark Factory (ver `docs/FASE_ATUAL.md`). `core.line.v0_proof` em 0/5 (USR-557 em voo corrige o USR-279 marcado completed).
-- `main` em `bb8a1231` (#944). Deploy de 24/11 em `darkfac-cloud`: coordinator e worker `running/healthy` na imagem `d6650ced` (#921). O #944 só muda testes. O `[CHECK-MAIN]` do deploy saiu `unknown` porque não houve CI concluído no main (USR-576).
+- `main` em `438c5ac8` (#946). Deploy de 24/11 em `darkfac-cloud`: coordinator e worker `running/healthy` na imagem `d6650ced` (#921). O #944 só muda testes. O `[CHECK-MAIN]` do deploy saiu `unknown` porque não houve CI concluído no main (USR-576).
 - Despachante ativo. Em voo: USR-557 (Notebook). Ainda há 18 holds no recibo de coordenação.
 - Hosts: Notebook e Desktop executam; o Grokbox entra e sai.
 - Cotas (24/11 ~17h): Codex 26%, Grok 24%, Antigravity vencida (RPC). A leitura do Claude ficou desconhecida por 29 h (USR-573).
@@ -34,14 +34,12 @@ A revisão cruzada do Codex pediu mudanças de desenho (comentário no PR):
 
 O próximo passo é redesenhar com um caminho único de coordenação e estado compartilhado entre hosts, não remendar. O CI do head `78780b51` está verde.
 
-## Defeitos registrados em 24/11
+## Defeitos de 24/11
 
-- USR-570: commit autônomo falha com `Author identity unknown` em repo de produto sem `user.name` (MDL-02 no Notebook).
-- USR-571: a varredura de segredos bloqueia fixture PEM falsa (MDL-01/03) e sai com `cause=unknown`.
-- USR-572: a retentativa abre worktree nova e cai em `build_evidence_mismatch` contra o progresso preservado (MDL-01/02 acumulam worktrees em `Site_Mansaodolago`).
-- USR-573: a CLI npm do Claude no Notebook (2.1.278) rejeita o id Haiku do registro, e a sonda de cota devolve vazio. Não há npm real no Notebook (o `npm.cmd` é wrapper do Codex).
-- USR-575: o seletor de testes afetados ignora o `.gitignore`.
-- USR-576: o CI do main cancelado em sequência esconde o vermelho (mexe em `.github/workflows`, que é protegido).
+Regra do owner (24/11): corrija direto o que der e consolide o resto num ticket por sessão. Um ticket por sintoma vira loop de frota.
+
+- Corrigidos direto no #946: USR-570 (identidade git de fallback em repo de produto), USR-571 (PEM sem corpo base64 não bloqueia; a chave real e a PEM criptografada continuam bloqueadas) e USR-575 (o fallback do PR mantém os testes citados por mudança não-Python, como `.gitignore`).
+- Pendente num único ticket, o USR-572 (consolidado; o USR-573 e o USR-576 foram cancelados e absorvidos): (a) a retentativa abre worktree nova e cai em `build_evidence_mismatch`; (b) a CLI npm do Claude no Notebook rejeita o id Haiku, e a cota fica desconhecida; (c) o CI do main foi cancelado em série e escondeu o vermelho (o workflow é protegido).
 
 ## Armadilhas
 
