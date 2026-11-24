@@ -1,4 +1,4 @@
-<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/notifications/telegram_delivery.py, scripts/telegram_delivery_check.py -->
+<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/notifications/telegram_delivery.py, scripts/telegram_delivery_check.py, core/integrations/telegram.py, core/line/failure_alerts.py, core/line/human.py, core/notifications/service.py -->
 # Operacao interativa por Claude Code, Codex, Grok Build e Antigravity (USR-431, USR-433, USR-539)
 
 ## Assumir a coordenação
@@ -266,6 +266,8 @@ python C:\dev\DarkFac\scripts\telegram_delivery_check.py --notification-id notif
 ```
 
 Estado consolidado do canal Telegram: o alerta usa o bot owner e o primeiro destino efetivo de `load_telegram_config` (ambiente do processo ou `.env` do checkout; id zero fica de fora). Sem token ou sem destino o comando recusa e nao chama `sendMessage`. O diagnostico de `notif_3e46d90ee946` neste processo encontrou o evento e recusou com `missing_token`, sem imprimir titulo, texto, token ou chat. Quando token e destino existem, o replay imprime `notification_id`, `role`, `message_id` e `timestamp`; a execucao seguinte do mesmo id devolve `already_delivered`.
+
+## Alertas de hold (USR-549)
 
 Alertas operacionais do bot owner usam `TELEGRAM_OWNER_CHAT_ID` primeiro e, quando nao configurado, podem recorrer a `TELEGRAM_AUTHORIZED_CHATS`/`TELEGRAM_ALLOWED_CHATS` e a `authorized_chat_ids` do JSON local. Holds de ticket (`notify_ticket_hold`) exigem o destino dedicado: nao recorrem a chats nem usuarios compartilhados (`TELEGRAM_AUTHORIZED_USERS`/`TELEGRAM_ALLOWED_USERS`). Configure `TELEGRAM_OWNER_CHAT_ID` como ID numerico do chat privado do owner no ambiente do servico que executa a linha. Se estiver ausente ou invalido, o evento permanece no DarkHub com essa instrucao visivel, registra `missing_destination` e nao declara entrega Telegram nem cria item de outbox.
 
