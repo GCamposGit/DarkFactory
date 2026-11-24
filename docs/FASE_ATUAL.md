@@ -48,7 +48,7 @@ Sessões de coordenação podem iniciar pelo pedido **“assuma a fábrica”** 
 - Os três canais funcionam sem erro.
 
 ## Piloto de produto (M1 escolhido em 24/11 para a prova V0)
-- Mansão do Lago é **cliente real** (não o owner). Projeto `mansaodolago` no registro, prefixo MDL, repo existente `GCamposGit/Site_Mansaodolago` (clone em `C:\dev\Site_Mansaodolago`), `requires_commercial_acceptance: true`: push em `master` publica o site por FTP, então merge, push em master e deploy só com aceite expresso do owner. O código do M1 vive na branch `darkfac/m1-seo`. Relatórios vão por e-mail ao administrador (destinatários no cofre, `MANSAODOLAGO_REPORT_RECIPIENTS`); seção admin no próprio site fica para depois.
+- Mansão do Lago é **cliente real** (não o owner). Projeto `mansaodolago` no registro, prefixo MDL, repo existente `GCamposGit/Site_Mansaodolago` (clone em `C:\dev\Site_Mansaodolago`), `requires_commercial_acceptance: true`: push em `master` publica o site por FTP, então merge, push em master e deploy só com aceite expresso do owner. O código do M1 vive na branch `darkfac/m1-seo`, que é a `default_branch` do projeto no registro: os PRs da frota miram essa branch, nunca `master`. A validação declarada é `python -m compileall -q .`; a adoção completa ficou de fora porque copiaria o runtime da fábrica para um repositório público. Relatórios vão por e-mail ao administrador (destinatários no cofre, `MANSAODOLAGO_REPORT_RECIPIENTS`); seção admin no próprio site fica para depois.
 - Gestor de SEO e redes sociais da mansaodolago.com, em fases:
   - M1: auditoria de SEO e Search Console, relatório semanal e calendário de conteúdo (sem Instagram/Facebook: a empresa ainda não tem as contas).
   - M2: publicação recorrente e SEO on-page, aprovação por lote.
