@@ -173,7 +173,11 @@ class _Attempt:
         code = 75 if code and category == "infra" else code
         if not self.enabled:
             return code
-        detail = error_detail(f"{self.output}\n{message}", cause)
+        # An exception caught at the launcher boundary has a concise structured
+        # message. Prefer it over the traceback captured in ``self.output`` so
+        # the stored diagnosis does not grow a redundant exception class prefix.
+        detail_source = message if payload.get("error") and message else f"{self.output}\n{message}"
+        detail = error_detail(detail_source, cause)
         previous = read_outcome(self.ticket, self.run_id)
         if code and previous is not None and previous.exit_code:
             cause, category, detail, code = previous.cause, previous.cause_class, previous.detail, previous.exit_code
