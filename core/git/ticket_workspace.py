@@ -507,6 +507,8 @@ def cleanup(
     rmtree_fn: Optional[RmtreeFn] = None,
     now_fn: Optional[NowFn] = None,
     holder_probe: Optional[HolderProbe] = None,
+    ignore_generated_ledgers: bool = False,
+    archive_root: Optional[Path] = None,
 ) -> CleanupResult:
     """Remove a worktree directory as reliably as the platform allows.
 
@@ -525,6 +527,11 @@ def cleanup(
     Never raises; ``CleanupResult.outcome`` records removal, dirty/process blocks,
     or an error. The Git remove is intentionally non-forced so a change created
     between inspection and removal is still rejected by Git.
+
+    ``ignore_generated_ledgers`` treats dirt confined to the generated ledgers as
+    no work (reset before removal). ``archive_root`` additionally archives any
+    other change (``git diff HEAD --binary`` plus untracked copies) and verifies the
+    archive before the reset; only callers that proved the ticket terminal pass it.
     """
     try:
         with _outside_dir(path, main_root):
@@ -532,6 +539,7 @@ def cleanup(
                 path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
                 run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn, holder_probe=holder_probe,
                 discard_path_hashes=discard_path_hashes or {},
+                ignore_generated_ledgers=ignore_generated_ledgers, archive_root=archive_root,
             )
     except Exception as exc:  # noqa: BLE001 -- cleanup reports failures instead of leaking them
         detail = f"cleanup failed for {path}: {exc}"
@@ -608,20 +616,86 @@ def list_cleanup_pending(main_root: Path) -> list[dict[str, Any]]:
     return records
 
 
-def cleanup_pending_worktree_paths(main_root: Path) -> frozenset[str]:
-    """Normalized paths with a durable cleanup record that must stay out of orphan sweeps."""
-    return frozenset(
-        _norm(record["path"])
-        for record in list_cleanup_pending(main_root)
-        if isinstance(record.get("path"), str)
-    )
-
-
 @dataclass(frozen=True)
 class _CleanupSafetyIssue:
     outcome: CleanupOutcome
     reason: str
     detail: str
+
+
+def archive_worktree_changes(path: Path, runner: GitRunner, archive_root: Path, now: datetime) -> Path:
+    """Save every uncommitted change of ``path`` under ``archive_root`` and verify it. Raises on any gap."""
+    dest = archive_root / f"{path.name}-{now.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    dest.mkdir(parents=True, exist_ok=False)
+    probe = runner(["rev-parse", "--verify", "HEAD"], path)
+    if probe.returncode != 0:
+        raise OSError("worktree HEAD is unreadable; refusing to archive")
+    diff = subprocess.run(  # bytes on purpose: ``--binary`` patches must not be text-decoded
+        ["git", "diff", "HEAD", "--binary"], cwd=str(path), capture_output=True,
+        timeout=_GIT_TIMEOUT_S, check=False, **_win_kwargs(),
+    )
+    if diff.returncode != 0:
+        raise OSError(f"git diff failed: {diff.stderr.decode('utf-8', 'replace').strip()}")
+    patch = dest / "changes.patch"
+    patch.write_bytes(diff.stdout)
+    listing = runner(["ls-files", "--others", "--exclude-standard", "-z"], path)
+    if listing.returncode != 0:
+        raise OSError(f"git ls-files failed: {(listing.stderr or '').strip()}")
+    untracked = [item for item in (listing.stdout or "").split("\0") if item]
+    names = "\n".join(untracked) + ("\n" if untracked else "")
+    (dest / "untracked.txt").write_text(names, encoding="utf-8")
+    for rel in untracked:
+        source, target = path / rel, dest / "untracked" / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=False)
+    if diff.stdout and patch.stat().st_size == 0:
+        raise OSError("archived patch is empty")
+    for rel in untracked:
+        copy, source = dest / "untracked" / rel, path / rel
+        if not copy.exists() or copy.stat().st_size != source.lstat().st_size:
+            raise OSError(f"archived copy of {rel} is missing or incomplete")
+    if not diff.stdout and not untracked:
+        raise OSError("nothing to archive although the worktree reported changes")
+    logger.warning("archived worktree changes of %s to %s (%d untracked)", path, dest, len(untracked))
+    return dest
+
+
+def _reset_ignorable_changes(
+    path: Path,
+    main_root: Path,
+    runner: GitRunner,
+    holder_probe: HolderProbe,
+    archive_root: Optional[Path],
+    now_fn: NowFn,
+) -> Optional[_CleanupSafetyIssue]:
+    """Reset dirt that is safe to lose so the strict, non-forced removal can proceed.
+
+    Generated ledgers are reset as-is; anything else only after a verified archive
+    (``archive_root`` given). Registration, lock and live-holder checks run first.
+    """
+    issue = _cleanup_safety_issue(path, main_root, runner, holder_probe, ignore_changes=True)
+    if issue:
+        return issue
+    status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+    if status.returncode != 0:
+        return _CleanupSafetyIssue("error", "git_status_error", "could not inspect worktree changes; preserved")
+    changes = _status_paths(status.stdout or "")
+    if not changes:
+        return None
+    real = [item for item in changes if not _is_generated_ledger(item)]
+    if real:
+        if archive_root is None:
+            return None  # the strict check reports worktree_dirty
+        try:
+            archive_worktree_changes(path, runner, archive_root, now_fn())
+        except (OSError, subprocess.SubprocessError) as exc:
+            return _CleanupSafetyIssue("error", "archive_failed", f"could not archive changes; preserved: {exc}")
+    for args in (["reset", "--hard", "--quiet", "HEAD"], ["clean", "-fdq"]):
+        done = runner(args, path)
+        if done.returncode != 0:
+            detail = (done.stderr or done.stdout or "git failed").strip()
+            return _CleanupSafetyIssue("error", "reset_failed", f"could not reset {args[0]}; preserved: {detail}")
+    return None
 
 
 def _cleanup_safety_issue(
@@ -630,6 +704,7 @@ def _cleanup_safety_issue(
     runner: GitRunner,
     holder_probe: HolderProbe,
     discard_path_hashes: Mapping[str, str] | frozenset[str] = frozenset(),
+    ignore_changes: bool = False,
 ) -> Optional[_CleanupSafetyIssue]:
     """Return why removal is unsafe, failing closed when ownership cannot be proved."""
     try:
@@ -660,7 +735,7 @@ def _cleanup_safety_issue(
         return _CleanupSafetyIssue("error", "git_status_error", f"could not inspect worktree changes; preserved: {detail}")
     changes = _status_paths(status.stdout or "")
     discardable = {change.replace("\\", "/") for change in changes}
-    if changes and not discardable.issubset(discard_path_hashes):
+    if changes and not ignore_changes and not discardable.issubset(discard_path_hashes):
         return _CleanupSafetyIssue(
             "blocked_changes",
             "worktree_dirty",
@@ -794,6 +869,8 @@ def _cleanup_outside(
     now_fn: Optional[NowFn],
     holder_probe: Optional[HolderProbe],
     discard_path_hashes: Mapping[str, str],
+    ignore_generated_ledgers: bool = False,
+    archive_root: Optional[Path] = None,
 ) -> CleanupResult:
     runner = run_git or _git
     sleeper = sleep_fn or time.sleep
@@ -816,6 +893,16 @@ def _cleanup_outside(
         _prune(main_root, runner)
         result.removed, result.method, result.outcome = True, "absent", "removed"
         return result
+
+    if ignore_generated_ledgers or archive_root is not None:
+        issue = _reset_ignorable_changes(
+            path, main_root, runner, inspect_holders, archive_root, now_fn or utc_now
+        )
+        if issue:
+            result.method, result.outcome, result.reason = "preserved", issue.outcome, issue.reason
+            result.detail = f"{path} {issue.detail}"
+            logger.warning(result.detail)
+            return result
 
     attempts = max(1, retries)
     for attempt in range(1, attempts + 1):
@@ -1332,7 +1419,8 @@ def find_preserved_workspaces(
 # The boundary itself is preserved; eligibility requires strictly older than 48h.
 OWNERLESS_MAX_AGE_S = 48 * 60 * 60
 # Exact repo-relative paths that are factory bookkeeping, not product work.
-_OWNERLESS_LEDGER = ".factory/demands/demands.json"
+# A terminal ticket's worktree older than this may carry real changes: they are archived, then removed.
+ARCHIVE_MIN_AGE_S = 7 * 24 * 60 * 60
 _TERMINAL_TICKET_STATUSES = frozenset({"completed", "cancelled", "canceled"})
 
 
@@ -1364,7 +1452,6 @@ class OwnerlessFacts:
     ticket_status_known: bool = True
     holders: Optional[tuple[str, ...]] = ()
     age_s: Optional[float] = None
-    cleanup_pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -1441,17 +1528,29 @@ def _ownerless_rel(path: str) -> str:
     return text
 
 
+def _is_generated_ledger(rel: str) -> bool:
+    """Generated factory ledgers (reuses ``core.infra.node_sync``; imported lazily to avoid a cycle)."""
+    from core.infra.node_sync import is_generated_ledger
+
+    return is_generated_ledger(rel)
+
+
+def worktree_archive_root() -> Path:
+    """Backup directory for changes archived before a terminal worktree is removed."""
+    return state_root() / "backups" / "worktree_archive"
+
+
 def substantive_worktree_changes(paths: Iterable[str]) -> list[str]:
     """Paths that count as product work.
 
-    Delivery scratch (``.tmp`` and everything under it) and the demands ledger
-    ``.factory/demands/demands.json`` do not. Order and the caller's spelling
+    Delivery scratch (``.tmp`` and everything under it) and the generated ledgers
+    (demands, owner actions, learning) do not. Order and the caller's spelling
     of the surviving paths are preserved.
     """
     kept: list[str] = []
     for path in paths:
         rel = _ownerless_rel(path)
-        if is_delivery_scratch(rel) or rel == _OWNERLESS_LEDGER:
+        if is_delivery_scratch(rel) or _is_generated_ledger(rel):
             continue
         kept.append(path)
     return kept
@@ -1493,8 +1592,6 @@ def classify_ownerless_cheap(facts: OwnerlessFacts) -> Optional[OwnerlessVerdict
     These are the checks that precede the holder step in :func:`classify_ownerless`.
     """
     path = facts.path
-    if facts.cleanup_pending:
-        return _preserved(path, "cleanup_pending", "registered as pending cleanup")
     if facts.is_main:
         return _preserved(path, "main_checkout", "primary checkout")
     if not facts.ticket_status_known:
@@ -1538,6 +1635,12 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
         return _preserved(path, "status_unreadable", "git status failed")
     changes = substantive_worktree_changes(facts.changed_paths)
     if changes:
+        status = _normalize_ticket_status(facts.ticket_status)
+        if status in _TERMINAL_TICKET_STATUSES and facts.age_s is not None and facts.age_s > ARCHIVE_MIN_AGE_S:
+            return OwnerlessVerdict(
+                path=path, eligible=True, reason="terminal_archive",
+                detail="terminal ticket older than 7d: changes are archived before removal",
+            )
         return _preserved(path, "dirty", ", ".join(changes[:5]))
     return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
 
@@ -1735,7 +1838,6 @@ def classify_ownerless_worktree(
     ledger_path: Optional[Path] = None,
     queue_lookup: Optional[Callable[[str], Optional[str]]] = None,
     holder_probe: Optional[Callable[[Path], Optional[tuple[str, ...]]]] = None,
-    pending_paths: Optional[Iterable[str]] = None,
 ) -> OwnerlessVerdict:
     """Read one worktree and classify it. Does not call :func:`cleanup` or change git state.
 
@@ -1752,13 +1854,6 @@ def classify_ownerless_worktree(
             root = main_checkout_root(cwd or path, runner)
         except WorkspaceError as exc:
             return _preserved(path, "git_unreadable", str(exc))
-    if pending_paths is None:
-        try:
-            pending_paths = cleanup_pending_worktree_paths(root)
-        except Exception as exc:  # noqa: BLE001 -- unknown pending inventory must not authorize removal
-            return _preserved(path, "cleanup_pending_inventory_error", str(exc))
-    pending = {_norm(candidate) for candidate in pending_paths}
-    cleanup_pending = _norm(path) in pending
     age = worktree_age_s(path, now=moment)
     if is_main is None:
         entries = list_worktrees(root, runner)
@@ -1770,7 +1865,7 @@ def classify_ownerless_worktree(
             entry = next((item for item in entries if _norm(item.get("worktree", "")) == target), None)
     if is_main:
         return classify_ownerless(
-            OwnerlessFacts(path=path, is_main=True, cleanup_pending=cleanup_pending, age_s=age)
+            OwnerlessFacts(path=path, is_main=True, age_s=age)
         )
     if entry is None:
         return _preserved(path, "unregistered", "path is not a registered worktree")
@@ -1796,7 +1891,6 @@ def classify_ownerless_worktree(
     facts = OwnerlessFacts(
         path=path,
         is_main=False,
-        cleanup_pending=cleanup_pending,
         locked=locked,
         index_locked=index_locked,
         git_readable=git_readable,
@@ -1845,13 +1939,6 @@ def classify_ownerless_worktrees(
     entries = list_worktrees(root, runner)
     if not entries:
         return [_preserved(cwd, "git_unreadable", "git worktree list failed")]
-    try:
-        pending_paths = cleanup_pending_worktree_paths(root)
-    except Exception as exc:  # noqa: BLE001 -- preserve all candidates if the inventory is uncertain
-        return [
-            _preserved(Path(item["worktree"]), "cleanup_pending_inventory_error", str(exc))
-            for item in entries
-        ]
     verdicts: list[OwnerlessVerdict] = []
     for index, item in enumerate(entries):
         verdicts.append(
@@ -1868,7 +1955,6 @@ def classify_ownerless_worktrees(
                 ledger_path=ledger_path,
                 queue_lookup=queue_lookup,
                 holder_probe=holder_probe,
-                pending_paths=pending_paths,
             )
         )
     return verdicts

@@ -279,13 +279,25 @@ zera `failure_count` e mantém a cadência diária. Se o processo for interrompi
 gravar o resultado, um ciclo posterior pode retomar a manutenção, inclusive após recarregar
 o despachante.
 A rotina considera uma
-worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não existe
-registro `cleanup_pending` e não há processo, alteração, lock ou commit detached sem
-referência segura. O limite é 48 horas; worktrees com idade igual ou inferior ao limite e
-worktrees já registradas como `cleanup_pending` não são enviadas para remoção.
+worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não há
+processo, alteração, lock ou commit detached sem referência segura. O limite é 48 horas;
+worktrees com idade igual ou inferior ao limite não são enviadas para remoção.
+
+Ledgers gerados (`.factory/demands/demands.json`, `.factory/learning/learning_ledger.json`,
+`.factory/owner_actions/owner_actions.json`, lista de `core.infra.node_sync.is_generated_ledger`)
+não contam como trabalho: a varredura os restaura ao `HEAD` antes de remover. Quando o ticket é
+terminal e a worktree tem mais de 7 dias, qualquer outra alteração é arquivada antes da remoção
+em `<state_root>/backups/worktree_archive/<nome>-<timestamp>/` (`changes.patch` de
+`git diff HEAD --binary`, `untracked.txt` e cópias em `untracked/`), com verificação de que os
+arquivos existem; sem arquivo verificado a worktree é preservada (`archive_failed`). Ticket
+aberto, checkout principal, worktree com lock ou com processo vivo nunca são arquivados.
+O registro `cleanup_pending` não bloqueia mais a classificação: a worktree é reavaliada a cada
+varredura. Registros `discard_path_changed` vêm de checkouts `fleet-dispatch-*` cujo ledger foi
+alterado pelo próprio ticket depois do hash gravado na criação; como o HEAD destacado carrega
+commits fora da base, eles seguem preservados (`detached_outside_base`).
 
 Cada remoção é delegada a `ticket_workspace.cleanup`, que revalida alterações e processos
-logo antes de remover. Registros `cleanup_pending` permanecem para observabilidade e não são
+logo antes de remover. Registros `cleanup_pending` permanecem para observabilidade e são
 retentados pela varredura diária. O resumo JSON registra contagens agregadas de `removed`, `preserved`
 e `failures`, além de `blocked`, `ignored` e `errors`, com o motivo por caminho. Falha de
 leitura ou de limpeza de uma worktree é registrada e a análise continua nas demais. Para

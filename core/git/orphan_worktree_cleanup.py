@@ -31,7 +31,6 @@ _ERROR_REASONS = frozenset(
         "ticket_status_unknown",
         "age_unknown",
         "unregistered",
-        "cleanup_pending_inventory_error",
     }
 )
 _CLEANUP_RETRY_REASONS = frozenset(
@@ -91,12 +90,6 @@ def sweep_orphan_worktrees(
         summary.record("errors", main_root, "worktree_inventory_empty", "Git returned no registered worktrees")
         return summary
 
-    try:
-        pending_paths = ticket_workspace.cleanup_pending_worktree_paths(main_root)
-    except Exception as exc:  # noqa: BLE001 - missing pending state must fail closed
-        summary.record("errors", main_root, "cleanup_pending_inventory_error", f"{type(exc).__name__}: {exc}")
-        return summary
-
     # One process scan for classification; cleanup() re-probes live before each delete.
     classify_probe = holder_probe if holder_probe is not None else ticket_workspace.snapshot_holder_probe()
     for index, entry in enumerate(entries):
@@ -111,7 +104,6 @@ def sweep_orphan_worktrees(
             classify_probe=classify_probe,
             queue_lookup=queue_lookup,
             statuses=statuses,
-            pending_paths=pending_paths,
         )
 
     logger.info(
@@ -137,7 +129,6 @@ def _process_sweep_entry(
     classify_probe: Optional[ticket_workspace.HolderProbe],
     queue_lookup: Optional[Callable[[str], Optional[str]]],
     statuses: Optional[Mapping[str, str]],
-    pending_paths: set[str],
 ) -> None:
     raw_path = entry.get("worktree", "")
     path = Path(raw_path) if raw_path else main_root
@@ -152,7 +143,6 @@ def _process_sweep_entry(
             holder_probe=classify_probe,
             queue_lookup=queue_lookup,
             statuses=statuses,
-            pending_paths=pending_paths,
         )
     except Exception as exc:  # noqa: BLE001 - isolate malformed worktree state
         summary.record("errors", path, "classification_error", f"{type(exc).__name__}: {exc}")
@@ -182,6 +172,10 @@ def _process_sweep_entry(
             run_git=runner,
             now_fn=lambda: moment,
             holder_probe=holder_probe,
+            ignore_generated_ledgers=True,
+            archive_root=(
+                ticket_workspace.worktree_archive_root() if verdict.reason == "terminal_archive" else None
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - cleanup normally returns a result; isolate broken adapters too
         summary.record("errors", path, "cleanup_exception", f"{type(exc).__name__}: {exc}")
