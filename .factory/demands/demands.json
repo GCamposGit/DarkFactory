@@ -15120,5 +15120,35 @@
     "dependencies": [],
     "created_at": "2026-11-23T09:50:47.390853Z",
     "updated_at": "2026-11-23T17:48:36.783734Z"
+  },
+  {
+    "id": "USR-555",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Portao no Notebook estoura coleta (TEST_PHASE collection timeout 120 s) e motivo da falha cita SUITE_LOCK",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "fleet-dispatcher.log 23/11: 15:49 'USR-538 falhou em notebook: causa=gate_failed motivo=[TEST_PHASE] collection files=23 timeout_sec=120' (coleta de 23 arquivos estoura 120 s no Notebook, mesmo apos USR-540); 15:40 'USR-545 falhou em grokbox: causa=gate_failed motivo=[SUITE_LOCK] acquired slot 0 after waiting 450.8s' - o motivo registrado e a linha informativa do lock, nao a falha real, o que esconde a causa na triagem. Ambos os tickets voltaram a hold.",
+    "core_journey": [
+      "fleet-dispatcher.log 23/11: 15:49 'USR-538 falhou em notebook: causa=gate_failed motivo=[TEST_PHASE] collection files=23 timeout_sec=120' (coleta de 23 arquivos estoura 120 s no Notebook, mesmo apos USR-540); 15:40 'USR-545 falhou em grokbox: causa=gate_failed motivo=[SUITE_LOCK] acquired slot 0 after waiting 450.8s' - o motivo registrado e a linha informativa do lock, nao a falha real, o que esconde a causa na triagem. Ambos os tickets voltaram a hold."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Coleta do perfil pr no Notebook conclui dentro do prazo ou o prazo de coleta escala com o numero de arquivos; o motivo de gate_failed registrado no despachante e a primeira linha de falha real (nunca [SUITE_LOCK] informativo); USR-538 e USR-545 passam no portao em reexecucao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-24T00:16:32.650290Z",
+    "updated_at": "2026-11-24T00:16:32.650290Z"
   }
 ]

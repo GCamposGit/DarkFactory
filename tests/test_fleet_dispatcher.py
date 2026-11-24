@@ -347,6 +347,43 @@ def test_structured_outcome_beats_banner_and_other_run_is_ignored(tmp_path, monk
     assert run_outcome.diagnostic_cause(banner, 1) == "unknown"
 
 
+def test_suite_lock_progress_does_not_replace_pytest_failure_or_lock_timeout(tmp_path, monkeypatch, caplog):
+    import json
+    from core.line import run_outcome
+
+    failure = "FAILED tests/test_gate.py::test_contract - AssertionError: expected value"
+    output = ("[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
+              "[TEST_PHASE] collection files=23 timeout_sec=120\n" + failure)
+    assert run_outcome.error_detail(output) == failure
+    assert run_outcome.error_detail("[SUITE_LOCK] timed out after 120s") == "[SUITE_LOCK] timed out after 120s"
+    assert run_outcome.error_detail("[SUITE_LOCK] waiting for slot; timed out after 120s") == \
+        "[SUITE_LOCK] waiting for slot; timed out after 120s"
+
+    notified = []
+    monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: notified.append(args))
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    for attempt in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest=f"patch-{attempt}",
+                          context_digest="ctx", run_id=f"run-{attempt}")
+        outcome_path = run_outcome.outcome_path(job.ticket_id)
+        outcome_path.parent.mkdir(parents=True, exist_ok=True)
+        outcome_path.write_text(json.dumps({
+            "ticket": job.ticket_id, "run_id": job.run_id, "exit_code": 1,
+            "cause": "gate_failed", "cause_class": "candidate", "stage": "gate",
+            "detail": "[SUITE_LOCK] acquired slot 0 after waiting 450.8s", "ts": "now",
+        }), encoding="utf-8")
+        tail = ("[ERRO NA ENTREGA] causa: gate_failed; erro: [SUITE_LOCK] acquired slot 0\n" + output)
+        job.log_path = tmp_path / f"{attempt}.log"
+        job.log_path.write_text(tail, encoding="utf-8")
+        with caplog.at_level(logging.ERROR, logger="core.line.fleet_dispatcher"):
+            e.d._record_failure(job, 1, "failure", tail)
+
+    assert e.d.failures[-1]["reason"] == failure
+    assert notified and notified[-1][2] == failure
+    assert all(f"motivo={failure}" in record.message for record in caplog.records[-3:])
+    assert e.d.admission_store.ticket_hold(project_id="darkfac", ticket_id="USR-01")["cause"] == "gate_failed"
+
+
 def test_host_permission_failure_before_launch_is_infra(tmp_path):
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
     def denied(*args, **kwargs):
