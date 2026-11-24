@@ -10,6 +10,7 @@ import builtins
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -321,7 +322,7 @@ def test_open_ticket_is_preserved(repo: SimpleNamespace, status: str) -> None:
         path,
         now=BORN + timedelta(hours=49),
         statuses={"USR-500": status},
-        holder_probe=_idle,
+        holder_probe=_forbid_holder_probe,
     )
     assert verdict.reason == "open_ticket" and not verdict.eligible
     assert path.exists()
@@ -468,6 +469,46 @@ def test_ledger_is_read_and_never_created(repo: SimpleNamespace) -> None:
     assert unknown.reason == "ticket_status_unknown" and not unknown.eligible
     assert ledger.read_text(encoding="utf-8") == "{"
     assert path.exists()
+
+
+def _forbid_holder_probe(_path: Path) -> tuple[str, ...]:
+    raise AssertionError("holder probe must not run once a cheap preservation applies")
+
+
+def test_holder_scan_is_lazy_and_snapshot_scans_each_process_once(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = _old_worktree(repo.local)
+    young = classify_ownerless_worktree(
+        path, now=BORN + timedelta(hours=1), statuses={"USR-500": "completed"}, holder_probe=_forbid_holder_probe
+    )
+    assert young.reason == "too_young"
+
+    calls: list[int] = []
+
+    class _Proc:
+        pid = 7
+        info = {"pid": 7, "name": "editor"}
+
+        def cwd(self) -> str:
+            return str(tmp_path)
+
+        def open_files(self) -> list[SimpleNamespace]:
+            calls.append(1)
+            return []
+
+    fake = SimpleNamespace(
+        process_iter=lambda _attrs: [_Proc()],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=type("AccessDenied", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake)
+    (tmp_path / ".git").mkdir()
+    probe = ticket_workspace.snapshot_holder_probe()
+    for index in range(5):
+        assert probe(tmp_path / f"wt{index}") == ()
+    assert len(calls) == 1
 
 
 def test_batch_classification_removes_nothing(repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:

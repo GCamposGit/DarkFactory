@@ -97,6 +97,8 @@ def sweep_orphan_worktrees(
         summary.record("errors", main_root, "cleanup_pending_inventory_error", f"{type(exc).__name__}: {exc}")
         return summary
 
+    # One process scan for classification; cleanup() re-probes live before each delete.
+    classify_probe = holder_probe if holder_probe is not None else ticket_workspace.snapshot_holder_probe()
     for index, entry in enumerate(entries):
         _process_sweep_entry(
             index,
@@ -106,6 +108,7 @@ def sweep_orphan_worktrees(
             moment=moment,
             runner=runner,
             holder_probe=holder_probe,
+            classify_probe=classify_probe,
             queue_lookup=queue_lookup,
             statuses=statuses,
             pending_paths=pending_paths,
@@ -131,6 +134,7 @@ def _process_sweep_entry(
     moment: datetime,
     runner: ticket_workspace.GitRunner,
     holder_probe: Optional[ticket_workspace.HolderProbe],
+    classify_probe: Optional[ticket_workspace.HolderProbe],
     queue_lookup: Optional[Callable[[str], Optional[str]]],
     statuses: Optional[Mapping[str, str]],
     pending_paths: set[str],
@@ -145,7 +149,7 @@ def _process_sweep_entry(
             is_main=index == 0,
             now=moment,
             run_git=runner,
-            holder_probe=holder_probe,
+            holder_probe=classify_probe,
             queue_lookup=queue_lookup,
             statuses=statuses,
             pending_paths=pending_paths,
