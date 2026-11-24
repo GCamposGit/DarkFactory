@@ -128,6 +128,22 @@ class NotificationService:
                 )
             )
 
+            # A hold with no dedicated owner destination is still persisted in
+            # DarkHub. Put the exact repair setting on that visible event so the
+            # owner can resolve the missing Telegram route from the alert itself.
+            tg = self.telegram_service
+            if (
+                self.owner_destination_only
+                and tg is not None
+                and not resolve_telegram_destinations(tg.config)
+            ):
+                safe_message = (
+                    f"{safe_message}\n\n"
+                    "Acao necessaria: configure TELEGRAM_OWNER_CHAT_ID com o ID numerico "
+                    "do chat privado do owner no ambiente do servico da linha e reinicie o servico."
+                )
+                event = event.model_copy(update={"message": safe_message})
+
         if provider_id:
             self._recent_alerts[(provider_id, severity)] = datetime.now(UTC)
 

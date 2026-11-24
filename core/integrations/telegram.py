@@ -609,6 +609,8 @@ def load_telegram_config(
             # Hold alerts require a private, dedicated destination. An absent
             # or malformed setting must not silently target a shared ops chat.
             chats = owner_chats
+            # Dedicated holds must not fall back to shared user destinations either.
+            users = []
         else:
             chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
             chats = owner_chats or parse_telegram_chat_ids(chats_raw)

@@ -9,7 +9,7 @@ Como manter: este arquivo é o snapshot da fase atual (canais, máquinas, orçam
 Sessões de coordenação podem iniciar pelo pedido **“assuma a fábrica”** com a skill `coordenar-fabrica`. O [manual de operação](manual/operacao_interativa.md) inclui a entrada explícita para harnesses que leem arquivos do projeto.
 
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
-- Holds de `HumanRequest` selecionam explicitamente o papel `owner` do Telegram; sem destino efetivo, a demanda segue visivel no Hub com a acao `OA-TELEGRAM-OWNER-DESTINATION`.
+- Holds de `HumanRequest` e `notify_ticket_hold` selecionam o papel `owner` e exigem `TELEGRAM_OWNER_CHAT_ID`, sem fallback para destinos compartilhados. Sem destino, o primeiro mantém a ação `OA-TELEGRAM-OWNER-DESTINATION`; o segundo persiste no alerta do DarkHub a instrução de configurar a variável e registra `missing_destination`, sem reportar entrega Telegram ou criar outbox.
 - Os três devem funcionar sem erro e levar a demanda pelo mesmo motor (`run_ticket.py` / despachante).
 - Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger — adotando o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
 

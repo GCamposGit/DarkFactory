@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from core.integrations.telegram import load_telegram_config
+from core.integrations.telegram import load_telegram_config, parse_telegram_chat_ids
 from core.line import human
+from core.line.failure_alerts import notify_ticket_hold
 from core.line.human import HumanRequest
+from core.notifications.store import NotificationStore
 from core.owner_actions.store import OwnerActionStore
 
 TOKEN = "123456789:AAHtestTokenValueShouldNotLeak"
@@ -66,6 +68,11 @@ def test_owner_destination_does_not_fall_back_to_shared_ops_chats(
 
     assert owner.authorized_chat_ids == [42]
     assert hold_owner.authorized_chat_ids == []
+    assert hold_owner.authorized_user_ids == []
+
+
+def test_owner_chat_id_parser_accepts_negative_and_rejects_zero() -> None:
+    assert parse_telegram_chat_ids("-100155009988,0,not-a-chat") == [-100155009988]
 
 
 def test_hold_owner_destination_does_not_fall_back_to_local_shared_chat_ids(
@@ -157,3 +164,65 @@ def test_default_hold_sender_selects_owner_notification_role(monkeypatch: pytest
     assert sender is not None
     assert sender("hold alert") is True
     assert roles == ["owner"]
+
+
+def test_ticket_hold_sends_to_dedicated_owner_chat_through_notification_service(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    chat_id = "-100155009988"
+    monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", TOKEN)
+    monkeypatch.setenv("TELEGRAM_OWNER_CHAT_ID", chat_id)
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_CHATS", "42")
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "1234")
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr("core.integrations.telegram._read_env_fallback", lambda *_args: {})
+    calls: list[dict[str, object]] = []
+
+    def fake(req: urllib.request.Request, timeout: float = 10.0) -> _HttpResponse:
+        calls.append(json.loads(req.data.decode("utf-8")))
+        return _HttpResponse()
+
+    monkeypatch.setattr("core.integrations.telegram.urllib.request.urlopen", fake)
+
+    notify_ticket_hold("USR-549-positive", "candidate_failed", "hold detail", "hold.log")
+
+    events = NotificationStore().list_notifications()
+    assert len(calls) == 1
+    assert calls[0]["chat_id"] == int(chat_id)
+    assert len(events) == 1
+    assert events[0].delivered_channels == ["darkhub", "telegram"]
+    assert chat_id not in events[0].model_dump_json()
+    assert chat_id not in caplog.text
+
+
+def test_ticket_hold_without_owner_destination_persists_visible_remediation_without_send(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    shared_chat = "42"
+    shared_user = "1234"
+    monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", TOKEN)
+    monkeypatch.delenv("TELEGRAM_OWNER_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_CHATS", shared_chat)
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", shared_user)
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr("core.integrations.telegram._read_env_fallback", lambda *_args: {})
+    calls: list[urllib.request.Request] = []
+
+    def fake(req: urllib.request.Request, timeout: float = 10.0) -> _HttpResponse:
+        calls.append(req)
+        return _HttpResponse()
+
+    monkeypatch.setattr("core.integrations.telegram.urllib.request.urlopen", fake)
+
+    notify_ticket_hold("USR-549-missing", "candidate_failed", "hold detail", "hold.log")
+
+    rows_path = tmp_path / "state" / "notifications" / "notifications.jsonl"
+    event = NotificationStore().list_notifications()[0]
+    assert len(calls) == 0
+    assert event.delivered_channels == ["darkhub"]
+    assert "missing_destination" in caplog.text
+    assert "TELEGRAM_OWNER_CHAT_ID" in event.message
+    assert shared_chat not in event.model_dump_json()
+    assert shared_user not in event.model_dump_json()
+    assert TOKEN not in rows_path.read_text(encoding="utf-8")
+    assert not list((tmp_path / "state").rglob("*outbox*.json"))
