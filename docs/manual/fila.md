@@ -26,6 +26,7 @@ python C:\dev\DarkFac\run_ticket.py --create --queue-only --title "Titulo" --pro
 
 O comando grava o ticket (status `planned`) no control store e termina. Não cria worktree
 `ticket/queue-*`, PR nem merge. O Telegram usa o mesmo caminho.
+`--project` precisa existir em `.factory/projects.json` (ou ser `darkfac`); projeto desconhecido sai com código 2 sem registrar ticket. O registro não sonda cota.
 
 ## Leitura
 

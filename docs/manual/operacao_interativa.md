@@ -284,3 +284,5 @@ de digest sem Git (`_non_git_candidate_digest`), arquivos dentro de `state_root(
 ignorados para que artefatos de stage nao alterem `candidate_digest`. Na etapa `REVIEW`,
 `run_ticket.py` remove `harness:antigravity` das caps em contexto `headless` sem
 `ANTIGRAVITY_LS_ADDRESS` configurado (USR-519, USR-531).
+
+`run_ticket.py --create` recusa `--project` desconhecido com exit 2 e `--queue-only` nao sonda cota (USR-560).

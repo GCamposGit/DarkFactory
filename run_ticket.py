@@ -345,8 +345,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class UnknownProjectError(ValueError):
+    """``--project`` names a project absent from the registry (USR-560)."""
+
+    def __init__(self, project_id: str, known: list[str]) -> None:
+        self.project_id = project_id
+        self.known = known
+        super().__init__(project_id)
+
+
 def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
     """Build the next sequential planned ticket from CLI arguments."""
+    if args.project != "darkfac":
+        from core.projects.registry import get_project_registry
+
+        registry = get_project_registry()
+        if registry.get_project(args.project) is None:
+            raise UnknownProjectError(args.project, [p.id for p in registry.list_projects()])
     return UserTicket(
         id=store.next_ticket_id(args.project),
         project_id=args.project,
@@ -3209,16 +3224,26 @@ def _stage_intake(args: argparse.Namespace) -> tuple[Optional[UserTicket], int]:
         if not args.title:
             print("[ERRO] --title é obrigatório para criar um novo ticket.", file=sys.stderr)
             return None, 1
+        try:
+            if args.queue_only:
+                queued = _queue_ticket_isolated(args)
+            else:
+                # The row is NOT written to the shared checkout's ledger: it is added to the ticket's own
+                # worktree ledger below and travels in the implementation commit (USR-69/USR-75).
+                ticket = _build_ticket(args, store)
+        except UnknownProjectError as exc:
+            print(
+                f"[ERRO] Projeto '{exc.project_id}' não está no registro; nenhum ticket foi registrado. "
+                f"Projetos conhecidos: {', '.join(exc.known)}.",
+                file=sys.stderr,
+            )
+            return None, 2
         if args.queue_only:
-            queued = _queue_ticket_isolated(args)
             if queued is None:
                 print("[ERRO] Não foi possível registrar o ticket na fila (control store indisponível).", file=sys.stderr)
                 return None, 1
             print(f"[+] Ticket {queued.id} registrado na fila de desenvolvimento: '{queued.title}'")
             return None, 0
-        # The row is NOT written to the shared checkout's ledger: it is added to the ticket's own
-        # worktree ledger below and travels in the implementation commit (USR-69/USR-75).
-        ticket = _build_ticket(args, store)
         if not args.json:
             print(f"\n[+] Novo ticket criado: {ticket.id} - '{ticket.title}'")
         return ticket, 0
@@ -4702,9 +4727,13 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if refused is not None:
         return refused
 
-    quotas = inspect_quotas()
-    if not args.json:
-        print(format_quota_report(quotas))
+    if args.create and args.queue_only:
+        # USR-560: registering in the control store needs no quota probe (10 s+ per provider).
+        quotas: dict[str, Any] = {}
+    else:
+        quotas = inspect_quotas()
+        if not args.json:
+            print(format_quota_report(quotas))
 
     override_granted = check_explicit_override(args.prompt, args.force)
 
