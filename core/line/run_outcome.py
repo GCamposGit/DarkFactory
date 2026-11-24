@@ -25,8 +25,9 @@ _BANNERS = ("quota_usage", "quota summary", "quota report", "resumo de cota", "t
             "cotas dos", "saldo das", "headroom")
 _LOCK_INFORMATION = re.compile(r"^\[SUITE_LOCK\]\s+(?:acquired|waiting)\b", re.IGNORECASE)
 _TEST_PHASE_INFORMATION = re.compile(r"^\[TEST_PHASE\]", re.IGNORECASE)
+_PLUGIN_TIMEOUT = re.compile(r"^timeout:\s*\d+(?:\.\d+)?s\b", re.IGNORECASE)
 _ACTIONABLE_FAILURE = re.compile(
-    r"\b(?:FAILED|ERROR|timed?\s*out|timeout|exception)\b|\b[A-Za-z_][\w.]*"
+    r"\b(?:FAILED|ERROR|STEP_TIMEOUT|timed?\s*out|timeout|exception)\b|\b[A-Za-z_][\w.]*"
     r"(?:Error|Exception)\s*:", re.IGNORECASE,
 )
 
@@ -80,6 +81,9 @@ def actionable_failure(text: str) -> str:
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     for line in lines:
+        folded = line.casefold()
+        if any(marker in folded for marker in _BANNERS) or _PLUGIN_TIMEOUT.match(line):
+            continue
         if ((_LOCK_INFORMATION.match(line) and not re.search(r"\btimed?\s*out\b|\btimeout\b", line, re.IGNORECASE))
                 or _TEST_PHASE_INFORMATION.match(line)):
             continue
@@ -99,6 +103,7 @@ def error_detail(text: str, fallback: str = "unknown") -> str:
     errors = [line for line in lines if any(marker in line.casefold() for marker in
               ("error", "erro", "failed", "failure", "timeout", "denied", "exception", "recusa", "aguardando", "exceeded"))]
     clean = [line for line in (errors or lines) if not any(marker in line.casefold() for marker in _BANNERS)
+             and not _PLUGIN_TIMEOUT.match(line)
              and not (_LOCK_INFORMATION.match(line) and not re.search(
                  r"\btimed?\s*out\b|\btimeout\b", line, re.IGNORECASE))
              and not _TEST_PHASE_INFORMATION.match(line)]

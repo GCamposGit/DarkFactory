@@ -1034,6 +1034,28 @@ def test_affected_collection_reports_scaled_timeout_for_23_files(monkeypatch, tm
     assert "[TEST_PHASE] collection files=23 timeout_sec=350" in capsys.readouterr().out
 
 
+def test_affected_collection_timeout_returns_124_with_phase(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    monkeypatch.setattr(affected, "_xdist_available", lambda: False)
+    monkeypatch.setattr(affected.time, "monotonic", lambda: 0.0)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"], output=b"collection started")
+
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(23)], {}, [], ["probe.py"])
+
+    assert affected.run_pytest(tmp_path, selection, [], deadline=1000) == 124
+    output = capsys.readouterr().out
+    assert calls[0][1]["timeout"] == 350
+    assert "[TEST_PHASE] collection files=23 timeout_sec=350" in output
+    assert "collection started\n[STEP_TIMEOUT] affected tests phase=collection" in output
+
+
 @pytest.mark.parametrize("changed", ["tests/conftest.py", "conftest.py", "tests/line/conftest.py", "tests/_helper.py", "pytest.ini", "harness.config.json", "requirements.txt"])
 def test_pr_global_change_runs_fixed_smoke_instead_of_full(tmp_path, changed, monkeypatch, capsys):
     repo = tmp_path / "repo"
