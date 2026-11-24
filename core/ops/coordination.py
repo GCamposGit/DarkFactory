@@ -89,6 +89,44 @@ def _dispatcher_stalls() -> list[dict[str, Any]]:
         return [_unavailable("dispatcher_state", exc)]
 
 
+def _deploy_deferral_stalls() -> list[dict[str, Any]]:
+    """Surface exhausted node convergence. A missing file is idle, not a failure."""
+    path = state_root() / "runs" / "deploy_deferrals.json"
+    try:
+        if not path.is_file():
+            return []
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [_unavailable("deploy_deferrals", exc)]
+    if not isinstance(loaded, dict):
+        return [_unavailable("deploy_deferrals", ValueError("deploy_deferrals_not_object"))]
+    stalls: list[dict[str, Any]] = []
+    for key, record in loaded.items():
+        if not isinstance(record, dict) or record.get("recovery_exhausted") is not True:
+            continue
+        stalls.append({
+            "kind": "deploy_convergence_exhausted",
+            "sha": str(record.get("target_sha") or key),
+            "pending_node": record.get("pending_node"),
+            "reason": record.get("reason"),
+            "recovery_attempts": record.get("recovery_attempts"),
+        })
+    return stalls
+
+
+def _deploy_exhausted_action(stall: dict[str, Any]) -> str:
+    sha = str(stall.get("sha") or "desconhecido")
+    node = stall.get("pending_node") or "desconhecido"
+    reason = stall.get("reason") or "sem motivo registrado"
+    attempts = stall.get("recovery_attempts")
+    return (
+        f"Stall deploy_convergence_exhausted: sha {sha}, nó {node}, "
+        f"motivo {reason}, recovery_attempts={attempts}. "
+        "Ler as linhas [NODE SYNC], limpar a causa e então executar "
+        "python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py."
+    )
+
+
 def _pr_stalls(runner: Runner) -> list[dict[str, Any]]:
     try:
         state = json.loads((state_root() / "runs" / "fleet_dispatcher_state.json").read_text(encoding="utf-8"))
@@ -143,7 +181,7 @@ def _hold_stalls(runner: Runner) -> list[dict[str, Any]]:
 def detect_stalls(runner: Runner | None = None) -> list[dict[str, Any]]:
     """Read-only scan for a stopped factory; every external source fails closed."""
     run = runner or _run
-    return _dispatcher_stalls() + _pr_stalls(run) + _hold_stalls(run)
+    return _dispatcher_stalls() + _deploy_deferral_stalls() + _pr_stalls(run) + _hold_stalls(run)
 
 
 def _stall_action(stalls: list[dict[str, Any]]) -> str | None:
@@ -163,6 +201,9 @@ def _stall_action(stalls: list[dict[str, Any]]) -> str | None:
     for stall in stalls:
         if stall["kind"] == "dispatcher_blocked_with_free_host":
             return "Despachante bloqueado com host livre: diagnosticar recent_failures do estado."
+    for stall in stalls:
+        if stall["kind"] == "deploy_convergence_exhausted":
+            return _deploy_exhausted_action(stall)
     return None
 
 
@@ -321,7 +362,15 @@ def coordinate(*, harness: str | None = None, entry: str = "short-request",
             status = "wait"
     stalls = detect_stalls(runner)
     stall_action = _stall_action(stalls)
-    if stall_action and status != "in_flight":
+    deploy_action = _stall_action([
+        stall for stall in stalls if stall["kind"] == "deploy_convergence_exhausted"
+    ])
+    # delivery_wait leaves the deploy run in flight after recovery is exhausted.
+    # The run stays on the receipt; the next action is the convergence itself.
+    deploy_in_flight = status == "in_flight" and (active_run or {}).get("stage") == "deploy"
+    if deploy_in_flight and deploy_action:
+        first = deploy_action
+    elif stall_action and status != "in_flight":
         first, status = stall_action, "stalled"
     receipt = CoordinationReceipt(
         project_id=(
