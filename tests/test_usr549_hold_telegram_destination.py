@@ -222,7 +222,11 @@ def test_ticket_hold_without_owner_destination_persists_visible_remediation_with
     assert event.delivered_channels == ["darkhub"]
     assert "missing_destination" in caplog.text
     assert "TELEGRAM_OWNER_CHAT_ID" in event.message
-    assert shared_chat not in event.model_dump_json()
-    assert shared_user not in event.model_dump_json()
+    # The full JSON also contains a timestamp, whose fractional seconds can
+    # coincidentally contain short IDs such as "42". Check all persisted alert
+    # fields while excluding only that unrelated timestamp.
+    persisted_fields = event.model_dump_json(exclude={"timestamp"})
+    assert shared_chat not in persisted_fields
+    assert shared_user not in persisted_fields
     assert TOKEN not in rows_path.read_text(encoding="utf-8")
     assert not list((tmp_path / "state").rglob("*outbox*.json"))
