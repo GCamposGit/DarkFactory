@@ -11,7 +11,7 @@ from core.workflow.control_contracts import JobKey
 
 @pytest.fixture
 def sweep(monkeypatch: pytest.MonkeyPatch):
-    now = datetime(2026, 11, 24, 12, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     run_id = "run-grill-sweep"
     job = JobKey(run_id=run_id, ticket_id="USR-550", plan_version="p1", stage="grill", iteration=0)
     store = MagicMock()

@@ -546,6 +546,10 @@ def test_worker_without_harness_never_claims_development(tmp_path: Path, monkeyp
     receipt = store.accept(cmd, NOW)
     run_id = receipt.run_id
     assert run_id is not None
+    # accept() keys the grill job by demand id; this test exercises the project-keyed
+    # capability stamping path of the line, so rebind the job to the project id.
+    with store._connect() as conn:
+        conn.execute("UPDATE jobs SET ticket_id = ? WHERE run_id = ?", ("acme", run_id))
 
     # Drive grill->planning->development successors for real via
     # materialize_result, exactly like the worker would, so "development"'s
