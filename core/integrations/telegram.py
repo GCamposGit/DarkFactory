@@ -597,8 +597,13 @@ def load_telegram_config(
     if not users:
         users = local_data.get("authorized_user_ids", [])
 
+    # The owner bot has a dedicated destination setting used by the Hub and
+    # deployment configuration. Prefer it over shared authorized-chat lists so
+    # owner alerts cannot accidentally target an ops/group chat.
+    owner_chat_raw = os.environ.get("TELEGRAM_OWNER_CHAT_ID") or env_vars.get("TELEGRAM_OWNER_CHAT_ID", "")
+    owner_chats = parse_telegram_chat_ids(owner_chat_raw) if role == "owner" else []
     chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
-    chats = parse_telegram_chat_ids(chats_raw)
+    chats = owner_chats or parse_telegram_chat_ids(chats_raw)
     if not chats:
         chats = local_data.get("authorized_chat_ids", [])
 
