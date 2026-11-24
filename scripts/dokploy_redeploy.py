@@ -1909,6 +1909,7 @@ def _run_main(
             "sleep": sleep_fn,
             "notifier": make_safe_ops_notifier(ops_notifier),
             "expected_sha": expected_sha,
+            "track_divergence": True,  # USR-562: sem isso node_sync_divergence.json nunca e escrito
             "disabled_hosts": {
                 host.strip().casefold()
                 for host in env.get("DARKFAC_FLEET_DISABLED_HOSTS", "").split(",")

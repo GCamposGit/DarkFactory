@@ -1372,6 +1372,7 @@ def test_redeploy_calls_sync_once_with_no_redeploy_reentry(monkeypatch: pytest.M
     code, _out, _err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], _cloud_transport(), monkeypatch, "feat: algo")
     assert code == mod.EXIT_OK
     assert len(seen) == 1
+    assert seen[0]["track_divergence"] is True  # USR-562
 
 
 def _report(notebook: str, vps: str) -> Any:
