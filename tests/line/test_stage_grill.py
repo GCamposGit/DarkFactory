@@ -165,7 +165,10 @@ def test_business_question_waits_then_defaults_after_timeout(project, monkeypatc
         now=start,
     )
     assert first.outcome == "waiting_human"
+    assert any(ref.startswith("grill_question_count:") and int(ref.split(":", 1)[1]) > 0 for ref in first.evidence_refs)
+    assert any(ref.startswith("grill_deadline:") for ref in first.evidence_refs)
     assert len(sent) == 1
+
     text, buttons = sent[0]
     assert "Deve cobrar assinatura mensal?" in text
     assert buttons and buttons[0][0]["callback_data"] == "cb:grill:run-3#q1:0"
@@ -186,6 +189,48 @@ def test_business_question_waits_then_defaults_after_timeout(project, monkeypatc
     grill_md = (ws_mod.context_dir(ws) / "GRILL.md").read_text(encoding="utf-8")
     assert "default_after_timeout" in grill_md
     assert "nao" in grill_md
+
+
+def test_pending_grill_inspection_requires_nonempty_persisted_questions(project, monkeypatch):
+    from core.line import workspace
+
+    reply = _fake_agent_reply({"questions": [{
+        "id": "q1", "text": "Objetivo?", "kind": "business", "options": ["a", "b"], "recommended": "a",
+    }]})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    result = run_grill(project, "run-inspect-grill", "demanda", now=datetime(2026, 11, 1, tzinfo=timezone.utc))
+    assert result.outcome == "waiting_human"
+    ws = workspace.checkout(project, "run-inspect-grill")
+    monkeypatch.setattr(workspace, "checkout", lambda *_args: ws)
+    proof = stage_grill.inspect_pending_grill(project, "run-inspect-grill")
+    assert proof is not None and proof[0] == 1
+
+    pending_path = workspace.context_dir(ws) / "GRILL_PENDING.json"
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    pending["questions"] = []
+    pending_path.write_text(json.dumps(pending), encoding="utf-8")
+    assert stage_grill.inspect_pending_grill(project, "run-inspect-grill") is None
+
+
+def test_unrecoverable_pending_grill_fails_with_structured_cause(project, monkeypatch):
+    from core.line import workspace
+
+    valid = _fake_agent_reply({"questions": [{
+        "id": "q1", "text": "Objetivo?", "kind": "business", "options": ["a", "b"], "recommended": "a",
+    }]})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: valid)
+    first = run_grill(project, "run-bad-grill-session", "demanda")
+    assert first.outcome == "waiting_human"
+
+    ws = workspace.checkout(project, "run-bad-grill-session")
+    pending_path = workspace.context_dir(ws) / "GRILL_PENDING.json"
+    pending_path.write_text("{invalid", encoding="utf-8")
+    monkeypatch.setattr(
+        stage_grill, "run_read_agent",
+        lambda *a, **k: AgentResult(ok=False, text="", harness="claude", duration_s=0.01, error_kind="crash"),
+    )
+    recovered = run_grill(project, "run-bad-grill-session", "demanda")
+    assert (recovered.outcome, recovered.cause_code) == ("failed", "grill_session_unrecoverable")
 
 
 def test_answers_submitted_before_deadline_finalize_immediately(project, monkeypatch):

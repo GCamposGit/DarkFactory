@@ -465,6 +465,26 @@ def _load_pending(ws: workspace.RunWorkspace) -> Optional[PendingGrill]:
         return None
 
 
+def inspect_pending_grill(project: ProjectDescriptor, run_id: str) -> tuple[int, datetime] | None:
+    """Return durable proof of a human Grill session, or ``None`` for an orphan/legacy row.
+
+    A persisted pending file with at least one blocking question and a deadline is the
+    authority; dashboard status alone is not sufficient evidence of an owner question.
+    """
+    try:
+        ws = workspace.checkout(project, run_id)
+        pending = _load_pending(ws)
+        if pending is None or not pending.questions:
+            return None
+        deadline = pending.deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        return len(pending.questions), deadline
+    except Exception as exc:
+        logger.warning("Could not inspect pending grill for run %s: %s", run_id, exc)
+        return None
+
+
 def _save_pending(ws: workspace.RunWorkspace, pending: PendingGrill) -> None:
     workspace.write_context(ws, _PENDING_FILE, pending.model_dump_json(indent=2))
 
@@ -711,7 +731,16 @@ def run_grill(
             existing, run_id, ", ".join(missing), ws.branch,
         )
 
-    pending = _load_pending(ws)
+    pending_path = _pending_path(ws)
+    saved_pending = _load_pending(ws)
+    had_unrecoverable_session = pending_path.exists() and (
+        saved_pending is None or not saved_pending.questions
+    )
+    if had_unrecoverable_session:
+        # The waiting job is resumed once by the worker sweep. Discard the unusable
+        # legacy/corrupt state so this normal Grill execution can reconstruct it.
+        _clear_pending(ws)
+    pending = None if had_unrecoverable_session else saved_pending
     if pending is not None:
         return _reconcile_pending(
             ws, run_id, pending, current_time, send_message, auto_policy=auto_policy, answers=answers
@@ -739,6 +768,11 @@ def run_grill(
     )
     if not result.ok:
         _record_failed_agent(ws, run_id, STAGE, result)
+        if had_unrecoverable_session:
+            return StageResult(
+                outcome="failed", cause_code="grill_session_unrecoverable",
+                evidence_refs=[f"grill_recovery_error:{result.error_kind or 'agent_failed'}"],
+            )
         waiter = route_waiter or RouteWaiter()
         return retry_for_agent_failure(
             result, "grill_agent_failed", now=current_time,
@@ -750,6 +784,11 @@ def run_grill(
     try:
         plan = parse_grill_plan(result.text)
     except (ValueError, json.JSONDecodeError, ValidationError):
+        if had_unrecoverable_session:
+            return StageResult(
+                outcome="failed", cause_code="grill_session_unrecoverable",
+                evidence_refs=["grill_recovery_error:invalid_reconstruction"],
+            )
         return invalid_json_outcome(ws, run_id, STAGE, result, "grill_invalid_json", now=current_time)
 
     technical: list[_PendingQuestion] = []
@@ -799,7 +838,7 @@ def run_grill(
     return StageResult(
         outcome="waiting_human",
         output_refs=[sha],
-        evidence_refs=[f"grill_deadline:{deadline.isoformat()}"],
+        evidence_refs=[f"grill_question_count:{len(blocking)}", f"grill_deadline:{deadline.isoformat()}"],
     )
 
 
@@ -985,7 +1024,7 @@ def _reconcile_pending(
         _notify_owner(ws, run_id, pending, send_message)
         return StageResult(
             outcome="waiting_human",
-            evidence_refs=[f"grill_deadline:{deadline.isoformat()}"],
+            evidence_refs=[f"grill_question_count:{len(still_pending)}", f"grill_deadline:{deadline.isoformat()}"],
         )
 
     markdown = _render_grill_markdown(

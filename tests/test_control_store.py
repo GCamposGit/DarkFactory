@@ -17,6 +17,7 @@ import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock
 import pytest
 
 from core.workflow.control_contracts import (
@@ -164,6 +165,155 @@ def test_idempotent_intake_and_conflict_detection(store: ControlStore) -> None:
     )
     with pytest.raises(IdempotencyConflict):
         store.accept(conflicting_cmd, now + timedelta(seconds=2))
+
+
+def test_grill_job_uses_ticket_identity_and_preserves_it_on_replay(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(channel="webhook", external_id="ticket-identity")
+    cmd = cmd.model_copy(update={"payload": {**cmd.payload, "ticket_id": "USR-550"}})
+
+    receipt = store.accept(cmd, now)
+    replay = store.accept(cmd, now + timedelta(seconds=1))
+    claim = store.claim("grill-worker", [], now)
+
+    assert claim is not None
+    assert claim.job_key.ticket_id == "USR-550"
+    assert replay.run_id == receipt.run_id
+    assert replay.initial_job_id == receipt.initial_job_id
+
+
+def test_grill_job_falls_back_to_demand_id_not_project_id(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(channel="webhook", external_id="demand-identity")
+
+    receipt = store.accept(cmd, now)
+    replay = store.accept(cmd, now + timedelta(seconds=1))
+    claim = store.claim("grill-worker", [], now)
+
+    assert claim is not None
+    assert claim.job_key.ticket_id == receipt.demand_id
+    assert claim.job_key.ticket_id != cmd.project_id
+    assert replay.demand_id == receipt.demand_id
+
+
+def _store_rows(store: ControlStore, run_id: str) -> tuple[str, list[tuple[str, str]]]:
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        run = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        jobs = conn.execute("SELECT stage, status FROM jobs WHERE run_id = ? ORDER BY stage", (run_id,)).fetchall()
+    return str(run["status"]), [(str(job["stage"]), str(job["status"])) for job in jobs]
+
+
+def _dependent_intake(parent_run_id: str, external_id: str) -> IntakeCommand:
+    command = _sample_intake_command(channel="line", external_id=external_id)
+    return command.model_copy(update={"payload": {**command.payload, "depends_on": parent_run_id}})
+
+
+def test_dependent_child_waits_for_parent_and_releases_once(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    parent = store.accept(_sample_intake_command(external_id="dependency-parent"), now)
+    child_command = _dependent_intake(parent.run_id or "", "dependency-child")
+    child = store.accept(child_command, now)
+    child_replay = store.accept(child_command, now + timedelta(seconds=1))
+
+    assert child.run_id is not None
+    assert child_replay.run_id == child.run_id
+    assert child_replay.initial_job_id == child.initial_job_id
+    parent_claim = store.claim("worker", [], now)
+    assert parent_claim is not None  # parent is executable
+    # While parent is active the child remains parked.
+    assert store.reconcile_dependencies(now + timedelta(seconds=2)) == 0
+    assert _store_rows(store, child.run_id) == ("active", [("grill", "waiting_dependency")])
+
+    store.finish(parent_claim, StageResult(outcome="success", output_refs=["ref:parent"]), now + timedelta(seconds=4))
+    assert store.reconcile_dependencies(now + timedelta(seconds=5)) == 1
+    assert store.reconcile_dependencies(now + timedelta(seconds=6)) == 0
+    child_claim = store.claim("worker", [], now + timedelta(seconds=6))
+    assert child_claim is not None
+    assert child_claim.job_key.run_id == child.run_id
+
+
+@pytest.mark.parametrize("parent_state", ["failed", "cancelled"])
+def test_dependent_child_of_terminal_failure_is_cancelled_including_grandchildren(
+    store: ControlStore, parent_state: str
+) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    parent = store.accept(_sample_intake_command(external_id=f"terminal-parent-{parent_state}"), now)
+    claim = store.claim("worker", [], now)
+    assert claim is not None
+    store.finish(claim, StageResult(outcome=parent_state), now + timedelta(seconds=1))
+
+    child = store.accept(_dependent_intake(parent.run_id or "", f"terminal-child-{parent_state}"), now)
+    assert child.run_id is not None
+    assert _store_rows(store, child.run_id) == ("cancelled", [("grill", "cancelled")])
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        cause = conn.execute("SELECT cause_code FROM jobs WHERE run_id = ?", (child.run_id,)).fetchone()[0]
+    assert cause == f"parent_run_terminal:{parent.run_id}:{parent_state}"
+    assert store.claim("worker", [], now + timedelta(seconds=2)) is None
+
+
+def test_unknown_parent_is_parked_with_explicit_cause(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    child = store.accept(_dependent_intake("run-created-later", "unknown-parent-child"), now)
+    assert child.run_id is not None
+    assert _store_rows(store, child.run_id) == ("active", [("grill", "waiting_dependency")])
+    backend = store._backend if isinstance(store, PostgresControlStore) else store
+    with backend._connect() as conn:
+        cause = conn.execute("SELECT cause_code FROM jobs WHERE run_id = ?", (child.run_id,)).fetchone()[0]
+    assert cause == "parent_run_pending:run-created-later:unknown"
+    assert store.claim("worker", [], now) is None
+
+
+def test_failure_cancels_existing_descendants_in_one_reconciliation(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    parent = store.accept(_sample_intake_command(external_id="cascade-parent"), now)
+    child = store.accept(_dependent_intake(parent.run_id or "", "cascade-child"), now)
+    assert child.run_id is not None
+    grandchild = store.accept(_dependent_intake(child.run_id, "cascade-grandchild"), now)
+    assert grandchild.run_id is not None
+    claim = store.claim("worker", [], now)
+    assert claim is not None
+    store.finish(claim, StageResult(outcome="failed"), now + timedelta(seconds=1))
+    assert store.reconcile_dependencies(now + timedelta(seconds=1)) == 2
+    assert _store_rows(store, child.run_id) == ("cancelled", [("grill", "cancelled")])
+    assert _store_rows(store, grandchild.run_id) == ("cancelled", [("grill", "cancelled")])
+
+
+@pytest.mark.parametrize("ticket_id", [None, "USR-550"])
+def test_postgres_grill_identity_and_idempotent_replay(ticket_id: str | None) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(channel="webhook", external_id=f"postgres-identity-{ticket_id}")
+    if ticket_id is not None:
+        cmd = cmd.model_copy(update={"payload": {**cmd.payload, "ticket_id": ticket_id}})
+
+    conn = MagicMock()
+    cursor = MagicMock()
+    conn.__enter__.return_value = conn
+    conn.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.return_value = None
+    store = object.__new__(PostgresControlStore)
+    store.mock_mode = False
+    store.runtime_owner = RuntimeOwner.CLOUD_DBOS_POSTGRES.value
+    store._connect = lambda: conn
+
+    receipt = store.accept(cmd, now)
+    job_insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO jobs" in call.args[0])
+    assert job_insert.args[1][1] == (ticket_id or receipt.demand_id)
+
+    cursor.fetchone.return_value = (
+        cmd.payload_digest,
+        receipt.demand_id,
+        receipt.demand_version,
+        receipt.run_id,
+        receipt.initial_job_id,
+        receipt.mode,
+        now,
+    )
+    replay = store.accept(cmd, now + timedelta(seconds=1))
+    assert replay.demand_id == receipt.demand_id
+    assert replay.run_id == receipt.run_id
+    assert replay.initial_job_id == receipt.initial_job_id
 
 
 def test_lease_expiry_allows_steal_with_higher_fencing_and_rejects_stale_worker(store: ControlStore) -> None:

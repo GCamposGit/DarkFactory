@@ -171,7 +171,11 @@ def test_waiting_human_intervention_reads_the_dashboard_task_id(mock_hub_service
         "status": "WAITING_HUMAN",
         "run_id": "run-d4d10d4aee94",
         "cause_code": "grill_pending",
-        "evidence": [{"label": "projeto", "value": "darkfac-canary"}],
+        "evidence": [
+            {"label": "projeto", "value": "darkfac-canary"},
+            {"label": "evidência", "value": "grill_question_count:1"},
+            {"label": "evidência", "value": "grill_deadline:2026-10-22T08:00:00+00:00"},
+        ],
     }
     with patch.object(mock_hub_service, "get_task_dashboard") as mock_dash:
         mock_dash.return_value = MagicMock(queue=[fake_task])
@@ -203,6 +207,7 @@ def test_waiting_human_intervention_from_real_dashboard_payload(mock_hub_service
         status="waiting_human",
         role="grill_engine",
         iteration=0,
+        evidence_refs=["grill_question_count:2", "grill_deadline:2026-10-22T08:00:00+00:00"],
     )
     row = HubService._control_dashboard_row(entry, {"dem-722f8e52bd7c": "Canario diario 2026-09-30"})
     item = TaskDashboardItem(
@@ -403,6 +408,23 @@ def test_waiting_human_attempts_of_one_ticket_show_once_newest_wins(mock_hub_ser
         assert report.waiting_human_count == 1
 
 
+@pytest.mark.parametrize("evidence", [[], ["grill_question_count:0", "grill_deadline:2026-10-22T08:00:00+00:00"]])
+def test_orphan_grill_jobs_are_not_owner_interventions(mock_hub_service: HubService, evidence: list[str]):
+    from core.workflow.job_board import JobBoardEntry
+
+    entry = JobBoardEntry(
+        run_id="run-orphan-grill", ticket_id="USR-ORPHAN", project_id="darkfac", demand_id="USR-ORPHAN",
+        mode="autonomous", run_status="active", stage="grill", status="waiting_human",
+        role="grill_engine", iteration=0, evidence_refs=evidence,
+    )
+    row = HubService._control_dashboard_row(entry, {})
+    with patch.object(mock_hub_service, "get_task_dashboard") as mock_dash:
+        mock_dash.return_value = MagicMock(queue=[row])
+        report = mock_hub_service.get_priority_interventions()
+    assert report.waiting_human_count == 0
+    assert not any(item.kind == PriorityInterventionKind.WAITING_HUMAN for item in report.items)
+
+
 def test_stale_interventions_are_filtered_out(mock_hub_service: HubService):
     """USR-407: planning-only tickets raise no WAITING_HUMAN; OA-HR of a dead run is hidden."""
     from types import SimpleNamespace
@@ -423,8 +445,13 @@ def test_stale_interventions_are_filtered_out(mock_hub_service: HubService):
         status=DeliveryStatus.PLANNED, item_type=RoadmapItemType.FEATURE,
         lifecycle_stage=LifecycleStage.EXECUTION, tags=["planning-only"], problem_statement="x",
     ))
-    base = {"task_id": "j", "status": "WAITING_HUMAN", "title": "t", "project_id": "darkfac",
-            "cause_code": "grill_pending"}
+    base = {
+        "task_id": "j", "status": "WAITING_HUMAN", "title": "t", "project_id": "darkfac",
+        "cause_code": "grill_pending", "evidence": [
+            {"label": "evidência", "value": "grill_question_count:1"},
+            {"label": "evidência", "value": "grill_deadline:2026-10-22T08:00:00+00:00"},
+        ],
+    }
     queue = [
         {**base, "ticket_id": "USR-UMBRELLA", "run_id": "run-umbrella", "run_status": "RUNNING"},
         {**base, "ticket_id": "USR-REAL", "run_id": "run-real", "run_status": "RUNNING"},

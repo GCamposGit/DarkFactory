@@ -54,6 +54,18 @@ automaticamente, mesmo depois de reiniciar. REVIEW continua na mesma worktree pe
 `--resume-delivery`, preservando gate válido para o candidato. A regra de contingência
 OpenRouter e o modo de recuperação sem novos BUILDs estão em [frota.md](frota.md).
 
+## Recuperação de Grill órfão (USR-550 T3)
+
+Um job `grill` só representa uma espera legítima do owner quando o estado `GRILL_PENDING.json`
+está persistido, contém ao menos uma pergunta e tem prazo. O job grava também as evidências
+`grill_question_count:<n>` e `grill_deadline:<ISO-8601>`, usadas pelo DarkHub para exibir a
+intervenção. Linhas antigas sem essas provas não aparecem como bloqueio humano.
+
+O sweep mantém uma sessão válida em `waiting_human` até o prazo e não duplica notificação.
+Sessão ausente, vazia ou inválida retoma o job uma vez para reconstrução; falha nessa
+reconstrução encerra com `grill_session_unrecoverable`. Ao vencer o prazo, o sweep retoma o
+mesmo job para aplicar respostas/defaults (ou concluir estruturadamente quando não há default).
+
 ## Admissão antes da worktree (USR-468)
 
 `_stage_preflight` chama `evaluate_admission` (`core.line.admission.admit`) depois da estimativa de

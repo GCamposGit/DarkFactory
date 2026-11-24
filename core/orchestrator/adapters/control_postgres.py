@@ -58,10 +58,12 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMPTZ,
+    parent_run_id VARCHAR(160),
     CONSTRAINT uq_runs_project_demand UNIQUE (project_id, demand_id, demand_version)
 );
 
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS budget_reset_at TIMESTAMPTZ;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS parent_run_id VARCHAR(160);
 
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs (status);
 
@@ -334,13 +336,30 @@ class PostgresControlStore:
                     if command.mode == "autonomous":
                         run_id = f"run-{uuid4().hex[:12]}"
                         initial_job_id = f"job-{uuid4().hex[:12]}"
+                        parent_run_id = str(command.payload.get("depends_on") or "").strip() or None
+                        parent_status = None
+                        if parent_run_id:
+                            cur.execute("SELECT status FROM runs WHERE run_id = %s", (parent_run_id,))
+                            parent = cur.fetchone()
+                            parent_status = str(parent[0]) if parent else "unknown"
+                        terminal_parent = parent_run_id and parent_status in ("failed", "cancelled")
+                        waiting_parent = parent_run_id and parent_status != "completed" and not terminal_parent
+                        run_status = "cancelled" if terminal_parent else "active"
+                        job_status = "cancelled" if terminal_parent else ("waiting_dependency" if waiting_parent else "pending")
+                        dependency_cause = (
+                            f"parent_run_terminal:{parent_run_id}:{parent_status}"
+                            if terminal_parent
+                            else f"parent_run_pending:{parent_run_id}:{parent_status}"
+                            if waiting_parent
+                            else None
+                        )
 
                         cur.execute(
                             """
                             INSERT INTO runs (
                                 run_id, project_id, demand_id, demand_version, runtime_owner,
-                                mode, status, plan_digest, config_version, created_at, updated_at
-                            ) VALUES (%s, %s, %s, %s, %s, %s, 'active', %s, '1.0', %s, %s)
+                                mode, status, plan_digest, config_version, created_at, updated_at, parent_run_id
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '1.0', %s, %s, %s)
                             """,
                             (
                                 run_id,
@@ -349,9 +368,11 @@ class PostgresControlStore:
                                 demand_version,
                                 self.runtime_owner,
                                 command.mode,
+                                run_status,
                                 digest,
                                 now_utc,
                                 now_utc,
+                                parent_run_id,
                             ),
                         )
 
@@ -363,7 +384,7 @@ class PostgresControlStore:
                         # generic default with no line intent, since the real
                         # registered "darkfac" project legitimately has its
                         # own repo_url/deploy config.
-                        ticket_id = str(command.payload.get("ticket_id") or command.project_id)
+                        ticket_id = str(command.payload.get("ticket_id") or demand_id)
                         cur.execute(
                             """
                             INSERT INTO jobs (
@@ -371,9 +392,9 @@ class PostgresControlStore:
                                 role, required_capabilities, fencing_token, timeout_seconds,
                                 retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                                 created_at, updated_at, ready_at
-                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
+                            ) VALUES (%s, %s, '1.0', 'grill', 0, %s, 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
                             """,
-                            (run_id, ticket_id, now_utc, now_utc, now_utc),
+                            (run_id, ticket_id, job_status, now_utc, now_utc, now_utc),
                         )
 
                         outbox_payload = json.dumps(
@@ -384,15 +405,18 @@ class PostgresControlStore:
                                 "stage": "grill",
                             }
                         )
-                        cur.execute(
-                            """
-                            INSERT INTO outbox (
-                                event_type, aggregate_type, aggregate_id, payload,
-                                target_system, status, retry_count, created_at
-                            ) VALUES ('intake_accepted', 'run', %s, %s::jsonb, 'cloud_dbos', 'pending', 0, %s)
-                            """,
-                            (run_id, outbox_payload, now_utc),
-                        )
+                        if job_status == "pending":
+                            cur.execute(
+                                """
+                                INSERT INTO outbox (
+                                    event_type, aggregate_type, aggregate_id, payload,
+                                    target_system, status, retry_count, created_at
+                                ) VALUES ('intake_accepted', 'run', %s, %s::jsonb, 'cloud_dbos', 'pending', 0, %s)
+                                """,
+                                (run_id, outbox_payload, now_utc),
+                            )
+                        if dependency_cause:
+                            cur.execute("UPDATE jobs SET cause_code = %s WHERE run_id = %s", (dependency_cause, run_id))
                     else:
                         run_id = None
                         initial_job_id = None
@@ -454,6 +478,58 @@ class PostgresControlStore:
             raise
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL accept failed: {exc}") from exc
+
+    def reconcile_dependencies(self, now: datetime) -> int:
+        if self.mock_mode:
+            return self._backend.reconcile_dependencies(now)
+        now_utc = now.astimezone(UTC)
+        changed_runs = 0
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    while True:
+                        cur.execute(
+                            """SELECT child.run_id, child.parent_run_id, parent.status
+                               FROM runs AS child LEFT JOIN runs AS parent ON parent.run_id = child.parent_run_id
+                               WHERE child.parent_run_id IS NOT NULL AND child.status = 'active'
+                                 AND EXISTS (SELECT 1 FROM jobs WHERE jobs.run_id = child.run_id AND jobs.status = 'waiting_dependency')
+                               ORDER BY child.created_at, child.run_id FOR UPDATE OF child"""
+                        )
+                        rows = cur.fetchall()
+                        round_changed = 0
+                        for child_id, parent_id, raw_parent_status in rows:
+                            parent_status = str(raw_parent_status or "unknown")
+                            if parent_status == "completed":
+                                cur.execute(
+                                    "UPDATE jobs SET status = 'pending', cause_code = NULL, ready_at = %s, updated_at = %s "
+                                    "WHERE run_id = %s AND status = 'waiting_dependency'",
+                                    (now_utc, now_utc, child_id),
+                                )
+                                if cur.rowcount:
+                                    cur.execute("UPDATE runs SET updated_at = %s WHERE run_id = %s AND status = 'active'", (now_utc, child_id))
+                                    round_changed += 1
+                            elif parent_status in ("failed", "cancelled"):
+                                cause = f"parent_run_terminal:{parent_id}:{parent_status}"
+                                cur.execute(
+                                    "UPDATE jobs SET status = 'cancelled', cause_code = %s, finished_at = %s, updated_at = %s, "
+                                    "current_lease_id = NULL WHERE run_id = %s AND status IN ('pending','running','waiting_human','waiting_dependency')",
+                                    (cause, now_utc, now_utc, child_id),
+                                )
+                                cur.execute("UPDATE claims SET status = 'released' WHERE run_id = %s AND status IN ('active','draining')", (child_id,))
+                                cur.execute(
+                                    "UPDATE runs SET status = 'cancelled', completed_at = %s, updated_at = %s "
+                                    "WHERE run_id = %s AND status = 'active'",
+                                    (now_utc, now_utc, child_id),
+                                )
+                                if cur.rowcount:
+                                    round_changed += 1
+                        changed_runs += round_changed
+                        if not round_changed:
+                            break
+                    conn.commit()
+            return changed_runs
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL reconcile_dependencies failed: {exc}") from exc
 
     def claim(
         self, worker: str, capabilities: list[str], now: datetime, ready_age_sec: float = 0.0
@@ -835,6 +911,10 @@ class PostgresControlStore:
                                 """,
                                 (result.cause_code or "MAX_RETRIES_EXCEEDED", now_utc, now_utc, jk.run_id, jk.ticket_id, jk.plan_version, jk.stage, jk.iteration, claim.fencing_token),
                             )
+                            cur.execute(
+                                "UPDATE runs SET status = 'failed', completed_at = %s, updated_at = %s WHERE run_id = %s AND status = 'active'",
+                                (now_utc, now_utc, jk.run_id),
+                            )
                         cur.execute("UPDATE claims SET status = 'released' WHERE lease_id = %s", (claim.lease_id,))
                     else:
                         cur.execute(
@@ -851,6 +931,11 @@ class PostgresControlStore:
                             (result.outcome, result.cause_code, now_utc, now_utc, jk.run_id, jk.ticket_id, jk.plan_version, jk.stage, jk.iteration, claim.fencing_token),
                         )
                         cur.execute("UPDATE claims SET status = 'released' WHERE lease_id = %s", (claim.lease_id,))
+                        if result.outcome in ("failed", "cancelled"):
+                            cur.execute(
+                                "UPDATE runs SET status = %s, completed_at = %s, updated_at = %s WHERE run_id = %s AND status = 'active'",
+                                (result.outcome, now_utc, now_utc, jk.run_id),
+                            )
 
                     if result.outcome != "success" and result.evidence_refs:
                         # Same contract as the SQLite store: a failed/retry/waiting stage keeps its evidence
@@ -871,6 +956,17 @@ class PostgresControlStore:
                                 claim.fencing_token,
                             ),
                         )
+
+                    if result.outcome == "success":
+                        cur.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status IN ('pending','running','waiting_human','waiting_dependency')",
+                            (jk.run_id,),
+                        )
+                        if cur.fetchone()[0] == 0:
+                            cur.execute(
+                                "UPDATE runs SET status = 'completed', completed_at = %s, updated_at = %s WHERE run_id = %s AND status = 'active'",
+                                (now_utc, now_utc, jk.run_id),
+                            )
 
                     conn.commit()
         except (StaleLeaseError, InvalidResultError):

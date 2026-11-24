@@ -54,6 +54,26 @@ def _queue_evidence(task: Any) -> list[dict[str, str]]:
     return out[:12]
 
 
+def _has_valid_grill_session_evidence(task: Any) -> bool:
+    """A line Grill intervention needs durable evidence of questions and its deadline."""
+    values: list[str] = []
+    evidence = task.get("evidence") if isinstance(task, dict) else getattr(task, "evidence", None)
+    for entry in evidence or []:
+        value = entry.get("value") if isinstance(entry, dict) else getattr(entry, "value", "")
+        if value:
+            values.append(str(value))
+    raw_refs = task.get("evidence_refs") if isinstance(task, dict) else getattr(task, "evidence_refs", None)
+    values.extend(str(ref) for ref in raw_refs or [])
+    count = next((value.split(":", 1)[1] for value in values if value.startswith("grill_question_count:")), None)
+    deadline = next((value.split(":", 1)[1] for value in values if value.startswith("grill_deadline:")), None)
+    if count is None or deadline is None:
+        return False
+    try:
+        return int(count) > 0 and bool(datetime.fromisoformat(deadline))
+    except (TypeError, ValueError):
+        return False
+
+
 def _queue_project(task: Any) -> str:
     """Project of a dashboard row. The row itself has no project_id; the evidence does."""
     explicit = _queue_text(task, "project_id")
@@ -139,6 +159,9 @@ class InterventionsMixin:
                         t_cause = _queue_text(task, "cause_code")
                         t_stage = _queue_text(task, "stage")
                         t_diag = _queue_text(task, "diagnostic")
+                        is_grill_job = t_stage.lower() == "grill" or "grill" in t_cause.lower()
+                        if is_grill_job and not _has_valid_grill_session_evidence(task):
+                            continue
                         label = t_ticket or t_run or t_id
                         if (project_id and t_proj != project_id) or t_ticket in planning_only:
                             continue  # planning-only umbrella tickets have no open question
