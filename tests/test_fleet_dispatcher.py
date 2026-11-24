@@ -355,6 +355,12 @@ def test_suite_lock_progress_does_not_replace_pytest_failure_or_lock_timeout(tmp
     output = ("[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
               "[TEST_PHASE] collection files=23 timeout_sec=120\n" + failure)
     assert run_outcome.error_detail(output) == failure
+    assert run_outcome.error_detail(
+        "[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
+        "[TEST_PHASE] collection files=23 timeout_sec=350\n"
+        "[STEP_TIMEOUT] affected tests phase=collection",
+        "diagnostico indisponivel",
+    ) == "[STEP_TIMEOUT] affected tests phase=collection"
     assert run_outcome.error_detail("[SUITE_LOCK] timed out after 120s") == "[SUITE_LOCK] timed out after 120s"
     assert run_outcome.error_detail("[SUITE_LOCK] waiting for slot; timed out after 120s") == \
         "[SUITE_LOCK] waiting for slot; timed out after 120s"

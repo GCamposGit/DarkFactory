@@ -23,8 +23,11 @@ Essa evidência cobre a seleção/fumaça; a suíte completa fica para Linux/CI 
 Mudança só de docs executa a fumaça do perfil.
 
 O orçamento dos afetados usa a coleta real (inclusive parametrizações):
-`min(1800, 120 + 20 * testes_coletados)` segundos. A coleta tem limite de 120s
-e o passo externo tem teto de 1800s, incluindo seleção, coleta e eventual retry.
+`min(1800, 120 + 20 * testes_coletados)` segundos. A coleta recebe
+`min(prazo_restante, 600, 120 + 10 * arquivos_selecionados)` segundos; o passo
+externo `affected_tests` tem piso de 1800s para que uma configuração antiga
+de 120s não trunque esse orçamento. O mesmo prazo interno cobre seleção, coleta,
+execução e eventual retry.
 O launcher mantém seu envelope externo para os demais contratos e fila do lock.
 Se a ACL impedir a leitura/criação do lock canônico ou a gravação do sidecar,
 `SuiteLock` libera qualquer slot canônico adquirido e tenta um diretório por
