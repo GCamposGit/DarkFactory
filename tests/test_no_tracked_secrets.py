@@ -39,7 +39,7 @@ FAKE_SECRETS: dict[str, str] = {
     "github_token": "ghp" + "_" + "Ab1" * 14,
     "google_api_key": "AIza" + "Ab1_-" * 7,
     "aws_access_key_id": "AKIA" + "ABCD1234EFGH5678",
-    "private_key_block": "-----BEGIN " + "RSA " + "PRIVATE KEY-----",
+    "private_key_block": "-----BEGIN " + "RSA " + "PRIVATE KEY-----\n" + "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj" + "AgEAAoIBAQC7",
     "postgres_url_with_password": "postgresql://" + "svc_user:" + "Xk3vQ9zLp2Rt" + "@db.internal:5432/app",
 }
 
@@ -55,6 +55,8 @@ HARMLESS_TEXTS: dict[str, str] = {
     "postgres masked": "postgresql://" + "user:" + "*" * 8 + "@db:5432/app",
     "postgres regex literal": r"postgresql://[^:]+:[^@]+@[^/]+/\w+",
     "private key mention": "never commit a PRIVATE KEY file",
+    # USR-571: a header built for a sanitization fixture has no base64 key body.
+    "pem fixture header": 'FAKE = "-----BEGIN ' + 'PRIVATE KEY-----\\n" + CANARY',
 }
 
 

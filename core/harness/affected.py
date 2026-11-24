@@ -132,6 +132,7 @@ LEDGER_DATA_FILES: dict[str, tuple[str, ...]] = {
     ".factory/learning/learning_ledger.json": (),
 }
 PR_FALLBACK_MAX_CITED_FILES = 25
+_TEXT_HIT_REASONS = ("text_reference:", "ledger_data_change:")
 
 #: Source roots for which a changed .py file selecting zero tests is worth
 #: flagging explicitly (``uncovered``) rather than silently reporting mode
@@ -817,10 +818,12 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
                 escalations.append(escalation)
 
     if escalations:
+        # Keep the precise non-module hits (e.g. a test reading .gitignore): the PR
+        # fallback runs them even when another file escalates to full (USR-575).
         return Selection(
             mode="full",
             tests=sorted(graph.test_paths),
-            reasons={},
+            reasons={t: sorted(set(rs)) for t, rs in reasons.items() if any(r.startswith(_TEXT_HIT_REASONS) for r in rs)},
             escalations=sorted(set(escalations)),
             changed_files=changed_files,
             uncovered=sorted(set(uncovered)),
@@ -964,8 +967,13 @@ def select_pr_tests(repo_root: Path, base_ref: str = "origin/main") -> Selection
     if selection.mode == "full" or selection.uncovered or global_changes:
         changed_tests = _changed_test_files(repo_root, selection.changed_files)
         fixed = {*PR_SMOKE_TESTS, *contracts, *changed_tests}
+        citing = tests_citing_modules(repo_root, selection.changed_files)
+        for test_path, why in selection.reasons.items():
+            hits = [r for r in why if r.startswith(_TEXT_HIT_REASONS)]
+            if hits:
+                citing.setdefault(test_path, []).extend(hits)
         cited, cap_note = _bound_fallback_cited(
-            tests_citing_modules(repo_root, selection.changed_files),
+            citing,
             fixed,
             PR_FALLBACK_MAX_CITED_FILES,
         )

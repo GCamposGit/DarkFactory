@@ -107,6 +107,26 @@ def test_git_autonomy_commit_ticket_clean_tree_returns_head(test_git_repo: Path)
     assert result_sha == initial_sha
 
 
+def test_commit_ticket_uses_factory_identity_only_when_repo_has_none(
+    test_git_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # USR-570: a product repo with no user.name (local or global) must still commit.
+    empty_global = tmp_path / "empty.gitconfig"
+    empty_global.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_global))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    mgr = GitAutonomyManager(test_git_repo)
+    (test_git_repo / "a.txt").write_text("a\n", encoding="utf-8")
+    mgr.commit_ticket("USR-570", "configured identity", paths=["a.txt"])
+    assert _git(test_git_repo, "log", "-1", "--format=%an").stdout.strip() == "DarkFac Test"
+
+    _git(test_git_repo, "config", "--unset", "user.name")
+    _git(test_git_repo, "config", "--unset", "user.email")
+    (test_git_repo / "b.txt").write_text("b\n", encoding="utf-8")
+    mgr.commit_ticket("USR-570", "no identity", paths=["b.txt"])
+    assert _git(test_git_repo, "log", "-1", "--format=%an <%ae>").stdout.strip() == "DarkFac <darkfac@localhost>"
+
+
 def test_commit_ticket_rejects_secret_in_pre_staged_index_blob(test_git_repo: Path) -> None:
     manager = GitAutonomyManager(test_git_repo)
     token = "123456789" + ":" + "Ab1_-" * 7
