@@ -592,3 +592,7 @@ a mesma assinatura estrutural (detalhes operacionais em
 `run_ticket.py --create` aceita `--priority <inteiro>` (padrão `0`) e persiste o valor no ticket criado. Use valores maiores para colocar trabalho elegível antes na fila. O dispatcher aplica a prioridade depois de seus filtros de dependência, reserva e recuperação; o argumento não força a execução de um ticket bloqueado.
 
 `run_ticket.py --create --queue-only` (USR-560) recusa `--project` fora do registro (exit 2, nenhum ticket) e pula a sonda de cota, pois so registra no control store.
+
+## build_evidence_mismatch falso (USR-547)
+
+Artefatos de INTAKE/GRILL sem PLAN, com worktree limpa e 0 commits, nao sao evidencia de implementacao: `_stage_plan` faz `ticket_engine.reset` e replaneja sem contar falha (worktree suja continua em mismatch). Quando todas as fatias do `progress.json` estao concluidas, a worktree esta limpa e o commit do ticket ja e ancestral de `origin/main`, o BUILD segue para entrega em vez de mismatch (`_completed_build_is_merged`). Retentativa que abre worktree nova contra `progress.json` de outra worktree continua em mismatch (fora desta entrega).
