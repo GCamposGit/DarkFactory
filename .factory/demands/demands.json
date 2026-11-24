@@ -15212,6 +15212,37 @@
     "updated_at": "2026-11-24T18:07:31.352821Z"
   },
   {
+    "id": "USR-538",
+    "project_id": "darkfac",
+    "title": "Reconciliar conclusao do USR-483 com PR, main e fila de entrega",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21/11/2026 a fila canonica marca USR-483 como completed com SHA 83f480ec659dd38032e5dbd1e1d83ea8bd4afd10. O commit esta na branch do ticket e fora da main confirmada 4e433c6c. O PR GitHub 912 segue aberto com mergeable=false, e o ticket permanece em pending_delivery bloqueado em REVIEW. Auditar a origem do status e reconciliar sem descartar a worktree.",
+    "core_journey": [
+      "Em 21/11/2026 a fila canonica marca USR-483 como completed com SHA 83f480ec659dd38032e5dbd1e1d83ea8bd4afd10. O commit esta na branch do ticket e fora da main confirmada 4e433c6c. O PR GitHub 912 segue aberto com mergeable=false, e o ticket permanece em pending_delivery bloqueado em REVIEW. Auditar a origem do status e reconciliar sem descartar a worktree."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar a origem do status completed sem merge verificavel.",
+      "Reconciliar fila, PR e pendencia a partir de evidencia de merge e producao, ou retomar como pendente com causa explicita.",
+      "Preservar o candidato e os requisitos de revisao independente e portao."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T06:07:46.758845Z",
+    "updated_at": "2026-11-21T06:07:46.758845Z"
+  },
+  {
     "id": "USR-483",
     "project_id": "darkfac",
     "title": "Troca de harness ou PC operador deve ser operacao normal, sem configuracao fixa",

@@ -599,6 +599,10 @@ def _reconcile_terminal_wait(path: Path, row: PendingDelivery, now: float) -> di
         return None
     release, merge_path, report = _release_paths(row)
     if status == "completed":
+        if not release.is_file() and not merge_path.is_file():
+            # Let the live dispatcher verify origin/main and reopen only with a readable
+            # candidate SHA. This low-level stale-PID probe has no repository context.
+            return None
         report = _completed_report(row, release, merge_path, report)
         if _ci_recovery_without_merge(row, release, merge_path):
             resume_delivery = True
@@ -680,6 +684,86 @@ def _check_completed_deploy_evidence(
             return report, {"ticket": row.ticket_id, "status": row.status, "cause": row.cause}
         return report, {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"]}
     return report, None
+
+
+def _reopen_completed_without_merge(
+    path: Path, row: PendingDelivery, repo_root: Path, ticket: dict, release: Path,
+    merge_path: Path, now: float,
+) -> dict | None:
+    """Reopen legacy completion only after proving its candidate is outside origin/main."""
+    if ticket.get("status") != "completed":
+        return None
+    review_recovery = row.cause in {_LEGACY_REVIEW_EXIT, "completed_without_merge"} or any(
+        marker in row.cause for marker in _RESUMABLE_REVIEW_MARKERS
+    )
+    if (row.stage != "review" or not row.resume_delivery or row.child_failures or not review_recovery
+            or row.cause in CI_RECOVERY_CAUSES):
+        return None
+    if release.is_file() or merge_path.is_file():
+        # Existing receipt files require the stricter receipt/deploy reconciliation below.
+        return None
+    evidence = str(ticket.get("delivery_evidence") or "")
+    candidate = evidence.removeprefix("candidate:").strip()
+    if len(candidate) != 40 or any(char not in "0123456789abcdefABCDEF" for char in candidate):
+        return _block_wait(path, row, "completed_without_merge_evidence_ambiguous",
+                           "candidate_sha_missing_or_invalid", now=now)
+    try:
+        main_result = subprocess.run(
+            ["git", "rev-parse", "origin/main"], cwd=repo_root, capture_output=True, text=True, check=False,
+        )
+    except OSError as exc:
+        return _block_wait(path, row, "completed_without_merge_evidence_ambiguous",
+                           f"origin_main_read_error:{type(exc).__name__}", now=now)
+    if main_result.returncode or not main_result.stdout.strip():
+        return _block_wait(path, row, "completed_without_merge_evidence_ambiguous",
+                           "origin_main_unreadable", now=now)
+    try:
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", candidate, "origin/main"],
+            cwd=repo_root, capture_output=True, check=False,
+        )
+    except OSError as exc:
+        return _block_wait(path, row, "completed_without_merge_evidence_ambiguous",
+                           f"ancestry_read_error:{type(exc).__name__}", now=now)
+    if ancestry.returncode == 0:
+        return None
+    if ancestry.returncode != 1:
+        return _block_wait(path, row, "completed_without_merge_evidence_ambiguous",
+                           f"candidate:{candidate};origin_main:{main_result.stdout.strip()};git_exit:{ancestry.returncode}",
+                           now=now)
+
+    prior_status, prior_cause = row.status, row.cause
+    try:
+        from core.demands.models import UserTicket
+        from core.demands.queue_store import control_store
+        from core.roadmap.models import DeliveryStatus
+
+        updated = UserTicket.model_validate(ticket)
+        updated.status = DeliveryStatus.PLANNED
+        updated.delivery_evidence = f"completed_without_merge:{candidate}"
+        updated.updated_at = datetime.now(timezone.utc)
+        control_store().upsert_ticket(
+            updated.project_id, updated.id, "planned", updated.model_dump(mode="json"), updated.updated_at,
+        )
+    except Exception as exc:
+        return _block_wait(path, row, "completed_without_merge_requeue_failed",
+                           f"candidate:{candidate};error:{type(exc).__name__}", now=now)
+
+    row.stage = "review"
+    row.resume_delivery = True
+    row.status, row.cause = prior_status, prior_cause
+    ticket["status"] = "planned"
+    ticket["delivery_evidence"] = updated.delivery_evidence
+    _record_reconciliation(
+        path, row, to_status="planned", to_cause="completed_without_merge",
+        reason="legacy completed status lacks merge and production receipts; candidate is absent from origin/main",
+        evidence=f"candidate:{candidate};origin_main:{main_result.stdout.strip()}", now=now,
+    )
+    row.status = "waiting"
+    row.cause = "completed_without_merge"
+    row.next_check = now
+    _save(path, row)
+    return None
 
 
 def _validate_pending_worktree(
@@ -854,6 +938,23 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
         _save(path, row)
         return {"ticket": row.ticket_id, "status": row.status, "cause": reason, "next_check": row.next_check}
     reopen = _blocked_review_reopen(row)
+    if reopen == "legacy" and row.resume_delivery and not row.child_failures:
+        terminal_store = control_store()
+        if getattr(terminal_store, "mock_mode", False):
+            raise RuntimeError("pending delivery requires the durable control store")
+        terminal_ticket = next((item for item in terminal_store.list_tickets()
+                                if item.get("id") == row.ticket_id), None)
+        if terminal_ticket is None:
+            raise RuntimeError(f"Ticket {row.ticket_id} absent from durable queue")
+        if terminal_ticket.get("status") == "completed":
+            release, merge_path, _report = _release_paths(row)
+            reopened_terminal = _reopen_completed_without_merge(
+                path, row, repo_root, terminal_ticket, release, merge_path, now,
+            )
+            if reopened_terminal is not None:
+                return reopened_terminal
+            if terminal_ticket.get("status") == "planned":
+                reopen = ""
     if (row.status == "blocked" and not reopen) or row.next_check > now or is_locked():
         result = {"ticket": row.ticket_id, "status": row.status, "next_check": row.next_check}
         if row.status == "blocked":
@@ -875,6 +976,9 @@ def _tick_row(path: Path, repo_root: Path, now: float) -> dict:
     report, deploy_wait = _check_completed_deploy_evidence(path, row, release, ticket)
     if deploy_wait is not None:
         return deploy_wait
+    reopened = _reopen_completed_without_merge(path, row, repo_root, ticket, release, merge_path, now)
+    if reopened is not None:
+        return reopened
     if ticket.get("status") in _TERMINAL_TICKET_STATUSES:
         terminal_outcome = _reconcile_terminal_ticket(path, row, release, merge_path, report, ticket, now)
         if terminal_outcome is not None:

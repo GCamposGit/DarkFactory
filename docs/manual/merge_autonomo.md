@@ -55,13 +55,15 @@ da classificação de órfãos e não são retentados pela varredura diária.
 
 `core/owner_actions/store.py` trata leituras de forma tolerante para manter a fila disponivel, mas toda mutacao valida o documento completo antes de gravar. Cada item precisa obedecer ao contrato de `OwnerAction` (incluindo `kind=action|decision`), e IDs duplicados, envelopes invalidos ou linhas malformadas fazem a escrita falhar sem substituir o arquivo. Assim, um item legado invalido como `OA-071` com `kind=approval` nao pode ser propagado por uma nova gravacao. As mesmas validacoes se aplicam ao ledger de controle e ao overlay de resolucoes.
 
-`complete_ticket` grava o ticket como concluido no `DemandsStore` e, com `auto_push`, entrega a branch. A sequencia interna:
+`complete_ticket` entrega a branch com `auto_push` e fecha o ticket após confirmar o merge. A sequência interna:
 
 1. `DemandsStore.canonical_ticket` resolve o registro sem gravar: a linha do `demands.json` da worktree ou, se esse id nao estiver no arquivo, a fila do control store. Nao depende do ledger compartilhado do checkout. Id ausente nos dois lados devolve `TicketCompletionReport` com `ok=false` e `cause=ticket_absent`, sem criar linha e sem commit.
 2. `_inspect_completion_changes` exige, contra `origin/main`, algum arquivo alem de `.factory/demands/demands.json`. Branch so de ledger continua `no_changes` e nao fecha o ticket.
-3. `_commit_completion` / `_record_completion` materializam o id da fila no ledger da worktree (o mesmo id, sem `next_ticket_id`) e gravam `completed` com `delivery_evidence`. Se a fila ja tinha a linha `(project_id, ticket_id)`, o upsert atualiza essa mesma linha e abre o PR de implementacao. Ticket que existe so no ledger local conclui sem criar control store, mesmo quando esse arquivo e o ledger padrao do checkout (`.git` e arquivo). Sem `auto_commit` a conclusao e recusada.
-4. `_deliver_completion` chama `deliver_branch` com `merge` desligado quando o projeto tem `requires_commercial_acceptance`. Sem `gh` autenticado, cai em push direto para a base.
+3. `_commit_completion` e `_record_completion` materializam o mesmo ID da fila, se necessário, e gravam `candidate:<SHA>` como evidência provisória. O status continua aberto. Sem `auto_commit`, o fluxo recusa concluir.
+4. `_deliver_completion` chama `deliver_branch`. Projetos com `requires_commercial_acceptance` recebem o status de espera após a abertura do PR. Sem `gh` autenticado, o fluxo preserva o candidato e registra a falha de entrega.
 5. `_verify_live_completion` roda so com `is_live_deploy` (USR-420). O SHA fica fixo e `node_sync.verify` recebe esse `expected_sha`. Host `excluded` nao conta como convergido; VPS excluida deixa `ok` falso. Falha reabre o ticket e abre um defeito `planned`.
+
+6. A conclusão exige um recibo de merge com SHA e, quando aplicável, a verificação em produção. O registro canônico recebe `completed` e `<SHA>:merged`, com a evidência de produção quando disponível. Uma nova tentativa preserva uma conclusão já comprovada.
 
 Bloqueio pela politica da branch (USR-475): com a branch atras do `origin/main` a entrega roda `gh pr update-branch`, reespera o CI e tenta o merge mais uma vez; se continuar bloqueado devolve a acao `merge_blocked`.
 `check-main --open-ticket` mantém no máximo um ticket aberto com título `CI vermelho no ...`: se já existe (outro sha ou mesmo sha), ele é atualizado com o sha e os jobs atuais em vez de abrir outro; só tickets `completed` ou `cancelled` liberam um novo.

@@ -159,7 +159,7 @@ def test_unexpected_cleanup_error_does_not_prevent_terminal_status(
     assert pending[0]["reason"] == "cleanup_exception"
 
 
-def test_complete_ticket_cleans_worktree_when_delivery_is_not_requested(
+def test_complete_ticket_preserves_worktree_when_delivery_is_not_requested(
     checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = ticket_workspace.create_workspace("USR-500-T2", cwd=checkout)
@@ -179,13 +179,13 @@ def test_complete_ticket_cleans_worktree_when_delivery_is_not_requested(
 
     report = manager.complete_ticket("USR-500-T2", cwd=workspace.path, auto_push=False)
 
-    assert report.ok, report.message
-    assert not workspace.path.exists()
-    assert calls == [(workspace.path.resolve(), checkout.resolve())]
+    assert not report.ok and report.cause == "merge_evidence_missing"
+    assert workspace.path.is_dir()
+    assert calls == []
     committed_ledger = json.loads(
         _git(checkout, "show", f"{workspace.branch}:.factory/demands/demands.json")
     )
-    assert committed_ledger[0]["status"] == DeliveryStatus.COMPLETED.value
+    assert committed_ledger[0]["status"] == DeliveryStatus.PLANNED.value
 
 
 def test_complete_ticket_does_not_repeat_a_blocked_delivery_cleanup(
@@ -217,6 +217,7 @@ def test_complete_ticket_does_not_repeat_a_blocked_delivery_cleanup(
         return None, DeliveryReport(
             ok=True,
             action="merged",
+            merge_sha=_git(target_dir, "rev-parse", "HEAD"),
             cleaned=False,
             worktree_cleanup_attempted=True,
             branch=workspace.branch,
