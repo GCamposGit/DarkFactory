@@ -1,11 +1,10 @@
-"""Isolar snapshots operacionais da arvore candidata (USR-471 T6).
+"""Isolar artefatos operacionais da arvore candidata (USR-471 T6, USR-561).
 
 Cobre:
-- somente `fleet_policy_snapshot.json`, `model_audit_receipt.json` e seus temporarios atomicos
-  sao ignorados pelo git, nunca aparecendo como `gate_dirty_worktree`/`SharedCheckoutDirty`.
-- ledgers e outros arquivos de `.factory/runs/` seguem detectaveis.
-- `.factory/runs/` nao e ignorado de forma ampla: evidencia ja versionada sob esse prefixo
-  continua visivel ao git e ao portao.
+- qualquer arquivo nao rastreado sob `.factory/runs/` e ignorado pelo git (USR-561), entao
+  snapshots, recibos, logs e estado do despachante nunca viram `gate_dirty_worktree`.
+- arquivo nao rastreado fora de `.factory/runs/` continua visivel.
+- evidencia ja versionada sob `.factory/runs/` continua visivel ao git e ao portao quando muda.
 - Os dois produtores gravam o snapshot/recibo atomicamente (sem temporario remanescente).
 """
 
@@ -54,26 +53,20 @@ def test_runs_directory_not_broadly_ignored() -> None:
     assert out.stdout.strip() == ""
 
 
-def test_non_sidecar_runtime_files_remain_visible() -> None:
+def test_untracked_runs_files_are_ignored_but_code_outside_runs_is_not() -> None:
     for path in (
         ".factory/runs/model_audit/USR-471.jsonl",
         ".factory/runs/review_benchmark.jsonl",
-        ".factory/runs/review_benchmark.tmp",
-        ".factory/runs/other-receipt.json",
+        ".factory/runs/fleet_dispatcher_logs/dispatcher.log",
+        ".factory/runs/hf01-run/evidence.json",
     ):
         out = _check_ignore(path)
-        assert out.returncode == 1, path
-        assert out.stdout.strip() == ""
+        assert out.returncode == 0, path
+        assert out.stdout.strip() == path
 
-
-def test_fleet_dispatcher_logs_are_ignored_without_ignoring_run_evidence() -> None:
-    out = _check_ignore(".factory/runs/fleet_dispatcher_logs/dispatcher.log")
-    assert out.returncode == 0
-    assert out.stdout.strip() == ".factory/runs/fleet_dispatcher_logs/dispatcher.log"
-
-    evidence = _check_ignore(".factory/runs/hf01-run/evidence.json")
-    assert evidence.returncode == 1
-    assert evidence.stdout.strip() == ""
+    outside = _check_ignore("core/untracked_module.py")
+    assert outside.returncode == 1
+    assert outside.stdout.strip() == ""
 
 
 def test_fleet_policy_snapshot_write_is_atomic(tmp_path: Path) -> None:
@@ -121,7 +114,7 @@ def test_sidecars_do_not_dirty_candidate_but_tracked_runs_evidence_does(tmp_path
     tracked = tmp_path / ".factory" / "runs" / "hf01-run" / "evidence.json"
     tracked.parent.mkdir(parents=True)
     tracked.write_text("{\"ok\": true}\n", encoding="utf-8")
-    subprocess.run(["git", "add", ".gitignore", ".factory/runs/hf01-run/evidence.json"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-f", ".gitignore", ".factory/runs/hf01-run/evidence.json"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
 
     sidecar = tmp_path / ".factory" / "runs" / "fleet_policy_snapshot.json"
