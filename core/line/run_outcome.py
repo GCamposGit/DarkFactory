@@ -23,6 +23,13 @@ from core.paths import state_root
 logger = logging.getLogger(__name__)
 _BANNERS = ("quota_usage", "quota summary", "quota report", "resumo de cota", "telemetria de cotas",
             "cotas dos", "saldo das", "headroom")
+_LOCK_INFORMATION = re.compile(r"^\[SUITE_LOCK\]\s+(?:acquired|waiting)\b", re.IGNORECASE)
+_TEST_PHASE_INFORMATION = re.compile(r"^\[TEST_PHASE\]", re.IGNORECASE)
+_PLUGIN_TIMEOUT = re.compile(r"^timeout:\s*\d+(?:\.\d+)?s\b", re.IGNORECASE)
+_ACTIONABLE_FAILURE = re.compile(
+    r"\b(?:FAILED|ERROR|STEP_TIMEOUT|timed?\s*out|timeout|exception)\b|\b[A-Za-z_][\w.]*"
+    r"(?:Error|Exception)\s*:", re.IGNORECASE,
+)
 
 
 class RunOutcome(BaseModel):
@@ -68,14 +75,38 @@ def main_sha(repo: Path) -> str:
         return ""
 
 
-def error_detail(text: str, fallback: str = "unknown") -> str:
-    """Keep the actual error line, redacted, excluding quota/accounting banners."""
+def actionable_failure(text: str) -> str:
+    """Return the first real test failure, skipping phase and lock progress messages."""
     from core.line.agent_cli import redact_secrets
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines:
+        folded = line.casefold()
+        if any(marker in folded for marker in _BANNERS) or _PLUGIN_TIMEOUT.match(line):
+            continue
+        if ((_LOCK_INFORMATION.match(line) and not re.search(r"\btimed?\s*out\b|\btimeout\b", line, re.IGNORECASE))
+                or _TEST_PHASE_INFORMATION.match(line)):
+            continue
+        if _ACTIONABLE_FAILURE.search(line):
+            return redact_secrets(line)[:1000]
+    return ""
+
+
+def error_detail(text: str, fallback: str = "unknown") -> str:
+    """Keep an actionable failure line, redacted, excluding progress and quota banners."""
+    from core.line.agent_cli import redact_secrets
+
+    actual_failure = actionable_failure(text)
+    if actual_failure:
+        return actual_failure
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     errors = [line for line in lines if any(marker in line.casefold() for marker in
               ("error", "erro", "failed", "failure", "timeout", "denied", "exception", "recusa", "aguardando", "exceeded"))]
-    clean = [line for line in (errors or lines) if not any(marker in line.casefold() for marker in _BANNERS)]
+    clean = [line for line in (errors or lines) if not any(marker in line.casefold() for marker in _BANNERS)
+             and not _PLUGIN_TIMEOUT.match(line)
+             and not (_LOCK_INFORMATION.match(line) and not re.search(
+                 r"\btimed?\s*out\b|\btimeout\b", line, re.IGNORECASE))
+             and not _TEST_PHASE_INFORMATION.match(line)]
     return redact_secrets((clean[0] if clean else fallback))[:1000]
 
 
@@ -147,7 +178,11 @@ class _Attempt:
         code = 75 if code and category == "infra" else code
         if not self.enabled:
             return code
-        detail = error_detail(message or self.output, cause)
+        # An exception caught at the launcher boundary has a concise structured
+        # message. Prefer it over the traceback captured in ``self.output`` so
+        # the stored diagnosis does not grow a redundant exception class prefix.
+        detail_source = message if payload.get("error") and message else f"{self.output}\n{message}"
+        detail = error_detail(detail_source, cause)
         previous = read_outcome(self.ticket, self.run_id)
         if code and previous is not None and previous.exit_code:
             cause, category, detail, code = previous.cause, previous.cause_class, previous.detail, previous.exit_code

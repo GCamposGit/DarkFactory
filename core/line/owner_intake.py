@@ -177,6 +177,7 @@ def command_for_ticket(ticket: UserTicket, attempt: int = 1) -> IntakeCommand:
         "suggested_files": list(ticket.suggested_files),
         "reachability_contract": ticket.reachability_contract,
         "ticket_id": ticket.id,
+        "priority": ticket.priority,
     }
     if attempt > 1:
         payload["attempt"] = attempt

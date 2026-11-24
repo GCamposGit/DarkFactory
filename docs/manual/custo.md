@@ -96,3 +96,8 @@ uma sonda e permitida quando o snapshot tem mais de 2 h (assinatura renovada ant
 a idade limita a repeticao. A publicacao nunca
 aciona essa sonda. Apos deploy, conferir `received_at`, aguardar/simular mais de 20 minutos
 sem publicacao e verificar `stale` e destaque visual; observar recibos do publicador.
+# Atualização e reparo de telemetria de cota
+
+Quando o roteador não consegue usar uma amostra de quota, ele registra uma solicitação persistente de nova leitura (`usage/refresh_requests.json`) identificada por provedor e nó. Solicitações pendentes ou em andamento para a mesma combinação são reaproveitadas, inclusive entre processos. O ledger usa um sidecar SQLite para serializar escritores concorrentes; o JSON continua sendo o registro legível da solicitação.
+
+O publicador de uso só conclui a solicitação depois de uma publicação HTTP bem-sucedida que contenha uma medição posterior ao pedido. Uma publicação antiga ou que não inclua o provedor não conta como amostra nova. Se o roteador ainda considerar inválida a leitura recém-publicada, marca a solicitação como falha e cria um único ticket de reparo por provedor e causa canônica em `darkfac`. Assim, uma falha transitória solicita nova medição; uma falha persistente fica rastreável sem tornar a rota elegível.

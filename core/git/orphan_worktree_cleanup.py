@@ -6,8 +6,6 @@ import argparse
 import json
 import logging
 import os
-import sys
-import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,9 +18,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger("darkfac.git.orphan_worktree_cleanup")
 
 SWEEP_INTERVAL = timedelta(days=1)
+INITIAL_FAILURE_BACKOFF = timedelta(hours=1)
+MAX_FAILURE_BACKOFF = timedelta(hours=24)
 SCHEDULE_STATE = Path(".factory") / "runs" / "orphan_worktree_cleanup.json"
-_LOCK_STALE_S = 300.0
-_LOCK_WAIT_S = 2.0
 
 _BLOCKED_REASONS = frozenset({"dirty", "holder", "locked", "index_lock", "detached_outside_base"})
 _ERROR_REASONS = frozenset(
@@ -33,7 +31,6 @@ _ERROR_REASONS = frozenset(
         "ticket_status_unknown",
         "age_unknown",
         "unregistered",
-        "cleanup_pending_inventory_error",
     }
 )
 _CLEANUP_RETRY_REASONS = frozenset(
@@ -93,12 +90,8 @@ def sweep_orphan_worktrees(
         summary.record("errors", main_root, "worktree_inventory_empty", "Git returned no registered worktrees")
         return summary
 
-    try:
-        pending_paths = ticket_workspace.cleanup_pending_worktree_paths(main_root)
-    except Exception as exc:  # noqa: BLE001 - missing pending state must fail closed
-        summary.record("errors", main_root, "cleanup_pending_inventory_error", f"{type(exc).__name__}: {exc}")
-        return summary
-
+    # One process scan for classification; cleanup() re-probes live before each delete.
+    classify_probe = holder_probe if holder_probe is not None else ticket_workspace.snapshot_holder_probe()
     for index, entry in enumerate(entries):
         _process_sweep_entry(
             index,
@@ -108,9 +101,9 @@ def sweep_orphan_worktrees(
             moment=moment,
             runner=runner,
             holder_probe=holder_probe,
+            classify_probe=classify_probe,
             queue_lookup=queue_lookup,
             statuses=statuses,
-            pending_paths=pending_paths,
         )
 
     logger.info(
@@ -133,9 +126,9 @@ def _process_sweep_entry(
     moment: datetime,
     runner: ticket_workspace.GitRunner,
     holder_probe: Optional[ticket_workspace.HolderProbe],
+    classify_probe: Optional[ticket_workspace.HolderProbe],
     queue_lookup: Optional[Callable[[str], Optional[str]]],
     statuses: Optional[Mapping[str, str]],
-    pending_paths: set[str],
 ) -> None:
     raw_path = entry.get("worktree", "")
     path = Path(raw_path) if raw_path else main_root
@@ -147,10 +140,9 @@ def _process_sweep_entry(
             is_main=index == 0,
             now=moment,
             run_git=runner,
-            holder_probe=holder_probe,
+            holder_probe=classify_probe,
             queue_lookup=queue_lookup,
             statuses=statuses,
-            pending_paths=pending_paths,
         )
     except Exception as exc:  # noqa: BLE001 - isolate malformed worktree state
         summary.record("errors", path, "classification_error", f"{type(exc).__name__}: {exc}")
@@ -180,6 +172,10 @@ def _process_sweep_entry(
             run_git=runner,
             now_fn=lambda: moment,
             holder_probe=holder_probe,
+            ignore_generated_ledgers=True,
+            archive_root=(
+                ticket_workspace.worktree_archive_root() if verdict.reason == "terminal_archive" else None
+            ),
         )
     except Exception as exc:  # noqa: BLE001 - cleanup normally returns a result; isolate broken adapters too
         summary.record("errors", path, "cleanup_exception", f"{type(exc).__name__}: {exc}")
@@ -218,59 +214,67 @@ def _parse_time(value: object) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def _write_schedule_state(path: Path, attempted_at: datetime) -> None:
+def _read_schedule_state(path: Path) -> dict[str, Any]:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        if path.exists():
+            logger.warning("could not read orphan worktree schedule state path=%s; recovering", path, exc_info=True)
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _write_schedule_state(path: Path, state: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     temp.write_text(
-        json.dumps({"last_attempt_at": attempted_at.astimezone(timezone.utc).isoformat()}, ensure_ascii=False) + "\n",
+        json.dumps(dict(state), ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     os.replace(temp, path)
 
 
-def _claim_due_run(state_path: Path, now: datetime) -> bool:
-    """Atomically claim one scheduled attempt; the lock protects only the state update."""
-    lock_path = state_path.with_name(state_path.name + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + _LOCK_WAIT_S
-    descriptor: Optional[int] = None
-    while descriptor is None:
-        try:
-            descriptor = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                if time.time() - lock_path.stat().st_mtime > _LOCK_STALE_S:
-                    lock_path.unlink(missing_ok=True)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.05)
+def _failure_backoff(failure_count: int) -> timedelta:
+    # Five doublings already exceed the 24-hour cap; bound before exponentiation.
+    exponent = min(max(0, failure_count - 1), 5)
+    seconds = INITIAL_FAILURE_BACKOFF.total_seconds() * (2**exponent)
+    return timedelta(seconds=min(seconds, MAX_FAILURE_BACKOFF.total_seconds()))
 
+
+def _next_failure_count(state: Mapping[str, Any]) -> int:
     try:
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            logger.warning("schedule state unreadable; running a recovery sweep: %s", exc)
-            state = {}
-        previous = _parse_time(state.get("last_attempt_at") if isinstance(state, dict) else None)
-        current = now.astimezone(timezone.utc)
-        elapsed = current - previous if previous is not None else SWEEP_INTERVAL
-        if previous is not None and timedelta(0) <= elapsed < SWEEP_INTERVAL:
-            return False
-        try:
-            _write_schedule_state(state_path, current)
-        except OSError:
-            logger.exception("could not persist orphan worktree sweep schedule state")
-            return False
+        return max(0, int(state.get("failure_count", 0))) + 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def schedule_due(root: Path, now: datetime) -> bool:
+    """Read the daily schedule without waiting for active maintenance."""
+    path = root / SCHEDULE_STATE
+    state = _read_schedule_state(path)
+    if not state and not path.exists():
         return True
-    finally:
-        os.close(descriptor)
-        try:
-            lock_path.unlink(missing_ok=True)
-        except OSError:
-            logger.warning("could not remove orphan worktree schedule lock %s", lock_path)
+    if state.get("status") == "failed":
+        retry_at = _parse_time(state.get("next_attempt_at"))
+        return retry_at is None or now.astimezone(timezone.utc) >= retry_at
+    previous = _parse_time(state.get("last_attempt_at") if isinstance(state, dict) else None)
+    return previous is None or not timedelta(0) <= now - previous < SWEEP_INTERVAL
+
+
+def _try_lock(handle: Any) -> bool:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
 
 
 def maybe_run_scheduled(
@@ -278,36 +282,64 @@ def maybe_run_scheduled(
     *,
     now_fn: Callable[[], datetime] = utc_now,
     sweep_fn: Callable[..., CleanupSummary] = sweep_orphan_worktrees,
+    force: bool = False,
 ) -> Optional[CleanupSummary]:
     """Run at most once per day; wired into the boot-scheduled fleet dispatcher."""
     state_path = root / SCHEDULE_STATE
+    lock_path = state_path.with_suffix(".sweep.lock")
     try:
-        due = _claim_due_run(state_path, now_fn())
-    except OSError:
-        logger.exception("could not claim scheduled orphan worktree sweep")
-        return None
-    if not due:
-        return None
-    try:
-        summary = sweep_fn(root)
-    except Exception:  # noqa: BLE001 - the fleet loop must continue after maintenance failure
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as handle:
+            if not _try_lock(handle):
+                return None
+            started_at = now_fn()
+            if not force and not schedule_due(root, started_at):
+                return None
+            try:
+                summary = sweep_fn(root)
+            except Exception as exc:  # noqa: BLE001 - persist failures so dispatchers honor backoff
+                cause = f"{type(exc).__name__}: {exc}"[:500]
+                logger.exception("scheduled orphan worktree sweep failed: %s", cause)
+                if not force:
+                    previous = _read_schedule_state(state_path)
+                    failure_count = _next_failure_count(previous)
+                    retry_at = started_at + _failure_backoff(failure_count)
+                    _write_schedule_state(
+                        state_path,
+                        {
+                            "status": "failed",
+                            "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
+                            "failure_count": failure_count,
+                            "next_attempt_at": retry_at.astimezone(timezone.utc).isoformat(),
+                            "last_failure": cause,
+                        },
+                    )
+                return CleanupSummary(errors=1, details=[{"path": str(root), "reason": "sweep_exception", "detail": cause}])
+            if not force:
+                _write_schedule_state(
+                    state_path,
+                    {
+                        "status": "succeeded",
+                        "last_attempt_at": started_at.astimezone(timezone.utc).isoformat(),
+                        "failure_count": 0,
+                    },
+                )
+            return summary
+    except Exception:  # noqa: BLE001 - a failed sweep must be retried and visible
         logger.exception("scheduled orphan worktree sweep failed")
         return CleanupSummary(errors=1, details=[{"path": str(root), "reason": "sweep_exception"}])
-    return summary
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scheduled", action="store_true", help="honor the persistent daily schedule guard")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.scheduled:
-        summary = maybe_run_scheduled(args.root)
-        if summary is None:
-            print(json.dumps({"status": "not_due", "interval_hours": SWEEP_INTERVAL.total_seconds() / 3600}))
-            return 0
-    else:
-        summary = sweep_orphan_worktrees(args.root)
+    summary = maybe_run_scheduled(args.root, force=not args.scheduled)
+    if summary is None:
+        print(json.dumps({"status": "skipped", "reason": "not_due_or_already_running"}))
+        return 0
     print(json.dumps(summary.to_dict(), ensure_ascii=False))
     return 1 if summary.errors else 0
 

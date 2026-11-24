@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_turn.add_argument("--followup", action="store_true", help="Flag if this prompt was a clarification or follow-up")
     p_turn.add_argument("--skill", default=None, help="Associated skill name")
     p_turn.add_argument("--gap", default=None, help="Identified context gap or reason for iteration")
+    p_turn.add_argument("--project", default=None, help="Project id for isolated durable observations")
+    p_turn.add_argument("--harness", default="unknown", help="Harness that handled the interaction")
+    p_turn.add_argument("--run-id", default="", help="Associated run id")
+    p_turn.add_argument("--cause", default="interaction", help="Canonical cause or interaction kind")
+    p_turn.add_argument("--identity", default=None, help="Stable idempotency identity for replay")
 
     # record-pref command
     p_pref = subparsers.add_parser("record-pref", help="Register or reinforce a user preference/convention")
@@ -72,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     # prime command (System 1 fast context primer)
     p_prime = subparsers.add_parser("prime", help="Synthesize System 1 prompt priming context")
     p_prime.add_argument("--domain", default=None, help="Target domain filter")
+    p_prime.add_argument("--project", default=None, help="Project id whose durable observations should be recovered")
 
     # prune command (System 2 anti-entropy policy debt pruning)
     subparsers.add_parser("prune", help="Prune policy debt and consolidate redundant rules")
@@ -131,6 +137,11 @@ def main():
             one_shot_success=(not args.followup),
             missing_context_or_gap=args.gap,
             target_skill=args.skill,
+            project_id=args.project,
+            harness=args.harness,
+            run_id=args.run_id,
+            cause=args.cause,
+            identity=args.identity,
         )
         is_trigger = tracker.is_checkpoint_turn(turn.turn_id, turn.was_followup)
         print(f"[TURN RECORDED] ID: {turn.turn_id} | Followup: {turn.was_followup}")
@@ -175,7 +186,7 @@ def main():
         print(f"[ANALOGY EXTRAPOLATED] ID: {transfer.transfer_id} | {args.source} -> {args.targets}")
 
     elif args.command == "prime":
-        context = tracker.get_active_system1_context(domain=args.domain)
+        context = tracker.get_active_system1_context(domain=args.domain, project_id=args.project)
         print(context)
 
     elif args.command == "prune":

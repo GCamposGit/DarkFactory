@@ -14879,6 +14879,339 @@
     "updated_at": "2026-11-20T04:36:00.312076Z"
   },
   {
+    "id": "USR-514",
+    "project_id": "darkfac",
+    "title": "Atualizar instalacao Windows do SOPS e do age no manual",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "e793b0c61c20193b0f7892b17be573de5dd19eae",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Na configuracao da OA-082 em 14/11, o manual orienta instalar Mozilla.SOPS, cujo diretorio no repositorio WinGet so contem metadados de validacao. O pacote atual esta em SecretsOPerationS.SOPS. O age v1.3.2 executa pelo caminho de WinGet Packages, mas o shell verificado nao resolve age.exe ou age-keygen.exe pelo nome.",
+    "core_journey": [
+      "Na configuracao da OA-082 em 14/11, o manual orienta instalar Mozilla.SOPS, cujo diretorio no repositorio WinGet so contem metadados de validacao. O pacote atual esta em SecretsOPerationS.SOPS. O age v1.3.2 executa pelo caminho de WinGet Packages, mas o shell verificado nao resolve age.exe ou age-keygen.exe pelo nome."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Manual usa o pacote atual do SOPS e diferencia instalacao de resolucao pelo PATH, com comandos Windows verificados.",
+      "Passo a passo confere sops, age e age-keygen sem tocar em credenciais e orienta o fallback quando as versoes nao aparecem."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-14T09:42:08.769411Z",
+    "updated_at": "2026-11-20T09:30:21.893822Z"
+  },
+  {
+    "id": "USR-518",
+    "project_id": "darkfac",
+    "title": "Verificar imagem em execucao no darkfac-cloud apos deploy no Dokploy",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "fb135186ac4944a6c33511c250f8e1b3bb077db2",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 15/11/2026, o deploy do SHA 060e4f41 concluiu. O Dokploy marcou done e docker.getContainers confirmou o SHA exato e coordinator/worker saudaveis, mas a verificacao rejeitou o titulo generico Manual deployment e pulou o backup pos-deploy.",
+    "core_journey": [
+      "Em 15/11/2026, o deploy do SHA 060e4f41 concluiu. O Dokploy marcou done e docker.getContainers confirmou o SHA exato e coordinator/worker saudaveis, mas a verificacao rejeitou o titulo generico Manual deployment e pulou o backup pos-deploy."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com prova do SHA em execucao, o fluxo segue para o backup existente e registra evidencia por servico"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-15T09:21:33.547955Z",
+    "updated_at": "2026-11-20T11:24:13.918480Z"
+  },
+  {
+    "id": "USR-534",
+    "project_id": "darkfac",
+    "title": "Isolar hostname local em tests/test_remote_dispatch.py quando executado no worker DESKTOP-G45IPEM",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "49eb3ff4096394863ba948139a2561c61d464738",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Quando runner.py despacha a suite completa remotamente para o worker DESKTOP-G45IPEM (http://100.78.181.90:8080), 4 testes em tests/test_remote_dispatch.py falham com discard_reason='self_dispatch' porque o mock de probe_health devolve hostname='desktop-g45ipem', que coincide com socket.gethostname() do proprio worker. Os mesmos 51 testes passam localmente em AI_Notebook.",
+    "core_journey": [
+      "Quando runner.py despacha a suite completa remotamente para o worker DESKTOP-G45IPEM (http://100.78.181.90:8080), 4 testes em tests/test_remote_dispatch.py falham com discard_reason='self_dispatch' porque o mock de probe_health devolve hostname='desktop-g45ipem', que coincide com socket.gethostname() do proprio worker. Os mesmos 51 testes passam localmente em AI_Notebook."
+    ],
+    "non_goals": [
+      "Nao alterar a logica de protecao contra self_dispatch em core/harness/remote_dispatch.py."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Os 4 testes de test_remote_dispatch.py (test_custom_worker_url_cannot_bypass_persisted_host_exclusion, test_offline_primary_worker_falls_through_to_next_eligible_host, test_maybe_dispatch_remote_falls_through_when_override_names_only_offline_grokbox, test_remote_dispatch_skips_healthy_endpoint_rejected_by_effective_policy) mockam o hostname local ou usam hostname sintetico distinto de DESKTOP-G45IPEM e passam tanto no notebook quanto no worker DESKTOP-G45IPEM."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-20T04:03:23.304649Z",
+    "updated_at": "2026-11-20T15:56:55.115883Z"
+  },
+  {
+    "id": "USR-536",
+    "project_id": "darkfac",
+    "title": "Restaurar alertas operacionais no Telegram apos HTTP 400",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "faf0b9ae7b7446429a8f8c4b70299cb1ce9bc03b",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21/11/2026, USR-446-notebook.log registrou HTTP 400 ao enviar alertas, inclusive na tentativa sem HTML. O alerta critico notif_3e46d90ee946 ficou no outbox, tambem houve ocorrencias nos logs de USR-519 e USR-535. Investigar com diagnostico sanitizado e recuperar a entrega pelo bot configurado.",
+    "core_journey": [
+      "Em 21/11/2026, USR-446-notebook.log registrou HTTP 400 ao enviar alertas, inclusive na tentativa sem HTML. O alerta critico notif_3e46d90ee946 ficou no outbox, tambem houve ocorrencias nos logs de USR-519 e USR-535. Investigar com diagnostico sanitizado e recuperar a entrega pelo bot configurado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Classificar o motivo da resposta 400 sem registrar token ou dados privados.",
+      "Confirmar o percurso do alerta ate o destino configurado com recibo real.",
+      "Preservar o outbox para falhas transitorias e evitar reenvio duplicado."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T06:06:02.537134Z",
+    "updated_at": "2026-11-21T10:31:39.281633Z"
+  },
+  {
+    "id": "USR-541",
+    "project_id": "darkfac",
+    "title": "Parar repeticao de deploy quando a convergencia dos nos fica pendente",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "850b7e5175d52fec42d1881f746a20f26f6c9aef",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21-22/11 o log .factory/runs/fleet_dispatcher_logs/fleet-dispatcher.log registrou 279 adiamentos do deploy canonico em 24 horas, 278 com codigo 3. O DarkHub servia 39ef4a60 com health ok. A verificacao contemporanea de node_sync mostrou Desktop e VPS convergentes e Notebook um commit atras; falta ligar cada codigo 3 ao no e arquivos vistos pelo processo agendado. USR-535 trata ledger de aprendizagem no Desktop e USR-519 trata perda da solicitacao, sem cobrir o ciclo de redeploy repetido.",
+    "core_journey": [
+      "Em 21-22/11 o log .factory/runs/fleet_dispatcher_logs/fleet-dispatcher.log registrou 279 adiamentos do deploy canonico em 24 horas, 278 com codigo 3. O DarkHub servia 39ef4a60 com health ok. A verificacao contemporanea de node_sync mostrou Desktop e VPS convergentes e Notebook um commit atras; falta ligar cada codigo 3 ao no e arquivos vistos pelo processo agendado. USR-535 trata ledger de aprendizagem no Desktop e USR-519 trata perda da solicitacao, sem cobrir o ciclo de redeploy repetido."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir o codigo 3 e persistir SHA, no e motivo diagnostico sem expor segredos. Com VPS ja no SHA e apenas convergencia pendente, o dispatcher deve preservar a pendencia e usar recuperacao delimitada, sem redisparar deploy completo para o mesmo SHA a cada ciclo. Provar retomada autonoma quando a causa cessa e preservar a exigencia de backup e evidencia de convergencia."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-22T18:42:47.750568Z",
+    "updated_at": "2026-11-22T20:04:37.382470Z"
+  },
+  {
+    "id": "USR-540",
+    "project_id": "darkfac",
+    "title": "Investigar timeout recorrente nos testes afetados do Notebook",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 21/11 os candidatos dos USR-480 e USR-537 preservaram a worktree e sairam com gate_timeout no passo affected_tests do perfil PR local. USR-537 selecionou 34 testes em 3,97 s e ficou 1800 s sem contagem nem resumo, inclusive na retomada. Evidencia: .factory/runs/outcomes/USR-480.json, .factory/runs/outcomes/USR-537.json e logs de step-timeouts nas worktrees. USR-502 ja foi concluido e a causa deste travamento ainda precisa ser isolada.",
+    "core_journey": [
+      "Em 21/11 os candidatos dos USR-480 e USR-537 preservaram a worktree e sairam com gate_timeout no passo affected_tests do perfil PR local. USR-537 selecionou 34 testes em 3,97 s e ficou 1800 s sem contagem nem resumo, inclusive na retomada. Evidencia: .factory/runs/outcomes/USR-480.json, .factory/runs/outcomes/USR-537.json e logs de step-timeouts nas worktrees. USR-502 ja foi concluido e a causa deste travamento ainda precisa ser isolada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar com evidencia o processo ou teste que impede o encerramento. No Notebook o perfil PR dos candidatos afetados termina com veredito e contagem real ou falha diagnosticavel e delimitada. Preservar os candidatos e a retomada de entrega, mantendo os contratos do portao e os limites de concorrencia."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T17:55:28.544261Z",
+    "updated_at": "2026-11-21T17:55:28.544261Z"
+  },
+  {
+    "id": "USR-539",
+    "project_id": "darkfac",
+    "title": "Prioridade alta — completar a coordenação autônoma e evoluir coordenar-fabrica",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "A V0 da skill, integrada pelo PR 916, orienta o operador, mas a seleção regular não executa prioridade explícita, a memória de interações varia por estado/host e a continuidade sem chat precisa de prova integrada. Consolidar nos componentes existentes a aprendizagem a cada intervenção, a recuperação de telemetria e a admissão do próximo trabalho, mantendo os gates e o orçamento.",
+    "core_journey": [
+      "A V0 da skill, integrada pelo PR 916, orienta o operador, mas a seleção regular não executa prioridade explícita, a memória de interações varia por estado/host e a continuidade sem chat precisa de prova integrada. Consolidar nos componentes existentes a aprendizagem a cada intervenção, a recuperação de telemetria e a admissão do próximo trabalho, mantendo os gates e o orçamento."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O intake persiste prioridade explícita por projeto e o despachante escolhe o ticket prioritário elegível, preservando dependências, reservas, faixas de recuperação, modo resume-only e ordem estável de empate.",
+      "Os quatro harnesses iniciam a coordenação pelo pedido curto; validar também a entrada por arquivo, delegação por etapa sem IDs de modelos na skill, custo por rota e ausência de loops de LLM sem trabalho.",
+      "Cada interação sanitizada e cada falha relevante de outro harness é recuperável no projeto certo, inclusive após troca de host ou reinício; dois escritores concorrentes não perdem observações. Consolidar pela causa, aplicar ajuste pequeno e comprovar menor intervenção em caso independente.",
+      "Falha de leitura de cota solicita nova amostra; uma falha persistente gera um único reparo por causa e provedor mesmo com concorrência; com rota saudável a fila segue e sem rota a espera fica persistida até recuperação. Respeitar capacidade e tetos.",
+      "Em ensaio real, fechar a sessão durante uma entrega preserva o run, conclui o deploy e admite outro ticket elegível no modo regular; segunda sessão recupera evidência e etapa sem duplicar trabalho. Um defeito de produto aparece no projeto correto e um do runtime na DarkFac com vínculo.",
+      "Registrar evidências operacionais dos critérios e acompanhar a meta V0 vigente de cinco demandas reais consecutivas até produção, incluindo produto externo, learning pack e intervenção humana medida."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-21T06:33:51.048827Z",
+    "updated_at": "2026-11-21T06:33:51.048827Z"
+  },
+  {
+    "id": "USR-546",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Varredura de worktrees que falha sempre e relancada a cada ciclo do despachante",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "171269c128739ae8f167a4682f24dbf57a91c6e7",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Apos o #925 (USR-544), maybe_run_scheduled so grava o horario da varredura quando ela termina sem excecao. Se a varredura falhar de forma persistente, schedule_due continua verdadeiro e scheduled_cleanup_hook lanca um novo processo a cada ciclo do despachante. O log enche e a falha fica sem backoff. Achado na revisao cruzada do #925 em 23/11.",
+    "core_journey": [
+      "Apos o #925 (USR-544), maybe_run_scheduled so grava o horario da varredura quando ela termina sem excecao. Se a varredura falhar de forma persistente, schedule_due continua verdadeiro e scheduled_cleanup_hook lanca um novo processo a cada ciclo do despachante. O log enche e a falha fica sem backoff. Achado na revisao cruzada do #925 em 23/11."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Falha da varredura aplica backoff persistido (ex.: nova tentativa em 1 h, com teto) e registra a causa; teste de comportamento mostra que duas falhas seguidas no mesmo intervalo nao lancam dois processos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-23T09:50:47.390853Z",
+    "updated_at": "2026-11-23T17:48:36.783734Z"
+  },
+  {
+    "id": "USR-549",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Alertas de hold nao chegam ao owner: Telegram missing_destination",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "86e9076a0e3ade3122ae0ea0c49c95fb819c70d7",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Logs dos USR-517/520/522 (22/11) mostram notificacao Telegram com category=missing_destination; o hold so aparece no Hub e o owner nao e avisado. USR-536 restaurou alertas apos HTTP 400, mas o destino continua ausente nesse caminho.",
+    "core_journey": [
+      "Logs dos USR-517/520/522 (22/11) mostram notificacao Telegram com category=missing_destination; o hold so aparece no Hub e o owner nao e avisado. USR-536 restaurou alertas apos HTTP 400, mas o destino continua ausente nesse caminho."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Notificacao de hold resolve o destino configurado do owner e chega ao Telegram em teste real de ponta a ponta; se o destino faltar, o erro vira acao visivel no Hub com a variavel a configurar."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-23T10:00:31.423637Z",
+    "updated_at": "2026-11-24T07:19:32.558821Z"
+  },
+  {
+    "id": "USR-555",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Portao no Notebook estoura coleta (TEST_PHASE collection timeout 120 s) e motivo da falha cita SUITE_LOCK",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "af6f7d797bb1a73e70fd27cb677903f355c9a546",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "fleet-dispatcher.log 23/11: 15:49 'USR-538 falhou em notebook: causa=gate_failed motivo=[TEST_PHASE] collection files=23 timeout_sec=120' (coleta de 23 arquivos estoura 120 s no Notebook, mesmo apos USR-540); 15:40 'USR-545 falhou em grokbox: causa=gate_failed motivo=[SUITE_LOCK] acquired slot 0 after waiting 450.8s' - o motivo registrado e a linha informativa do lock, nao a falha real, o que esconde a causa na triagem. Ambos os tickets voltaram a hold.",
+    "core_journey": [
+      "fleet-dispatcher.log 23/11: 15:49 'USR-538 falhou em notebook: causa=gate_failed motivo=[TEST_PHASE] collection files=23 timeout_sec=120' (coleta de 23 arquivos estoura 120 s no Notebook, mesmo apos USR-540); 15:40 'USR-545 falhou em grokbox: causa=gate_failed motivo=[SUITE_LOCK] acquired slot 0 after waiting 450.8s' - o motivo registrado e a linha informativa do lock, nao a falha real, o que esconde a causa na triagem. Ambos os tickets voltaram a hold."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Coleta do perfil pr no Notebook conclui dentro do prazo ou o prazo de coleta escala com o numero de arquivos; o motivo de gate_failed registrado no despachante e a primeira linha de falha real (nunca [SUITE_LOCK] informativo); USR-538 e USR-545 passam no portao em reexecucao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-24T00:16:32.650290Z",
+    "updated_at": "2026-11-24T15:19:04.286544Z"
+  },
+  {
+    "id": "USR-556",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Recibo de coordenacao nao acusa despachante parado por deploy com recuperacao esgotada",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "c70674957b1a5a19431303782cbff9a467ed2f30",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "23/11 15:13-21:13: despachante com delivery_wait=true e .factory/runs/deploy_deferrals.json com recovery_exhausted=true para 07e55b6 (convergencia do Notebook barrada pelo ledger, USR-535); nenhum despacho por 6 h. python -m core.ops.coordination listou status in_flight 'USR-546 na etapa deploy' e nenhum stall desse tipo; o coordenador so achou a causa lendo fleet-dispatcher.log. detect_stalls em core/ops/coordination.py nao le deploy_deferrals.json nem delivery_wait.",
+    "core_journey": [
+      "23/11 15:13-21:13: despachante com delivery_wait=true e .factory/runs/deploy_deferrals.json com recovery_exhausted=true para 07e55b6 (convergencia do Notebook barrada pelo ledger, USR-535); nenhum despacho por 6 h. python -m core.ops.coordination listou status in_flight 'USR-546 na etapa deploy' e nenhum stall desse tipo; o coordenador so achou a causa lendo fleet-dispatcher.log. detect_stalls em core/ops/coordination.py nao le deploy_deferrals.json nem delivery_wait."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "detect_stalls emite stall 'deploy_convergence_exhausted' (sha, pending_node, reason, recovery_attempts) quando deploy_deferrals.json tem recovery_exhausted; _stall_action aponta ler [NODE SYNC] e rodar scripts/dokploy_redeploy.py apos limpar a causa; skill coordenar-fabrica cita o sinal na tabela; teste de comportamento cobre o caso"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-24T00:32:26.067911Z",
+    "updated_at": "2026-11-24T18:07:31.352821Z"
+  },
+  {
     "id": "USR-483",
     "project_id": "darkfac",
     "title": "Troca de harness ou PC operador deve ser operacao normal, sem configuracao fixa",

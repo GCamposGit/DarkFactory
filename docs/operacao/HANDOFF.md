@@ -1,7 +1,7 @@
 # Handoff operacional
 
-Versao: 12
-Atualizado em: 2026-11-11
+Versao: 14
+Atualizado em: 2026-11-24
 
 Este arquivo guarda o procedimento de coordenacao. Fatos correntes nao sao copiados para ca: coordenador, sessoes paralelas, fila, cotas, runs vivos e PRs saem do estado gerado.
 
@@ -46,6 +46,12 @@ Sessao paralela, no mesmo harness ou em outro, no mesmo modelo ou em outro, no m
 
 - As pendencias humanas correntes estao no estado gerado e no backlog de acoes do owner no DarkHub. Este arquivo nao lista identificadores de acao, coordenador, cotas, runs nem PRs.
 
+## Licoes de 22-23/11
+
+- PR em rascunho de ticket fora da esteira trava a frota: o despachante relanca o ticket e o `run_ticket` recusa com `[RECUSA] ja possui PR ativo` (codigo 75, conta como espera). Ao assumir, cruze `gh pr list --json number,isDraft` com `recent_failures` em `.factory/runs/fleet_dispatcher_state.json`; PR de ticket com CI verde se revisa, promove e mescla.
+- Recusa nao e falha, mas recusa repetida no mesmo sha e laco.
+- Ticket entregue fora da esteira fecha com `register_ticket` (`status=completed` e evidencia) mais `AdmissionStore(state_root() / "admission.sqlite3").reset_budget("darkfac", id)`.
+
 ## Armadilhas
 
 1. **Ratchet de complexidade em funcoes orquestradoras**: condicoes novas de validacao de host devem ser encapsuladas em funcoes auxiliares para o `complexity_ratchet.py` nao reprovar o orquestrador.
@@ -66,6 +72,9 @@ Sessao paralela, no mesmo harness ou em outro, no mesmo modelo ou em outro, no m
 16. **`admission.sqlite3`**: falhas antigas de causa ja corrigida podem ser fechadas (`update failures set open=0`) e `dispatcher_recovery.active=0`, sempre com backup em `.factory/backups/`. O fechamento e automatico quando o `main` muda.
 17. **CI de PR**: leva de 3 a 5 minutos para criar o run do `DarkFac CI`; antes disso so aparece `trusted-pr-policy`.
 18. **`gh pr close`** pode ser negado pelo classificador de permissoes; peca autorizacao explicita ao owner.
+
+19. `learning.cli record-turn` altera o `learning_ledger.json` rastreado no checkout compartilhado. Antes de avancar o checkout: `git stash push -- .factory/learning/learning_ledger.json`, depois `merge --ff-only` e `stash pop`.
+20. `dokploy_redeploy.py` sai com codigo 3 quando so o Notebook nao converge; os servicos podem estar corretos. Confira as linhas `[RUNTIME IMAGE]`.
 
 ## Proximo passo
 

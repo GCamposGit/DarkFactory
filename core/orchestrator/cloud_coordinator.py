@@ -269,7 +269,7 @@ class CloudCoordinator:
             return []
 
         try:
-            eligible_jobs = self.store.list_eligible_admission_jobs(limit=50)
+            eligible_jobs = self.store.list_eligible_admission_jobs(limit=50, now=now_utc)
         except Exception as exc:
             logger.warning("Failed to list eligible admission jobs: %s", exc)
             return []

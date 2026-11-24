@@ -163,6 +163,7 @@ class HeuristicDemandSpecifier:
         suggested_ticket = UserTicket(
             id=ticket_id,
             project_id=demand.project_id,
+            priority=demand.priority,
             title=title,
             origin=DemandOrigin.USER,
             status=DeliveryStatus.PLANNED,

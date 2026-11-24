@@ -71,7 +71,11 @@ def _run_count(store: SQLiteControlStore) -> int:
 
 
 def test_existing_ticket_becomes_a_line_run_with_an_initial_grill_job(store, demands) -> None:
-    _ticket(demands)
+    ticket = _ticket(demands, priority=11)
+
+    command = owner_intake.command_for_ticket(ticket)
+    assert command.project_id == ticket.project_id
+    assert command.payload["priority"] == 11
 
     result = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
 

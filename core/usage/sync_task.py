@@ -180,6 +180,18 @@ def collect_local_usage_payload(
     }
 
 
+def _settle_published_refresh_requests(provider_dir: Path, node_id: str, accounts: list[dict[str, Any]]) -> None:
+    """A successful telemetry publish is the durable acknowledgement for local refresh requests."""
+    try:
+        from core.usage.refresh_requests import RefreshRequestStore
+
+        RefreshRequestStore(Path(provider_dir).parent / "refresh_requests.json").complete_from_snapshots(
+            node_id, accounts
+        )
+    except Exception as exc:  # publication success must not be reported as failed by local bookkeeping
+        logger.warning("Could not settle published quota refresh requests: %s", type(exc).__name__)
+
+
 class PublishResult(BaseModel):
     """A publication receipt; errors contain no response body, token or database URL."""
 
@@ -218,6 +230,12 @@ def publish_once(
             timeout=6.0,
         )
         ok = 200 <= response.status_code < 300
+        if ok:
+            _settle_published_refresh_requests(
+                root / ".factory" / "usage" / "providers",
+                node_id or os.environ.get("DARKFAC_NODE_ID", "workstation"),
+                payload["accounts"],
+            )
         return PublishResult(ok=ok, http_status=response.status_code,
                              oldest_snapshot_age_seconds=age, error=None if ok else "http_error")
     except Exception as exc:

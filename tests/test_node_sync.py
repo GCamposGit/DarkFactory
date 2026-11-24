@@ -71,7 +71,7 @@ class FakeGit:
             return "C:/repo/.git" if self.worktree else ".git"
         if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
             return self.branch
-        if args == ["status", "--porcelain"]:
+        if args in (["status", "--porcelain"], ["status", "--porcelain", "--untracked-files=all"]):
             return " M file" if self.dirty else ""
         if len(args) == 2 and args[0] == "rev-list":
             spec = args[1]
@@ -325,6 +325,67 @@ def test_notebook_clean_main_fast_forwards() -> None:
     assert ["merge", "--ff-only", SHA] in git.calls
     assert ["rev-parse", "origin/main"] not in git.calls
     assert ["merge", "--ff-only", "origin/main"] not in git.calls
+
+
+@pytest.mark.parametrize(
+    ("late_status", "can_sync"),
+    [
+        ("?? .factory/runs/brand_new_state.json\n?? .factory/runs/some_dir/audit.json", True),
+        (" M .factory/learning/learning_ledger.json", True),
+        # run_git strips the output: the only dirty line arrives without its leading blank.
+        ("M .factory/learning/learning_ledger.json", True),
+        (" M .factory/learning/learning_ledger.json\n M core/app.py", False),
+        ("?? .factory/runs/brand_new_state.json\n?? core/new_module.py", False),
+        ("M  .factory/runs/review_benchmark.jsonl", False),
+    ],
+)
+def test_notebook_sync_rechecks_changes_without_blocking_known_runtime_state(
+    late_status: str, can_sync: bool,
+) -> None:
+    class GitWithLateChanges(FakeGit):
+        def __call__(self, root: Path, args: list[str]) -> str:
+            if args == ["status", "--porcelain", "--untracked-files=all"]:
+                return late_status
+            return super().__call__(root, args)
+
+    git = GitWithLateChanges(old=True)
+    report = mod.sync(root=Path("."), git=git, http=FakeHttp())
+
+    assert report.ok is can_sync
+    assert (["merge", "--ff-only", SHA] in git.calls) is can_sync
+    if not can_sync:
+        assert report.nodes[0].reason == "dirty worktree; no git operation attempted"
+
+
+def test_modified_learning_ledger_is_behind_and_reapplied_after_fast_forward(tmp_path: Path) -> None:
+    ledger = ".factory/learning/learning_ledger.json"
+    local = b'{"local": true}'
+    (tmp_path / ".factory/learning").mkdir(parents=True)
+    (tmp_path / ledger).write_bytes(local)
+
+    class _LedgerGit(FakeGit):
+        def __call__(self, root: Path, args: list[str]) -> str:
+            if args[:2] == ["status", "--porcelain"]:
+                return f"M {ledger}"  # as run_git returns it: stripped
+            if args == ["diff", "--name-only"]:
+                return ledger
+            if args[:2] == ["ls-files", "--others"]:
+                return ""
+            if args == ["rev-parse", f"HEAD:{ledger}"]:
+                return "blob1"
+            if args == ["checkout", "--", ledger]:
+                (tmp_path / ledger).write_bytes(b"head")
+                return ""
+            return super().__call__(root, args)
+
+    git = _LedgerGit(old=True)
+    kind, _commits, dirty, _reason = mod.classify_checkout(tmp_path, git, SHA)
+    assert kind == "behind" and dirty["tracked_modified"] == [ledger]
+
+    report = mod.sync(root=tmp_path, git=git, http=FakeHttp())
+    assert report.ok
+    assert ["merge", "--ff-only", SHA] in git.calls
+    assert (tmp_path / ledger).read_bytes() == local
 
 
 class _RelationGit(FakeGit):

@@ -215,12 +215,12 @@ def test_allocator_recalculates_when_candidate_is_already_on_origin_main(
     origin_reads = {"count": 0}
 
     def show(root_path: Path, ref: str) -> str | None:
+        # The snapshot comes from the batch read; this single read is the
+        # post-snapshot re-check of origin/main, where USR-187 has landed.
         raw = real_show(root_path, ref)
         if ref != "origin/main" or raw is None:
             return raw
         origin_reads["count"] += 1
-        if origin_reads["count"] == 1:
-            return raw
         rows = json.loads(raw)
         if not any(row.get("id") == "USR-187" for row in rows):
             rows.append({"id": "USR-187", "title": "landed on origin/main"})
@@ -229,7 +229,7 @@ def test_allocator_recalculates_when_candidate_is_already_on_origin_main(
     monkeypatch.setattr(id_allocator, "_show_ledger", show)
 
     assert reserve_ticket_id(path, "USR") == "USR-188"
-    assert origin_reads["count"] >= 2
+    assert origin_reads["count"] >= 1
     common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     saved = json.loads((common / "darkfac-ids.json").read_text(encoding="utf-8"))
     assert saved["USR"] == 188

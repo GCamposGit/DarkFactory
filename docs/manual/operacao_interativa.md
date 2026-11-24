@@ -1,5 +1,14 @@
-<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/line/briefing.py, core/line/coordination.py, core/line/session_identity.py, core/line/shared_state.py, scripts/line_briefing.py -->
-# Operacao interativa (USR-431, USR-433, USR-483)
+<!-- covers: core/ops/briefing.py, core/ops/turn_guard.py, core/line/operating_harness.py, core/line/routing.py, core/line/feeder_cycle.py, core/line/stage_integration.py, core/line/sentinel.py, run_ticket.py, core/notifications/telegram_delivery.py, scripts/telegram_delivery_check.py, core/integrations/telegram.py, core/line/failure_alerts.py, core/line/human.py, core/notifications/service.py, core/line/briefing.py, core/line/coordination.py, core/line/session_identity.py, core/line/shared_state.py, scripts/line_briefing.py -->
+# Operacao interativa por Claude Code, Codex, Grok Build e Antigravity (USR-431, USR-433, USR-483, USR-539)
+
+## Assumir a coordenação
+
+O pedido curto e a entrada explícita pela skill executam `python -m core.ops.coordination` e recebem o mesmo recibo persistido em `DARKFAC_STATE_ROOT/coordination/last_receipt.json`. Use `--entry skill-file` para declarar a segunda entrada e `--harness` somente quando o harness não puder ser detectado. O recibo contém projeto, papel, trabalho em voo, run/etapa/evidências recuperados, primeira ação, ticket, decisão de rota, referência de uso quando disponível e custo disponível. Se existir run em voo, a coordenação aguarda essa retomada antes de rotear outro ticket. O briefing e as lições são contexto complementar, lidos após a persistência do recibo. A seleção lê a elegibilidade pelo feeder canônico. Fila sem trabalho elegível persiste `idle` (ou `in_flight` durante recuperação), e rota indisponível persiste `wait`; esses estados não iniciam agente nem repetem chamadas de LLM.
+
+**Fábrica parada (stalls).** O recibo traz `stalls`, lidos de forma somente leitura e que falham fechados: `dispatcher_blocked_with_free_host` (estado do despachante `blocked` com host livre), `ticket_pr_open` (PR aberto de ticket não terminal, com `draft`, CI `green`/`red`/`pending` e `refusal_loop` quando o `run_ticket` recusa por "ja possui PR ativo"), `hold_already_delivered` (hold cujo `[TICKET]` já está em `origin/main`, com o sha), `hold` (demais, com a causa), `deploy_convergence_exhausted` (registro em `DARKFAC_STATE_ROOT/runs/deploy_deferrals.json` com `recovery_exhausted=true`, expondo `sha`, `pending_node`, `reason` e `recovery_attempts`; arquivo ausente fica omisso, conteúdo inválido ou inacessível vira `source_unavailable` da fonte `deploy_deferrals`) e `source_unavailable` (gh, git, admissão ou adiamento de deploy fora do ar; nunca derruba o recibo). Com stall acionável e sem run em voo, o status vira `stalled` e a `first_action` vem antes de admitir trabalho novo: revisar e mesclar o PR com CI verde, corrigir o CI vermelho, fechar o hold já entregue (`complete`, ver [fila.md](fila.md)), diagnosticar o despachante ou, na convergência esgotada, ler as linhas `[NODE SYNC]`, limpar a causa e executar `python C:\dev\DarkFac\scripts\dokploy_redeploy.py`. Se `delivery_wait` mantiver uma entrega em voo na etapa deploy, o recibo preserva `status=in_flight` e os dados do run, mas a ação de convergência passa a ser a `first_action`; a retomada do deploy continua prioritária e nenhum trabalho novo é admitido.
+
+Abra o checkout da fábrica ou do produto adotado e diga **“assuma a fábrica”** em uma sessão com descoberta da skill `coordenar-fabrica`. Para qualquer harness com acesso ao checkout da DarkFac, a entrada explícita é **“Leia `.agents/skills/coordenar-fabrica/SKILL.md` e assuma a coordenação deste projeto”**. As duas entradas iniciam `python -m core.ops.coordination`, leem `DARKFAC_STATE_ROOT/coordination/last_receipt.json` antes de despachar e usam briefing e lições para contexto complementar. A execução fora do chat depende do modo e da disponibilidade do despachante. [Guia do coordenador](../../.agents/skills/coordenar-fabrica/SKILL.md)
+
 
 O briefing le OAs apenas da fonte configurada pelo `OwnerActionStore`: control store
 em producao, arquivo com modo local explicito. Nao consulta `dynamic.json` nem
@@ -45,6 +54,10 @@ O procedimento de consulta e de troca nao grava `DARKFAC_OPERATING_HARNESS` no a
 python C:\dev\DarkFac\scripts\line_briefing.py
 python C:\dev\DarkFac\scripts\line_briefing.py --json
 python C:\dev\DarkFac\scripts\line_briefing.py assumir --decisao-owner
+python -m core.ops.coordination --entry short-request
+Get-Content "$env:DARKFAC_STATE_ROOT/coordination/last_receipt.json"
+python -m core.ops.briefing
+python -m core.learning.cli prime --domain coordenacao
 ```
 
 A consulta mostra o coordenador vigente ou a causa da ausencia (`no_coordinator` ou `heartbeat_expired`), as sessoes paralelas, a fila, as cotas, os runs vivos e os PRs. Cada bloco traz `observado_em`, `origem_em`, `idade_s` e `frescor` (`vigente`, `stale` ou `indisponivel`). `--json` imprime o mesmo estado para automacao, com `freshness` `current`, `stale` ou `unavailable`. Esses fatos correntes saem do estado gerado.
@@ -260,6 +273,30 @@ ou inacessivel, inclusive quando a consulta de existencia recebe `PermissionErro
 como configuracao opcional indisponivel e nao interrompe a execucao do ticket. Para exigir o
 modo MCP estrito explicitamente, use `DARKFAC_STRICT_MCP_CONFIG=1`.
 
+## Diagnostico e replay de alerta no Telegram (USR-536)
+
+O canal Telegram do owner entrega o alerta operacional pelo bot `owner` ao primeiro destino efetivo: `authorized_chat_ids` e, se a lista ficar vazia, `authorized_user_ids`. Zero nao e destino. O comando localiza o `NotificationEvent` pelo `notification_id`. Sem token ou sem destino a execucao e recusada (codigo 2) e a saida nao traz token, chat, titulo nem texto.
+
+Diagnostico, sem chamar `sendMessage`:
+
+```powershell
+python C:\dev\DarkFac\scripts\telegram_delivery_check.py --notification-id notif_3e46d90ee946
+```
+
+Replay. A segunda execucao do mesmo `notification_id` devolve `already_delivered` e nao chama `sendMessage` de novo. Falha transitoria permanece no outbox; timeout ambiguo fica `uncertain` e tambem nao e reenviado.
+
+```powershell
+python C:\dev\DarkFac\scripts\telegram_delivery_check.py --notification-id notif_3e46d90ee946 --replay
+```
+
+Estado consolidado do canal Telegram: o alerta usa o bot owner e o primeiro destino efetivo de `load_telegram_config` (ambiente do processo ou `.env` do checkout; id zero fica de fora). Sem token ou sem destino o comando recusa e nao chama `sendMessage`. O diagnostico de `notif_3e46d90ee946` neste processo encontrou o evento e recusou com `missing_token`, sem imprimir titulo, texto, token ou chat. Quando token e destino existem, o replay imprime `notification_id`, `role`, `message_id` e `timestamp`; a execucao seguinte do mesmo id devolve `already_delivered`.
+
+## Alertas de hold (USR-549)
+
+Alertas operacionais do bot owner usam `TELEGRAM_OWNER_CHAT_ID` primeiro e, quando nao configurado, podem recorrer a `TELEGRAM_AUTHORIZED_CHATS`/`TELEGRAM_ALLOWED_CHATS` e a `authorized_chat_ids` do JSON local. Holds de ticket (`notify_ticket_hold`) exigem o destino dedicado: nao recorrem a chats nem usuarios compartilhados (`TELEGRAM_AUTHORIZED_USERS`/`TELEGRAM_ALLOWED_USERS`). Configure `TELEGRAM_OWNER_CHAT_ID` como ID numerico do chat privado do owner no ambiente do servico que executa a linha. Se estiver ausente ou invalido, o evento permanece no DarkHub com essa instrucao visivel, registra `missing_destination` e nao declara entrega Telegram nem cria item de outbox.
+
+Para conferir o caminho ponta a ponta, configure temporariamente `TELEGRAM_OWNER_CHAT_ID` no ambiente e provoque um hold de ticket; confirme uma chamada `sendMessage` ao chat dedicado e `telegram` em `delivered_channels`. Sem a variavel, confirme o alerta no DarkHub com a instrucao de correcao, `delivered_channels` sem `telegram`, log `missing_destination` e nenhuma chamada HTTP ou entrada no outbox. O ID do chat nao deve aparecer no evento nem nos logs.
+
 ## Checkpoint de BUILD e recuperacao de rebase (USR-475)
 
 Na operacao interativa e na retomada pelo launcher, `run_ticket.py` vincula `progress.json` ao
@@ -271,3 +308,5 @@ de digest sem Git (`_non_git_candidate_digest`), arquivos dentro de `state_root(
 ignorados para que artefatos de stage nao alterem `candidate_digest`. Na etapa `REVIEW`,
 `run_ticket.py` remove `harness:antigravity` das caps em contexto `headless` sem
 `ANTIGRAVITY_LS_ADDRESS` configurado (USR-519, USR-531).
+
+`run_ticket.py --create` recusa `--project` desconhecido com exit 2 e `--queue-only` nao sonda cota (USR-560).

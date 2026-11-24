@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import pytest
@@ -161,6 +162,32 @@ def test_append_lessons_to_markdown_file_and_read_lessons(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 # 3. Learning ledger integration tests
 # ---------------------------------------------------------------------------
+
+
+def test_retrospective_routes_runtime_failure_observation_to_darkfac(monkeypatch, tmp_path: Path) -> None:
+    recorded = []
+    monkeypatch.setattr(retrospective, "record_observation", lambda **kwargs: recorded.append(kwargs))
+
+    class Tracker:
+        learning_dir = tmp_path / "learning"
+        ledger = SimpleNamespace(mistakes=[])
+
+        def record_mistake_rca(self, **kwargs):
+            self.ledger.mistakes.append(kwargs)
+
+    lessons = [
+        RetrospectiveLesson("Produto falhou", cause_code="build_failed", stage="build"),
+        RetrospectiveLesson("Runtime caiu", cause_code="worker_timeout", stage="validation"),
+    ]
+    record_lessons_in_learning_tracker(
+        lessons, "run-runtime-1", tracker=Tracker(), project_id="produto", ticket_id="USR-539",
+        evidence=["artifacts/validation.json"],
+    )
+
+    assert [item["project_id"] for item in recorded] == ["produto", "darkfac"]
+    assert all(item["run_id"] == "run-runtime-1" for item in recorded)
+    assert all(item["ticket_id"] == "USR-539" for item in recorded)
+    assert all(item["evidence"] == ["artifacts/validation.json"] for item in recorded)
 
 
 def test_record_lessons_in_learning_tracker(tmp_path: Path) -> None:

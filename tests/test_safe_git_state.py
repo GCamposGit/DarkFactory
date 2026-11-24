@@ -120,9 +120,9 @@ def test_no_shell_git_revision_path_commands_in_factory() -> None:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
-            command = ast.get_source_segment(source_text, node.args[0]) or ""
             shell = next((kw.value for kw in node.keywords if kw.arg == "shell"), None)
             if isinstance(shell, ast.Constant) and shell.value is True:
+                command = ast.get_source_segment(source_text, node.args[0]) or ""
                 if re.search(r"\bgit\s+show\s+\S+:\S+", command):
                     offenders.append(f"{source.relative_to(root)}:{node.lineno}")
             if source.name == "safe_show.py" or not isinstance(node.args[0], ast.List):

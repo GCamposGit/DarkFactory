@@ -270,3 +270,6 @@ e sem reabrir ou alterar o status de um ticket concluido (leitura pura, nenhum
 `save_ticket`/`update_status` e chamado). `--ticket <ID>` limita a auditoria de
 modelo ao ledger desse ticket; `--out <caminho>` so troca o destino do recibo
 persistido (`docs/evidence/USR-471-operational-context.json` por padrao).
+# Reamostragem e reparo de quota desconhecida
+
+Quando a sondagem de um provedor resulta em quota desconhecida por timeout, amostra antiga ou inválida, o roteador solicita uma nova amostra persistente. Chamadas concorrentes para o mesmo provedor reutilizam a solicitação ainda pendente. O registro só é considerado concluído quando o publicador envia uma medição mais nova que o pedido. Se essa nova leitura continuar sem uso, o roteador registra um único ticket de reparo em `darkfac`, deduplicado por provedor e causa; a quota permanece inelegível até haver evidência utilizável.

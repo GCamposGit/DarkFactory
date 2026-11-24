@@ -27,6 +27,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field as dataclass_field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
@@ -161,6 +162,9 @@ class WorkerHealthStatus(BaseModel):
     hostname: str = Field(default="", description="socket.gethostname() of this worker, for self-dispatch detection")
     busy: bool = Field(default=False, description="True while a harness job is actively running (single worker thread)")
     queue_length: int = Field(default=0, description="Number of jobs queued or running on this worker")
+    workers: int = Field(default=0, ge=0, description="Measured capacity for the validation gate")
+    available_gib: float | None = Field(default=None, ge=0, description="Available RAM at measurement")
+    observed_at: datetime | None = Field(default=None, description="UTC timestamp of the capacity measurement")
     known_shas: list[str] = Field(
         default_factory=list,
         description="origin/main SHA + recent validated candidate SHAs, for thin `git bundle --not` negotiation",
@@ -1904,21 +1908,32 @@ def _worker_health_status(
     except Exception:
         docker_available = False
 
+    from core.line import gate_ram
+
+    try:
+        reading = gate_ram.measure_workers()
+    except (ImportError, OSError, RuntimeError) as exc:
+        logger.warning("Could not measure worker capacity: %s", type(exc).__name__)
+        reading = None
+    busy = job_manager.is_busy()
     return WorkerHealthStatus(
-        status="busy" if job_manager.is_busy() else "ok",
+        status="busy" if busy else "ok",
         node_id=node_id,
         configured_node_id=identity.configured_node_id,
         node_id_source=identity.source,
         version="1.0.0",
         docker_ready=docker_available,
         project_root=str(root_path),
-        active_runs=1 if job_manager.is_busy() else 0,
+        active_runs=1 if busy else 0,
         available_harnesses=get_available_harnesses(),
         platform_family=harness_cache.platform_family(),
         python_version=harness_cache.python_version_tag(),
         hostname=socket.gethostname(),
-        busy=job_manager.is_busy(),
+        busy=busy,
         queue_length=job_manager.queue_length(),
+        workers=reading.workers if reading else 0,
+        available_gib=reading.available_gib if reading else None,
+        observed_at=datetime.now(timezone.utc) if reading else None,
         known_shas=known_validated_shas(root_path),
         harness_version="1",
         git_sha=current_git_sha(root_path),

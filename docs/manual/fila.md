@@ -1,6 +1,11 @@
 <!-- covers: core/git/app_token.py, core/infra/node_sync.py, scripts/sync_usage_to_cloud.py, scripts/snapshot_queue.py, core/owner_actions/*.py, hub/backend/service*.py, hub/backend/api.py, hub/backend/main.py, hub/backend/models.py, hub/frontend/interventions.js, core/orchestrator/adapters/control_postgres.py, core/ops/briefing.py, deploy/dokploy/docker-compose.hub.yml, .env.example, core/demands/queue_store.py, core/demands/store.py -->
 # Fila de tickets (USR-343)
 
+Na fila de etapas, `not_before` define quando uma nova tentativa volta a disputar a capacidade da
+frota. Uma etapa pendente com prazo futuro não renova a reserva atual nem causa nova admissão.
+O run e o prazo ficam no control store. No horário marcado, a etapa volta a disputar uma reserva
+pelo coordenador. Os workers continuam renovando as reservas de etapas em execução.
+
 A fila de desenvolvimento vive no control store: Postgres quando `DARKFAC_HF02_DATABASE_URL`
 está definida, senão o SQLite local `.factory/control.db`. Tabelas (criadas com
 `CREATE TABLE IF NOT EXISTS`):
@@ -21,6 +26,7 @@ python C:\dev\DarkFac\run_ticket.py --create --queue-only --title "Titulo" --pro
 
 O comando grava o ticket (status `planned`) no control store e termina. Não cria worktree
 `ticket/queue-*`, PR nem merge. O Telegram usa o mesmo caminho.
+`--project` precisa existir em `.factory/projects.json` (ou ser `darkfac`); projeto desconhecido sai com código 2 sem registrar ticket. O registro não sonda cota.
 
 ## Leitura
 
@@ -88,6 +94,10 @@ numa linha nova. A linha igual nao e repetida. Ticket que ja esta `planned` nao 
 regravado e nao ganha outra linha. Branch, worktree e trava de linha nao entram
 nesse metodo.
 
+## Fechar entrega com prova (USR-539)
+
+`python -m core.demands.cli complete USR-447 --sha <sha> --evidence "<texto>" [--project darkfac]` fecha um ticket cujo commit já está no main. Faz `git fetch -q origin` e recusa com código 2 se o sha não for ancestral de `origin/main` ou se nenhum commit do intervalo citar `[USR-447]`. Se passar, grava `completed` com `delivery_evidence` iniciado pelo sha e libera hold e orçamento (`AdmissionStore.reset_budget`).
+
 ## Limpeza ao encerrar ticket (USR-500)
 
 `DemandsStore.update_status` primeiro persiste a transicao e libera o lock do ledger. Ao
@@ -126,6 +136,15 @@ python -m core.line.stale_active --dry-run
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).
   USR-394: no `/system/update` a edicao local e guardada e reaplicada apos o pull se o arquivo nao mudou no
   upstream; se mudou, vale o upstream e a copia local vai para `.factory/runs/node_sync_conflicts/`.
+  Antes de avançar o Notebook, a checagem final do Git permite somente os artefatos não rastreados
+  de runtime já reconhecidos pela classificação do checkout. Arquivos rastreados com alterações e
+  os demais arquivos não rastreados continuam bloqueando o avanço. USR-535: os ledgers gerados
+  (`GENERATED_LEDGER_FILES`, incluindo o ledger de aprendizagem que o `record-turn` grava) não sujam
+  o Notebook; o avanço guarda a edição local antes do `merge --ff-only` e a reaplica depois, com a
+  mesma regra de conflito do USR-394. USR-561: qualquer arquivo ou
+  diretorio NAO rastreado sob `.factory/runs/` e runtime da frota (`FLEET_RUNTIME_UNTRACKED_PREFIX`,
+  e uma unica entrada `.factory/runs/` no `.gitignore`), nunca codigo; um novo arquivo de estado do
+  despachante nao bloqueia mais a convergencia. Arquivo rastreado ali com alteracao continua `dirty`.
 - USR-420: convergencia e backup usam o SHA da execucao (`--expected-sha` ou `DARKFAC_EXPECTED_SHA`).
   O alvo imutavel e somente `^[0-9a-f]{40}$` (40 hex minusculos; maiuscula nao e normalizada).
   `classify_checkout` e `verify` comparam HEAD e `/health` a esse SHA. `origin/main` que avancou
@@ -148,6 +167,7 @@ python -m core.line.stale_active --dry-run
   USR-515: antes da espera de tag, o pin de GHCR, compose, blue-green, `darkfac-cloud` e `/health`
   pode ser o ancestral publicado quando o alvo esta fora dos paths de `hub-image.yml` e ha runtime
   no intervalo. O sync permanece no SHA alvo. O stdout traz `published=` e `reach=`.
+- USR-562: o redeploy passa `track_divergence=True` ao sync; `record_divergence_cycle` grava `node_sync_divergence.json` a cada ciclo (alerta no 2o ciclo divergente seguido) e falhas viram `logger.warning`, nao silencio.
 
 # Fila de demandas (entrada)
 
@@ -243,3 +263,9 @@ tratar o store como desconfigurado.
 - `OwnerActionDraft` (`core/owner_actions/models.py`) valida comandos em passos destinados ao owner para
   rejeitar invocacoes relativas dependentes de `CWD` (`git <subcmd>` sem `-C <abs>`, script `.py` relativo
   ou `python -m core.*` sem `Set-Location <abs>`), mantendo leitura retrocompatível de `OwnerAction` historicas.
+# Prioridade explícita na entrada
+
+Demandas podem carregar `priority` numérico. O intake autônomo do Hub encaminha esse valor ao registro da demanda, e `run_ticket.py --create --priority <valor>` permite defini-lo na criação pela CLI (padrão `0`). Valores maiores indicam prioridade maior. A prioridade afeta a ordem de seleção do dispatcher entre tickets elegíveis; não remove dependências nem critérios de admissão.
+
+
+A leitura de um ticket (`queue_store.get_ticket`) consulta uma unica linha no control store e levanta `ControlStoreUnavailableError` quando o store configurado esta inacessivel, distinguindo falha de ticket ausente (`None`); `demands cli complete` sai com codigo 3 nesse caso.

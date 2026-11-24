@@ -980,6 +980,82 @@ def test_run_pytest_memory_budget_and_parallel_split(monkeypatch, tmp_path, gib,
         assert len(calls) == (3 if workers > 1 else 2)
 
 
+def test_affected_collection_and_execution_share_the_parent_deadline(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    clock = [0.0]
+    monkeypatch.setattr(affected.time, "monotonic", lambda: clock[0])
+
+    def run(cmd, **kwargs):
+        if "--collect-only" in cmd:
+            assert kwargs["timeout"] == 12
+            clock[0] = 5.0
+            return subprocess.CompletedProcess(cmd, 0, stdout="tests/test_probe.py::test_probe")
+        assert kwargs["timeout"] == 7
+        raise subprocess.TimeoutExpired(cmd, 7, output=b"test_probe started")
+
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    selection = affected.Selection("subset", ["tests/test_probe.py"], {}, [], ["probe.py"])
+
+    assert affected.run_pytest(tmp_path, selection, [], deadline=12) == 124
+    output = capsys.readouterr().out
+    assert "[TEST_PHASE] collection files=1 timeout_sec=12" in output
+    assert "test_probe started\n[STEP_TIMEOUT] affected tests phase=execution" in output
+
+
+@pytest.mark.parametrize(
+    "file_count,remaining,expected",
+    [(23, 1000, 350), (100, 1000, 600), (23, 75, 75)],
+)
+def test_selected_collection_timeout_scales_and_respects_caps(file_count, remaining, expected):
+    assert affected.selected_collection_timeout(file_count, remaining) == expected
+
+
+def test_affected_collection_reports_scaled_timeout_for_23_files(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    monkeypatch.setattr(affected, "_xdist_available", lambda: False)
+    monkeypatch.setattr(affected.time, "monotonic", lambda: 0.0)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if "--collect-only" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="tests/test_probe.py::test_probe")
+        return subprocess.CompletedProcess(cmd, 0, stdout="1 passed")
+
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(23)], {}, [], ["probe.py"])
+
+    assert affected.run_pytest(tmp_path, selection, [], deadline=1000) == 0
+    assert calls[0][1]["timeout"] == 350
+    assert "[TEST_PHASE] collection files=23 timeout_sec=350" in capsys.readouterr().out
+
+
+def test_affected_collection_timeout_returns_124_with_phase(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    monkeypatch.setattr(affected, "_xdist_available", lambda: False)
+    monkeypatch.setattr(affected.time, "monotonic", lambda: 0.0)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"], output=b"collection started")
+
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(23)], {}, [], ["probe.py"])
+
+    assert affected.run_pytest(tmp_path, selection, [], deadline=1000) == 124
+    output = capsys.readouterr().out
+    assert calls[0][1]["timeout"] == 350
+    assert "[TEST_PHASE] collection files=23 timeout_sec=350" in output
+    assert "collection started\n[STEP_TIMEOUT] affected tests phase=collection" in output
+
+
 @pytest.mark.parametrize("changed", ["tests/conftest.py", "conftest.py", "tests/line/conftest.py", "tests/_helper.py", "pytest.ini", "harness.config.json", "requirements.txt"])
 def test_pr_global_change_runs_fixed_smoke_instead_of_full(tmp_path, changed, monkeypatch, capsys):
     repo = tmp_path / "repo"

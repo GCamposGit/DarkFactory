@@ -8,6 +8,10 @@ pré-teste focal duplicado. O perfil roda compileall, typecheck, `lint-imports`,
 O perfil PR força `--no-cache --local`; o veredito continua exigindo candidato
 limpo e imutável, testes descobertos/executados e `[HARNESS_PASS]`.
 
+O subprocesso de testes afetados usa um prazo compartilhado para seleção, coleta e execução
+quando chamado pelo portão. A margem final permite devolver a saída parcial e indicar a fase
+do timeout antes de o runner encerrar o passo.
+
 A seleção compara o candidato inteiro ao merge-base com `origin/main`, incluindo
 alterações staged, unstaged e untracked na CLI. Não compara só o último commit.
 Usa imports transitivos, referências de texto e guards de repositório. Quando
@@ -19,8 +23,11 @@ Essa evidência cobre a seleção/fumaça; a suíte completa fica para Linux/CI 
 Mudança só de docs executa a fumaça do perfil.
 
 O orçamento dos afetados usa a coleta real (inclusive parametrizações):
-`min(1800, 120 + 20 * testes_coletados)` segundos. A coleta tem limite de 120s
-e o passo externo tem teto de 1800s, incluindo seleção, coleta e eventual retry.
+`min(1800, 120 + 20 * testes_coletados)` segundos. A coleta recebe
+`min(prazo_restante, 600, 120 + 10 * arquivos_selecionados)` segundos; o passo
+externo `affected_tests` tem piso de 1800s para que uma configuração antiga
+de 120s não trunque esse orçamento. O mesmo prazo interno cobre seleção, coleta,
+execução e eventual retry.
 O launcher mantém seu envelope externo para os demais contratos e fila do lock.
 Se a ACL impedir a leitura/criação do lock canônico ou a gravação do sidecar,
 `SuiteLock` libera qualquer slot canônico adquirido e tenta um diretório por

@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from core.harness.remote_worker import create_worker_app
+from core.line.gate_ram import RamReading
 
 
-def test_remote_worker_health_includes_harnesses(tmp_path) -> None:
+@pytest.mark.parametrize("reading", [RamReading(8.0, 3), RamReading(1.0, 0), None])
+def test_remote_worker_health_includes_harnesses_and_capacity(tmp_path, reading) -> None:
     """Test /health endpoint reports detected harnesses on the node."""
     app = create_worker_app(project_root=tmp_path, node_id="test-multi-node")
     client = TestClient(app)
 
-    with patch("core.harness.remote_worker.find_codex_binary", return_value="fake_codex.cmd"):
+    with (
+        patch("core.line.gate_ram.measure_workers", return_value=reading,
+              side_effect=OSError if reading is None else None),
+        patch("core.harness.remote_worker.find_codex_binary", return_value="fake_codex.cmd"),
+    ):
         with patch("core.harness.remote_worker.find_grok_binary", return_value="fake_grok.exe"):
             response = client.get("/health")
 
@@ -25,6 +32,12 @@ def test_remote_worker_health_includes_harnesses(tmp_path) -> None:
     assert data["node_id"] == "test-multi-node"
     assert "codex" in data["available_harnesses"]
     assert "grok" in data["available_harnesses"]
+    assert data["workers"] == (reading.workers if reading else 0)
+    assert data["available_gib"] == (reading.available_gib if reading else None)
+    if reading is not None:
+        assert datetime.fromisoformat(data["observed_at"]).tzinfo is not None
+    else:
+        assert data["observed_at"] is None
 
 
 def test_remote_worker_execute_grok_mocked(tmp_path) -> None:

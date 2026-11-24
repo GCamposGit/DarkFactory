@@ -21,7 +21,8 @@ ativo sem teste ou código sem cobertura detectada) registra
 `scope=affected_fallback` e executa `tests/test_harness_contract.py`, sem ampliar
 para a suíte local inteira. A coleta conta casos parametrizados e define prazo
 `min(1800, 120 + 20 * N)` segundos; seleção/coleta/retry compartilham o teto externo
-de 1800s do passo. A coleta isolada é limitada a 120s.
+de 1800s do passo. A coleta isolada é limitada a
+`min(prazo_restante, 600, 120 + 10 * arquivos_selecionados)` segundos.
 
 PR aceita 1,5 GiB livres e usa `-n 0` até um worker, sem gateway execnet; acima de
 30 arquivos e com dois workers disponíveis pode paralelizar, separando `serial`.

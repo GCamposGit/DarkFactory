@@ -89,6 +89,10 @@ Módulos que permanecem, todos com chamador em produção:
 | `cloud_coordinator.py`, `cloud_worker.py`, `cloud_db.py`, `cloud_artifacts.py`, `artifact_retention.py`, `adapters/control_postgres.py` | Coordenação de workers na nuvem e banco de controle | `scripts/start_fleet_worker.py`, `core/line/*` |
 | `context.py` | Contexto de aprendizado | `core/learning/service.py` |
 
+O coordenador passa o horário de cada ciclo ao control store. SQLite e PostgreSQL usam esse
+horário para filtrar novas admissões por `not_before` e deixam expirar as reservas que só têm
+jobs pendentes com prazo futuro.
+
 Removidos em USR-377 (S3), por não terem nenhum importador em produção, apenas testes:
 `cli.py` (CLI vertical DF-15), `release_cli.py`, `state.py` e `models.py` (máquina de estados DF-01,
 substituída pelo estado da esteira em `core/line`), `target_journey.py` (a etapa foi fundida em

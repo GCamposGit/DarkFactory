@@ -622,3 +622,41 @@ def test_demands_path_override_stays_file_only(queue_env, monkeypatch: pytest.Mo
     assert queue.get_ticket("USR-501") is None
     assert _queue_pairs(state) == [("darkfac", "USR-413", "planned")]
     assert _ledger_ids(ledger) == ["USR-500", "USR-413", "USR-501"]
+
+
+def test_complete_requires_sha_on_origin_main_and_closes_with_proof(queue_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-539: `complete` refuses a sha outside origin/main and closes a merged one, releasing the hold."""
+    from types import SimpleNamespace
+
+    from core.demands import cli
+    from core.line.admission_store import AdmissionStore
+
+    queue_env["queue"].register_ticket(_queued_ticket("USR-447", status=DeliveryStatus.IMPLEMENTING))
+    reset: list[tuple[str, str]] = []
+    monkeypatch.setattr(AdmissionStore, "reset_budget", lambda self, project, ticket: reset.append((project, ticket)))
+
+    def fake_git(merged: bool, cites: bool):
+        def run(argv: list[str]) -> SimpleNamespace:
+            if argv[0] == "merge-base":
+                return SimpleNamespace(returncode=0 if merged else 1, stdout="")
+            return SimpleNamespace(returncode=0, stdout="deadbeef\n" if argv[0] == "log" and cites else "")
+        return run
+
+    assert cli.complete_ticket("USR-447", "deadbeef", "ev", git=fake_git(False, True)) == 2
+    assert cli.complete_ticket("USR-447", "deadbeef", "ev", git=fake_git(True, False)) == 2
+    assert queue_env["queue"].get_ticket("USR-447").status == DeliveryStatus.IMPLEMENTING and not reset
+
+    assert cli.complete_ticket("USR-447", "deadbeef", "entregue no main", git=fake_git(True, True)) == 0
+    done = queue_env["queue"].get_ticket("USR-447")
+    assert done.status == DeliveryStatus.COMPLETED and "deadbeef" in done.delivery_evidence
+    assert reset == [("darkfac", "USR-447")]
+
+    # USR-565: single-row lookup distinguishes absent from unreachable store.
+    assert queue_env["queue"].get_ticket("USR-000") is None
+    monkeypatch.setattr(
+        queue_env["queue"].control_store().__class__, "get_ticket",
+        lambda self, tid: (_ for _ in ()).throw(OSError("tailnet down")),
+    )
+    with pytest.raises(queue_env["queue"].ControlStoreUnavailableError):
+        queue_env["queue"].get_ticket("USR-447")
+    assert cli.complete_ticket("USR-447", "deadbeef", "ev", git=fake_git(True, True)) == 3

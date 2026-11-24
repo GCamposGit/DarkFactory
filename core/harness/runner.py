@@ -370,6 +370,12 @@ def check_scope_label(cmd: str) -> str | None:
 
 def effective_step_timeout(step: HarnessStepConfig, workers: int = 1) -> float:
     """Use actual step workers; outer deadlines reserve the eligible one-worker worst case."""
+    if step.name == "affected_tests":
+        # The inner collector scales its budget by selected files, so a stale or
+        # host-specific 120s config must not truncate that budget before it starts.
+        from core.harness.affected import PR_TIMEOUT_MAX_S
+
+        return max(float(step.timeout_sec), PR_TIMEOUT_MAX_S)
     if step.name != "unit_and_integration_tests_parallel":
         return float(step.timeout_sec)
     # The existing 3000s budget covered >=2 workers; one worker needs both shares.
@@ -425,6 +431,10 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         child_env = dict(os.environ)
         if step.name in ("affected_tests", "smoke_tests"):
             child_env["DARKFAC_GATE_SCOPE"] = "pr"
+        if step.name == "affected_tests":
+            from core.harness.affected import AFFECTED_DEADLINE_ENV, PR_FINALIZATION_RESERVE_S
+
+            child_env[AFFECTED_DEADLINE_ENV] = str(time.monotonic() + step_timeout - PR_FINALIZATION_RESERVE_S)
         if worker_count is not None:
             child_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] = str(worker_count)
 

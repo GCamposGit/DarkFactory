@@ -44,7 +44,7 @@ from pydantic import BaseModel
 
 from core.common.tempdirs import probe_sandbox
 from core.harness.remote_worker import find_codex_binary
-from core.line.agent_cli import AgentRequest, redact_secrets, run_agent
+from core.line.agent_cli import AgentRequest, hidden_popen_kwargs, redact_secrets, run_agent
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,7 @@ def probe_codex_status(timeout_s: int = 30) -> HarnessProbeResult:
     executable = find_codex_binary()
     if not executable:
         return HarnessProbeResult(harness="codex", ok=False, detail="not_installed")
+    started_at = time.monotonic()
     try:
         proc = subprocess.run(
             [executable, "login", "status"],
@@ -123,10 +124,15 @@ def probe_codex_status(timeout_s: int = 30) -> HarnessProbeResult:
             timeout=timeout_s,
             encoding="utf-8",
             errors="replace",
+            **hidden_popen_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return HarnessProbeResult(harness="codex", ok=False, detail="timeout")
     except OSError as exc:
+        # On Windows, subprocess.run can surface an invalid process handle while
+        # cleaning up a timed-out shim. Preserve the timeout result in that race.
+        if time.monotonic() - started_at >= timeout_s:
+            return HarnessProbeResult(harness="codex", ok=False, detail="timeout")
         return HarnessProbeResult(harness="codex", ok=False, detail=str(exc))
 
     combined = f"{proc.stdout}\n{proc.stderr}".lower()

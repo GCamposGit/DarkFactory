@@ -149,7 +149,7 @@ class ControlStore(Protocol):
         """Ids of every run whose `runs.status` is `active`, oldest first (USR-142 orphan-run sweep)."""
         ...
 
-    def list_eligible_admission_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_eligible_admission_jobs(self, limit: int = 50, *, now: datetime | None = None) -> list[dict[str, Any]]:
         """List pending jobs of active runs eligible for fleet cycle admission (USR-282)."""
         ...
 
@@ -1700,6 +1700,12 @@ class SQLiteControlStore:
         with self._connect() as conn:
             return [json.loads(r["payload"]) for r in conn.execute(sql + " ORDER BY ticket_id", params)]
 
+    def get_ticket(self, ticket_id: str) -> dict[str, Any] | None:
+        """Single-row lookup by ``ticket_id`` (same raw payload ``list_tickets`` returns)."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT payload FROM tickets WHERE ticket_id = ? LIMIT 1", (ticket_id,)).fetchone()
+        return json.loads(row["payload"]) if row else None
+
     def upsert_owner_action(self, action_id: str, status: str, payload: dict[str, Any], now: datetime) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -2683,7 +2689,7 @@ class SQLiteControlStore:
 
         Without this the reservation is only renewed while a stage handler runs, so any gap between stages
         (successor job pending, waiting_dependency) let it expire un-renewed. Running jobs are renewed by their
-        worker heartbeat; pending jobs only within `pending_grace_sec` of becoming ready (dead host => expires).
+        worker heartbeat; pending jobs must be due and recently updated (dead host => expires).
         """
         now_iso = now.isoformat()
         expires_iso = (now + timedelta(seconds=self.lease_duration_sec)).isoformat()
@@ -2700,10 +2706,11 @@ class SQLiteControlStore:
                   AND run_id IN (
                       SELECT run_id FROM jobs
                       WHERE status = 'waiting_dependency'
-                         OR (status = 'pending' AND updated_at >= ?)
+                         OR (status = 'pending' AND updated_at >= ?
+                             AND (not_before IS NULL OR julianday(not_before) <= julianday(?)))
                   )
                 """,
-                (now_iso, expires_iso, now_iso, cutoff_iso),
+                (now_iso, expires_iso, now_iso, cutoff_iso, now_iso),
             )
             renewed = cur.rowcount
             conn.commit()
@@ -2792,8 +2799,9 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
-    def list_eligible_admission_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_eligible_admission_jobs(self, limit: int = 50, *, now: datetime | None = None) -> list[dict[str, Any]]:
         """List pending jobs of active runs eligible for fleet cycle admission (USR-282)."""
+        now_iso = (now or datetime.now(UTC)).isoformat()
         conn = self._connect()
         try:
             cur = conn.cursor()
@@ -2803,10 +2811,11 @@ class SQLiteControlStore:
                 FROM jobs j
                 JOIN runs r ON j.run_id = r.run_id
                 WHERE j.status = 'pending' AND r.status = 'active'
+                  AND (j.not_before IS NULL OR julianday(j.not_before) <= julianday(?))
                 ORDER BY j.created_at ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (now_iso, limit),
             )
             rows = cur.fetchall()
             return [dict(r) for r in rows]

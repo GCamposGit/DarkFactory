@@ -1,7 +1,20 @@
 <!-- covers: core/line/fleet_dispatcher.py, core/line/pending_delivery.py, core/line/express_lane.py, core/line/admission_store.py, core/line/failure_taxonomy.py, core/line/run_outcome.py, core/line/failure_alerts.py, core/line/stale_active.py -->
 <!-- covers: core/line/fleet_dispatcher.py, core/line/recovery_receipt.py -->
 <!-- covers: core/line/fleet_policy.py, core/line/operational_context.py -->
+<!-- covers: core/harness/remote_worker.py -->
 # Operação da frota
+
+Falhas repetidas de candidato colocam o ticket em hold e `notify_ticket_hold` avisa o
+owner pelo bot Telegram dedicado. O destino é `TELEGRAM_OWNER_CHAT_ID`; chats e usuários
+compartilhados de operação não são usados como fallback. Sem destino válido, o alerta
+continua visível no DarkHub com a instrução de configurar essa variável, registra
+`missing_destination` e não declara entrega Telegram nem cria outbox. Holds de `HumanRequest`
+seguem a mesma regra. Confira também [operação interativa](operacao_interativa.md#alertas-de-hold)
+para o procedimento de verificação ponta a ponta.
+
+O `/health` de cada worker remoto publica `workers`, `available_gib` e `observed_at`
+medidos no próprio host com o critério de RAM do portão. Um host ocupado, sem capacidade
+positiva ou sem leitura válida permanece fora da admissão.
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
 Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,
@@ -95,6 +108,12 @@ confiável de desenvolvimento concluído, mantém o fluxo normal do ticket.
 O controlador mantém `merged_awaiting_deploy`, executa o deploy canônico e só encerra
 a espera após verificar o SHA saudável de produção incluindo o candidato. Falha de
 deploy permanece pendente para nova tentativa, sem chamar um agente para supervisionar.
+
+### Deploy com convergencia de nos pendente (USR-541)
+
+O deploy canonico que sai com codigo 3 (`EXIT_NODE_DIRTY`: VPS saudavel, mas Desktop ou Notebook ainda fora do SHA) deixa de ser repetido por inteiro a cada ciclo. O despachante grava o adiamento por SHA em `<state_root>/runs/deploy_deferrals.json` (SHA alvo, no pendente, motivo redigido, codigo, `attempts`) e preserva `node_sync` pending. Daí em diante usa so a recuperacao delimitada: `python -m core.infra.node_sync retry` seguido de `python -m core.infra.backup_cron --once`, com backoff exponencial (300 s ate 3600 s) e teto de 6 tentativas. A recuperacao so conclui o deploy (`pending_deploy` falso, `deploys` +1, `pending_releases` fechados) quando os dois comandos saem 0: `retry` so devolve 0 com VPS e nos incluidos no SHA candidato, e o backup pos-deploy segue exigido. Pendencia sumida sem essa prova, ou novo merge, reabre o deploy completo; um deploy completo que sai 0 limpa registro e contador. Teto esgotado grava `convergence_recovery_exhausted` em `recent_failures` uma vez e mantem a pendencia.
+
+O estado do despachante expoe `deploy_deferral` (`state: awaiting_node_convergence`, `target_sha`, `pending_node`, `recovery_attempts`, `recovery_next_at`, `recovery_exhausted`), para o Hub e o briefing separarem "aguardando no" de "deploy falhou" (`canonical_deploy_exit:<codigo>` em `recent_failures`). Equivalente manual: `Set-Location C:\dev\DarkFac; python -m core.infra.node_sync retry; python -m core.infra.backup_cron --once`.
 
 ## CI vermelho sem recibo de merge (USR-509)
 
@@ -247,15 +266,38 @@ worktree. A deduplicação do deploy continua agrupando merges pela janela de si
 
 O dispatcher de frota, iniciado pela tarefa persistente `DarkFac-Fleet-Dispatcher` no
 checkout principal, chama `scripts/cleanup_orphan_worktrees.py` pelo seu gancho de manutenção.
-Uma trava de estado em `.factory/runs/orphan_worktree_cleanup.json` limita a execução a uma
-tentativa por dia, inclusive após reinício do processo. A rotina considera uma
-worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não existe
-registro `cleanup_pending` e não há processo, alteração, lock ou commit detached sem
-referência segura. O limite é 48 horas; worktrees com idade igual ou inferior ao limite e
-worktrees já registradas como `cleanup_pending` não são enviadas para remoção.
+O processo de manutenção roda em paralelo aos ciclos e registra a saída em
+`orphan-worktree-cleanup.log` no diretório de logs do despachante. Uma trava do
+sistema operacional impede duas varreduras simultâneas no checkout. O estado persistente
+fica em `.factory/runs/orphan_worktree_cleanup.json`, com `status`, `last_attempt_at`,
+`failure_count`, `next_attempt_at` e `last_failure` quando aplicável. Uma exceção na
+varredura grava `status=failed` e agenda nova tentativa em `next_attempt_at` com backoff
+exponencial de 1 hora, dobrando a cada falha e limitado a 24 horas. O gancho não inicia
+outro subprocesso antes desse horário. Depois que a varredura retorna, inclusive quando
+há erro isolado de classificação ou limpeza de uma worktree, o estado registra sucesso,
+zera `failure_count` e mantém a cadência diária. Se o processo for interrompido antes de
+gravar o resultado, um ciclo posterior pode retomar a manutenção, inclusive após recarregar
+o despachante.
+A rotina considera uma
+worktree órfã quando o ticket está ausente ou terminal nas fontes de tickets, não há
+processo, alteração, lock ou commit detached sem referência segura. O limite é 48 horas;
+worktrees com idade igual ou inferior ao limite não são enviadas para remoção.
+
+Ledgers gerados (`.factory/demands/demands.json`, `.factory/learning/learning_ledger.json`,
+`.factory/owner_actions/owner_actions.json`, lista de `core.infra.node_sync.is_generated_ledger`)
+não contam como trabalho: a varredura os restaura ao `HEAD` antes de remover. Quando o ticket é
+terminal e a worktree tem mais de 7 dias, qualquer outra alteração é arquivada antes da remoção
+em `<state_root>/backups/worktree_archive/<nome>-<timestamp>/` (`changes.patch` de
+`git diff HEAD --binary`, `untracked.txt` e cópias em `untracked/`), com verificação de que os
+arquivos existem; sem arquivo verificado a worktree é preservada (`archive_failed`). Ticket
+aberto, checkout principal, worktree com lock ou com processo vivo nunca são arquivados.
+O registro `cleanup_pending` não bloqueia mais a classificação: a worktree é reavaliada a cada
+varredura. Registros `discard_path_changed` vêm de checkouts `fleet-dispatch-*` cujo ledger foi
+alterado pelo próprio ticket depois do hash gravado na criação; como o HEAD destacado carrega
+commits fora da base, eles seguem preservados (`detached_outside_base`).
 
 Cada remoção é delegada a `ticket_workspace.cleanup`, que revalida alterações e processos
-logo antes de remover. Registros `cleanup_pending` permanecem para observabilidade e não são
+logo antes de remover. Registros `cleanup_pending` permanecem para observabilidade e são
 retentados pela varredura diária. O resumo JSON registra contagens agregadas de `removed`, `preserved`
 e `failures`, além de `blocked`, `ignored` e `errors`, com o motivo por caminho. Falha de
 leitura ou de limpeza de uma worktree é registrada e a análise continua nas demais. Para
@@ -487,7 +529,7 @@ Recoloque os dois arquivos em `deploy/dokploy/`, recrie o compose no Dokploy e r
 
 ## Imagem do cloud no GHCR
 
-O job `cloud` de `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkfac-cloud:<sha>` (coordinator, worker, backup-cron, canary) junto com a imagem do Hub. O `DARKFAC_GIT_SHA` do compose `darkfac-cloud` e gravado pela propria fabrica: `scripts/dokploy_redeploy.py` (`pin_cloud_git_sha`) acrescenta `DARKFAC_GIT_SHA=<sha da imagem>` ao env do compose no Dokploy antes de cada deploy, preservando as outras variaveis. Esse sha e o do alvo quando o commit toca os paths do workflow; quando o alvo esta fora desses paths e ha runtime pendente desde o SHA live, e o ultimo ancestral que o workflow publica (USR-515). O sync segue no SHA alvo. Antes do POST o script espera a tag `ghcr.io/gcamposgit/darkfac-cloud:<sha da imagem>` no GHCR (mesmo mecanismo do Hub); se ela nao aparecer no prazo, nao grava o sha novo nem dispara o deploy, e o sha anterior continua rodando. Depois da espera, o pin e revalidado contra o SHA live sob lock antes da troca; se o Hub avancou alem dele, o deploy e recusado. A mesma protecao cobre compose, blue-green e retrigger apos um deploy joined. Historico do proprio servico cloud confirma convergencia parcial; o titulo e comparado ao subject do SHA da imagem. Se Git nao provar a linha necessaria para selecionar um pin, o diff acumulado nao autoriza consultar a tag do alvo. Sem sha valido, o disparo falha fechado em vez de construir na VPS. O alcance desse atraso sai no stdout (`published=` e `reach=`).
+O job `cloud` de `.github/workflows/hub-image.yml` publica `ghcr.io/gcamposgit/darkfac-cloud:<sha>` (coordinator, worker, backup-cron, canary) junto com a imagem do Hub. O `DARKFAC_GIT_SHA` do compose `darkfac-cloud` e gravado pela propria fabrica: `scripts/dokploy_redeploy.py` (`pin_cloud_git_sha`) acrescenta `DARKFAC_GIT_SHA=<sha da imagem>` ao env do compose no Dokploy antes de cada deploy, preservando as outras variaveis. Esse sha e o do alvo quando o commit toca os paths do workflow; quando o alvo esta fora desses paths e ha runtime pendente desde o SHA live, e o ultimo ancestral que o workflow publica (USR-515). O sync segue no SHA alvo. Antes do POST o script espera a tag `ghcr.io/gcamposgit/darkfac-cloud:<sha da imagem>` no GHCR (mesmo mecanismo do Hub); se ela nao aparecer no prazo, nao grava o sha novo nem dispara o deploy, e o sha anterior continua rodando. Depois da espera, o pin e revalidado contra o SHA live sob lock antes da troca; se o Hub avancou alem dele, o deploy e recusado. A mesma protecao cobre compose, blue-green e retrigger apos um deploy joined. A verificacao pos-deploy consulta `docker.getContainers` e exige que coordinator e worker estejam saudaveis, em execucao, com a imagem GHCR no SHA exato. O titulo do deploy Dokploy fica informativo: `Manual deployment` nao invalida evidencia da imagem em execucao. O stdout registra imagem, estado e saude para cada componente; sem prova completa, o backup pos-deploy nao roda. Se Git nao provar a linha necessaria para selecionar um pin, o diff acumulado nao autoriza consultar a tag do alvo. Sem sha valido, o disparo falha fechado em vez de construir na VPS. O alcance desse atraso sai no stdout (`published=` e `reach=`).
 
 Mudancas em `.factory/config/**` (precos, roteamento, registro de modelos) reconstroem a imagem do Hub (USR-397); o ledger (`.factory/demands`, `.factory/owner_actions`) continua somente dados.
 
@@ -507,6 +549,11 @@ próximo passo. Ele é gravado antes do aviso. Hub/Telegram deduplicam por finge
 repetir a mesma evidência não avisa de novo; uma mudança persistida de evidência ou a passagem de
 `retrying` para `blocked` pode gerar um novo aviso. O estado e o ledger de avisos sobrevivem ao
 reinício.
+
+Ao resumir um gate, a triagem usa a primeira linha real de `FAILED`, `ERROR`, timeout ou exceção.
+Linhas de progresso `[SUITE_LOCK] acquired`/`waiting` e cabeçalhos `[TEST_PHASE]` não substituem
+essa causa; `[SUITE_LOCK] timed out` permanece uma falha válida. Outcome, motivo do dispatcher e
+detalhe encaminhado ao registro de falhas usam a mesma linha sanitizada.
 
 ## Orçamento por ticket e recuperação
 
@@ -660,3 +707,8 @@ A recusa da etapa DOCS (docs-sync) sai como `docs_sync_failed`, causa de candida
 Relancamento pelo despachante (USR-447): se a worktree preservada do ticket tem commits a frente de `origin/main` e plano valido (`SPEC.md` e `tickets.json` na worktree ou em `state_root()/artifacts/ticket_runs/<id>/.darkfac/runs/<id>`), `default_launch` acrescenta `--resume-delivery --worktree <caminho>` ao comando da frota; sem isso o ticket e relancado inteiro.
 
 A varredura diaria de worktrees orfas (`maybe_run_scheduled`) reside no dominio `core/git/orphan_worktree_cleanup.py` consumido por `core/line/fleet_dispatcher.py`, enquanto `scripts/cleanup_orphan_worktrees.py` permanece apenas como launcher CLI (sem imports de `scripts` em `core/`, `USR-531`).
+# Prioridade e continuidade de entrega
+
+Na seleção regular, o dispatcher ordena tickets elegíveis por prioridade numérica decrescente. Empates preservam a ordem de criação e, em seguida, o ID, mantendo o resultado estável. A prioridade não altera dependências, reservas, bloqueios, faixas de recuperação ou o modo `resume-only`.
+
+Após um merge que ainda aguarda deploy, o dispatcher grava a entrega em `pending_deliveries.json`, vinculada ao ticket, run e digest do candidato. Um processo novo recupera esse diário e conclui o deploy pendente antes de admitir trabalho regular. Só um deploy canônico bem-sucedido marca a entrada como entregue e permite anexar recibo/evidências; falhas preservam a espera para uma nova tentativa.

@@ -297,7 +297,12 @@ class DemandsStore:
         """``(file row, queue row)``. The queue read does not create ``control.db``."""
         from core.demands import queue_store
 
-        return self._file_ticket(ticket_id), queue_store.get_ticket(ticket_id)
+        try:
+            queued = queue_store.get_ticket(ticket_id)
+        except queue_store.ControlStoreUnavailableError as exc:
+            logger.warning("%s; delivery pair falls back to the ledger file", exc)
+            queued = None
+        return self._file_ticket(ticket_id), queued
 
     def _file_ticket(self, ticket_id: str) -> UserTicket | None:
         """The row stored in this ledger file, ignoring the control-store merge."""
@@ -367,7 +372,10 @@ class DemandsStore:
 
         if os.environ.get("DARKFAC_DEMANDS_PATH"):
             return
-        queued = queue_store.get_ticket(ticket.id)
+        try:
+            queued = queue_store.get_ticket(ticket.id)
+        except queue_store.ControlStoreUnavailableError:
+            return
         pair_present = queued is not None and queued.project_id == ticket.project_id
         if not pair_present and not self._inserts_missing_queue_rows():
             return

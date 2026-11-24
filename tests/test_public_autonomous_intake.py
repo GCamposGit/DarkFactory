@@ -85,12 +85,28 @@ def test_hub_api_intake_success_202(isolated_hub) -> None:
     assert data["run_id"].startswith("run-")
     assert data["initial_job_id"].startswith("job-")
     assert data["committed_at"] is not None
+    assert isolated_hub["demands_store"].get_ticket(data["demand_id"]).priority == 0
 
     # Verify initial grill job was committed and is claimable
     claim = control_store.claim(worker="grill-worker-1", capabilities=["grill_engine"], now=datetime.now(UTC))
     assert claim is not None
     assert claim.job_key.stage == "grill"
     assert claim.job_key.run_id == data["run_id"]
+
+
+def test_hub_api_intake_projects_explicit_priority(isolated_hub) -> None:
+    payload = _sample_demand_payload("Prioridade explícita")
+    payload["priority"] = 12
+
+    response = isolated_hub["client"].post(
+        "/api/demands/intake", json=payload, headers={"Idempotency-Key": "priority-intake"}
+    )
+
+    assert response.status_code == status.HTTP_202_ACCEPTED
+    demand_id = response.json()["demand_id"]
+    ticket = isolated_hub["demands_store"].get_ticket(demand_id)
+    assert ticket is not None
+    assert ticket.project_id == "darkfac" and ticket.priority == 12
 
 
 def test_hub_api_intake_idempotent_replay_202(isolated_hub) -> None:
@@ -210,6 +226,8 @@ def test_cli_intake_subprocess_success(tmp_path: Path) -> None:
         "Exit 0 and valid JSON",
         "--external-id",
         "ext-cli-001",
+        "--priority",
+        "17",
         "--store-path",
         str(db_path),
         "--json",
@@ -231,6 +249,7 @@ def test_cli_intake_subprocess_success(tmp_path: Path) -> None:
     assert out["run_id"].startswith("run-")
     assert out["initial_job_id"].startswith("job-")
     assert out["mode"] == "autonomous"
+    assert out["ticket"]["priority"] == 17
 
     # Verify job exists in DB
     store = SQLiteControlStore(db_path=db_path)

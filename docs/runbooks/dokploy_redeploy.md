@@ -165,7 +165,7 @@ O pin pode ser o ancestral publicado: o ultimo SHA que esse workflow publica, de
 - Alvo que toca os paths do workflow: a espera e a tag do proprio alvo.
 - Alvo fora desses paths, com runtime no intervalo: implanta o SHA publicado. Nao espera a tag do alvo.
 - Alvo fora desses paths, sem runtime no intervalo: saida 0, sem consulta de tag e sem POST. O stdout traz o SHA live em `published=` e o alcance em `reach=`, sem path do workflow.
-  Nesse caso a VPS segue no SHA live publicado: o sync a aceita como convergida (nao e divergencia), o backup pos-deploy roda e o script sai com 0 (USR-490). Falha de publicacao do snapshot de convergencia e so aviso.
+  Nesse caso a VPS segue no SHA live publicado: o sync a aceita como convergida (nao e divergencia), o backup pos-deploy roda e o script sai com 0 (USR-490). Falha de publicacao do snapshot de convergencia e so aviso. O redeploy liga `track_divergence` (USR-562): cada ciclo grava `node_sync_divergence.json`, o snapshot de convergencia e publicado e o notifier alerta quando um no fica divergente por 2 ciclos seguidos.
 - Live desconhecido e alvo fora dos paths: sem espera da tag ausente, sem POST, saida diferente de zero, nomeando o SHA alvo.
 - `--force` implanta o SHA explicito e nao troca o pin por um ancestral.
 - O pin nunca e um SHA anterior ao que ja esta em producao.
@@ -226,6 +226,14 @@ pendencia persistir depois que a outra sessao terminar, rode
 `python -m core.infra.node_sync retry` (cwd `C:\dev\DarkFac`) ou veja a
 secao "Checkout compartilhado do Notebook e disciplina de worktree (USR-222)"
 em `docs/HARNESS_INTEROP.md`.
+
+**Saida com codigo 3 (`[PENDING] ... divergent`, USR-541)**
+O deploy da VPS foi concluido, mas Desktop ou Notebook seguem fora do SHA. O despachante da frota nao repete o deploy completo para o mesmo SHA: grava o adiamento em `runs/deploy_deferrals.json` (no, motivo redigido, tentativas), expoe `deploy_deferral` no estado (`awaiting_node_convergence`) e tenta so a convergencia, com backoff, ate 6 vezes. Ao convergir, ele roda o backup pos-deploy e so entao conclui o deploy; se a causa nao cessar, a pendencia fica registrada em `recent_failures` (`convergence_recovery_exhausted`). Comando manual equivalente (cwd `C:\dev\DarkFac`):
+
+```powershell
+python -m core.infra.node_sync retry
+python -m core.infra.backup_cron --once
+```
 
 **Quero rodar em outra maquina (por exemplo a VPS) alem da que configurei
 primeiro**

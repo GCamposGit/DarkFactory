@@ -105,6 +105,14 @@ ROUTE_WAIT_MARKERS = ("harness_infra_error: route_wait", '"cause": "route_wait"'
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 FAILURE_HISTORY_LIMIT = 20
+DEPLOY_PENDING_CONVERGENCE_EXIT_CODE = 3
+DEPLOY_PENDING_CONVERGENCE_REASON = "canonical_deploy_pending_convergence"
+DEPLOY_DEFERRAL_FILE = "deploy_deferrals.json"
+DEPLOY_DEFERRAL_TEXT_LIMIT = 500
+CONVERGENCE_RECOVERY_MAX_ATTEMPTS = 6
+CONVERGENCE_RECOVERY_BACKOFF_BASE_SEC = 300.0
+CONVERGENCE_RECOVERY_BACKOFF_MAX_SEC = 3600.0
+CONVERGENCE_RECOVERY_TIMEOUT_SEC = 900.0
 DEFAULT_PROGRESS_WINDOW_SEC = 120.0
 
 
@@ -125,6 +133,35 @@ def configure_logging(log_dir: Path, *, stream: Any = None) -> RotatingFileHandl
         force=True,
     )
     return file_handler
+
+
+def scheduled_cleanup_hook(log_dir: Path) -> Callable[[], None]:
+    """Start or poll maintenance without holding up a fleet cycle or a reload."""
+    from core.git.orphan_worktree_cleanup import schedule_due
+
+    process: subprocess.Popen[bytes] | None = None
+
+    def tick() -> None:
+        nonlocal process
+        if process is not None:
+            result = process.poll()
+            if result is None:
+                return
+            if result != 0:
+                logger.warning("varredura de worktrees encerrou com codigo %s; consulte o log de manutencao", result)
+            process = None
+        if not schedule_due(PROJECT_ROOT, datetime.now(timezone.utc)):
+            return
+        with (log_dir / "orphan-worktree-cleanup.log").open("ab") as output:
+            process = subprocess.Popen(
+                [sys.executable, str(PROJECT_ROOT / "scripts" / "cleanup_orphan_worktrees.py"), "--scheduled"],
+                cwd=PROJECT_ROOT,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                creationflags=CREATE_NO_WINDOW,
+            )
+
+    return tick
 
 
 @dataclass
@@ -205,7 +242,7 @@ def select_tickets(
 ) -> tuple[list[str], dict[str, str]]:
     """Tickets ``planned`` executaveis, em ordem estavel (id), mais o motivo de cada exclusao."""
     done = {d["id"] for d in demands if d.get("status") == "completed"}
-    eligible: list[tuple[str, str]] = []
+    eligible: list[tuple[int, str, str]] = []
     skipped: dict[str, str] = {}
     for d in demands:
         tid = str(d.get("id", ""))
@@ -230,8 +267,12 @@ def select_tickets(
             if reason:
                 skipped[tid] = reason
             else:
-                eligible.append((str(d.get("created_at", "")), tid))
-    return [t for _, t in sorted(eligible)], skipped
+                try:
+                    priority = int(d.get("priority", 0) or 0)
+                except (TypeError, ValueError):
+                    priority = 0
+                eligible.append((-priority, str(d.get("created_at", "")), tid))
+    return [tid for _, _, tid in sorted(eligible)], skipped
 
 
 def demand_has_line_block(demand: Mapping[str, Any]) -> bool:
@@ -648,6 +689,41 @@ def default_deploy(timeout: Optional[float] = None) -> int:
         return DEPLOY_TIMEOUT_EXIT_CODE
 
 
+def default_converge(timeout: Optional[float] = None, expected_sha: str | None = None) -> int:
+    """Recuperacao delimitada: ``node_sync retry`` sobre o candidato imutavel pendente, depois o backup pos-deploy."""
+    from core.infra import node_sync
+
+    pending = node_sync.load_pending_convergence()
+    candidate = normalize_sha(expected_sha) or normalize_sha((pending or {}).get("expected_sha"))
+    if candidate is None:
+        logger.error("Recuperacao sem SHA alvo valido; mantendo deploy pendente")
+        return 1
+    bound = CONVERGENCE_RECOVERY_TIMEOUT_SEC if timeout is None else timeout
+    deadline = time.monotonic() + bound
+    # retry pode sair 0 sem pendencia; a verificacao explicita do candidato fecha essa corrida.
+    for module, args in (
+        ("core.infra.node_sync", ["retry"]),
+        ("core.infra.node_sync", ["verify", "--expected-sha", candidate]),
+        ("core.infra.backup_cron", ["--once"]),
+    ):
+        proc = subprocess.Popen(
+            [sys.executable, "-m", module, *args], cwd=PROJECT_ROOT, creationflags=CREATE_NO_WINDOW,
+        )
+        try:
+            rc = proc.wait(timeout=max(1.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            logger.error("default_converge excedeu %.0fs em %s; encerrando a subarvore do processo", bound, module)
+            from core.execution.sandbox import kill_process_tree
+
+            kill_process_tree(proc.pid)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=10)
+            return DEPLOY_TIMEOUT_EXIT_CODE
+        if rc != 0:
+            return rc
+    return 0
+
+
 def is_lock_refusal(log_tail: str) -> bool:
     return canonical_cause(log_tail) == "lock"
 
@@ -890,6 +966,7 @@ class FleetDispatcher:
         probe: Optional[Callable[[HostSpec], HostProbe]] = None,
         launch: Optional[Callable[[str, HostSpec], InFlight]] = None,
         deploy: Callable[[], int] = default_deploy,
+        converge: Callable[[], int] = default_converge,
         clock: Callable[[], float] = time.time,
         busy_ids_loader: Callable[[], set[str]] = lambda: set(),
         busy_hosts_loader: Callable[[], set[str]] = lambda: set(),
@@ -911,6 +988,8 @@ class FleetDispatcher:
         self.probe = probe or (lambda h: default_probe(h, self.config.stable_probes))
         self.launch = launch
         self.deploy = deploy
+        self.converge = converge
+        self._deferred_sha: str | None = None  # SHA com deploy ja feito e convergencia pendente (exit 3)
         self.clock = clock
         self.busy_hosts_loader = busy_hosts_loader  # hosts com run --fleet vivo fora deste processo
         self.busy_ids_loader = busy_ids_loader  # tickets com run/worktree de entrega fora deste processo
@@ -936,8 +1015,18 @@ class FleetDispatcher:
         self.lock_busy: dict[str, str] = {}  # host -> motivo (trava de linha recusada), vai a idle_reasons
         self.last_merge_at: Optional[float] = None
         self.pending_deploy = False
+        self._restore_deploy_deferral()
         self.pending_release_path = self.config.state_path.with_name("pending_recovery_releases.json")
         self.pending_releases = json.loads(self.pending_release_path.read_text(encoding="utf-8")) if self.pending_release_path.exists() else []
+        # A dispatcher can disappear after a child has merged but before canonical
+        # deploy. Keep that boundary durable so a fresh process does not lose it.
+        self.delivery_journal_path = self.config.state_path.with_name("pending_deliveries.json")
+        self.delivery_journal = self._read_delivery_journal()
+        if any(row.get("status") == "awaiting_deploy" for row in self.delivery_journal):
+            self.pending_deploy = True
+            latest = max(float(row.get("merged_at_epoch", 0)) for row in self.delivery_journal
+                          if row.get("status") == "awaiting_deploy")
+            self.last_merge_at = latest or self.clock()
         if self.pending_releases:
             self.pending_deploy = True
             self.last_merge_at = self.clock() - self.config.deploy_window_sec
@@ -1056,7 +1145,9 @@ class FleetDispatcher:
         cause = outcome.cause if outcome else classify_log_cause(tail) or run_outcome.diagnostic_cause(tail, rc)
         if not outcome and cause == "unknown":
             cause = "infra" if rc == 75 else canonical_cause(kind)
-        reason = outcome.detail if outcome else failure_reason(rc, tail)
+        log_failure = run_outcome.actionable_failure(tail)
+        detail_source = log_failure or (outcome.detail if outcome else tail)
+        reason = failure_reason(rc, detail_source)
         self.failures = (self.failures + [{
             "ts": datetime.now(timezone.utc).isoformat(), "ticket": job.ticket_id, "host": job.host_id,
             "exit_code": outcome.exit_code if outcome else rc, "kind": kind, "reason": reason,
@@ -1156,6 +1247,7 @@ class FleetDispatcher:
                     self.admission_store.reset_budget(job.project_id, job.ticket_id)
                     self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
+                    self._record_pending_delivery(job)
                     if in_recovery:
                         pending = {"ticket_id": job.ticket_id, "run_id": job.run_id}
                         if pending not in self.pending_releases:
@@ -1164,6 +1256,7 @@ class FleetDispatcher:
                         self.recovery = self.admission_store.record_recovery_receipt_cause("awaiting_deploy_proof")
                     self.last_merge_at = self.clock()
                     self.pending_deploy = True
+                    self._deferred_sha = None
                 elif not in_recovery:
                     self._record_failure(job, rc, "no_delivery_evidence", tail)
                     self._release_reservation(job)
@@ -1190,6 +1283,186 @@ class FleetDispatcher:
                 self._record_failure(job, rc, "failure", tail)
                 self._release_reservation(job)
 
+    @staticmethod
+    def _deferral_path() -> Path:
+        return state_root() / "runs" / DEPLOY_DEFERRAL_FILE
+
+    def _load_deferrals(self) -> dict[str, Any]:
+        try:
+            loaded = json.loads(self._deferral_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def _restore_deploy_deferral(self) -> None:
+        """Restaura somente adiamentos cujo registro e pendencia node_sync confirmam o mesmo SHA."""
+        from core.infra import node_sync
+
+        try:
+            pending = node_sync.load_pending_convergence()
+            sha = normalize_sha((pending or {}).get("expected_sha"))
+            record = self._load_deferrals().get(sha) if sha else None
+            if not sha or not isinstance(record, dict) or normalize_sha(record.get("target_sha")) != sha:
+                return
+            self._deferred_sha = sha
+            self.pending_deploy = True
+            # recovery_next_at continua governando o backoff; o ciclo pode retomar logo.
+            self.last_merge_at = self.clock() - self.config.deploy_window_sec
+        except Exception:  # estado corrompido/inacessivel nao pode derrubar o dispatcher
+            logger.exception("Falha ao restaurar adiamento de deploy")
+
+    def _save_deferrals(self, records: dict[str, Any]) -> None:
+        if len(records) > FAILURE_HISTORY_LIMIT:
+            newest = sorted(records.items(), key=lambda kv: str(kv[1].get("timestamp", "")))
+            records = dict(newest[-FAILURE_HISTORY_LIMIT:])
+        path = self._deferral_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps(records, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(temp, path)
+
+    def _record_deploy_deferral(self, exit_code: int) -> dict[str, Any] | None:
+        """Persiste o adiamento por SHA (idempotente): repeticoes incrementam ``attempts``.
+
+        Garante um registro pendente com candidato imutavel para o ``node_sync retry``.
+        """
+        from core.infra import node_sync
+
+        try:
+            pending = node_sync.load_pending_convergence() or {}
+            target_sha = normalize_sha(pending.get("expected_sha")) or _default_checkout_sha() or "unknown"
+            node = node_sync.redact_worker_output(pending.get("node") or "unknown", limit=80)
+            diagnostic = node_sync.redact_worker_output(
+                pending.get("reason") or "convergence pending; no diagnostic recorded", limit=DEPLOY_DEFERRAL_TEXT_LIMIT
+            )
+            if normalize_sha(pending.get("expected_sha")) is None and normalize_sha(target_sha):
+                node_sync.record_pending_convergence(node, target_sha, diagnostic)
+            records = self._load_deferrals()
+            previous = records.get(target_sha)
+            previous = previous if isinstance(previous, dict) else {}
+            record = {
+                **previous,
+                "target_sha": target_sha, "pending_node": node, "reason": diagnostic,
+                "exit_code": exit_code, "attempts": int(previous.get("attempts", 0)) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            records[target_sha] = record
+            self._save_deferrals(records)
+            return record
+        except Exception:  # diagnostico nunca derruba o ciclo do despachante
+            logger.exception("Falha ao persistir o adiamento do deploy canonico")
+            return None
+
+    def _clear_deploy_deferrals(self) -> None:
+        from core.infra import node_sync
+
+        self._deferred_sha = None
+        if self._load_deferrals():
+            self._save_deferrals({})
+        node_sync.clear_pending_convergence()
+
+    def deploy_deferral_snapshot(self) -> dict[str, Any] | None:
+        """Adiamento por convergencia pendente para o Hub distinguir 'aguardando no' de 'deploy falhou'."""
+        sha = self._deferred_sha
+        record = self._load_deferrals().get(sha) if sha else None
+        if not isinstance(record, dict):
+            return None
+        keys = ("pending_node", "reason", "exit_code", "attempts", "recovery_attempts", "recovery_next_at",
+                "recovery_last_exit_code", "recovery_exhausted", "timestamp")
+        return {
+            "state": "awaiting_node_convergence", "target_sha": sha,
+            "recovery_max_attempts": CONVERGENCE_RECOVERY_MAX_ATTEMPTS,
+            **{key: record.get(key) for key in keys if key in record},
+        }
+
+    def _note_failure(self, rc: int, reason: str) -> None:
+        self.failures = (self.failures + [{
+            "ts": datetime.now(timezone.utc).isoformat(), "ticket": "deploy", "host": "vps",
+            "exit_code": rc, "kind": "deploy", "reason": reason, "log": None,
+        }])[-FAILURE_HISTORY_LIMIT:]
+
+    def _recover_convergence(self) -> bool | None:
+        """Recuperacao delimitada de um deploy com convergencia pendente.
+
+        Retorna True quando a convergencia foi comprovada (deploy concluido), False quando o
+        ciclo deve apenas esperar (backoff, teto esgotado ou falha) e None quando o SHA alvo
+        mudou ou a pendencia sumiu sem prova e o caminho normal de deploy completo deve ser reaberto.
+        Verdadeiro somente com evidencia explicita de todos os nos no SHA alvo e backup concluido.
+        """
+        from core.infra import node_sync
+
+        sha = self._deferred_sha
+        pending = node_sync.load_pending_convergence()
+        records = self._load_deferrals()
+        record = records.get(sha) if sha is not None else None
+        if sha is None or not isinstance(record, dict) or (
+            pending is not None and normalize_sha(pending.get("expected_sha")) != sha
+        ):
+            self._deferred_sha = None
+            return None
+        if pending is None:
+            # Pendencia sumiu sem prova de convergencia da VPS nem backup: o deploy completo reabre.
+            records.pop(sha, None)
+            self._save_deferrals(records)
+            self._deferred_sha = None
+            return None
+        attempts = int(record.get("recovery_attempts", 0))
+        if attempts >= CONVERGENCE_RECOVERY_MAX_ATTEMPTS:
+            if not record.get("recovery_exhausted"):
+                record["recovery_exhausted"] = True
+                records[sha] = record
+                self._save_deferrals(records)
+                self._note_failure(DEPLOY_PENDING_CONVERGENCE_EXIT_CODE, "convergence_recovery_exhausted")
+                logger.error(
+                    "Recuperacao de convergencia esgotada para %s apos %s tentativas; pendencia preservada",
+                    sha[:12], attempts,
+                )
+                self._write_state()
+            return False
+        if self.clock() < float(record.get("recovery_next_at", 0.0)):
+            return False
+        try:
+            rc = self.converge(expected_sha=sha) if self.converge is default_converge else self.converge()
+        except Exception:  # noqa: BLE001 - falha da recuperacao conta como tentativa
+            logger.exception("Recuperacao de convergencia levantou excecao")
+            rc = 1
+        verified = False
+        if rc == 0:
+            try:
+                report = node_sync.verify(expected_sha=sha)
+                included = [node for node in report.nodes if node.state != "excluded"]
+                verified = (
+                    normalize_sha(report.expected_sha) == sha
+                    and bool(included)
+                    and any(node.name == "VPS" for node in included)
+                    and all(node.state == "converged" and normalize_sha(node.git_sha) == sha for node in included)
+                )
+            except Exception:  # noqa: BLE001 - sem prova explicita, preservar a pendencia
+                logger.exception("Verificacao explicita de convergencia falhou para %s", sha[:12])
+        if rc == 0 and verified:
+            node_sync.clear_pending_convergence()
+            records.pop(sha, None)
+            self._save_deferrals(records)
+            self._deferred_sha = None
+            return True
+        recovery_rc = rc if rc != 0 else DEPLOY_PENDING_CONVERGENCE_EXIT_CODE
+        attempts += 1
+        backoff = min(CONVERGENCE_RECOVERY_BACKOFF_BASE_SEC * 2 ** (attempts - 1), CONVERGENCE_RECOVERY_BACKOFF_MAX_SEC)
+        record.update(
+            recovery_attempts=attempts, recovery_next_at=self.clock() + backoff,
+            recovery_last_exit_code=recovery_rc, recovery_last_at=datetime.now(timezone.utc).isoformat(),
+        )
+        records[sha] = record
+        self._save_deferrals(records)
+        self._note_failure(recovery_rc, f"convergence_recovery_exit:{recovery_rc}")
+        logger.error(
+            "Recuperacao de convergencia falhou ou ficou sem prova: exit_code=%s tentativa=%s/%s",
+            recovery_rc, attempts, CONVERGENCE_RECOVERY_MAX_ATTEMPTS,
+        )
+        self.last_merge_at = self.clock()
+        self._write_state()
+        return False
+
     def _maybe_deploy(self) -> bool:
         """Um deploy por lote: so apos a janela de silencio desde o ultimo merge."""
         if not self.pending_deploy or self.last_merge_at is None:
@@ -1198,27 +1471,146 @@ class FleetDispatcher:
             return False
         if self.dry_run:
             return False
+        already_deployed = bool(self.pending_releases) and any(
+            row.get("status") == "deployed"
+            and float(row.get("deployed_at_epoch") or 0) >= float(self.last_merge_at)
+            for row in self.delivery_journal
+        )
+        if already_deployed:
+            if not self._complete_pending_releases():
+                self.last_merge_at = self.clock()
+                return False
+            self.pending_deploy = False
+            return True
         from core.demands.store import _PathMutex, DemandsLockTimeout
-        try:
-            with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
-                rc = self.deploy()
-        except DemandsLockTimeout:
-            rc = 75
-        if rc != 0:
-            self.failures = (self.failures + [{
-                "ts": datetime.now(timezone.utc).isoformat(), "ticket": "deploy", "host": "vps",
-                "exit_code": rc, "kind": "deploy", "reason": f"canonical_deploy_exit:{rc}", "log": None,
-            }])[-FAILURE_HISTORY_LIMIT:]
-            logger.error("Canonical deployment deferred: exit_code=%s", rc)
-            self.last_merge_at = self.clock()
-            self._write_state()
+        recovered = self._recover_convergence() if self._deferred_sha is not None else None
+        if recovered is False:
             return False
+        if recovered is None:
+            try:
+                with _PathMutex(state_root() / "runs" / "deploy", timeout=0.1):
+                    rc = self.deploy()
+            except DemandsLockTimeout:
+                rc = 75
+            if rc != 0:
+                reason = f"canonical_deploy_exit:{rc}"
+                if rc == DEPLOY_PENDING_CONVERGENCE_EXIT_CODE:
+                    reason = DEPLOY_PENDING_CONVERGENCE_REASON
+                    record = self._record_deploy_deferral(rc)
+                    self._deferred_sha = normalize_sha(record.get("target_sha")) if record is not None else None
+                self._note_failure(rc, reason)
+                logger.error("Canonical deployment deferred: exit_code=%s reason=%s", rc, reason)
+                self.last_merge_at = self.clock()
+                self._write_state()
+                return False
+        if recovered is None:
+            self._clear_deploy_deferrals()  # deploy completo saiu 0: convergencia e backup comprovados
+        # Persist the successful deploy boundary before recovery receipt checks:
+        # those checks may need another pass, but must not redeploy a proven run.
+        if any(row.get("status") == "awaiting_deploy" for row in self.delivery_journal):
+            self._complete_delivery_journal()
         if self.pending_releases and not self._complete_pending_releases():
             self.last_merge_at = self.clock()
             return False
         self.pending_deploy = False
         self.deploys += 1
         return True
+
+    def _read_delivery_journal(self) -> list[dict[str, Any]]:
+        try:
+            rows = json.loads(self.delivery_journal_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        return [row for row in rows if isinstance(row, dict) and row.get("ticket_id") and row.get("run_id")]
+
+    def _save_delivery_journal(self) -> None:
+        self.delivery_journal_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.delivery_journal_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.delivery_journal, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporary, self.delivery_journal_path)
+
+    def _record_pending_delivery(self, job: InFlight) -> None:
+        """Persist candidate-bound delivery identity before the process can restart."""
+        run_id = job.run_id or ""
+        if not run_id or any(row.get("run_id") == run_id for row in self.delivery_journal):
+            return
+        outcome = run_outcome.read_outcome(job.ticket_id, run_id)
+        cost_usd: float | None = None
+        try:
+            from core.usage.ledger import ModelUsageLedger
+
+            usage_events = ModelUsageLedger()._store.read().get("events", [])
+            cost_usd = round(sum(
+                float(event.get("cost_usd") or 0.0)
+                for event in usage_events if event.get("ticket_id") == job.ticket_id
+            ), 8)
+        except (AttributeError, OSError, TypeError, ValueError):
+            logger.info("cost evidence unavailable for run %s", run_id)
+        row = {
+            "ticket_id": job.ticket_id,
+            "project_id": job.project_id,
+            "run_id": run_id,
+            "candidate_digest": job.candidate_digest,
+            "stage": "deploy",
+            "status": "awaiting_deploy",
+            "merged_at": datetime.now(timezone.utc).isoformat(),
+            "merged_at_epoch": float(self.clock()),
+            "gate_sha": getattr(outcome, "candidate_sha", None) if outcome else None,
+            "evidence_refs": [str(job.log_path)] if job.log_path else [],
+            "interventions": self._owner_interventions(job),
+            "cost_usd": cost_usd,
+        }
+        self.delivery_journal.append(row)
+        self._save_delivery_journal()
+
+    @staticmethod
+    def _owner_interventions(job: InFlight) -> list[dict[str, Any]]:
+        """Snapshot owner actions and decisions linked to this ticket into its delivery proof."""
+        try:
+            from core.owner_actions.store import OwnerActionStore
+
+            actions = OwnerActionStore().list_actions()
+            result: list[dict[str, Any]] = []
+            for action in actions:
+                if job.ticket_id not in action.blocks:
+                    continue
+                result.append({
+                    "id": action.id, "kind": action.kind.value,
+                    "status": action.status.value,
+                    "resolved_at": action.resolved_at.isoformat() if action.resolved_at else None,
+                    "answer": action.answer.model_dump(mode="json") if action.answer else None,
+                })
+            return result
+        except Exception as exc:  # noqa: BLE001 - delivery persists with explicit evidence degradation
+            logger.warning("owner intervention evidence unavailable for %s (%s)", job.ticket_id, type(exc).__name__)
+            return [{"evidence": "unavailable"}]
+
+    def _complete_delivery_journal(self) -> None:
+        """Mark journal entries deployed only after the canonical deploy returned success."""
+        completed_at = datetime.now(timezone.utc).isoformat()
+        for row in self.delivery_journal:
+            if row.get("status") != "awaiting_deploy":
+                continue
+            row["status"] = "deployed"
+            row["deployed_at"] = completed_at
+            row["deployed_at_epoch"] = float(self.clock())
+            row["deploy_sha"] = run_outcome.main_sha(PROJECT_ROOT)
+            try:
+                from core.line.recovery_receipt import build_receipt
+
+                receipt = build_receipt(str(row["ticket_id"]), str(row["run_id"]), PROJECT_ROOT)
+                if receipt.get("candidate_digest") == row.get("candidate_digest"):
+                    row["receipt"] = receipt
+                    row["evidence_refs"] = sorted({
+                        str(evidence["evidence_ref"])
+                        for evidence in receipt.values()
+                        if isinstance(evidence, dict) and evidence.get("evidence_ref")
+                    })
+            except Exception as exc:  # delivery already succeeded; keep its journal and expose missing proof
+                row["receipt_error"] = type(exc).__name__
+                logger.warning("candidate-bound delivery receipt unavailable for %s (%s)",
+                               row.get("ticket_id"), type(exc).__name__)
+        self._save_delivery_journal()
 
     def _save_pending_releases(self) -> None:
         self.pending_release_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1740,9 +2132,18 @@ class FleetDispatcher:
         awaiting_deploy = any(r["status"] == "merged_awaiting_deploy" for r in resumptions)
         if awaiting_deploy and not self.pending_deploy:
             self.pending_deploy, self.last_merge_at = True, self.clock()
-        deployed_resume = self._maybe_deploy() if awaiting_deploy else False
-        if deployed_resume:
+        # A new dispatcher must close a previously journaled delivery before it
+        # admits regular work. This also keeps --resume-only from becoming a build
+        # mode: it may complete this continuation, then returns below.
+        durable_delivery_wait = any(row.get("status") == "awaiting_deploy" for row in self.delivery_journal)
+        deployed_resume = self._maybe_deploy() if self.pending_deploy else False
+        if deployed_resume and awaiting_deploy:
             acknowledge_deploy(PROJECT_ROOT, resumptions)
+        if durable_delivery_wait and not deployed_resume:
+            return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(),
+                                       "resumptions": resumptions, "dispatched": [],
+                                       "deployed": False, "deployed_this_cycle": False,
+                                       "delivery_wait": True, "recovery": self._recovery_summary()})
         if self.config.resume_only:
             return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "mode": "resume_only",
                                        "resumptions": resumptions, "dispatched": [],
@@ -1831,20 +2232,24 @@ class FleetDispatcher:
             "queue_remaining": queue,
             "cooldown": sorted(tid for tid, reason in skipped.items() if reason == "backoff_infra"),
             "deploys_total": self.deploys,
-            "deployed_this_cycle": deployed,
+            "deployed_this_cycle": deployed or deployed_resume,
             "demands_error": load_error,
             "recent_failures": self.failures,
+            "deploy_deferral": self.deploy_deferral_snapshot(),
             "ticket_holds": self._ticket_holds(),
             "recovery_list": {k: v for k, v in recovery_list.items() if k != "live"},
-            "recovery": {"active": bool(self.recovery.get("active")),
-                         "cause": self.recovery.get("cause", ""),
-                         "fingerprint": self.recovery.get("fingerprint", ""),
-                         "successes": self.recovery.get("successes", 0),
-                         "receipt_cause": self.recovery.get("receipt_cause", ""),
-                         "receipt_digest": self.recovery.get("receipt_digest", ""),
-                         "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")},
+            "recovery": self._recovery_summary(),
             "reconciled": reconciled,
         })
+
+    def _recovery_summary(self) -> dict[str, Any]:
+        return {"active": bool(self.recovery.get("active")),
+                "cause": self.recovery.get("cause", ""),
+                "fingerprint": self.recovery.get("fingerprint", ""),
+                "successes": self.recovery.get("successes", 0),
+                "receipt_cause": self.recovery.get("receipt_cause", ""),
+                "receipt_digest": self.recovery.get("receipt_digest", ""),
+                "recovered_candidate_digest": self.recovery.get("recovered_candidate_digest", "")}
 
     def _finish_cycle(self, cycle: dict[str, Any]) -> dict[str, Any]:
         self._record_queue_blockage(cycle)
@@ -2046,7 +2451,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     from core.line.sentinel import maybe_run_sentinel
     from core.notifications.daily_digest import maybe_send_due
     from core.usage.sync_task import publish_once
-    from core.git.orphan_worktree_cleanup import maybe_run_scheduled
 
     recovery_value = args.recovery_tickets[0] if args.recovery_tickets else ""
     recovery = tuple(t.strip() for t in recovery_value.split(",") if t.strip())
@@ -2058,7 +2462,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                         policy_path=DEFAULT_CONFIG_PATH), dry_run=args.dry_run,
                         digest_hook=None if args.resume_only else maybe_send_due,
                         sentinel_hook=None if args.resume_only else maybe_run_sentinel,
-                        orphan_worktree_cleanup_hook=lambda: maybe_run_scheduled(PROJECT_ROOT),
+                        orphan_worktree_cleanup_hook=scheduled_cleanup_hook(log_dir),
                         usage_hook=publish_once,
                         busy_ids_loader=running_fleet_tickets, busy_hosts_loader=running_fleet_hosts,
                         launch_argv=list(sys.argv[1:] if argv is None else argv),

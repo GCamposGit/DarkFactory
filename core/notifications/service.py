@@ -7,7 +7,13 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.integrations.telegram import TelegramService, load_telegram_config, redact_secrets
+from core.integrations.telegram import (
+    TelegramService,
+    load_telegram_config,
+    log_telegram_delivery,
+    redact_secrets,
+    resolve_telegram_destinations,
+)
 from core.notifications.models import (
     AlertCategory,
     AlertSeverity,
@@ -28,11 +34,13 @@ class NotificationService:
         telegram_service: Optional[TelegramService] = None,
         cooldown_minutes: int = 30,
         telegram_role: str = "owner",
+        owner_destination_only: bool = False,
     ) -> None:
         self.store = store or NotificationStore()
         self.telegram_service = telegram_service
         self.cooldown_minutes = max(1, cooldown_minutes)
         self.telegram_role = telegram_role
+        self.owner_destination_only = owner_destination_only
         # In-memory tracking of recent alerts: (provider_id, severity) -> last_sent_datetime
         self._recent_alerts: Dict[Tuple[str, AlertSeverity], datetime] = {}
 
@@ -41,7 +49,10 @@ class NotificationService:
         if self.telegram_service is not None:
             return self.telegram_service
         try:
-            cfg = load_telegram_config(role=self.telegram_role)
+            cfg = load_telegram_config(
+                role=self.telegram_role,
+                owner_destination_only=self.owner_destination_only,
+            )
             if cfg.bot_token:
                 self.telegram_service = TelegramService(cfg)
                 return self.telegram_service
@@ -102,44 +113,44 @@ class NotificationService:
         )
 
         if channel in {NotificationChannel.DARKHUB, NotificationChannel.ALL}:
-            self.store.add_notification(event)
             delivered_channels.append("darkhub")
 
-        # 2. Delivery to Telegram
         if channel in {NotificationChannel.TELEGRAM, NotificationChannel.ALL}:
-            tg = self._get_telegram_service()
-            if tg:
-                icon = "🚨" if severity == AlertSeverity.CRITICAL else ("⚠️" if severity == AlertSeverity.WARNING else "ℹ️")
-                tg_text = (
-                    f"{icon} <b>[{severity.value.upper()}: {safe_title}]</b>\n\n"
-                    f"{safe_message}\n"
+            delivered_channels.extend(
+                self._telegram_channels(
+                    event,
+                    severity=severity,
+                    safe_title=safe_title,
+                    safe_message=safe_message,
+                    provider_id=provider_id,
+                    remaining_percent=remaining_percent,
+                    details=details,
                 )
-                if provider_id:
-                    p_label = (details or {}).get("provider_name") or provider_id
-                    tg_text += f"• <b>Provedor:</b> <code>{p_label}</code>\n"
-                if remaining_percent is not None:
-                    tg_text += f"• <b>Cota Restante:</b> <code>{remaining_percent:.1f}%</code>\n"
-                tg_text += f"• <b>Horário:</b> <i>{datetime.now(UTC).strftime('%H:%M:%S UTC')}</i>"
+            )
 
-                # Send to authorized users/chats
-                chats = list(tg.config.authorized_chat_ids) or list(tg.config.authorized_user_ids)
-                if chats:
-                    for cid in chats:
-                        sent = tg.send_message(chat_id=cid, text=tg_text, parse_mode="HTML")
-                        if sent and "telegram" not in delivered_channels:
-                            delivered_channels.append("telegram")
-                else:
-                    # Enqueue in outbox if no direct chats configured
-                    tg.send_message(chat_id=0, text=tg_text, parse_mode="HTML")
-                    delivered_channels.append("telegram_outbox")
+            # A hold with no dedicated owner destination is still persisted in
+            # DarkHub. Put the exact repair setting on that visible event so the
+            # owner can resolve the missing Telegram route from the alert itself.
+            tg = self.telegram_service
+            if (
+                self.owner_destination_only
+                and tg is not None
+                and not resolve_telegram_destinations(tg.config)
+            ):
+                safe_message = (
+                    f"{safe_message}\n\n"
+                    "Acao necessaria: configure TELEGRAM_OWNER_CHAT_ID com o ID numerico "
+                    "do chat privado do owner no ambiente do servico da linha e reinicie o servico."
+                )
+                event = event.model_copy(update={"message": safe_message})
 
-        # Record cooldown timestamp if provider is set
         if provider_id:
             self._recent_alerts[(provider_id, severity)] = datetime.now(UTC)
 
-        # Update delivered channels on the stored event if store was used
-        if "darkhub" in delivered_channels and delivered_channels != event.delivered_channels:
-            event = event.model_copy(update={"delivered_channels": delivered_channels})
+        if delivered_channels:
+            event = event.model_copy(update={"delivered_channels": list(delivered_channels)})
+        if "darkhub" in delivered_channels:
+            self.store.add_notification(event)
 
         logger.info(
             "Notification %s [%s] dispatched to %s",
@@ -148,6 +159,79 @@ class NotificationService:
             delivered_channels,
         )
         return event
+
+    def _telegram_channels(
+        self,
+        event: NotificationEvent,
+        *,
+        severity: AlertSeverity,
+        safe_title: str,
+        safe_message: str,
+        provider_id: Optional[str],
+        remaining_percent: Optional[float],
+        details: Optional[Dict[str, Any]],
+    ) -> List[str]:
+        """``telegram`` only after a receipt. Any miss is ``telegram_outbox``."""
+
+        tg = self._get_telegram_service()
+        if tg is None:
+            return ["telegram_outbox"]
+        destinations = resolve_telegram_destinations(tg.config)
+        if not destinations:
+            log_telegram_delivery(
+                notification_id=event.notification_id,
+                role=tg.config.role or self.telegram_role,
+                http_status=None,
+                category="missing_destination",
+            )
+            return []
+        text = self._telegram_text(
+            severity=severity,
+            safe_title=safe_title,
+            safe_message=safe_message,
+            provider_id=provider_id,
+            remaining_percent=remaining_percent,
+            details=details,
+        )
+        confirmed = False
+        failed = False
+        for chat_id in destinations:
+            sent = tg.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="HTML",
+                notification_id=event.notification_id,
+            )
+            if sent:
+                confirmed = True
+            else:
+                failed = True
+        channels: List[str] = []
+        if confirmed:
+            channels.append("telegram")
+        if failed:
+            channels.append("telegram_outbox")
+        return channels
+
+    def _telegram_text(
+        self,
+        *,
+        severity: AlertSeverity,
+        safe_title: str,
+        safe_message: str,
+        provider_id: Optional[str],
+        remaining_percent: Optional[float],
+        details: Optional[Dict[str, Any]],
+    ) -> str:
+        icon = "🚨" if severity == AlertSeverity.CRITICAL else ("⚠️" if severity == AlertSeverity.WARNING else "ℹ️")
+        text = f"{icon} <b>[{severity.value.upper()}: {safe_title}]</b>\n\n{safe_message}\n"
+        if provider_id:
+            label = (details or {}).get("provider_name") or provider_id
+            text += f"• <b>Provedor:</b> <code>{label}</code>\n"
+        if remaining_percent is not None:
+            text += f"• <b>Cota Restante:</b> <code>{remaining_percent:.1f}%</code>\n"
+        text += f"• <b>Horário:</b> <i>{datetime.now(UTC).strftime('%H:%M:%S UTC')}</i>"
+        return text
 
     def notify_token_quota(
         self,

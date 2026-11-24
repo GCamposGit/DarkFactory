@@ -2213,6 +2213,7 @@ def submit_autonomous_intake(
             "journey": demand.core_journey,
             "non_goals": demand.non_goals,
             "criteria": demand.acceptance_criteria,
+            "priority": demand.priority,
         },
         mode=mode,
         policy_ref=policy_ref,

@@ -157,6 +157,44 @@ def _show_ledger(root: Path, ref: str) -> str | None:
     return shown.stdout
 
 
+def _show_ledgers(root: Path, refs: list[str]) -> dict[str, str | None]:
+    """Read the ledger of every ref with one ``git cat-file --batch`` process.
+
+    A ref without the ledger maps to None, like ``_show_ledger``. One process
+    replaces one ``git show`` spawn per ticket ref (~0.7 s each on Windows).
+    """
+    if not refs:
+        return {}
+    executable = _git_executable()
+    if executable is None:
+        raise RuntimeError(_GIT_NOT_FOUND)
+    stdin = "".join(f"{ref}:{LEDGER}\n" for ref in refs).encode("utf-8")
+    try:
+        run = subprocess.run(
+            [executable, "cat-file", "--batch"], cwd=root, input=stdin,
+            capture_output=True, timeout=120, check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(_GIT_NOT_FOUND) from exc
+    if run.returncode != 0:
+        raise RuntimeError(f"Cannot read ticket ledgers: {run.stderr.decode('utf-8', 'replace').strip()}")
+    out, pos = run.stdout, 0
+    ledgers: dict[str, str | None] = {}
+    for ref in refs:
+        end = out.find(b"\n", pos)
+        if end < 0:
+            raise RuntimeError("Cannot read ticket ledgers: truncated git cat-file output")
+        header = out[pos:end].split()
+        pos = end + 1
+        if len(header) == 3 and header[1] == b"blob":
+            size = int(header[2])
+            ledgers[ref] = out[pos:pos + size].decode("utf-8", errors="replace")
+            pos += size + 1
+        else:
+            ledgers[ref] = None
+    return ledgers
+
+
 def _origin_remote_configured(root: Path) -> bool:
     remotes = _git(root, "remote")
     if remotes.returncode != 0:
@@ -208,20 +246,14 @@ def _occupied_numbers(root: Path, path: Path, prefix: str, *, in_git: bool) -> l
         ledger = worktree / LEDGER
         if ledger.is_file():
             numbers.extend(_numbers(ledger.read_text(encoding="utf-8"), prefix))
-    main_raw = _show_ledger(root, "origin/main")
-    if main_raw is not None:
-        numbers.extend(_numbers(main_raw, prefix))
     refs = _git(
         root, "for-each-ref", "--format=%(refname)",
         "refs/heads/ticket/", "refs/remotes/origin/ticket/",
     )
     if refs.returncode != 0:
         raise RuntimeError(f"Cannot list ticket branches: {refs.stderr.strip()}")
-    for ref in refs.stdout.splitlines():
-        ref = ref.strip()
-        if not ref:
-            continue
-        shown = _show_ledger(root, ref)
+    names = ["origin/main"] + [ref.strip() for ref in refs.stdout.splitlines() if ref.strip()]
+    for shown in _show_ledgers(root, names).values():
         if shown is not None:
             numbers.extend(_numbers(shown, prefix))
     return numbers

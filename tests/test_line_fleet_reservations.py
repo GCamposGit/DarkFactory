@@ -47,6 +47,7 @@ from core.workflow.control_contracts import (
     TicketAlreadyActiveError,
 )
 from core.workflow.control_store import ControlStore, SQLiteControlStore
+from core.workflow.successors import materialize_result
 
 NOW = datetime(2026, 10, 16, 18, 0, 0, tzinfo=timezone.utc)
 
@@ -93,6 +94,51 @@ def test_reserve_cycle_atomic_success(store: ControlStore):
         now=NOW + timedelta(seconds=5),
     )
     assert res_same.reservation_id == res.reservation_id
+
+
+def test_deferred_route_does_not_hold_or_readmit_a_host_before_due(store: ControlStore):
+    receipt = store.accept(IntakeCommand(
+        project_id="darkfac-canary", channel="cli", external_id="canary-route-wait", mode="autonomous",
+        policy_ref="default", payload={
+            "title": "Canary route wait", "problem": "Exercise deferred admission",
+            "journey": ["plan"], "non_goals": ["skip gates"], "criteria": ["retry when due"],
+        },
+    ), now=NOW)
+    assert receipt.run_id
+    park_at = NOW + timedelta(seconds=2)
+    due = NOW + timedelta(minutes=10)
+    admission = store.list_eligible_admission_jobs(now=NOW)[0]
+    lease = store.reserve_cycle(
+        project_id="darkfac-canary", ticket_id=admission["ticket_id"], run_id=receipt.run_id,
+        host_id="notebook", now=NOW,
+    )
+    capabilities = ["git", "harness:any", "harness:codex", "grill_engine"]
+    claim = store.claim(worker="notebook-worker", capabilities=capabilities, now=NOW)
+    assert claim is not None and claim.reservation_id == lease.reservation_id
+    retry = StageResult(outcome="retry", cause_code=f"no_route_available not_before={due.isoformat()}")
+    store.finish(claim, retry, now=park_at)
+    materialize_result(claim.job_key, retry, store, now=park_at)
+
+    assert store.renew_open_run_reservations(park_at) == 0
+    assert store.list_eligible_admission_jobs(now=park_at) == []
+
+    free_at = NOW + timedelta(seconds=31)
+    assert [row.reservation_id for row in store.reconcile_fleet_reservations(free_at)] == [lease.reservation_id]
+    interim = store.reserve_cycle(
+        project_id="darkfac", ticket_id="USR-NEXT", run_id="run-next", host_id="notebook", now=free_at,
+    )
+    assert interim.host_id == "notebook"
+    assert store.list_eligible_admission_jobs(now=due - timedelta(seconds=1)) == []
+
+    ready = store.list_eligible_admission_jobs(now=due)
+    assert [job["run_id"] for job in ready] == [receipt.run_id]
+    resumed = store.reserve_cycle(
+        project_id="darkfac-canary", ticket_id=admission["ticket_id"], run_id=receipt.run_id,
+        host_id="notebook", now=due,
+    )
+    assert resumed.reservation_id != lease.reservation_id
+    claim = store.claim(worker="notebook-worker", capabilities=capabilities, now=due)
+    assert claim is not None and claim.reservation_id == resumed.reservation_id
 
 
 # ------------------------------------------------------------------------------

@@ -59,6 +59,9 @@ ALLOWLIST_PATH_EXCEPTIONS: dict[str, str] = {
     "14-speculative-model-racing:.factory/benchmarks/empirical_ledger.json": (
         "Dynamic empirical benchmark ledger generated at runtime by Skill 14; not pre-committed"
     ),
+    "coordenar-fabrica:DARKFAC_STATE_ROOT/runs/deploy_deferrals.json": (
+        "Runtime deploy-deferral ledger under DARKFAC_STATE_ROOT, not a repository path"
+    ),
 }
 
 # ---------------------------------------------------------------------------

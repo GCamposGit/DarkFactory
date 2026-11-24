@@ -231,9 +231,12 @@ class QueueTicketPort:
     """Control store da fila. O ledger versionado so entra na leitura."""
 
     def get(self, ticket_id: str) -> UserTicket | None:
-        from core.demands.queue_store import get_ticket
+        from core.demands.queue_store import ControlStoreUnavailableError, get_ticket
 
-        found = get_ticket(ticket_id)
+        try:
+            found = get_ticket(ticket_id)
+        except ControlStoreUnavailableError:
+            found = None
         if found is not None:
             return found
         return _ledger_ticket(ticket_id)

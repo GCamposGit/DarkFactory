@@ -100,6 +100,22 @@ def test_selection_filters():
     assert sk["USR-02"].startswith("tag:") and sk["USR-04"] == "dependencia_aberta" and sk["USR-07"] == "em_voo"
 
 
+def test_selection_orders_eligible_tickets_by_priority_then_stable_creation_and_id():
+    demands = [
+        {**_d("USR-04"), "priority": 2, "created_at": "2026-01-01"},
+        {**_d("USR-03"), "priority": 2, "created_at": "2026-01-01"},
+        {**_d("USR-02"), "priority": 5, "created_at": "2026-01-03"},
+        {**_d("USR-01"), "priority": 0, "created_at": "2026-01-01"},
+        {**_d("USR-05", deps=["USR-99"]), "priority": 99},
+        {**_d("USR-06"), "priority": 100},
+    ]
+
+    queue, skipped = fd.select_tickets(demands, busy_ids={"USR-06"})
+
+    assert queue == ["USR-02", "USR-03", "USR-04", "USR-01"]
+    assert skipped == {"USR-05": "dependencia_aberta", "USR-06": "em_voo"}
+
+
 def test_active_canonical_reservation_blocks_dispatch_until_lease_expires(tmp_path):
     from core.workflow.control_store import SQLiteControlStore
 
@@ -329,6 +345,86 @@ def test_structured_outcome_beats_banner_and_other_run_is_ignored(tmp_path, monk
     banner = "Telemetria de Cotas em Tempo Real\nQuota summary: headroom 80%"
     assert run_outcome.error_detail(banner, "diagnostico indisponivel") == "diagnostico indisponivel"
     assert run_outcome.diagnostic_cause(banner, 1) == "unknown"
+
+
+def test_suite_lock_progress_does_not_replace_pytest_failure_or_lock_timeout(tmp_path, monkeypatch, caplog):
+    import json
+    from core.line import run_outcome
+
+    failure = "FAILED tests/test_gate.py::test_contract - AssertionError: expected value"
+    output = ("[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
+              "[TEST_PHASE] collection files=23 timeout_sec=120\n" + failure)
+    assert run_outcome.error_detail(output) == failure
+    assert run_outcome.error_detail(
+        "[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
+        "[TEST_PHASE] collection files=23 timeout_sec=350\n"
+        "[STEP_TIMEOUT] affected tests phase=collection",
+        "diagnostico indisponivel",
+    ) == "[STEP_TIMEOUT] affected tests phase=collection"
+    assert run_outcome.error_detail("[SUITE_LOCK] timed out after 120s") == "[SUITE_LOCK] timed out after 120s"
+    assert run_outcome.error_detail("[SUITE_LOCK] waiting for slot; timed out after 120s") == \
+        "[SUITE_LOCK] waiting for slot; timed out after 120s"
+    assert run_outcome.actionable_failure("Quota summary: timeout exceeded") == ""
+    assert run_outcome.actionable_failure("timeout: 120.0s") == ""
+    timeout_log = (
+        "[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
+        "[TEST_PHASE] collection files=23 timeout_sec=350\n"
+        "[STEP_TIMEOUT] affected tests phase=collection"
+    )
+    assert run_outcome.actionable_failure(timeout_log) == "[STEP_TIMEOUT] affected tests phase=collection"
+
+    notified = []
+    monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: notified.append(args))
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    for attempt in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest=f"patch-{attempt}",
+                          context_digest="ctx", run_id=f"run-{attempt}")
+        outcome_path = run_outcome.outcome_path(job.ticket_id)
+        outcome_path.parent.mkdir(parents=True, exist_ok=True)
+        outcome_path.write_text(json.dumps({
+            "ticket": job.ticket_id, "run_id": job.run_id, "exit_code": 1,
+            "cause": "gate_failed", "cause_class": "candidate", "stage": "gate",
+            "detail": "[SUITE_LOCK] acquired slot 0 after waiting 450.8s", "ts": "now",
+        }), encoding="utf-8")
+        tail = ("[ERRO NA ENTREGA] causa: gate_failed; erro: [SUITE_LOCK] acquired slot 0\n" + output)
+        job.log_path = tmp_path / f"{attempt}.log"
+        job.log_path.write_text(tail, encoding="utf-8")
+        with caplog.at_level(logging.ERROR, logger="core.line.fleet_dispatcher"):
+            e.d._record_failure(job, 1, "failure", tail)
+
+    assert e.d.failures[-1]["reason"] == failure
+    assert notified and notified[-1][2] == failure
+    assert all(f"motivo={failure}" in record.message for record in caplog.records[-3:])
+    assert e.d.admission_store.ticket_hold(project_id="darkfac", ticket_id="USR-01")["cause"] == "gate_failed"
+
+
+def test_collection_timeout_log_overrides_stale_outcome_detail(tmp_path, monkeypatch):
+    import json
+    from core.line import run_outcome
+
+    notified = []
+    monkeypatch.setattr("core.line.failure_alerts.notify_ticket_hold", lambda *args: notified.append(args))
+    e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
+    tail = (
+        "[SUITE_LOCK] acquired slot 0 after waiting 450.8s\n"
+        "[TEST_PHASE] collection files=23 timeout_sec=350\n"
+        "[STEP_TIMEOUT] affected tests phase=collection"
+    )
+    expected = "[STEP_TIMEOUT] affected tests phase=collection"
+    for attempt in range(3):
+        job = fd.InFlight("USR-01", "grokbox", Handle(), candidate_digest=f"candidate-{attempt}",
+                          context_digest="ctx", run_id=f"collection-timeout-{attempt}")
+        outcome_path = run_outcome.outcome_path(job.ticket_id)
+        outcome_path.parent.mkdir(parents=True, exist_ok=True)
+        outcome_path.write_text(json.dumps({
+            "ticket": job.ticket_id, "run_id": job.run_id, "exit_code": 1,
+            "cause": "gate_failed", "cause_class": "candidate", "stage": "gate",
+            "detail": "old informative outcome detail", "ts": "now",
+        }), encoding="utf-8")
+        e.d._record_failure(job, 1, "failure", tail)
+        assert e.d.failures[-1]["reason"] == expected
+    assert e.d.admission_store.ticket_hold(project_id="darkfac", ticket_id="USR-01")["cause"] == "gate_failed"
+    assert notified and notified[-1][2] == expected
 
 
 def test_host_permission_failure_before_launch_is_infra(tmp_path):
@@ -1805,8 +1901,8 @@ def test_recovery_success_requires_merge_receipt(tmp_path: Path, monkeypatch):
     assert cycle["recovery"]["active"] is False
     assert cycle["recovery"]["successes"] == 1
     assert json.loads((directory / "deploy_report.json").read_text(encoding="utf-8"))["deployed"] is True
-    assert e.deploys == 2 and not e.d.pending_releases
-    assert e.launched == [("USR-01", "grokbox")]
+    assert e.deploys == 1 and not e.d.pending_releases
+    assert e.launched == [("USR-01", "grokbox"), ("USR-02", "notebook")]
 
 
 def test_recovery_rejects_missing_production_receipt_and_persists_cause(tmp_path: Path):
@@ -3188,16 +3284,69 @@ def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(
     assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == _SHA_A
 
 
-def test_run_forever_invokes_orphan_worktree_cleanup_hook(tmp_path: Path, monkeypatch) -> None:
+def test_run_forever_keeps_dispatching_and_reloads_during_worktree_cleanup(
+    tmp_path: Path, monkeypatch,
+) -> None:
     events: list[str] = []
-    dispatcher, _execs = _sha_dispatcher(tmp_path / "state", lambda: _SHA_A)
+    dispatcher, execs = _sha_dispatcher(tmp_path / "state", lambda: _SHA_A)
     dispatcher.run_cycle = lambda: events.append("cycle") or {}
-    dispatcher.orphan_worktree_cleanup_hook = lambda: events.append("cleanup")
+    from core.git import orphan_worktree_cleanup
+
+    monkeypatch.setattr(orphan_worktree_cleanup, "schedule_due", lambda *_args: True)
+
+    class Maintenance:
+        def poll(self) -> None:
+            events.append("still_running")
+
+    def launch(command, **_kwargs):
+        assert command[-1] == "--scheduled"
+        events.append("cleanup_started")
+        return Maintenance()
+
+    monkeypatch.setattr(fd.subprocess, "Popen", launch)
+    dispatcher.orphan_worktree_cleanup_hook = fd.scheduled_cleanup_hook(tmp_path)
     monkeypatch.setattr(fd.time, "sleep", lambda _seconds: events.append("sleep"))
+    dispatcher._read_checkout_sha = lambda: _SHA_B if events.count("sleep") == 2 else _SHA_A
 
-    dispatcher.run_forever(stop=_stop_after(1))
+    dispatcher.run_forever(stop=_stop_after(3))
 
-    assert events == ["cycle", "cleanup", "sleep"]
+    assert events == ["cycle", "cleanup_started", "sleep", "cycle", "still_running", "sleep"]
+    assert len(execs) == 1
+
+
+def test_scheduled_cleanup_hook_does_not_relaunch_during_persisted_backoff(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from core.git.orphan_worktree_cleanup import SCHEDULE_STATE
+
+    monkeypatch.setattr(fd, "PROJECT_ROOT", tmp_path)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    launches: list[list[str]] = []
+    state_path = tmp_path / SCHEDULE_STATE
+
+    class FailedMaintenance:
+        def poll(self) -> int:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                '{"status":"failed","last_attempt_at":"2026-11-23T00:00:00+00:00",'
+                '"failure_count":1,"next_attempt_at":"2099-01-01T00:00:00+00:00",'
+                '"last_failure":"synthetic failure"}',
+                encoding="utf-8",
+            )
+            return 1
+
+    def launch(command, **_kwargs):
+        launches.append(command)
+        return FailedMaintenance()
+
+    monkeypatch.setattr(fd.subprocess, "Popen", launch)
+    hook = fd.scheduled_cleanup_hook(log_dir)
+    hook()
+    hook()
+    hook()
+
+    assert len(launches) == 1
 
 
 def test_checkout_sha_change_with_launch_absent_does_not_set_import_restart_sha(
@@ -3584,3 +3733,284 @@ def test_review_child_crash_without_a_known_marker_stays_blocked_and_never_reope
     reopened = pending.tick(tmp_path, directory=directory, now=saved.next_check + 1)[0]
     assert reopened["status"] == "blocked"
     assert not calls
+
+
+def test_deploy_exit_3_persists_redacted_deferral_idempotent_per_sha(tmp_path: Path, monkeypatch):
+    import json
+
+    from core.infra import node_sync
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "deferral-state"))
+    sha = "b" * 40
+    secret = "ghp_" + "A" * 30
+    node_sync.record_pending_convergence(
+        "notebook", sha, f"behind origin/main; push https://user:{secret}@github.com/x token={secret}"
+    )
+    e = Env(tmp_path, [])
+    e.d.deploy = lambda: 3
+    e.d.pending_deploy, e.d.last_merge_at = True, e.now - 101
+
+    assert e.d._maybe_deploy() is False
+    e.d._deferred_sha = None  # novo merge: o deploy completo volta a rodar e re-adia por exit 3
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+
+    path = tmp_path / "deferral-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    raw = path.read_text(encoding="utf-8")
+    records = json.loads(raw)
+    assert list(records) == [sha]
+    record = records[sha]
+    assert record["target_sha"] == sha and record["pending_node"] == "notebook"
+    assert record["attempts"] == 2 and record["exit_code"] == 3 and record["timestamp"]
+    assert secret not in raw and "user:" not in raw
+    assert not list(path.parent.glob("*.tmp"))
+    assert [f["reason"] for f in e.d.failures] == [fd.DEPLOY_PENDING_CONVERGENCE_REASON] * 2
+
+    e.d.deploy = lambda: 1
+    e.d._deferred_sha = None
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    assert e.d.failures[-1]["reason"] == "canonical_deploy_exit:1"
+    assert json.loads(path.read_text(encoding="utf-8"))[sha]["attempts"] == 2
+
+
+def _deferred_env(tmp_path: Path, monkeypatch, converge_rcs):
+    from core.infra import node_sync
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "recovery-state"))
+    sha = "c" * 40
+    node_sync.record_pending_convergence("notebook", sha, "behind origin/main")
+    e = Env(tmp_path, [])
+    calls = {"deploy": 0, "converge": 0}
+    rcs = iter(converge_rcs)
+
+    def deploy():
+        calls["deploy"] += 1
+        return 3
+
+    def converge():
+        calls["converge"] += 1
+        return next(rcs)
+
+    e.d.deploy, e.d.converge = deploy, converge
+    e.d.pending_deploy, e.d.last_merge_at = True, e.now - 101
+    return e, calls, sha, node_sync
+
+
+def test_deploy_exit_3_switches_to_bounded_convergence_recovery_with_backoff_and_cap(tmp_path: Path, monkeypatch):
+    import json
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1] * 20)
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 0}
+
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+
+    e.now += 101  # dentro do backoff (300 s): nada roda
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+
+    path = tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    waits = []
+    for _ in range(fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS - 1):
+        record = json.loads(path.read_text(encoding="utf-8"))[sha]
+        waits.append(record["recovery_next_at"] - e.now)
+        e.now = record["recovery_next_at"] + 1
+        e.d.last_merge_at = e.now - 101
+        assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS}
+    assert waits == sorted(waits) and waits[-1] > waits[0]
+
+    for _ in range(5):  # teto esgotado: sem deploy nem recuperacao, pendencia preservada
+        e.now += 10_000
+        assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS}
+    assert e.d.pending_deploy is True
+    assert node_sync.load_pending_convergence()["expected_sha"] == sha
+    assert json.loads(path.read_text(encoding="utf-8"))[sha]["recovery_exhausted"] is True
+    assert [f["reason"] for f in e.d.failures].count("convergence_recovery_exhausted") == 1
+
+
+def test_convergence_recovery_success_completes_deploy_and_clears_pending(tmp_path: Path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from core.infra import node_sync
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1, 0])
+    monkeypatch.setattr(node_sync, "verify", lambda *, expected_sha: SimpleNamespace(
+        expected_sha=expected_sha,
+        nodes=[SimpleNamespace(name=name, state="converged", git_sha=expected_sha)
+               for name in ("Notebook", "Desktop", "VPS")],
+    ))
+    assert e.d._maybe_deploy() is False
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    record = json.loads((tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE).read_text(encoding="utf-8"))[sha]
+    e.now = record["recovery_next_at"] + 1
+    e.d.last_merge_at = e.now - 101
+
+    assert e.d._maybe_deploy() is True
+    assert calls == {"deploy": 1, "converge": 2}
+    assert e.d.pending_deploy is False and e.d.deploys == 1
+    assert node_sync.load_pending_convergence() is None
+
+
+def test_convergence_retry_zero_without_target_evidence_stays_pending(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.infra import node_sync
+
+    e, calls, _sha, node_sync = _deferred_env(tmp_path, monkeypatch, [0])
+    assert e.d._maybe_deploy() is False
+    monkeypatch.setattr(node_sync, "verify", lambda *, expected_sha: SimpleNamespace(
+        expected_sha=expected_sha,
+        nodes=[SimpleNamespace(name="VPS", state="converged", git_sha="d" * 40)],
+    ))
+    e.now += 301
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+    assert e.d.pending_deploy is True and e.d.deploys == 0
+    record = e.d._load_deferrals()[_sha]
+    assert record["recovery_attempts"] == 1
+    assert record["recovery_last_exit_code"] == fd.DEPLOY_PENDING_CONVERGENCE_EXIT_CODE
+
+
+def test_dispatcher_restores_persisted_deferral_and_keeps_recovery_backoff(tmp_path: Path, monkeypatch):
+    import json
+
+    from core.infra import node_sync
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1, 1])
+    assert e.d._maybe_deploy() is False
+    e.now += 301
+    e.d.last_merge_at = e.now - 101
+    assert e.d._maybe_deploy() is False
+    record_path = tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    record = json.loads(record_path.read_text(encoding="utf-8"))[sha]
+    assert record["recovery_attempts"] == 1
+
+    restored = fd.FleetDispatcher(
+        e.d.config, demands_loader=lambda: [], probe=lambda h: fd.HostProbe(True, "x"),
+        launch=e.d.launch, deploy=e.d.deploy, converge=e.d.converge,
+        clock=lambda: e.now,
+        admission_store=AdmissionStore(tmp_path / "admission-restored.sqlite3"),
+    )
+    assert restored._deferred_sha == sha
+    assert restored.pending_deploy is True
+    assert restored._load_deferrals()[sha]["recovery_attempts"] == 1
+    e.now = record["recovery_next_at"] - 1
+    restored.last_merge_at = e.now - 101
+    assert restored._maybe_deploy() is False
+    assert calls == {"deploy": 1, "converge": 1}
+
+
+def test_new_merge_reopens_full_deploy_after_convergence_deferral(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1] * 5)
+    assert e.d._maybe_deploy() is False
+    assert e.d._deferred_sha == sha
+    e.d._deferred_sha = None  # o merge de um ticket zera o marcador em _reap
+    e.d.last_merge_at = e.now - 101
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 2, "converge": 0}
+
+
+def test_pending_record_for_another_sha_reopens_full_deploy(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1] * 5)
+    assert e.d._maybe_deploy() is False
+    node_sync.record_pending_convergence("desktop", "d" * 40, "busy")
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+    assert calls == {"deploy": 2, "converge": 0}
+
+
+@pytest.mark.parametrize("rc", [1, 2, 75, 124])
+def test_non_convergence_exit_codes_keep_full_deploy_each_cycle(tmp_path: Path, monkeypatch, rc):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [])
+    e.d.deploy = lambda: calls.__setitem__("deploy", calls["deploy"] + 1) or rc
+    for _ in range(3):
+        assert e.d._maybe_deploy() is False
+        e.now += 101
+    assert calls == {"deploy": 3, "converge": 0}
+    assert e.d.failures[-1]["reason"] == f"canonical_deploy_exit:{rc}"
+
+
+def test_deferral_snapshot_distinguishes_waiting_node_from_failed_deploy(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1])
+    assert e.d.deploy_deferral_snapshot() is None
+    assert e.d._maybe_deploy() is False
+    e.now += 101
+    assert e.d._maybe_deploy() is False
+
+    snap = e.d.deploy_deferral_snapshot()
+    assert snap["state"] == "awaiting_node_convergence" and snap["target_sha"] == sha
+    assert snap["pending_node"] == "notebook" and snap["recovery_attempts"] == 1
+    assert snap["recovery_max_attempts"] == fd.CONVERGENCE_RECOVERY_MAX_ATTEMPTS
+
+
+def test_pending_record_vanishing_without_proof_reopens_full_deploy(tmp_path: Path, monkeypatch):
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [0])
+    assert e.d._maybe_deploy() is False
+    node_sync.clear_pending_convergence()
+    e.now += 101
+    assert e.d._maybe_deploy() is False  # sem prova, nunca conclui: o deploy completo (e o backup) volta
+    assert calls == {"deploy": 2, "converge": 0}
+    assert e.d.pending_deploy is True and e.d.deploys == 0
+
+
+def test_later_full_deploy_exit_0_clears_deferral_and_completes(tmp_path: Path, monkeypatch):
+    import json
+
+    e, calls, sha, node_sync = _deferred_env(tmp_path, monkeypatch, [1])
+    assert e.d._maybe_deploy() is False
+    e.d._deferred_sha = None  # novo merge reabre o deploy completo
+    e.d.deploy = lambda: 0
+    e.d.last_merge_at = e.now - 101
+
+    assert e.d._maybe_deploy() is True
+    assert e.d.pending_deploy is False and e.d.deploys == 1
+    assert node_sync.load_pending_convergence() is None
+    path = tmp_path / "recovery-state" / "runs" / fd.DEPLOY_DEFERRAL_FILE
+    assert json.loads(path.read_text(encoding="utf-8")) == {}
+    assert e.d.deploy_deferral_snapshot() is None
+
+
+def test_default_converge_requires_node_retry_then_backup(monkeypatch):
+    launched = []
+
+    class Proc:
+        def __init__(self, argv, **_kw):
+            launched.append(tuple(argv[2:]))
+            self.pid, self.rc = 1, rcs[tuple(argv[2:])]
+
+        def wait(self, timeout=None):
+            return self.rc
+
+    monkeypatch.setattr(fd.subprocess, "Popen", Proc)
+    sha = "e" * 40
+    rcs = {
+        ("core.infra.node_sync", "retry"): 0,
+        ("core.infra.node_sync", "verify", "--expected-sha", sha): 0,
+        ("core.infra.backup_cron", "--once"): 0,
+    }
+    assert fd.default_converge(expected_sha=sha) == 0 and launched == [
+        ("core.infra.node_sync", "retry"),
+        ("core.infra.node_sync", "verify", "--expected-sha", sha),
+        ("core.infra.backup_cron", "--once"),
+    ]
+
+    launched.clear()
+    rcs[("core.infra.node_sync", "retry")] = 1
+    assert fd.default_converge(expected_sha=sha) == 1 and launched == [
+        ("core.infra.node_sync", "retry"),
+    ]  # sem convergencia, sem backup
+
+    launched.clear()
+    rcs.update({
+        ("core.infra.node_sync", "retry"): 0,
+        ("core.infra.node_sync", "verify", "--expected-sha", sha): 0,
+        ("core.infra.backup_cron", "--once"): 1,
+    })
+    assert fd.default_converge(expected_sha=sha) == 1

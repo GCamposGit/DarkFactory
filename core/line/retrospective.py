@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from core.learning.models import MistakeCategory
 from core.learning.tracker import ContinuousLearningTracker
+from core.learning.observations import record_observation
 from core.line import workspace as ws_mod
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageContext
@@ -183,6 +184,10 @@ def record_lessons_in_learning_tracker(
     lessons: Sequence[RetrospectiveLesson],
     run_id: str,
     tracker: Optional[ContinuousLearningTracker] = None,
+    *,
+    project_id: str = "darkfac",
+    ticket_id: str = "",
+    evidence: Optional[Sequence[str]] = None,
 ) -> None:
     """Record lessons into ContinuousLearningTracker (learning_ledger.json)."""
     if not lessons:
@@ -190,6 +195,23 @@ def record_lessons_in_learning_tracker(
     try:
         active_tracker = tracker or ContinuousLearningTracker()
         for lesson in lessons:
+            cause = str(lesson.cause_code or "").lower()
+            runtime_markers = ("harness", "runtime", "worker", "infra", "route", "quota", "host", "launcher")
+            observation_project = "darkfac" if any(marker in cause for marker in runtime_markers) else project_id
+            record_observation(
+                project_id=observation_project,
+                identity=f"failure:{observation_project}:{run_id}:{lesson.stage}:{lesson.cause_code}",
+                kind="harness_failure",
+                summary=lesson.rule,
+                intention="prevent recurrence of a production-line failure",
+                harness="darkfac-line",
+                run_id=run_id,
+                cause=lesson.cause_code,
+                ticket_id=ticket_id,
+                stage=lesson.stage,
+                evidence=list(evidence or []),
+                root=active_tracker.learning_dir.parent,
+            )
             active_tracker.record_mistake_rca(
                 category=lesson.category,
                 symptom=f"Run {run_id} encountered {lesson.cause_code or 'retry/failure'}",
@@ -255,6 +277,13 @@ def record_retrospective_lessons(
         logger.warning("Failed to commit retrospective lessons in workspace for %s: %s", run_id, ws_exc)
 
     # 3. Record in core.learning ledger
-    record_lessons_in_learning_tracker(lessons, run_id, tracker=learning_tracker)
+    record_lessons_in_learning_tracker(
+        lessons,
+        run_id,
+        tracker=learning_tracker,
+        project_id=project.id,
+        ticket_id=str(summary.get("ticket_id") or ""),
+        evidence=[str(item) for item in summary.get("evidence_refs", []) if item],
+    )
 
     return lessons

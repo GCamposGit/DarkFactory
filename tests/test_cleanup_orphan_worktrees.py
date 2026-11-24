@@ -6,6 +6,7 @@ import json
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -156,36 +157,49 @@ def test_dirty_and_held_worktrees_are_reported_pending_without_removal(
     assert (dirty / "keep.txt").is_file() and held.is_dir()
 
 
-def test_pending_worktree_is_not_reclassified_as_an_old_orphan(
-    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pending_worktree_dirty_only_in_generated_ledgers_is_removed(repo: SimpleNamespace) -> None:
     path = _workspace(repo.local, "USR-608")
-    (path / "keep.txt").write_text("working copy\n", encoding="utf-8")
-    real_cleanup = ticket_workspace.cleanup
-    first = real_cleanup(path, repo.local, holder_probe=_idle, now_fn=lambda: BORN + timedelta(hours=50))
+    ledger = path / ticket_workspace.TICKET_LEDGER_RELATIVE
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]\n", encoding="utf-8")
+    _git(path, "add", "-f", ticket_workspace.TICKET_LEDGER_RELATIVE)
+    _git(path, "commit", "--quiet", "-m", "chore: ledger")
+    ledger.write_text('[{"generated": true}]\n', encoding="utf-8")
+    first = ticket_workspace.cleanup(path, repo.local, holder_probe=_idle, now_fn=lambda: BORN + timedelta(hours=50))
     assert not first.removed and len(ticket_workspace.list_cleanup_pending(repo.local)) == 1
-    (path / "keep.txt").unlink()
 
-    calls: list[Path] = []
-
-    def tracked_cleanup(candidate: Path, root: Path, **kwargs: object) -> CleanupResult:
-        calls.append(candidate)
-        return real_cleanup(candidate, root, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(ticket_workspace, "cleanup", tracked_cleanup)
-    retried = sweep.sweep_orphan_worktrees(
-        repo.local,
-        now=BORN + timedelta(hours=51),
-        holder_probe=_idle,
-        statuses={"USR-608": "completed"},
+    swept = sweep.sweep_orphan_worktrees(
+        repo.local, now=BORN + timedelta(hours=51), holder_probe=_idle, statuses={"USR-608": "completed"}
     )
 
-    assert calls == []
-    assert retried.removed == 0 and retried.errors == retried.blocked == 0
-    assert retried.ignored == 2
-    assert any(item["path"] == str(path) and item["reason"] == "cleanup_pending" for item in retried.details)
-    assert len(ticket_workspace.list_cleanup_pending(repo.local)) == 1
-    assert path.exists()
+    assert swept.removed == 1 and swept.errors == swept.blocked == 0
+    assert not path.exists()
+    assert ticket_workspace.list_cleanup_pending(repo.local) == []
+
+
+def test_terminal_worktree_with_a_real_change_is_archived_then_removed(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = repo.tmp / "archive"
+    monkeypatch.setattr(ticket_workspace, "worktree_archive_root", lambda: archive)
+    path = _workspace(repo.local, "USR-610")
+    (path / "README.md").write_text("changed\n", encoding="utf-8")
+    (path / "new.txt").write_text("untracked\n", encoding="utf-8")
+
+    young = sweep.sweep_orphan_worktrees(
+        repo.local, now=BORN + timedelta(days=3), holder_probe=_idle, statuses={"USR-610": "completed"}
+    )
+    assert young.removed == 0 and path.exists() and not archive.exists()
+
+    old = sweep.sweep_orphan_worktrees(
+        repo.local, now=BORN + timedelta(days=8), holder_probe=_idle, statuses={"USR-610": "completed"}
+    )
+
+    assert old.removed == 1 and old.errors == 0
+    assert not path.exists()
+    (saved,) = list(archive.iterdir())
+    assert "+changed" in (saved / "changes.patch").read_text(encoding="utf-8")
+    assert (saved / "untracked" / "new.txt").read_text(encoding="utf-8") == "untracked\n"
 
 
 def test_dirty_worktree_for_an_active_ticket_is_not_sent_to_cleanup(
@@ -282,4 +296,125 @@ def test_scheduler_guard_runs_daily_and_skips_repeated_calls(tmp_path: Path) -> 
         tmp_path, now_fn=lambda: start + timedelta(days=1), sweep_fn=fake_sweep
     ) is not None
     assert runs == [tmp_path, tmp_path]
+
+
+def test_scheduler_serializes_active_sweep_and_retries_after_failure_backoff(tmp_path: Path) -> None:
+    started = Event()
+    release = Event()
+    start = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+
+    def interrupted(_root: Path) -> sweep.CleanupSummary:
+        started.set()
+        assert release.wait(timeout=10)
+        raise RuntimeError("interrupted sweep")
+
+    worker = Thread(
+        target=sweep.maybe_run_scheduled,
+        args=(tmp_path,),
+        kwargs={"sweep_fn": interrupted, "now_fn": lambda: start},
+    )
+    worker.start()
+    try:
+        assert started.wait(timeout=5)
+        assert sweep.maybe_run_scheduled(tmp_path, force=True) is None
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert sweep.maybe_run_scheduled(
+        tmp_path,
+        now_fn=lambda: start + timedelta(hours=1) - timedelta(seconds=1),
+        sweep_fn=lambda _: sweep.CleanupSummary(),
+    ) is None
+    assert sweep.maybe_run_scheduled(
+        tmp_path,
+        now_fn=lambda: start + timedelta(hours=1),
+        sweep_fn=lambda _: sweep.CleanupSummary(),
+    ) is not None
+
+
+def test_repeated_sweep_failures_are_backed_off_and_recorded(tmp_path: Path) -> None:
+    start = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    launches: list[Path] = []
+
+    def failed_sweep(root: Path) -> sweep.CleanupSummary:
+        launches.append(root)
+        raise OSError("git inventory unavailable")
+
+    first = sweep.maybe_run_scheduled(tmp_path, now_fn=lambda: start, sweep_fn=failed_sweep)
+    assert sweep.maybe_run_scheduled(
+        tmp_path, now_fn=lambda: start + timedelta(hours=1) - timedelta(seconds=1), sweep_fn=failed_sweep
+    ) is None
+    second_failure_time = start + timedelta(hours=1)
+    second = sweep.maybe_run_scheduled(tmp_path, now_fn=lambda: second_failure_time, sweep_fn=failed_sweep)
+    assert sweep.maybe_run_scheduled(
+        tmp_path, now_fn=lambda: second_failure_time + timedelta(hours=2) - timedelta(seconds=1), sweep_fn=failed_sweep
+    ) is None
+    state = json.loads((tmp_path / sweep.SCHEDULE_STATE).read_text(encoding="utf-8"))
+
+    assert first is not None and first.errors == 1
+    assert second is not None and second.errors == 1
+    assert launches == [tmp_path, tmp_path]
+    assert state["status"] == "failed"
+    assert state["failure_count"] == 2
+    assert state["last_failure"] == "OSError: git inventory unavailable"
+    assert state["next_attempt_at"] == (second_failure_time + timedelta(hours=2)).isoformat()
+
+
+def test_failure_backoff_caps_at_one_day_and_success_resets_to_daily_schedule(tmp_path: Path) -> None:
+    start = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    state_path = tmp_path / sweep.SCHEDULE_STATE
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({"status": "failed", "failure_count": 8}), encoding="utf-8")
+
+    def failed(_root: Path) -> sweep.CleanupSummary:
+        raise OSError("inventory unavailable")
+
+    assert sweep.maybe_run_scheduled(
+        tmp_path, now_fn=lambda: start, sweep_fn=failed
+    ) is not None
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["failure_count"] == 9
+    assert state["next_attempt_at"] == (start + timedelta(hours=24)).isoformat()
+
+    resumed = start + timedelta(hours=24)
+    assert sweep.maybe_run_scheduled(
+        tmp_path, now_fn=lambda: resumed, sweep_fn=lambda _: sweep.CleanupSummary(errors=1)
+    ) is not None
+    recovered = json.loads(state_path.read_text(encoding="utf-8"))
+    assert recovered["status"] == "succeeded"
+    assert recovered["failure_count"] == 0
+    assert "next_attempt_at" not in recovered
+    assert sweep.maybe_run_scheduled(
+        tmp_path, now_fn=lambda: resumed + timedelta(days=1) - timedelta(seconds=1),
+        sweep_fn=lambda _: sweep.CleanupSummary(),
+    ) is None
+    assert sweep.maybe_run_scheduled(
+        tmp_path, now_fn=lambda: resumed + timedelta(days=1), sweep_fn=lambda _: sweep.CleanupSummary()
+    ) is not None
+
+
+def test_legacy_last_attempt_state_keeps_daily_interval(tmp_path: Path) -> None:
+    from core.git import orphan_worktree_cleanup as scheduler
+
+    start = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    state_path = tmp_path / sweep.SCHEDULE_STATE
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({"last_attempt_at": start.isoformat()}), encoding="utf-8")
+
+    assert not scheduler.schedule_due(tmp_path, start + timedelta(hours=23))
+    assert scheduler.schedule_due(tmp_path, start + timedelta(days=1))
+
+
+def test_summary_errors_complete_sweep_on_daily_cadence(tmp_path: Path) -> None:
+    from core.git import orphan_worktree_cleanup as scheduler
+
+    start = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    partial = sweep.CleanupSummary(errors=1, details=[{"path": "worktree", "reason": "classification_error"}])
+    assert sweep.maybe_run_scheduled(tmp_path, now_fn=lambda: start, sweep_fn=lambda _: partial) is partial
+    state = json.loads((tmp_path / sweep.SCHEDULE_STATE).read_text(encoding="utf-8"))
+    assert state["status"] == "succeeded"
+    assert state["failure_count"] == 0
+    assert not scheduler.schedule_due(tmp_path, start + timedelta(hours=1))
 
