@@ -538,6 +538,11 @@ repetir a mesma evidência não avisa de novo; uma mudança persistida de evidê
 `retrying` para `blocked` pode gerar um novo aviso. O estado e o ledger de avisos sobrevivem ao
 reinício.
 
+Ao resumir um gate, a triagem usa a primeira linha real de `FAILED`, `ERROR`, timeout ou exceção.
+Linhas de progresso `[SUITE_LOCK] acquired`/`waiting` e cabeçalhos `[TEST_PHASE]` não substituem
+essa causa; `[SUITE_LOCK] timed out` permanece uma falha válida. Outcome, motivo do dispatcher e
+detalhe encaminhado ao registro de falhas usam a mesma linha sanitizada.
+
 ## Orçamento por ticket e recuperação
 
 `core.line.failure_taxonomy` é a fonte única das classes `infra`, `candidate`, `owner` e `unknown`.

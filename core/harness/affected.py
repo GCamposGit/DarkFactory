@@ -942,6 +942,8 @@ def _pr_contract_tests(repo_root: Path) -> list[str]:
 PR_TIMEOUT_BASE_S = 120.0
 PR_TIMEOUT_PER_TEST_S = 20.0
 PR_TIMEOUT_MAX_S = 1800.0
+PR_COLLECTION_TIMEOUT_PER_FILE_S = 10.0
+PR_COLLECTION_TIMEOUT_MAX_S = 600.0
 PR_FINALIZATION_RESERVE_S = 20.0
 AFFECTED_DEADLINE_ENV = "DARKFAC_AFFECTED_DEADLINE"
 
@@ -996,6 +998,15 @@ def selected_test_timeout(test_count: int) -> float:
     return min(PR_TIMEOUT_MAX_S, PR_TIMEOUT_BASE_S + PR_TIMEOUT_PER_TEST_S * test_count)
 
 
+def selected_collection_timeout(file_count: int, remaining_seconds: float) -> float:
+    """Scale collection time with selected files, bounded by remaining deadline and ten minutes."""
+    return min(
+        remaining_seconds,
+        PR_COLLECTION_TIMEOUT_MAX_S,
+        PR_TIMEOUT_BASE_S + PR_COLLECTION_TIMEOUT_PER_FILE_S * file_count,
+    )
+
+
 # --- pytest execution ---------------------------------------------------------
 
 
@@ -1047,7 +1058,7 @@ def run_pytest(
         deadline = time.monotonic() + PR_TIMEOUT_MAX_S - PR_FINALIZATION_RESERVE_S
     phase = "collection"
     try:
-        collection_timeout = min(PR_TIMEOUT_BASE_S, deadline - time.monotonic())
+        collection_timeout = selected_collection_timeout(len(targets), deadline - time.monotonic())
         if collection_timeout <= 0:
             raise subprocess.TimeoutExpired(command, 0)
         print(f"[TEST_PHASE] collection files={len(targets)} timeout_sec={collection_timeout:.0f}", flush=True)

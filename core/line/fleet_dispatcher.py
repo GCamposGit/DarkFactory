@@ -1145,7 +1145,9 @@ class FleetDispatcher:
         cause = outcome.cause if outcome else classify_log_cause(tail) or run_outcome.diagnostic_cause(tail, rc)
         if not outcome and cause == "unknown":
             cause = "infra" if rc == 75 else canonical_cause(kind)
-        reason = outcome.detail if outcome else failure_reason(rc, tail)
+        log_failure = run_outcome.actionable_failure(tail)
+        detail_source = log_failure or (outcome.detail if outcome else tail)
+        reason = failure_reason(rc, detail_source)
         self.failures = (self.failures + [{
             "ts": datetime.now(timezone.utc).isoformat(), "ticket": job.ticket_id, "host": job.host_id,
             "exit_code": outcome.exit_code if outcome else rc, "kind": kind, "reason": reason,

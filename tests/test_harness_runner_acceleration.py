@@ -540,6 +540,14 @@ def test_runner_uses_in_process_pytest_for_one_worker(monkeypatch, workers):
         assert calls[0][calls[0].index("-n") + 1] == ("0" if workers == 1 else "2")
 
 
+def test_affected_step_timeout_cannot_truncate_scaled_collection_budget():
+    from core.harness.models import HarnessStepConfig
+
+    step = HarnessStepConfig(name="affected_tests", cmd="python -m core.harness.affected --run",
+                             timeout_sec=120, kind="test")
+    assert runner.effective_step_timeout(step) >= 1800
+
+
 @pytest.mark.parametrize("failure, serial_code, expected_calls", [(3, 0, 2), (3, 1, 2), (3, 3, 2), (1, 0, 1)])
 def test_parallel_crash_gets_one_serial_retry(monkeypatch, tmp_path, failure, serial_code, expected_calls):
     import subprocess
