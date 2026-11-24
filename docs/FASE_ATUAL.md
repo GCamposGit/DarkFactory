@@ -9,6 +9,7 @@ Como manter: este arquivo é o snapshot da fase atual (canais, máquinas, orçam
 Sessões de coordenação podem iniciar pelo pedido **“assuma a fábrica”** com a skill `coordenar-fabrica`. O [manual de operação](manual/operacao_interativa.md) inclui a entrada explícita para harnesses que leem arquivos do projeto.
 
 - Telegram (bot do owner), DarkHub (darkhub.ggcampos.com) e chat com os harnesses (Claude Code, Codex, Grok Build e Antigravity).
+- Holds de `HumanRequest` e `notify_ticket_hold` selecionam o papel `owner` e exigem `TELEGRAM_OWNER_CHAT_ID`, sem fallback para destinos compartilhados. Sem destino, o primeiro mantém a ação `OA-TELEGRAM-OWNER-DESTINATION`; o segundo persiste no alerta do DarkHub a instrução de configurar a variável e registra `missing_destination`, sem reportar entrega Telegram ou criar outbox.
 - Os três devem funcionar sem erro e levar a demanda pelo mesmo motor (`run_ticket.py` / despachante).
 - Antigravity atua como interface interativa: inicia sessão pelo `python -m core.ops.briefing`, define `DARKFAC_OPERATING_HARNESS=antigravity` e implementa no chat se o roteador o eleger — adotando o **Gemini 4 Neon** (idealmente **Orchestrator (Neon)**) como modelo principal para coordenação da fábrica e tarefas de alta inteligência, e o **Gemini 4 Hydrogen High** ou **Gemini 4 Argon High** para tarefas específicas em subagentes. Se outro harness for eleito, o ticket segue pelo `run_ticket.py`. Antigravity é proibido em modo headless/frota, incluindo workers, `--fleet` e pump.
 
@@ -46,7 +47,8 @@ Sessões de coordenação podem iniciar pelo pedido **“assuma a fábrica”** 
 - Pelo menos 1 é de um produto real, não da própria fábrica.
 - Os três canais funcionam sem erro.
 
-## Piloto de produto (potencial, sujeito a mudança)
+## Piloto de produto (M1 escolhido em 24/11 para a prova V0)
+- Mansão do Lago é **cliente real** (não o owner). Projeto `mansaodolago` no registro, prefixo MDL, repo existente `GCamposGit/Site_Mansaodolago` (clone em `C:\dev\Site_Mansaodolago`), `requires_commercial_acceptance: true`: push em `master` publica o site por FTP, então merge, push em master e deploy só com aceite expresso do owner. O código do M1 vive na branch `darkfac/m1-seo`. Relatórios vão por e-mail ao administrador (destinatários no cofre, `MANSAODOLAGO_REPORT_RECIPIENTS`); seção admin no próprio site fica para depois.
 - Gestor de SEO e redes sociais da mansaodolago.com, em fases:
   - M1: auditoria de SEO e Search Console, relatório semanal e calendário de conteúdo (sem Instagram/Facebook: a empresa ainda não tem as contas).
   - M2: publicação recorrente e SEO on-page, aprovação por lote.

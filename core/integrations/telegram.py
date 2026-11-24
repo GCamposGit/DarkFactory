@@ -536,6 +536,8 @@ def load_telegram_config(
     config_file: Optional[Path] = None,
     role: str = "ops",
     config_dir: Optional[Path] = None,
+    *,
+    owner_destination_only: bool = False,
 ) -> TelegramConfig:
     """Load environment credentials first; use local config only as fallback."""
     root_dir = config_dir.parent.parent if config_dir is not None else project_root()
@@ -597,9 +599,25 @@ def load_telegram_config(
     if not users:
         users = local_data.get("authorized_user_ids", [])
 
-    chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
-    chats = parse_telegram_chat_ids(chats_raw)
-    if not chats:
+    # The owner bot has a dedicated destination setting used by the Hub and
+    # deployment configuration. Prefer it over shared authorized-chat lists so
+    # owner alerts cannot accidentally target an ops/group chat.
+    owner_chat_raw = os.environ.get("TELEGRAM_OWNER_CHAT_ID") or env_vars.get("TELEGRAM_OWNER_CHAT_ID", "")
+    if role == "owner":
+        owner_chats = parse_telegram_chat_ids(owner_chat_raw)
+        if owner_destination_only:
+            # Hold alerts require a private, dedicated destination. An absent
+            # or malformed setting must not silently target a shared ops chat.
+            chats = owner_chats
+            # Dedicated holds must not fall back to shared user destinations either.
+            users = []
+        else:
+            chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
+            chats = owner_chats or parse_telegram_chat_ids(chats_raw)
+    else:
+        chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
+        chats = parse_telegram_chat_ids(chats_raw)
+    if not chats and not (role == "owner" and owner_destination_only):
         chats = local_data.get("authorized_chat_ids", [])
 
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or env_vars.get("TELEGRAM_WEBHOOK_SECRET")

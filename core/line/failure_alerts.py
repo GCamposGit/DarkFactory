@@ -147,13 +147,15 @@ def _remember(fingerprint: str, ticket: str, cause: str, evidence: str) -> None:
 def _emit_failure_alert(
     *, ticket: str, cause: str, evidence: str, log_path: str, title: str,
     phase: str = "unknown", fingerprint: str = "", attempts: int = 0,
-    next_step: str = "", transition: str = "failure",
+    next_step: str = "", transition: str = "failure", owner_destination_only: bool = False,
 ) -> bool:
     from core.notifications.models import AlertCategory, AlertSeverity, NotificationChannel
     from core.notifications.service import NotificationService
 
     try:
-        event = NotificationService().notify(
+        event = NotificationService(
+            telegram_role="owner", owner_destination_only=owner_destination_only,
+        ).notify(
             category=AlertCategory.SYSTEM_HEALTH, severity=AlertSeverity.CRITICAL,
             title=title,
             message=(f"Fase: {phase}\nCausa: {cause}\nFingerprint: {fingerprint}\n"
@@ -180,6 +182,7 @@ def notify_deterministic_failure(
     attempts: int = 0,
     next_step: str = "Inspect the recorded evidence and correct the failure before retrying.",
     transition: str = "retrying",
+    owner_destination_only: bool = False,
 ) -> bool:
     """Alert once for this fingerprint. The same cause and evidence stay silent.
 
@@ -213,6 +216,7 @@ def notify_deterministic_failure(
         ticket=ticket, cause=cause, evidence=evidence, log_path=log_path,
         title=f"Falha deterministica em {ticket}", phase=phase, fingerprint=fingerprint,
         attempts=attempts, next_step=next_step, transition=transition,
+        owner_destination_only=owner_destination_only,
     )
     if sent:
         _remember(alert_key, ticket, cause, evidence)
@@ -237,4 +241,5 @@ def notify_ticket_hold(ticket: str, cause: str, detail: str, log_path: str) -> N
         attempts=int(record.get("attempts") or 0),
         next_step=str(record.get("next_step") or "Review the evidence, correct the cause, then release the ticket hold."),
         transition="blocked",
+        owner_destination_only=True,
     )

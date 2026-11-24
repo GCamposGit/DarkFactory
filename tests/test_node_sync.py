@@ -331,7 +331,7 @@ def test_notebook_clean_main_fast_forwards() -> None:
     ("late_status", "can_sync"),
     [
         ("?? .factory/runs/model_audit/audit.json\n?? .factory/runs/review_benchmark.jsonl", True),
-        ("?? .factory/runs/deploy_deferrals.json\n?? .factory/runs/pending_deliveries.json", True),
+        ("?? .factory/runs/deploy_deferrals.json\n?? .factory/runs/pending_deliveries.json\n?? .factory/runs/express_episodes.json", True),
         (" M .factory/learning/learning_ledger.json", True),
         # run_git strips the output: the only dirty line arrives without its leading blank.
         ("M .factory/learning/learning_ledger.json", True),

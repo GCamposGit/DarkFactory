@@ -4,6 +4,14 @@
 <!-- covers: core/harness/remote_worker.py -->
 # Operação da frota
 
+Falhas repetidas de candidato colocam o ticket em hold e `notify_ticket_hold` avisa o
+owner pelo bot Telegram dedicado. O destino é `TELEGRAM_OWNER_CHAT_ID`; chats e usuários
+compartilhados de operação não são usados como fallback. Sem destino válido, o alerta
+continua visível no DarkHub com a instrução de configurar essa variável, registra
+`missing_destination` e não declara entrega Telegram nem cria outbox. Holds de `HumanRequest`
+seguem a mesma regra. Confira também [operação interativa](operacao_interativa.md#alertas-de-hold)
+para o procedimento de verificação ponta a ponta.
+
 O `/health` de cada worker remoto publica `workers`, `available_gib` e `observed_at`
 medidos no próprio host com o critério de RAM do portão. Um host ocupado, sem capacidade
 positiva ou sem leitura válida permanece fora da admissão.

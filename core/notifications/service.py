@@ -34,11 +34,13 @@ class NotificationService:
         telegram_service: Optional[TelegramService] = None,
         cooldown_minutes: int = 30,
         telegram_role: str = "owner",
+        owner_destination_only: bool = False,
     ) -> None:
         self.store = store or NotificationStore()
         self.telegram_service = telegram_service
         self.cooldown_minutes = max(1, cooldown_minutes)
         self.telegram_role = telegram_role
+        self.owner_destination_only = owner_destination_only
         # In-memory tracking of recent alerts: (provider_id, severity) -> last_sent_datetime
         self._recent_alerts: Dict[Tuple[str, AlertSeverity], datetime] = {}
 
@@ -47,7 +49,10 @@ class NotificationService:
         if self.telegram_service is not None:
             return self.telegram_service
         try:
-            cfg = load_telegram_config(role=self.telegram_role)
+            cfg = load_telegram_config(
+                role=self.telegram_role,
+                owner_destination_only=self.owner_destination_only,
+            )
             if cfg.bot_token:
                 self.telegram_service = TelegramService(cfg)
                 return self.telegram_service
@@ -122,6 +127,22 @@ class NotificationService:
                     details=details,
                 )
             )
+
+            # A hold with no dedicated owner destination is still persisted in
+            # DarkHub. Put the exact repair setting on that visible event so the
+            # owner can resolve the missing Telegram route from the alert itself.
+            tg = self.telegram_service
+            if (
+                self.owner_destination_only
+                and tg is not None
+                and not resolve_telegram_destinations(tg.config)
+            ):
+                safe_message = (
+                    f"{safe_message}\n\n"
+                    "Acao necessaria: configure TELEGRAM_OWNER_CHAT_ID com o ID numerico "
+                    "do chat privado do owner no ambiente do servico da linha e reinicie o servico."
+                )
+                event = event.model_copy(update={"message": safe_message})
 
         if provider_id:
             self._recent_alerts[(provider_id, severity)] = datetime.now(UTC)

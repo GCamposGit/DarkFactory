@@ -171,5 +171,29 @@
     "smoke": [],
     "exec_affinity": [],
     "requires_commercial_acceptance": false
+  },
+  {
+    "id": "mansaodolago",
+    "name": "Mansão do Lago (cliente)",
+    "description": "Site do cliente Mansão do Lago (mansaodolago.com). Cliente real: nada muda no site publicado sem aceite expresso do owner. Push em master publica via FTP na Hostinger.",
+    "path": "C:\\dev\\Site_Mansaodolago",
+    "paths": {},
+    "kind": "client_portfolio",
+    "prefix": "MDL",
+    "domain": "mansaodolago.com",
+    "deploy_target": "hostinger_ftp",
+    "created_at": "2026-11-24T13:45:58.252060+00:00",
+    "repo_url": "https://github.com/GCamposGit/Site_Mansaodolago.git",
+    "default_branch": "master",
+    "commands": {},
+    "deploy": null,
+    "smoke": [
+      {
+        "url": "https://mansaodolago.com/",
+        "expect_status": 200
+      }
+    ],
+    "exec_affinity": [],
+    "requires_commercial_acceptance": true
   }
 ]
