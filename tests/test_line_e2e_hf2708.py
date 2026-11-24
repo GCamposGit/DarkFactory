@@ -546,10 +546,6 @@ def test_worker_without_harness_never_claims_development(tmp_path: Path, monkeyp
     receipt = store.accept(cmd, NOW)
     run_id = receipt.run_id
     assert run_id is not None
-    # accept() keys the grill job by demand id; this test exercises the project-keyed
-    # capability stamping path of the line, so rebind the job to the project id.
-    with store._connect() as conn:
-        conn.execute("UPDATE jobs SET ticket_id = ? WHERE run_id = ?", ("acme", run_id))
 
     # Drive grill->planning->development successors for real via
     # materialize_result, exactly like the worker would, so "development"'s
@@ -558,9 +554,9 @@ def test_worker_without_harness_never_claims_development(tmp_path: Path, monkeyp
     from core.workflow.control_contracts import JobKey, StageResult
     from core.workflow.successors import materialize_result
 
-    grill_key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="grill", iteration=0)
+    grill_key = JobKey(run_id=run_id, ticket_id=receipt.demand_id, plan_version="1.0", stage="grill", iteration=0)
     materialize_result(grill_key, StageResult(outcome="success", output_refs=["sha1"]), store, now=NOW)
-    planning_key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="planning", iteration=0)
+    planning_key = JobKey(run_id=run_id, ticket_id=receipt.demand_id, plan_version="1.0", stage="planning", iteration=0)
     materialize_result(planning_key, StageResult(outcome="success", output_refs=["sha2"]), store, now=NOW)
 
     conn = store._connect()

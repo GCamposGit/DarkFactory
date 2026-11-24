@@ -38,7 +38,7 @@ import json
 import logging
 import re
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Any, Optional
 
 from core.git.ci_checks import is_base_red_cause
 from core.workflow.control_contracts import (
@@ -195,11 +195,21 @@ def _run_wall_clock_exceeded(store: ControlStore, run_id: str, now_dt: datetime)
     return elapsed_hours > wall_clock_hours
 
 
-def _required_capabilities_json(ticket_id: str, stage: str) -> str:
+def _run_project_id(cur: Any, run_id: str, placeholder: str) -> Optional[str]:
+    """Project of a run, read from `runs` (the grill job's ticket_id may be a demand id)."""
+    try:
+        cur.execute(f"SELECT project_id FROM runs WHERE run_id = {placeholder}", (run_id,))
+        row = cur.fetchone()
+        return str(row[0]) if row and row[0] else None
+    except Exception:  # pragma: no cover - defensive, falls back to the legacy ticket_id lookup
+        return None
+
+
+def _required_capabilities_json(ticket_id: str, stage: str, project_id: Optional[str] = None) -> str:
     """Best-effort `required_capabilities` for a freshly created job (HF-27-08 item D).
 
-    `ticket_id` holds the project id for line runs (`ControlStore.accept()`
-    stores it there). Lazily imports `core.line.bindings` so this generic
+    The project is the run's `project_id` when known; otherwise `ticket_id` is tried
+    (legacy line runs stored the project id there). Lazily imports `core.line.bindings` so this generic
     HF-05 module has no hard dependency on the line package; any failure
     (project unknown, core.line unavailable, non-line ticket_id) falls back
     to the historical `'[]'` (no gating), matching pre-HF-27-08 behaviour
@@ -209,7 +219,8 @@ def _required_capabilities_json(ticket_id: str, stage: str) -> str:
         from core.line.bindings import required_caps
         from core.projects.registry import get_project_registry
 
-        project = get_project_registry().get_project(ticket_id)
+        registry = get_project_registry()
+        project = (registry.get_project(project_id) if project_id else None) or registry.get_project(ticket_id)
         if project is None:
             return "[]"
         return json.dumps(required_caps(project, stage))
@@ -506,7 +517,7 @@ def materialize_result(
                         succ.stage,
                         succ.iteration,
                         succ_role,
-                        _required_capabilities_json(succ.ticket_id, succ.stage),
+                        _required_capabilities_json(succ.ticket_id, succ.stage, _run_project_id(cur, succ.run_id, "?")),
                         now_iso,
                         now_iso,
                         _not_before_for(succ),
@@ -679,7 +690,7 @@ def materialize_result(
                                 succ.stage,
                                 succ.iteration,
                                 succ_role,
-                                _required_capabilities_json(succ.ticket_id, succ.stage),
+                                _required_capabilities_json(succ.ticket_id, succ.stage, _run_project_id(cur, succ.run_id, "%s")),
                                 now_utc,
                                 now_utc,
                                 _not_before_for(succ),
