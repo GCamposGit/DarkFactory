@@ -990,8 +990,7 @@
       h('div', { class: 'v0slot-chan', text: 'canal: ' + (slot.channel || '—') }),
       h('div', { class: 'v0slot-checks' },
         chk(slot.smoke_passed, 'smoke'),
-        chk(slot.learning_pack_linked, 'learning pack'),
-        chk(slot.manual_page_changed, 'manual')),
+        chk(slot.learning_pack_linked, 'learning pack')),
       evidence,
     ];
   }
