@@ -120,6 +120,14 @@ def _checkout_enterprise_policy_is_read_only() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_host_claude_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quota tests mock `_find_claude`; never let the fallback walk probe the host's real installs."""
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_claude_fallbacks", lambda self: [])
+
+
+@pytest.fixture(autouse=True)
 def _disable_live_pull_request_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep ordinary tests offline; USR-418 tests exercise the PR adapter with injected results."""
     run_ticket = sys.modules.get("run_ticket")

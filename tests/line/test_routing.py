@@ -811,7 +811,7 @@ def test_claude_headless_probe_reads_rate_limit_events_and_writes_fresh_snapshot
     used = {w.quota_id: w.used_percent for w in usage.windows}
     assert used == {"claude:5h": 25.625, "claude:weekly": 65.625}
     assert "-p" in calls[0][0] and "--model" in calls[0][0]
-    assert calls[0][0][calls[0][0].index("--model") + 1] == "claude-haiku-5-5"
+    assert calls[0][0][calls[0][0].index("--model") + 1] == "haiku"  # CLI alias; registry id is cost identity only
     assert calls[0][0][calls[0][0].index("--max-turns") + 1] == "1"
     from core.models.registry import resolve_claude_probe_model
 
