@@ -32,7 +32,9 @@ snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
 
 ## Probe headless do Claude (USR-416)
 
-`ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova). O alias permitido `haiku` e resolvido pelo registro de modelos, mas a chamada usa o ID explicito configurado em `claude_cli_model_id`; hoje ele precisa coincidir com o ID do alias `haiku` no registro. As janelas de cota sao da conta: se a CLI avisar que nao reconhece o modelo, ou responder com outro modelo, a leitura vale mesmo assim (16/11/2026: recusar essa leitura deixou o Claude desconhecido e a linha sem rota de planejamento). A coleta so aceita a leitura se a CLI informar exatamente esse ID, mantendo modelo solicitado, modelo efetivo e identidade de custo alinhados. Se a CLI rejeitar o modelo ou informar outro ID, nenhum snapshot novo e gravado.
+`ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova). O alias permitido `haiku` valida o registro de modelos (identidade de custo), mas a CLI recebe o proprio alias `--model haiku`; se a CLI rejeitar o modelo ou nao devolver as duas janelas, a sonda repete sem `--model` (EC-04, 25/11/2026). As janelas de cota sao da conta: aviso de modelo nao reconhecido ou modelo efetivo diferente nao anulam a leitura (16/11/2026: recusar isso deixou o Claude desconhecido e a linha sem rota de planejamento). Sem eventos com as duas janelas e ao menos um modelo informado, nenhum snapshot novo e gravado.
+
+`_find_claude` escolhe a instalacao de maior versao (`--version`, timeout de 4 s, cache por caminho e mtime) entre shim npm, instalacao nativa e `PATH`; empate ou versao ilegivel mantem a ordem npm primeiro. Snapshot com menos de 900 s (`SNAPSHOT_FRESHNESS_TTL_SECONDS`) e reutilizado sem subprocesso, mesmo com `force`.
 
 ## Contrato do sandbox de sonda (USR-457)
 

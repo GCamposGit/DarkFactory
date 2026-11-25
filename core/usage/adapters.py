@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.common.tempdirs import ProbeSandbox, SandboxCleanup, probe_sandbox
 from core.models.registry import id_of, resolve_claude_probe_model, resolve_known
@@ -1705,31 +1705,51 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             logger.debug("Failed to refresh Claude token via CLI: %s", exc)
             return False
 
-    @staticmethod
-    def _find_claude() -> Optional[str]:
+    _version_cache: Dict[Tuple[str, float], Optional[Tuple[int, ...]]] = {}
+
+    @classmethod
+    def _claude_version(cls, path: str) -> Optional[Tuple[int, ...]]:
+        """Semantic version from `--version` (short timeout, cached per path and mtime)."""
+        try:
+            mtime = Path(path).stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        key = (path, mtime)
+        if key not in cls._version_cache:
+            version: Optional[Tuple[int, ...]] = None
+            try:
+                out = subprocess.run(
+                    [path, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=4, check=False, creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
+                ).stdout
+                found = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+                version = tuple(int(part) for part in found.groups()) if found else None
+            except Exception as exc:  # unusable shim: ranked last, never fatal
+                logger.debug("claude --version failed for %s: %s", path, type(exc).__name__)
+            cls._version_cache[key] = version
+        return cls._version_cache[key]
+
+    @classmethod
+    def _find_claude(cls) -> Optional[str]:
+        """Pick the newest Claude Code install: an old npm shim must not shadow a newer native one."""
         user_home = Path.home()
         app_data = os.environ.get("APPDATA")
         local_app_data = os.environ.get("LOCALAPPDATA")
-        candidates = [
+        raw: List[Optional[Path]] = [
             Path(app_data) / "npm" / "claude.cmd" if app_data else None,
             Path(app_data) / "npm" / "claude" if app_data else None,
-        ]
-        for candidate in candidates:
-            if candidate and candidate.is_file():
-                return str(candidate)
-
-        direct = shutil.which("claude") or shutil.which("claude.cmd")
-        if direct:
-            return direct
-        candidates = [
             Path(local_app_data) / "Programs" / "Claude" / "claude.exe" if local_app_data else None,
-            user_home / ".local" / "bin" / "claude",
             user_home / ".local" / "bin" / "claude.exe",
+            user_home / ".local" / "bin" / "claude",
         ]
-        for candidate in candidates:
-            if candidate and candidate.is_file():
-                return str(candidate)
-        return None
+        found = [str(c) for c in raw if c and c.is_file()]
+        direct = shutil.which("claude") or shutil.which("claude.cmd")
+        if direct and direct not in found:
+            found.append(direct)
+        if len(found) < 2:
+            return found[0] if found else None
+        # Stable sort: equal or unknown versions keep the order above (npm first).
+        return sorted(found, key=lambda path: cls._claude_version(path) or (0,), reverse=True)[0]
 
     def _probe_claude_cli(self, executable: str) -> Optional[ProviderAccountUsage]:
         try:
@@ -1796,19 +1816,65 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if not self._paid_probe_allowed():
             return None
         selection = resolve_claude_probe_model("haiku")
+        # The CLI takes its own short alias; the registry id stays the cost identity only. A CLI
+        # that rejects the model is retried without --model: the windows belong to the account.
+        limits: Dict[str, Any] = {}
+        effective_models: set[str] = set()
+        for model_args in (["--model", selection.alias], []):
+            limits, effective_models = self._claude_probe_once(executable, model_args)
+            if set(limits) == {"five_hour", "seven_day"} and effective_models:
+                break
+            logger.warning("Claude quota probe gave no reading%s", " with --model; retrying without it" if model_args else "")
+        if set(limits) != {"five_hour", "seven_day"} or not effective_models:
+            return None
+        if any(not self._claude_probe_model_matches(selection.cost_model_id, model) for model in effective_models):
+            logger.warning("Claude quota probe ran on a model other than the pinned one; reading kept")
+        windows = self._claude_cli_rate_limit_windows(limits, preserve_percentages=True)
+        if {window.quota_id for window in windows} != {"claude:5h", "claude:weekly"}:
+            return None
+        limited = any(w.used_percent is not None and w.used_percent >= 100 for w in windows)
+        usage = ProviderAccountUsage(
+            provider_id=self.spec.provider_id,
+            provider_name=self.spec.provider_name,
+            family=self.spec.family,
+            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
+            adapter="claude_code_headless",
+            plan="Claude Pro",
+            quota_supported=True,
+            windows=windows,
+            message="Limites de uso lidos por chamada minima da CLI autenticada do Claude.",
+            dashboard_url=self.spec.dashboard_url,
+            raw_fields={
+                "model_selection": {
+                    "alias": selection.alias,
+                    "requested_model": selection.cli_model_id,
+                    "effective_models": sorted(effective_models),
+                    "cost_model_id": selection.cost_model_id,
+                    "max_turns": 1,
+                    "prompt_characters": len("ok"),
+                }
+            },
+        )
+        # Preserve the percentages reported by Claude. History plausibility correction is not
+        # applied here because it can replace a real current-window value with an older one.
+        self._save_snapshot(usage)
+        return usage
+
+    def _claude_probe_once(self, executable: str, model_args: List[str]) -> Tuple[Dict[str, Any], set[str]]:
+        """One minimal `claude -p` call; returns (rate-limit windows, effective models) or empties."""
         sandbox: ProbeSandbox = probe_sandbox(prefix="darkfac-quota-probe-")
         try:
             with sandbox as neutral:
                 result = _run_probe_command(
                     [executable, "-p", "ok", "--output-format", "stream-json", "--verbose",
-                     "--model", selection.cli_model_id, "--max-turns", "1"],
+                     *model_args, "--max-turns", "1"],
                     neutral,
                     sandbox,
                 )
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._record_probe_cleanup(sandbox)
             logger.debug("Claude headless quota probe failed: %s", type(exc).__name__)
-            return None
+            return {}, set()
         self._record_probe_cleanup(sandbox)
         stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else (result.stdout or "")
         stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
@@ -1819,7 +1885,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             logger.warning("Claude quota probe: CLI did not recognize the pinned model id; reading kept")
         if result.returncode != 0:
             logger.debug("Claude headless quota probe exited with status %s", result.returncode)
-            return None
+            return {}, set()
 
         limits: Dict[str, Any] = {}
         effective_models: set[str] = set()
@@ -1860,40 +1926,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                     "used_percentage": float(Decimal(str(utilization)) * Decimal("100")),
                     "resets_at": window.get("resetsAt", info.get("resetsAt")),
                 }
-        if set(limits) != {"five_hour", "seven_day"} or not effective_models:
-            return None
-        if any(not self._claude_probe_model_matches(selection.cost_model_id, model) for model in effective_models):
-            logger.warning("Claude quota probe ran on a model other than the pinned one; reading kept")
-        windows = self._claude_cli_rate_limit_windows(limits, preserve_percentages=True)
-        if {window.quota_id for window in windows} != {"claude:5h", "claude:weekly"}:
-            return None
-        limited = any(w.used_percent is not None and w.used_percent >= 100 for w in windows)
-        usage = ProviderAccountUsage(
-            provider_id=self.spec.provider_id,
-            provider_name=self.spec.provider_name,
-            family=self.spec.family,
-            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
-            adapter="claude_code_headless",
-            plan="Claude Pro",
-            quota_supported=True,
-            windows=windows,
-            message="Limites de uso lidos por chamada minima da CLI autenticada do Claude.",
-            dashboard_url=self.spec.dashboard_url,
-            raw_fields={
-                "model_selection": {
-                    "alias": selection.alias,
-                    "requested_model": selection.cli_model_id,
-                    "effective_models": sorted(effective_models),
-                    "cost_model_id": selection.cost_model_id,
-                    "max_turns": 1,
-                    "prompt_characters": len("ok"),
-                }
-            },
-        )
-        # Preserve the percentages reported by Claude. History plausibility correction is not
-        # applied here because it can replace a real current-window value with an older one.
-        self._save_snapshot(usage)
-        return usage
+        return limits, effective_models
 
     def _record_probe_cleanup(self, sandbox: ProbeSandbox) -> None:
         """Expose explicit cleanup outcome without changing the quota verdict."""

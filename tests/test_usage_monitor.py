@@ -5,6 +5,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -959,3 +960,79 @@ def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeyp
     assert result.windows[1].quota_id == "grok:5h"
     assert result.windows[1].remaining_percent is None
     assert "Pool semanal e janela móvel" in result.message
+
+
+def test_find_claude_prefers_highest_version_over_old_npm_shim(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    npm = tmp_path / "npm" / "claude.cmd"
+    npm.parent.mkdir()
+    npm.write_text("", encoding="utf-8")
+    native = tmp_path / "home" / ".local" / "bin" / "claude.exe"
+    native.parent.mkdir(parents=True)
+    native.write_text("", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_version_cache", {})
+    versions = {str(npm): "2.1.278 (Claude Code)", str(native): "2.3.10 (Claude Code)"}
+    calls: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd[0])
+        return subprocess.CompletedProcess(cmd, 0, versions[cmd[0]], "")
+
+    monkeypatch.setattr("core.usage.adapters.subprocess.run", fake_run)
+    assert ClaudeCodeAccountAdapter._find_claude() == str(native)
+    assert ClaudeCodeAccountAdapter._find_claude() == str(native)
+    assert len(calls) == 2  # versions cached after the first lookup
+
+
+def test_claude_headless_probe_retries_without_model_when_cli_rejects_it(tmp_path, monkeypatch) -> None:
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    reset = int((datetime.now(timezone.utc) + timedelta(hours=3)).timestamp())
+    ok = "\n".join(json.dumps(e) for e in [
+        {"type": "system", "subtype": "init", "model": "claude-haiku-4-5"},
+        {"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {
+            "five_hour": {"utilization": 0.1, "resetsAt": reset},
+            "seven_day": {"utilization": 0.3, "resetsAt": reset + 86400}}}},
+    ])
+    argvs: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        argvs.append(cmd)
+        if "--model" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "There's an issue with the selected model")
+        return subprocess.CompletedProcess(cmd, 0, ok, "")
+
+    monkeypatch.setattr(adapters_mod, "_run_probe_command", fake_run)
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+    usage = adapter.inspect(force=True)
+    assert [("--model" in a) for a in argvs] == [True, False]
+    assert argvs[0][argvs[0].index("--model") + 1] == "haiku"
+    assert {w.quota_id: w.used_percent for w in usage.windows} == {"claude:5h": 10.0, "claude:weekly": 30.0}
+
+
+def test_claude_snapshot_under_five_minutes_is_reused_without_subprocess(tmp_path, monkeypatch) -> None:
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+    from scripts.claude_statusline import snapshot_from_payload
+
+    snapshot = snapshot_from_payload({"rate_limits": {
+        "five_hour": {"used_percentage": 20}, "seven_day": {"used_percentage": 40}}})
+    snapshot["checked_at"] = (datetime.now(timezone.utc) - timedelta(seconds=240)).isoformat()
+    (tmp_path / "anthropic.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    spec = ProviderSpec("anthropic", "Claude", ProviderFamily.FRONTIER, "https://example.test")
+    adapter = ClaudeCodeAccountAdapter(spec, tmp_path)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fresh snapshot must not spawn any probe")
+
+    monkeypatch.setattr(adapters_mod.subprocess, "run", forbidden)
+    monkeypatch.setattr(adapters_mod, "_run_probe_command", forbidden)
+    assert [w.used_percent for w in adapter.inspect(force=True).windows] == [20.0, 40.0]
