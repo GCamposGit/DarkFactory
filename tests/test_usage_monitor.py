@@ -1,6 +1,7 @@
 """Regression tests for account quota monitoring and model telemetry."""
 
 import json
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -489,6 +490,8 @@ def test_find_claude_prefers_npm_install_over_path_cache(tmp_path: Path, monkeyp
     npm.parent.mkdir()
     npm.write_text("", encoding="utf-8")
     monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nolocal"))
     monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: "codex-cache/claude.ps1")
     assert ClaudeCodeAccountAdapter._find_claude() == str(npm)
 
@@ -497,6 +500,8 @@ def test_find_claude_falls_back_to_path_when_npm_missing(tmp_path: Path, monkeyp
     from core.usage.adapters import ClaudeCodeAccountAdapter
 
     monkeypatch.setenv("APPDATA", str(tmp_path / "missing"))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nolocal"))
     monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: "codex-cache/claude.ps1")
     assert ClaudeCodeAccountAdapter._find_claude() == "codex-cache/claude.ps1"
 
@@ -962,30 +967,66 @@ def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeyp
     assert "Pool semanal e janela móvel" in result.message
 
 
-def test_find_claude_prefers_highest_version_over_old_npm_shim(tmp_path: Path, monkeypatch) -> None:
+def test_find_claude_picks_newest_across_path_and_desktop_app(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
 
-    npm = tmp_path / "npm" / "claude.cmd"
-    npm.parent.mkdir()
-    npm.write_text("", encoding="utf-8")
-    native = tmp_path / "home" / ".local" / "bin" / "claude.exe"
-    native.parent.mkdir(parents=True)
-    native.write_text("", encoding="utf-8")
-    monkeypatch.setenv("APPDATA", str(tmp_path))
+    old_dir, new_dir = tmp_path / "pathold", tmp_path / "pathnew"
+    desktop = tmp_path / "local" / "Claude-Data" / "claude_x" / "claude-code" / "2.1.325" / "abc" / "claude.exe"
+    old, newer = old_dir / "claude.cmd", new_dir / "claude.exe"
+    for f in (old, newer, desktop):
+        f.parent.mkdir(parents=True)
+        f.write_text("", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "noapp"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(old_dir), str(new_dir)]))  # old shim first on PATH
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: None)
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: str(old))
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_version_cache", {})
-    versions = {str(npm): "2.1.278 (Claude Code)", str(native): "2.3.10 (Claude Code)"}
+    versions = {str(old): "2.1.278", str(newer): "2.1.400", str(desktop): "2.1.325"}
     calls: list[str] = []
 
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd[0])
-        return subprocess.CompletedProcess(cmd, 0, versions[cmd[0]], "")
+    class FakeProc:
+        returncode = 0
 
-    monkeypatch.setattr("core.usage.adapters.subprocess.run", fake_run)
-    assert ClaudeCodeAccountAdapter._find_claude() == str(native)
-    assert ClaudeCodeAccountAdapter._find_claude() == str(native)
-    assert len(calls) == 2  # versions cached after the first lookup
+        def __init__(self, cmd, **kwargs):
+            calls.append(cmd[0])
+            self.out = versions[cmd[0]]
+
+        def communicate(self, timeout=None):
+            return self.out, ""
+
+    monkeypatch.setattr("core.usage.adapters.subprocess.Popen", FakeProc)
+    assert ClaudeCodeAccountAdapter._claude_candidates() == [str(newer), str(desktop), str(old)]
+    assert ClaudeCodeAccountAdapter._find_claude() == str(newer)
+    assert len(calls) == 3  # one version call per distinct install; the which() duplicate is deduped, then cached
+
+
+def test_claude_version_timeout_kills_tree_and_failures_are_not_cached(tmp_path: Path, monkeypatch) -> None:
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    exe = tmp_path / "claude.cmd"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_version_cache", {})
+    killed: list[object] = []
+    monkeypatch.setattr(adapters_mod, "_terminate_probe_process_tree", killed.append)
+    mode = {"v": "timeout"}
+
+    class FakeProc:
+        def __init__(self, cmd, **kwargs):
+            self.returncode = 1 if mode["v"] == "fail" else 0
+
+        def communicate(self, timeout=None):
+            if mode["v"] == "timeout":
+                raise subprocess.TimeoutExpired("claude", timeout)
+            return "2.2.0 (Claude Code)", ""
+
+    monkeypatch.setattr(adapters_mod.subprocess, "Popen", FakeProc)
+    assert ClaudeCodeAccountAdapter._claude_version(str(exe)) is None and len(killed) == 1
+    mode["v"] = "fail"
+    assert ClaudeCodeAccountAdapter._claude_version(str(exe)) is None
+    mode["v"] = "ok"
+    assert ClaudeCodeAccountAdapter._claude_version(str(exe)) == (2, 2, 0)  # earlier failures were not cached
 
 
 def test_claude_headless_probe_retries_without_model_when_cli_rejects_it(tmp_path, monkeypatch) -> None:
@@ -1018,7 +1059,7 @@ def test_claude_headless_probe_retries_without_model_when_cli_rejects_it(tmp_pat
     assert {w.quota_id: w.used_percent for w in usage.windows} == {"claude:5h": 10.0, "claude:weekly": 30.0}
 
 
-def test_claude_snapshot_under_five_minutes_is_reused_without_subprocess(tmp_path, monkeypatch) -> None:
+def test_claude_fresh_snapshot_is_reused_without_subprocess(tmp_path, monkeypatch) -> None:
     from core.usage import adapters as adapters_mod
     from core.usage.adapters import ClaudeCodeAccountAdapter
     from scripts.claude_statusline import snapshot_from_payload
@@ -1036,3 +1077,26 @@ def test_claude_snapshot_under_five_minutes_is_reused_without_subprocess(tmp_pat
     monkeypatch.setattr(adapters_mod.subprocess, "run", forbidden)
     monkeypatch.setattr(adapters_mod, "_run_probe_command", forbidden)
     assert [w.used_percent for w in adapter.inspect(force=True).windows] == [20.0, 40.0]
+
+
+@pytest.mark.parametrize("failure", ["auth", "timeout"])
+def test_claude_headless_probe_does_not_retry_on_auth_failure_or_timeout(tmp_path, monkeypatch, failure) -> None:
+    from core.usage import adapters as adapters_mod
+    from core.usage.adapters import ClaudeCodeAccountAdapter, build_default_adapters
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", staticmethod(lambda: "claude"))
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    argvs: list[list[str]] = []
+
+    def fake_run(cmd, *args, **kwargs):
+        argvs.append(cmd)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(cmd, 40)
+        return subprocess.CompletedProcess(
+            cmd, 1, '{"result":"Failed to authenticate: OAuth session expired","is_error":true}', "")
+
+    monkeypatch.setattr(adapters_mod, "_run_probe_command", fake_run)
+    adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
+    adapter.inspect(force=True)
+    assert len(argvs) == 1

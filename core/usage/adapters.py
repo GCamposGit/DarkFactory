@@ -47,6 +47,13 @@ _ANTIGRAVITY_MODEL = resolve_known("flash")
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+# Desktop app data dir (split so the model-id census does not read it as a model id).
+_CLAUDE_DESKTOP_GLOB = "Claude" "-Data/claude_*/claude" "-code/*/*/claude.exe"
+_CLAUDE_MODEL_REJECTION_MARKERS = (
+    "unrecognized_model", "issue with the selected model", "model_not_found", "invalid model",
+)
+
+
 def _run_probe_command(
     command: List[str], cwd: Path, sandbox: ProbeSandbox, *, timeout: int = 40
 ) -> "subprocess.CompletedProcess[str]":
@@ -1585,12 +1592,20 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if executable:
             # Validate the exact quota-probe model before invoking any Claude CLI command.
             resolve_claude_probe_model("haiku")
-            cli_usage = self._probe_claude_cli(executable)
-            if cli_usage and cli_usage.quota_supported:
-                return cli_usage
-            headless_usage = self._probe_claude_headless(executable) if self._paid_probe_allowed(snapshot) else None
-            if headless_usage is not None:
-                return headless_usage
+            tried: List[str] = []
+            queue_: List[str] = [executable]
+            while queue_:
+                current = queue_.pop(0)
+                tried.append(current)
+                cli_usage = self._probe_claude_cli(current)
+                if cli_usage and cli_usage.quota_supported:
+                    return cli_usage
+                headless_usage = self._probe_claude_headless(current) if self._paid_probe_allowed(snapshot) else None
+                if headless_usage is not None:
+                    return headless_usage
+                if not queue_ and len(tried) == 1:
+                    # The picked install failed; try the other installs (lazy: costs only on failure).
+                    queue_ = [c for c in self._claude_fallbacks() if c not in tried]
 
         if snapshot and not self._is_snapshot_fresh(snapshot):
             logger.warning("Claude CLI quota probe returned no reading; only a stale snapshot is available")
@@ -1705,51 +1720,84 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             logger.debug("Failed to refresh Claude token via CLI: %s", exc)
             return False
 
-    _version_cache: Dict[Tuple[str, float], Optional[Tuple[int, ...]]] = {}
+    _version_cache: Dict[Tuple[str, float], Tuple[int, ...]] = {}
 
     @classmethod
     def _claude_version(cls, path: str) -> Optional[Tuple[int, ...]]:
-        """Semantic version from `--version` (short timeout, cached per path and mtime)."""
+        """Semantic version from `--version`; only a clean exit counts and only success is cached."""
         try:
             mtime = Path(path).stat().st_mtime
         except OSError:
             mtime = 0.0
         key = (path, mtime)
-        if key not in cls._version_cache:
-            version: Optional[Tuple[int, ...]] = None
-            try:
-                out = subprocess.run(
-                    [path, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    timeout=4, check=False, creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
-                ).stdout
-                found = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
-                version = tuple(int(part) for part in found.groups()) if found else None
-            except Exception as exc:  # unusable shim: ranked last, never fatal
-                logger.debug("claude --version failed for %s: %s", path, type(exc).__name__)
-            cls._version_cache[key] = version
-        return cls._version_cache[key]
+        if key in cls._version_cache:
+            return cls._version_cache[key]
+        process: Optional["subprocess.Popen[str]"] = None
+        try:
+            # Own process group, stopped as a tree on timeout: a .cmd shim leaves children holding
+            # the pipes, so subprocess.run(timeout=) would keep waiting for them on Windows.
+            process = subprocess.Popen(
+                [path, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+                creationflags=(_CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0,
+                start_new_session=os.name != "nt",
+            )
+            out, _ = process.communicate(timeout=4)
+            found = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+            if process.returncode == 0 and found:
+                cls._version_cache[key] = tuple(int(part) for part in found.groups())
+                return cls._version_cache[key]
+        except subprocess.TimeoutExpired:
+            _terminate_probe_process_tree(process)  # type: ignore[arg-type]
+        except Exception as exc:  # unusable shim: ranked last, retried next time
+            logger.debug("claude --version failed for %s: %s", path, type(exc).__name__)
+        return None
 
     @classmethod
-    def _find_claude(cls) -> Optional[str]:
-        """Pick the newest Claude Code install: an old npm shim must not shadow a newer native one."""
+    def _claude_candidates(cls) -> List[str]:
+        """Every installed Claude Code, newest version first (ties keep discovery order)."""
         user_home = Path.home()
         app_data = os.environ.get("APPDATA")
         local_app_data = os.environ.get("LOCALAPPDATA")
-        raw: List[Optional[Path]] = [
-            Path(app_data) / "npm" / "claude.cmd" if app_data else None,
-            Path(app_data) / "npm" / "claude" if app_data else None,
-            Path(local_app_data) / "Programs" / "Claude" / "claude.exe" if local_app_data else None,
-            user_home / ".local" / "bin" / "claude.exe",
-            user_home / ".local" / "bin" / "claude",
-        ]
-        found = [str(c) for c in raw if c and c.is_file()]
+        raw: List[Path] = []
+        if app_data:
+            raw += [Path(app_data) / "npm" / "claude.cmd", Path(app_data) / "npm" / "claude"]
+        if local_app_data:
+            raw.append(Path(local_app_data) / "Programs" / "Claude" / "claude.exe")
+            # The desktop app keeps its own Claude Code build here.
+            raw += sorted(Path(local_app_data).glob(_CLAUDE_DESKTOP_GLOB))
+        raw += [user_home / ".local" / "bin" / "claude.exe", user_home / ".local" / "bin" / "claude"]
+        found = [str(c) for c in raw if c.is_file()]
+        # shutil.which only returns the first PATH hit; walk the whole PATH.
+        for directory in os.environ.get("PATH", "").split(os.pathsep):
+            if not directory:
+                continue
+            for name in ("claude.exe", "claude.cmd", "claude"):
+                candidate = Path(directory) / name
+                if candidate.is_file():
+                    found.append(str(candidate))
         direct = shutil.which("claude") or shutil.which("claude.cmd")
-        if direct and direct not in found:
+        if direct:
             found.append(direct)
-        if len(found) < 2:
-            return found[0] if found else None
-        # Stable sort: equal or unknown versions keep the order above (npm first).
-        return sorted(found, key=lambda path: cls._claude_version(path) or (0,), reverse=True)[0]
+        seen: set[str] = set()
+        deduped = []
+        for c in found:
+            norm = os.path.normcase(os.path.normpath(c))
+            if norm not in seen:
+                seen.add(norm)
+                deduped.append(c)
+        if len(deduped) < 2:
+            return deduped
+        return sorted(deduped, key=lambda path: cls._claude_version(path) or (0,), reverse=True)
+
+    @classmethod
+    def _find_claude(cls) -> Optional[str]:
+        """Pick the newest Claude Code install: an old npm shim must not shadow a newer one."""
+        candidates = cls._claude_candidates()
+        return candidates[0] if candidates else None
+
+    def _claude_fallbacks(self) -> List[str]:
+        return self._claude_candidates()
 
     def _probe_claude_cli(self, executable: str) -> Optional[ProviderAccountUsage]:
         try:
@@ -1821,10 +1869,14 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         limits: Dict[str, Any] = {}
         effective_models: set[str] = set()
         for model_args in (["--model", selection.alias], []):
-            limits, effective_models = self._claude_probe_once(executable, model_args)
+            limits, effective_models, model_rejected = self._claude_probe_once(executable, model_args)
             if set(limits) == {"five_hour", "seven_day"} and effective_models:
                 break
-            logger.warning("Claude quota probe gave no reading%s", " with --model; retrying without it" if model_args else "")
+            # Only an identified model rejection justifies a retry; timeouts and authentication
+            # failures would just repeat a paid call that cannot work.
+            if not (model_args and model_rejected):
+                break
+            logger.warning("Claude quota probe: CLI rejected the model; retrying without --model")
         if set(limits) != {"five_hour", "seven_day"} or not effective_models:
             return None
         if any(not self._claude_probe_model_matches(selection.cost_model_id, model) for model in effective_models):
@@ -1860,8 +1912,8 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         self._save_snapshot(usage)
         return usage
 
-    def _claude_probe_once(self, executable: str, model_args: List[str]) -> Tuple[Dict[str, Any], set[str]]:
-        """One minimal `claude -p` call; returns (rate-limit windows, effective models) or empties."""
+    def _claude_probe_once(self, executable: str, model_args: List[str]) -> Tuple[Dict[str, Any], set[str], bool]:
+        """One minimal `claude -p` call: (rate-limit windows, effective models, model_rejected)."""
         sandbox: ProbeSandbox = probe_sandbox(prefix="darkfac-quota-probe-")
         try:
             with sandbox as neutral:
@@ -1874,18 +1926,22 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._record_probe_cleanup(sandbox)
             logger.debug("Claude headless quota probe failed: %s", type(exc).__name__)
-            return {}, set()
+            return {}, set(), False
         self._record_probe_cleanup(sandbox)
         stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else (result.stdout or "")
         stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
-        if "unrecognized_model" in f"{stdout}\n{stderr}".casefold():
+        text = f"{stdout}\n{stderr}".casefold()
+        model_rejected = "failed to authenticate" not in text and any(
+            marker in text for marker in _CLAUDE_MODEL_REJECTION_MARKERS
+        )
+        if "unrecognized_model" in text:
             # The quota windows belong to the account, not to the model. The CLI prints this
             # diagnostic and still answers with real rate-limit events, so the reading stands:
             # refusing it left Claude "unknown" and the whole line without a planning route.
             logger.warning("Claude quota probe: CLI did not recognize the pinned model id; reading kept")
         if result.returncode != 0:
             logger.debug("Claude headless quota probe exited with status %s", result.returncode)
-            return {}, set()
+            return {}, set(), model_rejected
 
         limits: Dict[str, Any] = {}
         effective_models: set[str] = set()
@@ -1926,7 +1982,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                     "used_percentage": float(Decimal(str(utilization)) * Decimal("100")),
                     "resets_at": window.get("resetsAt", info.get("resetsAt")),
                 }
-        return limits, effective_models
+        return limits, effective_models, model_rejected and not limits
 
     def _record_probe_cleanup(self, sandbox: ProbeSandbox) -> None:
         """Expose explicit cleanup outcome without changing the quota verdict."""

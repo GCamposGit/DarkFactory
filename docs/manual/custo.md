@@ -34,7 +34,7 @@ snapshot nao esta fresco; nenhuma chamada HTTP e feita para coletar a cota.
 
 `ClaudeCodeAccountAdapter` tenta, apos `auth status`, `claude -p` minimo com `--output-format stream-json --verbose` e grava snapshot fresco a partir dos eventos `rate_limit_event` (sem chave nova). O alias permitido `haiku` valida o registro de modelos (identidade de custo), mas a CLI recebe o proprio alias `--model haiku`; se a CLI rejeitar o modelo ou nao devolver as duas janelas, a sonda repete sem `--model` (EC-04, 25/11/2026). As janelas de cota sao da conta: aviso de modelo nao reconhecido ou modelo efetivo diferente nao anulam a leitura (16/11/2026: recusar isso deixou o Claude desconhecido e a linha sem rota de planejamento). Sem eventos com as duas janelas e ao menos um modelo informado, nenhum snapshot novo e gravado.
 
-`_find_claude` escolhe a instalacao de maior versao (`--version`, timeout de 4 s, cache por caminho e mtime) entre shim npm, instalacao nativa e `PATH`; empate ou versao ilegivel mantem a ordem npm primeiro. Snapshot com menos de 900 s (`SNAPSHOT_FRESHNESS_TTL_SECONDS`) e reutilizado sem subprocesso, mesmo com `force`.
+`_find_claude` enumera todos os Claude Code instalados (shim npm, `PATH` inteiro, `~/.local/bin`, app desktop em `%LOCALAPPDATA%`) e escolhe a maior versao (`--version`: so saida 0 conta, timeout de 4 s encerra a arvore de processos, falha nao entra no cache); se a sonda do escolhido falhar, `inspect` tenta os demais. O retry sem `--model` so ocorre com rejeicao de modelo identificada, nunca em timeout ou falha de autenticacao. Snapshot com menos de 900 s (`SNAPSHOT_FRESHNESS_TTL_SECONDS`) e reutilizado sem subprocesso, mesmo com `force`.
 
 ## Contrato do sandbox de sonda (USR-457)
 
