@@ -248,6 +248,13 @@ workers. Ele não herda `DARKFAC_PROJECT_ROOT`. Durante a entrega, `run_ticket.p
 `DARKFAC_PROJECT_ROOT` para a worktree do ticket em cada tentativa do portão, inclusive nos retries
 remotos. Assim o portão recusa uma worktree candidata suja.
 
+Como o filho roda do checkout compartilhado, `node_sync` adia o fast-forward do Notebook enquanto
+houver `run_ticket.py` da frota em voo (`running_fleet_runs`), com `logger.warning`
+(`fleet_runs_in_flight=...`); o próximo ciclo tenta de novo. Dois `gate_timeout` seguidos no mesmo
+`main_sha` colocam o ticket em hold com causa `gate_timeout_repeated`. Uma worktree preservada só é
+reaproveitada se a base registrada em `branch.<ticket>.darkfacbase` for a base atual do projeto, e o
+`progress.json` órfão só é arquivado pelo host que o gravou (`host`).
+
 ## Pin de execução e admissão (USR-510)
 
 Em host com `worker_url`, o filho do despacho recebe `DARKFAC_TEST_WORKERS` igual só a essa URL, `DARKFAC_REMOTE_HARNESS=required` e `DARKFAC_FLEET_GATE_REMOTE=1`. Esse valor é o pin de execução do portão. O pin de execução não é a lista que a admissão lê. O mesmo filho recebe `DARKFAC_ADMISSION_WORKERS` com a lista que já estava em `DARKFAC_TEST_WORKERS` no ambiente do despachante, ou o default grokbox+desktop (`http://100.77.130.5:8080,http://100.78.181.90:8080`) quando essa lista estava vazia, mais a URL do pin, sem repetir uma URL.

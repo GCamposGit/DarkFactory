@@ -349,6 +349,7 @@ def test_gate_failure_gives_up_after_max_fix_attempts(tmp_path: Path, capsys) ->
 @pytest.mark.parametrize("gate_stdout", [
     "[STEP_FAIL] unit_and_integration_tests_parallel (timeout exceeded)\n",
     "[STEP_TIMEOUT] affected tests phase=collection\n",  # EC-02: affected.py budget hit, exit 75, no fix agent
+    "[STEP_TIMEOUT] affected tests phase=execution\n",
 ])
 def test_gate_timeout_fails_immediately_without_reinvoking_the_agent(
     tmp_path: Path, capsys, gate_stdout: str
@@ -376,7 +377,7 @@ def test_gate_timeout_fails_immediately_without_reinvoking_the_agent(
     def fake_run_bounded(argv, **kwargs):
         gate_calls.append(argv)
         return BoundedProcessResult(
-            stdout="[STEP_FAIL] unit_and_integration_tests_parallel (timeout exceeded)\n",
+            stdout=gate_stdout,
             stderr="", returncode=1, duration_s=3000.1, timed_out=False,
         )
 
@@ -408,6 +409,13 @@ def test_gate_timeout_fails_immediately_without_reinvoking_the_agent(
     assert "Worktree preservada para diagnóstico" in captured.err
     assert "--resume-delivery USR-245" in captured.err
     assert "NAO reinvocado" in captured.err
+
+
+def test_test_level_timeout_expired_is_a_test_failure_not_gate_infra() -> None:
+    """EC-02: a `subprocess.TimeoutExpired` raised inside a failing test has no STEP_TIMEOUT summary."""
+    out = "FAILED tests/test_x.py::test_a - subprocess.TimeoutExpired: Command 'x' timed out\n1 failed in 3s\n"
+    res = BoundedProcessResult(stdout=out, stderr="", returncode=1, duration_s=3.0, timed_out=False)
+    assert run_ticket._gate_failure_is_timeout(res) is False
 
 
 def test_gate_suite_lock_contention_fails_immediately_without_reinvoking_the_agent(

@@ -399,6 +399,8 @@ def create_workspace(
         if path.exists():
             cleanup(path, main_root, sleep_fn=lambda _s: None, run_git=run_git, retries=1, now_fn=now_fn)
         raise WorkspaceError(f"git worktree add failed: {add.stderr.strip()}")
+    # EC-02: remember the base this branch was cut from, so a retry never resumes on a stale base.
+    runner(["config", f"branch.{branch}.darkfacbase", base_ref], main_root)
     logger.info("Created worktree %s on %s (base %s@%s)", path, branch, base_ref, base_sha[:12])
     return TicketWorkspace(
         ticket_id=ticket_id, path=path, branch=branch, main_root=main_root, base_ref=base_ref, base_sha=base_sha
@@ -1372,6 +1374,19 @@ def find_preserved_workspaces(
             continue
         if not path.is_dir():
             lookup.notes.append(f"{path} (diretorio inexistente; ignorada)")
+            continue
+        recorded = runner(["config", "--get", f"branch.{branch}.darkfacbase"], main_root)
+        recorded_base = recorded.stdout.strip() if recorded.returncode == 0 else ""
+        if recorded_base:
+            wrong_base = recorded_base != base_ref
+        else:  # legacy branch without metadata: at least require a common history with the base
+            wrong_base = runner(["merge-base", base_ref, "HEAD"], path).returncode != 0
+        if wrong_base:
+            logger.warning(
+                "worktree preservada ignorada por base divergente: path=%s ticket=%s base_registrada=%s base_esperada=%s",
+                path, ticket_id, recorded_base or "desconhecida", base_ref,
+            )
+            lookup.notes.append(f"{path} (base {recorded_base or 'sem historia comum'} difere de {base_ref}; ignorada)")
             continue
         if "locked" in entry or "prunable" in entry:
             lookup.notes.append(f"{path} (worktree bloqueada/prunable no git; ignorada)")

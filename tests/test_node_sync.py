@@ -317,6 +317,23 @@ def test_notebook_on_other_branch_reports_pending_when_ref_fetch_fails() -> None
     assert "no ref update attempted" in (notebook.reason or "")
 
 
+@pytest.fixture(autouse=True)
+def _no_fleet_runs_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mod, "_fleet_runs_in_flight", lambda: {})
+
+
+def test_notebook_fast_forward_is_deferred_while_a_fleet_run_is_in_flight(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(mod, "_fleet_runs_in_flight", lambda: {"USR-1": "notebook"})
+    git = FakeGit(old=True)
+    with caplog.at_level("WARNING"):
+        report = mod.sync(root=Path("."), git=git, http=FakeHttp())
+    assert not report.ok
+    assert ["merge", "--ff-only", SHA] not in git.calls
+    assert "fleet_runs_in_flight=['USR-1']" in caplog.text
+
+
 def test_notebook_clean_main_fast_forwards() -> None:
     git = FakeGit(old=True)
     report = mod.sync(root=Path("."), git=git, http=FakeHttp())

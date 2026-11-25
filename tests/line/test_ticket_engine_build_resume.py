@@ -10,6 +10,7 @@ current plan/candidate/worktree (which must fail closed, never silently reset or
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,29 @@ def test_resumable_build_raises_build_evidence_mismatch_when_the_previous_worktr
         ticket_engine.resumable_build(ws, "candidate-x", "worktree-new")
 
 
+@pytest.mark.parametrize("host", ["other-machine", ""])
+def test_resumable_build_keeps_failing_closed_for_a_checkpoint_from_another_or_unknown_host(
+    tmp_path: Path, host: str
+) -> None:
+    from core.line.stages import BUILD_FILE
+
+    ws = _rws(tmp_path)
+    _write_plan(ws, [{"id": "T1", "title": "a"}])
+    ticket_engine.write_build(
+        ws, "grok", ["T1"], plan_digest=ticket_engine.plan_digest(ws),
+        candidate_digest="candidate-x", worktree=str(tmp_path / "gone"),
+    )
+    progress_path = workspace.context_dir(ws) / BUILD_FILE
+    data = json.loads(progress_path.read_text(encoding="utf-8"))
+    data["host"] = host
+    progress_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ticket_engine.BuildEvidenceMismatch):
+        ticket_engine.resumable_build(ws, "candidate-new", "worktree-new")
+
+    assert progress_path.is_file()
+
+
 def test_resumable_build_restarts_cleanly_when_the_previous_worktree_is_gone(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -242,6 +266,7 @@ def test_write_build_round_trips_digest_fields(tmp_path: Path) -> None:
         "harness": "codex", "ticket_id": ws.run_id, "tickets_done": ["T1", "T2"],
         "completed_slice_count": 2,
         "plan_digest": "plan-abc", "candidate_digest": "cand-abc", "worktree": "/wt/abc",
+        "host": socket.gethostname(),
     }
 
 

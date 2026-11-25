@@ -448,6 +448,22 @@ def test_prepare_workspace_without_a_preserved_worktree_creates_a_new_one(
     assert os.path.normcase(str(workspace.path.parent)) == os.path.normcase(str(repo.local / ".worktrees"))
 
 
+def test_preserved_worktree_cut_from_another_base_is_not_reused(repo: SimpleNamespace) -> None:
+    """EC-02: the project now targets another branch; a worktree cut from main must not be resumed."""
+    ws = create_workspace("USR-205", cwd=repo.local)
+    (ws.path / "impl.py").write_text("x = 1\n", encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "wip")
+    _git(repo.local, "push", "--quiet", "origin", "main:refs/heads/m1-seo")
+
+    same = find_preserved_workspaces("USR-205", cwd=repo.local, base="main")
+    other = find_preserved_workspaces("USR-205", cwd=repo.local, base="m1-seo")
+
+    assert same.chosen is not None and same.chosen.workspace.path == ws.path
+    assert other.chosen is None
+    assert any("difere de origin/m1-seo" in note for note in other.notes)
+
+
 def test_external_project_retry_reuses_the_preserved_worktree_and_its_commits(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -836,6 +836,17 @@ def verify(
     return SyncReport(expected_sha=expected, nodes=[notebook, desktop, vps])
 
 
+def _fleet_runs_in_flight() -> dict[str, str]:
+    """``{ticket: host}`` of live `run_ticket.py` children on this host; unreadable inventory means none."""
+    try:
+        from core.line.fleet_dispatcher import running_fleet_runs
+
+        return running_fleet_runs()
+    except Exception:  # noqa: BLE001 - never block convergence on a failed process scan
+        logging.getLogger(__name__).exception("inventario de runs da frota indisponivel")
+        return {}
+
+
 def sync(
     *, root: Path = MAIN_CHECKOUT, git: GitRunner = run_git,
     http: HttpClient = request_json, desktop_url: str = DESKTOP_URL,
@@ -890,6 +901,14 @@ def sync(
                 for entry in git(root, ["status", "--porcelain", "--untracked-files=all"]).splitlines()
             ):
                 notebook.reason = "dirty worktree; no git operation attempted"
+            elif in_flight := _fleet_runs_in_flight():
+                # EC-02: fleet children run straight from this checkout; moving HEAD mid-run would mix
+                # modules of two commits. Defer the fast-forward; the next cycle retries.
+                logging.getLogger(__name__).warning(
+                    "fast-forward do checkout adiado: fleet_runs_in_flight=%s expected_sha=%s",
+                    sorted(in_flight), expected,
+                )
+                notebook.reason = f"fast-forward deferred: fleet runs in flight ({', '.join(sorted(in_flight))})"
             else:
                 # Fast-forward only when classification compared HEAD with the immutable candidate.
                 saved = stash_runtime_state(root, git)

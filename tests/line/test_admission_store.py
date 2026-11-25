@@ -15,7 +15,7 @@ def test_infra_backoff_survives_restart_and_new_main_preserves_candidate_debt(tm
     alerts = []
     for index in range(8):
         store = AdmissionStore(path, clock=lambda: now)
-        budget = store.record_attempt("darkfac", "USR-1", "gate_timeout", run_id=str(index), main_sha="a",
+        budget = store.record_attempt("darkfac", "USR-1", "network", run_id=str(index), main_sha="a",
                                       notify=lambda *args: alerts.append(args))
         assert budget["candidate_failures"] == 0
         assert budget["next_attempt_at"] == now.timestamp() + min(600 * 2 ** index, 7200)
@@ -29,6 +29,18 @@ def test_infra_backoff_survives_restart_and_new_main_preserves_candidate_debt(tm
     assert after.retry_reason("darkfac", "USR-1", main_sha="b") == ""
     assert after.budget("darkfac", "USR-1")["candidate_failures"] == 1
     assert after.budget("darkfac", "USR-1")["infra_streak"] == 0
+
+
+def test_same_sha_gate_timeout_twice_holds_with_gate_timeout_repeated(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    store.record_attempt("darkfac", "USR-2", "gate_timeout", run_id="1", main_sha="a")
+    assert not store.ticket_holds()
+    store.record_attempt("darkfac", "USR-3", "gate_timeout", run_id="x", main_sha="a")
+    store.record_attempt("darkfac", "USR-2", "gate_timeout", run_id="2", main_sha="a")
+    assert [(h["ticket_id"], h["cause"]) for h in store.ticket_holds()] == [("USR-2", "gate_timeout_repeated")]
+    # a new main sha is a new candidate: one timeout there is only retried
+    store.record_attempt("darkfac", "USR-3", "gate_timeout", run_id="y", main_sha="b")
+    assert [h["ticket_id"] for h in store.ticket_holds()] == ["USR-2"]
 
 
 def test_ticket_budget_counts_once_per_run_and_holds_once_across_hosts_and_sha(tmp_path):

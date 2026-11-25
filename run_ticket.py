@@ -1289,10 +1289,10 @@ def _invoke_fix_agent(
 # behind a sibling session's run on the same host instead of ever reaching collection -- reproduced live
 # while diagnosing USR-249's own delivery: a concurrent worktree held the lock for the full window,
 # leaving `discovered_count=0` with no code-level failure to fix.
-_GATE_TIMEOUT_MARKERS = (
-    "(timeout exceeded)", "[SUITE_LOCK] timed out", "phase=collection", "TimeoutExpired",
-)
-# `core/harness/affected.py` prints this when pytest hit the step budget; it is always infra (EC-02).
+# A `TimeoutExpired` traceback inside a failing test is NOT here: that is a test failure (EC-02).
+_GATE_TIMEOUT_MARKERS = ("(timeout exceeded)", "[SUITE_LOCK] timed out")
+# `core/harness/affected.py` prints this (any `phase=`, collection or execution) when pytest hit the step
+# budget and exits 124; it is always infra, even with zero tests discovered.
 _GATE_STEP_TIMEOUT_MARKER = "[STEP_TIMEOUT]"
 # Remote-worker loss markers are infra only when the output carries no real pytest failure: if the
 # worker dropped and the local fallback then ran and reprovou a real test, that is fixable by the agent.
@@ -1312,6 +1312,8 @@ def _gate_failure_is_timeout(gate_res: Any) -> bool:
     if getattr(gate_res, "timed_out", False):
         return True
     combined = f"{gate_res.stdout}\n{gate_res.stderr}"
+    if _GATE_STEP_TIMEOUT_MARKER in combined:
+        return True
     payload = _parse_harness_result(combined)
     if payload and payload.get("discovered_count", 0) > 0:
         return 124 in (payload.get("exit_codes") or {}).values()
