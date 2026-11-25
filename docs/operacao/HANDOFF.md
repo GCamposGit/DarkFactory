@@ -1,62 +1,48 @@
 # Handoff operacional
 
-Versao: 15
-Atualizado em: 2026-11-24 (Claude Code, coordenador)
+Versao: 16
+Atualizado em: 2026-11-25 (Antigravity, planejamento cirúrgico aprovado pelo owner)
 
-## Estado
+## Prioridade imediata da coordenação: Plano `EC-2026-11` (`EC-01` → `EC-05`)
 
-- Fase: V0 da Dark Factory (ver `docs/FASE_ATUAL.md`). `core.line.v0_proof` em 0/5 (USR-557 em voo corrige o USR-279 marcado completed).
-- `main` em `e33e8a39` (#948). Deploy de 24/11 à noite em `darkfac-cloud`: coordinator e worker `running/healthy` nesse sha. O `[CHECK-MAIN]` sai `unknown` porque não houve CI concluído no main (item (c) do USR-572).
-- Despachante ativo. Em voo: USR-572 (consolidado). Holds: de 19 caíram para 9 (veja Holds).
-- Hosts: Notebook e Desktop executam; o Grokbox entra e sai.
-- Cotas (24/11 ~17h): Codex 26%, Grok 24%, Antigravity vencida (RPC). A leitura do Claude ficou desconhecida por 29 h (USR-573).
+O owner aprovou e priorizou o **Plano de Estabilização Cirúrgica** salvo em [`docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md`](../plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md) e registrado no roadmap operacional (`.factory/roadmap/darkfac.json`, épico `EC-2026-11`, itens `EC-01` a `EC-05` em horizonte `now` e `EC-06` em horizonte `next`).
 
-## Incidente de 24/11: main vermelho por 5 h sem alerta
+**Diretriz obrigatória ao assumir a fábrica (`coordenar-fabrica`):**
 
-O #934 (USR-561) passou a ignorar todo `.factory/runs/` e quebrou 4 testes de higiene no main em `2f6ada4f`. O pr-tests do PR passou porque os testes afetados não ligam o `.gitignore` aos testes que o leem (USR-575). As 10 execuções seguintes do CI no main terminaram canceladas e esconderam o vermelho (USR-576). O problema só apareceu no PR #912. A correção entrou pelo #944 (USR-574).
+1. **Zero abertura de meta-tickets fragmentados.** Não abra novos tickets `USR-*` por sintoma nem redespache a fila antiga antes de concluir `EC-01` e `EC-02`.
+2. **Inicie imediatamente por `EC-01` (higiene operacional do coordenador):**
+   - Pausar o processo `core.line.fleet_dispatcher --loop` durante a cirurgia `EC-01..04` para cessar a criação de `fleet-dispatch-*` duplos e novos holds no Notebook.
+   - Podar as ~75 worktrees órfãs/`fleet-dispatch-*` e limpar `.factory/backups/trash/` e `.factory/tmp/`, **preservando obrigatoriamente** as 3 worktrees com código pronto em `C:\dev\Site_Mansaodolago\.worktrees\`: `mdl-01-20261124T181425Z`, `mdl-02-20261124T181931Z` e `mdl-03-20261124T183555Z` (15+15+12 arquivos e 71 testes passando).
+   - Limpar os holds espúrios em `.factory/admission.sqlite3` (`MDL-01..03` por `build_evidence_mismatch` e tickets trancados em `fix_agent_no_changes` por `[STEP_TIMEOUT]`), absorver/cancelar os meta-tickets cobertos pelo plano (`USR-572`, `USR-554`, `USR-557`, `USR-563`) e encerrar/arquivar o PR `#912` (`USR-483`, segurado por fluxo paralelo) para destravar `detect_stalls()` em `core.ops.coordination`.
+3. **Executar na sequência estrita (1 PR limpo por bloco):**
+   - **`EC-02`:** Reuso universal de worktrees (`project_checkout(project)`) em `run_ticket.py` e `fleet_dispatcher.py` + reset limpo de `progress.json` órfão em `ticket_engine.py`; fim do checkout efêmero `fleet-dispatch-*` com `DARKFAC_STATE_ROOT` explícito; classificação de `[STEP_TIMEOUT]` e `phase=collection` em `_gate_failure_is_timeout()` como código `75` sem chamar `_invoke_fix_agent` (absorve `USR-572`).
+   - **`EC-03`:** Eventos de turno de `learning_ledger` fora do Git (`STATE_ROOT`), zero mutação de `demands.json` em branches de código e `Docs-Unchanged:` automático em ajustes estritamente internos.
+   - **`EC-04`:** Descoberta do binário mais recente do Claude Code em `adapters.py`, sonda resiliente por alias curto (`haiku` / fallback) e reuso de snapshot fresco (< 5 min) entre fatias (absorve `USR-554`).
+   - **`EC-05`:** Habilitar Learning Pack para `external_project` em `run_ticket.py`, alinhar `core/line/v0_proof.py` aos artefatos reais do motor único (absorve `USR-557`), religar a frota saudável e resgatar/entregar `MDL-01`, `MDL-02` e `MDL-03` na branch `darkfac/m1-seo` (jamais em `master`/FTP).
+4. **Atualizar `.factory/roadmap/darkfac.json`** a cada bloco `EC-01..05` entregue (marcando `delivery_status: "completed"` com `commit:<ID>:<sha>` e `"verified": true`).
 
-Ao assumir a coordenação, confira o último CI **concluído** do main: `gh run list --branch main --workflow "DarkFac CI" --limit 15`.
+## Estado observado na manhã de 25/11
 
-## Entregue em 24/11
+- Fase: V0 da Dark Factory (`docs/FASE_ATUAL.md`), `core.line.v0_proof` em `0/5`.
+- `origin/main` verde após `#944`, `#946`, `#948`, `#949`, `#950` e `#951`; serviços `darkfac-cloud` (`coordinator` e `worker`) saudáveis.
+- Ocorrências da madrugada (24/11 23h → 25/11 10h45 UTC) que confirmaram o diagnóstico de `EC-02` e `EC-04`:
+  - `MDL-03` entrou em hold `build_evidence_mismatch` (`01:42Z`) pelo mesmo bug de nova worktree por tentativa que já havia travado `MDL-01` e `MDL-02`.
+  - `USR-572` (`02:10Z`), `USR-554` (`09:49Z`) e `USR-563` (`10:45Z`) caíram em hold `fix_agent_no_changes` após `[STEP_TIMEOUT]` sob contenção local do `fleet_dispatcher --loop` no Notebook (`18` holds totais na tabela `ticket_holds`).
+- PR aberto remanescente: `#912` (`USR-483`, segurado desde 20/11 após revisão cruzada apontar segundo fluxo paralelo a `core.ops.coordination`).
 
-- #921 (USR-538): `completed` só com prova `<sha>:merged` (e live quando exigido). Sem `gh`, a entrega recusa em vez de fazer push direto ao main. Conclusão legada sem merge volta para `planned`.
-- #944 (USR-574): testes de higiene alinhados ao USR-561. Main verde de novo.
-- #949 (USR-548): rebase por cherry-pick para tickets com 1 ou 2 commits. Destrava o `rebase_conflict`.
-- #950 (USR-547): artefato só com DEMAND/GRILL e worktree limpa é resetado; trabalho já mesclado segue para entrega.
-- #948 (USR-550): grill órfão, dependência terminal e sessão sem perguntas. A revisão pegou uma regressão de gating de capacidades, corrigida antes do merge.
-- Os runs do USR-573 e do USR-575, obsoletos, foram parados com `run_ticket.py --cancel` (o `taskkill` foi negado pelo classificador de permissões).
+## Histórico recente entregue em 24/11
 
-## Holds (24/11 à noite)
+- `#921` (`USR-538`): `completed` exige prova `<sha>:merged`.
+- `#944` (`USR-574`): testes de higiene alinhados ao `USR-561`.
+- `#946` (`USR-570`/`571`/`575`): identidade git de fallback em repo de produto, PEM sem corpo base64 e testes citados por mudança não-Python no fallback do PR.
+- `#949` (`USR-548`): rebase por cherry-pick para tickets com 1 ou 2 commits.
+- `#950` (`USR-547`): reset de artefato só com DEMAND/GRILL em worktree limpa.
+- `#948` (`USR-550`): grill órfão, dependência terminal e sessão sem perguntas.
 
-- Fechados sem trabalho: USR-517 e USR-519 (superados), USR-476 (allow já vigente), USR-462 (duplicado do 547 e do 446), USR-480, USR-551 e USR-552 (escopo grande demais para o valor; worktrees preservadas).
-- Liberados para nova tentativa da frota: USR-520 e USR-522 (agora pelo cherry-pick do #949) e USR-554 (o hold veio de um lock de suíte parado).
-- Restantes: USR-446 (retrabalho do review em `stage_grill.py`/`demands/grill.py`), USR-537 e USR-545 (portão estourou ou falhou; a worktree tem commits), USR-483 (#912, redesenho), MDL-01/02 (dependem do item (a) do USR-572 e do owner).
-- A OA-099 e a OA-100 (via expressa de USR-547/550) ficaram desnecessárias com os merges. A CLI de owner actions neste host não as lista, então feche-as pelo Hub.
+## Armadilhas ativas (até conclusão de `EC-01..05`)
 
-## PR #912 (USR-483) segurado
-
-A revisão cruzada do Codex pediu mudanças de desenho (comentário no PR):
-
-- lease em SQLite local, com dois PCs mantendo coordenadores válidos;
-- despachante direto sai com 78 ou segue com lease vencida;
-- sessões Claude compartilham o ID;
-- Antigravity perde a preferência de `development`;
-- segundo fluxo de coordenação paralelo a `core.ops.coordination`.
-
-O próximo passo é redesenhar com um caminho único de coordenação e estado compartilhado entre hosts, não remendar. O CI do head `78780b51` está verde.
-
-## Defeitos de 24/11
-
-Regra do owner (24/11): corrija direto o que der e consolide o resto num ticket por sessão. Um ticket por sintoma vira loop de frota.
-
-- Corrigidos direto no #946: USR-570 (identidade git de fallback em repo de produto), USR-571 (PEM sem corpo base64 não bloqueia; a chave real e a PEM criptografada continuam bloqueadas) e USR-575 (o fallback do PR mantém os testes citados por mudança não-Python, como `.gitignore`).
-- Pendente num único ticket, o USR-572 (consolidado; o USR-573 e o USR-576 foram cancelados e absorvidos): (a) a retentativa abre worktree nova e cai em `build_evidence_mismatch`; (b) a CLI npm do Claude no Notebook rejeita o id Haiku, e a cota fica desconhecida; (c) o CI do main foi cancelado em série e escondeu o vermelho (o workflow é protegido).
-
-## Armadilhas
-
-1. Recusa não é falha, mas recusa repetida no mesmo sha é laço (USR-545).
-2. Para fechar entrega feita fora do launcher, use `python -m core.demands.cli complete <TICKET> --sha <sha completo do origin/main> --evidence "..."`.
-3. `learning.cli record-turn` altera o `learning_ledger.json` rastreado no checkout compartilhado. Antes de avançar o checkout, rode `git stash push -m <tag> -- .factory/learning/learning_ledger.json`, depois `merge --ff-only` e `stash apply <sha>`.
-4. `dokploy_redeploy.py` sai com código 3 quando só o Notebook não converge. Confira as linhas `[RUNTIME IMAGE]`.
-5. Id literal de modelo neste arquivo quebra o censo de modelos. Use alias.
-6. A frota está rodando MDL-01..03 (Mansão do Lago, cliente) na branch `darkfac/m1-seo`. Nada vai para produção do cliente sem autorização expressa do owner.
+1. Para fechar entrega feita fora do launcher, use `Set-Location C:\dev\DarkFac; python -m core.demands.cli complete <TICKET> --sha <sha completo do origin/main> --evidence "..."`.
+2. Até `EC-03` entrar, `learning.cli record-turn` altera `.factory/learning/learning_ledger.json` rastreado no checkout compartilhado (`C:\dev\DarkFac`). Antes de avançar o checkout, rode `git -C C:\dev\DarkFac stash push -m <tag> -- .factory/learning/learning_ledger.json`, depois `git -C C:\dev\DarkFac merge --ff-only` e `git -C C:\dev\DarkFac stash pop`.
+3. `dokploy_redeploy.py` sai com código 3 quando só o Notebook não converge por árvore suja. Confira as linhas `[NODE SYNC]` e `[RUNTIME IMAGE]`.
+4. Identificador literal de modelo neste arquivo ou no roadmap quebra `tests/test_model_id_ratchet_usr185.py`. Cite apenas aliases (`opus`, `sonnet`, `haiku`, `sol`, `luna`, `neon`, `flash`).
+5. `MDL-01..03` (`mansaodolago`, cliente real) miram exclusivamente a branch `darkfac/m1-seo` (`requires_commercial_acceptance: true`). Nada vai para `master` ou FTP sem aceite expresso do owner.

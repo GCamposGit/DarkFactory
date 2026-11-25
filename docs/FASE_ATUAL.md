@@ -1,6 +1,6 @@
 # Fase atual da DarkFac
 
-Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A missão de longo prazo está em [`MISSION.md`](../MISSION.md); as regras para agentes em [`AGENTS.md`](../AGENTS.md); o plano de execução vigente em [`docs/plans/PLANO_V0_2026-10-24.md`](plans/PLANO_V0_2026-10-24.md).
+Fonte única do contexto que vale **hoje** e muda conforme a fábrica avança. A missão de longo prazo está em [`MISSION.md`](../MISSION.md); as regras para agentes em [`AGENTS.md`](../AGENTS.md); o marco da fase em [`docs/plans/PLANO_V0_2026-10-24.md`](plans/PLANO_V0_2026-10-24.md) e a sequência tática ativa de estabilização cirúrgica (`EC-2026-11`: `EC-01` a `EC-05` no roadmap `.factory/roadmap/darkfac.json`) em [`docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md`](plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md).
 
 Como manter: este arquivo é o snapshot da fase atual (canais, máquinas, orçamento, metas, piloto). Não é protegido. Não recebe histórico, changelog nem entrada por ticket: cada linha datada acrescentada aqui disputa o mesmo trecho no rebase. Quando um fato desta fase muda, edite a seção consolidada. O registro de cada entrega fica no manual (`docs/manual/`) e no learning pack (`.factory/learning_packs/`). Agentes consultam este arquivo antes de decidir rota, gasto, host ou quando acionar o owner.
 

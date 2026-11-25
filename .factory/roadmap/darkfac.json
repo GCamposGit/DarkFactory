@@ -3079,6 +3079,347 @@
           "verified": false
         }
       ]
+    },
+    {
+      "id": "EC-2026-11",
+      "project_id": "darkfac",
+      "title": "Estabilização cirúrgica e destravamento da V0 (plano EC-2026-11)",
+      "description": "Sequência enxuta de 5 intervenções na causa raiz (EC-01 a EC-05) para eliminar bloqueios autoimunes do motor, conflitos de rebase, cegueira de sonda de cota e travas em projetos externos, entregando o piloto Mansão do Lago sem inflação de tickets. Ver docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "epic",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Criado em 25/11/2026 após auditoria forense de 31 dias de execução da fábrica; priorizado para execução imediata pela sessão de coordenação (coordenar-fabrica).",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27",
+          "type": "related_to"
+        },
+        {
+          "item_id": "HF-28",
+          "type": "related_to"
+        }
+      ],
+      "tags": [
+        "stabilization",
+        "v0",
+        "surgical-plan"
+      ],
+      "completion_criteria": [
+        "Intervenções EC-01 a EC-05 concluídas em sequência sem abertura de meta-tickets fragmentados",
+        "MDL-01, MDL-02 e MDL-03 integrados na branch darkfac/m1-seo com revisão independente e Learning Pack",
+        "core.line.v0_proof alinhado ao motor único e contabilizando entregas reais sem falsos negativos"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-2026-11:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Plano EC-2026-11",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "EC-01",
+      "project_id": "darkfac",
+      "title": "Desobstrução operacional do host, poda de worktrees órfãs e reconciliação de estado",
+      "description": "Pausa temporariamente o loop do despachante durante a cirurgia, remove ~75 worktrees órfãs e lixo em .factory/backups/trash e .factory/tmp preservando as worktrees válidas de MDL-01..03, reconcilia tickets já mesclados e limpa holds espúrios em admission.sqlite3. Ver seção EC-01 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "operations",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Primeira ação obrigatória da sessão de coordenação antes de despachar qualquer ticket.",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": "EC-2026-11",
+      "dependencies": [
+        {
+          "item_id": "EC-2026-11",
+          "type": "related_to"
+        }
+      ],
+      "tags": [
+        "stabilization",
+        "hygiene",
+        "operations"
+      ],
+      "completion_criteria": [
+        "Loop concorrente do fleet_dispatcher pausado durante EC-01..04 e processos órfãos encerrados",
+        "Worktrees órfãs fleet-dispatch-* e diretórios trash/tmp removidos preservando as 3 worktrees válidas de MDL-01..03",
+        "Holds espúrios limpos em admission.sqlite3, tickets meta absorvidos reconciliados e PR #912 encerrado/arquivado sem falso stall"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25 (EC-01)",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-01:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Especificação EC-01",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "EC-02",
+      "project_id": "darkfac",
+      "title": "Cirurgia no motor: reuso universal de worktrees, fim de fleet-dispatch duplo e classificação de STEP_TIMEOUT",
+      "description": "Unifica reuso de worktree para darkfac e projetos externos sem cair em BuildEvidenceMismatch, elimina o checkout efêmero fleet-dispatch-* propagando DARKFAC_STATE_ROOT e classifica [STEP_TIMEOUT] como espera transitória (código 75) sem chamar fix_agent. Absorve USR-572. Ver seção EC-02 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "infrastructure",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Elimina na causa raiz os três maiores geradores de ticket_holds na frota.",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": "EC-2026-11",
+      "dependencies": [
+        {
+          "item_id": "EC-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "stabilization",
+        "engine",
+        "fleet"
+      ],
+      "completion_criteria": [
+        "Retentativa em projeto externo reaproveita worktree preservada via project_checkout sem BuildEvidenceMismatch",
+        "fleet_dispatcher invoca run_ticket.py com DARKFAC_STATE_ROOT explícito sem criar worktree dupla fleet-dispatch-*",
+        "_gate_failure_is_timeout reconhece [STEP_TIMEOUT] e phase=collection retornando código 75 sem fix_agent_no_changes"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25 (EC-02)",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-02:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Especificação EC-02",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "EC-03",
+      "project_id": "darkfac",
+      "title": "Fim de conflitos de rebase por construção: estado de runtime fora do Git e Docs-Unchanged interno",
+      "description": "Move gravações de turno do learning_ledger para STATE_ROOT sem sujar C:\\dev\\DarkFac, garante zero mutação de demands.json em branches de código e anexa Docs-Unchanged automático em ajustes internos que não alteram contratos operacionais do owner. Ver seção EC-03 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "infrastructure",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Elimina conflitos crônicos de rebase em docs/manual/ e falha código 3 de node_sync no pós-deploy.",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": "EC-2026-11",
+      "dependencies": [
+        {
+          "item_id": "EC-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "stabilization",
+        "git-hygiene",
+        "docs-sync"
+      ],
+      "completion_criteria": [
+        "learning.cli record-turn mantém git status limpo no checkout principal e não bloqueia node_sync",
+        "Execução de tickets não altera .factory/demands/demands.json na worktree de código",
+        "Commits internos sem alteração de superfície do operador emitem Docs-Unchanged válido no portão docs_sync"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25 (EC-03)",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-03:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Especificação EC-03",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "EC-04",
+      "project_id": "darkfac",
+      "title": "Restauração das sondas de cota do Claude Code e cache curto entre fatias",
+      "description": "Corrige descoberta do binário atualizado do Claude Code em adapters.py, usa alias resiliente na sonda sem falhar fechado por shim antigo e reutiliza snapshot fresco (< 5 min) entre fatias do mesmo ticket. Absorve USR-554. Ver seção EC-04 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "quality",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Restaura opus e sonnet para planejamento, desenvolvimento e revisão cruzada, zerando route_wait artificial.",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": "EC-2026-11",
+      "dependencies": [
+        {
+          "item_id": "EC-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "stabilization",
+        "routing",
+        "quotas"
+      ],
+      "completion_criteria": [
+        "ClaudeCodeAccountAdapter prioriza binário mais recente e obtém leitura real de cota sem estado unknown permanente",
+        "Fatias consecutivas dentro da janela fresca (< 5 min) reutilizam snapshot sem re-executar subprocessos de sonda",
+        "Roteador pick('planning') e pick('development') enxerga cota válida do Claude Code no host"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25 (EC-04)",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-04:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Especificação EC-04",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "EC-05",
+      "project_id": "darkfac",
+      "title": "Projetos externos de 1ª classe, alinhamento do v0_proof e entrega real de MDL-01..03",
+      "description": "Habilita geração de Learning Pack em projetos externos no run_ticket.py, alinha v0_proof.py aos artefatos reais do motor único respeitando requires_commercial_acceptance e entrega MDL-01, MDL-02 e MDL-03 na branch darkfac/m1-seo a partir das worktrees preservadas. Absorve USR-557. Ver seção EC-05 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Converte o trabalho já construído dos três tickets do piloto Mansão do Lago em entregas validadas e contabilizáveis na prova da V0.",
+      "horizon": "now",
+      "confidence": "high",
+      "parent_id": "EC-2026-11",
+      "dependencies": [
+        {
+          "item_id": "EC-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "EC-03",
+          "type": "requires"
+        },
+        {
+          "item_id": "EC-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "stabilization",
+        "external-projects",
+        "v0-proof",
+        "mansaodolago"
+      ],
+      "completion_criteria": [
+        "run_ticket.py gera Learning Pack completo também para projetos externos (project_id != darkfac)",
+        "core.line.v0_proof valida recibos reais do motor único e branch alvo do projeto sem exigir docs/manual da DarkFac nem tabelas DAG legadas",
+        "MDL-01, MDL-02 e MDL-03 validados, revisados e integrados em darkfac/m1-seo sem tocar em master/FTP"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25 (EC-05)",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-05:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Especificação EC-05",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "EC-06",
+      "project_id": "darkfac",
+      "title": "Enxugamento pós-V0: remoção do motor DAG legado sem uso e modularização de run_ticket.py",
+      "description": "Executado somente após conclusão de EC-01..05 e comprovação da V0: arquiva/remove subsistemas legados sem chamador de produção (core/workflow e caminhos mortos de core/orchestrator) e extrai estágios de run_ticket.py cumprindo a meta de -10% de linhas em core/. Ver seção 5 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
+      "item_type": "quality",
+      "lifecycle_stage": "next_steps",
+      "delivery_status": "planned",
+      "state_rationale": "Contido em horizonte next para não introduzir risco de refatoração ampla antes da estabilização e prova da V0.",
+      "horizon": "next",
+      "confidence": "high",
+      "parent_id": "EC-2026-11",
+      "dependencies": [
+        {
+          "item_id": "EC-05",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "simplification",
+        "code-balance",
+        "post-v0"
+      ],
+      "completion_criteria": [
+        "Subsistemas legados sem execução em produção removidos com portão e contratos de arquitetura verdes",
+        "run_ticket.py reduzido e modularizado sem duplicar motores",
+        "core/ atinge redução líquida mínima de 10% em relação ao baseline de 24/10/2026"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de Estabilização Cirúrgica 2026-11-25 (EC-06)",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:EC-06:PLANO_ESTABILIZACAO_CIRURGICA",
+          "evidence_kind": "handoff_doc",
+          "label": "Especificação EC-06",
+          "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
+          "verified": false
+        }
+      ]
     }
   ]
 }
