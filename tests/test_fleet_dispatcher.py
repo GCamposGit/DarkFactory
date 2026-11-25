@@ -2413,6 +2413,10 @@ def test_dispatch_launches_from_project_root_with_state_root_and_no_fleet_dispat
     assert "DARKFAC_PROJECT_ROOT" not in launched["env"]
     assert list((root / ".worktrees").glob("fleet-dispatch-*")) == []
     assert job.ticket_id == "USR-413"
+    import json
+
+    handed = json.loads(Path(launched["env"]["DARKFAC_DISPATCH_TICKET"]).read_text(encoding="utf-8"))
+    assert handed == {"id": "USR-413"}  # the selected record travels with the child
 
 
 def test_reap_keeps_deploy_batch_after_job_exits(tmp_path, monkeypatch):

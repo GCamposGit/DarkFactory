@@ -464,6 +464,32 @@ def test_preserved_worktree_cut_from_another_base_is_not_reused(repo: SimpleName
     assert any("difere de origin/m1-seo" in note for note in other.notes)
 
 
+def test_legacy_worktree_without_base_metadata_needs_every_commit_to_cite_the_ticket(
+    repo: SimpleNamespace,
+) -> None:
+    """EC-02: main and m1-seo diverge; a legacy worktree (no `darkfacbase`) is reused only on its own base."""
+    _git(repo.local, "checkout", "--quiet", "-b", "m1-seo")
+    (repo.local / "seo.md").write_text("seo" + chr(10), encoding="utf-8")
+    _git(repo.local, "add", "seo.md")
+    _git(repo.local, "commit", "--quiet", "-m", "feat: seo base")
+    _git(repo.local, "push", "--quiet", "origin", "m1-seo")
+    _git(repo.local, "checkout", "--quiet", "main")
+    (repo.local / "main_only.md").write_text("m" + chr(10), encoding="utf-8")
+    _git(repo.local, "add", "main_only.md")
+    _git(repo.local, "commit", "--quiet", "-m", "chore: main only")
+    _git(repo.local, "push", "--quiet", "origin", "main")
+
+    ws = create_workspace("USR-205", cwd=repo.local)  # cut from main
+    (ws.path / "impl.py").write_text("x = 1" + chr(10), encoding="utf-8")
+    _git(ws.path, "add", "impl.py")
+    _git(ws.path, "commit", "--quiet", "-m", "feat: impl [USR-205]")
+    _git(repo.local, "config", "--unset", f"branch.{ws.branch}.darkfacbase")
+
+    assert find_preserved_workspaces("USR-205", cwd=repo.local, base="main").chosen is not None
+    # against m1-seo the worktree's range also carries main-only commits that do not cite the ticket
+    assert find_preserved_workspaces("USR-205", cwd=repo.local, base="m1-seo").chosen is None
+
+
 def test_external_project_retry_reuses_the_preserved_worktree_and_its_commits(
     repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -971,3 +997,25 @@ def test_missing_build_artifacts_do_not_reset_preserved_candidate(
     assert launcher.requests == []
     assert ws.path.exists() and (ws.path / "implementation.py").is_file()
     assert "sem artefatos PLAN/BUILD" in capsys.readouterr().err
+
+
+def test_intake_prefers_the_ticket_the_dispatcher_handed_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EC-02: the child uses the dispatcher's origin/main version, not a stale local ledger row."""
+    handed = run_ticket.UserTicket(id="USR-205", project_id="darkfac", title="versao nova", problem_statement="p")
+    path = tmp_path / "USR-205.dispatch_ticket.json"
+    path.write_text(handed.model_dump_json(), encoding="utf-8")
+    stale = run_ticket.UserTicket(id="USR-205", project_id="darkfac", title="versao velha", problem_statement="p")
+    monkeypatch.setattr(run_ticket, "DemandsStore", lambda _p: SimpleNamespace(get_ticket=lambda _i: stale))
+    args = run_ticket.build_parser().parse_args(["USR-205", "--json"])
+
+    monkeypatch.setenv("DARKFAC_DISPATCH_TICKET", str(path))
+    ticket, code = run_ticket._stage_intake(args)
+    assert code == 0 and ticket.title == "versao nova"
+
+    other = tmp_path / "USR-999.dispatch_ticket.json"  # another ticket's file is ignored
+    other.write_text(handed.model_copy(update={"id": "USR-999"}).model_dump_json(), encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_DISPATCH_TICKET", str(other))
+    ticket, code = run_ticket._stage_intake(args)
+    assert code == 0 and ticket.title == "versao velha"

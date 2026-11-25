@@ -319,13 +319,13 @@ def test_notebook_on_other_branch_reports_pending_when_ref_fetch_fails() -> None
 
 @pytest.fixture(autouse=True)
 def _no_fleet_runs_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mod, "_fleet_runs_in_flight", lambda: {})
+    monkeypatch.setattr("core.git.ticket_workspace.fleet_runs_in_flight", lambda: {})
 
 
 def test_notebook_fast_forward_is_deferred_while_a_fleet_run_is_in_flight(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    monkeypatch.setattr(mod, "_fleet_runs_in_flight", lambda: {"USR-1": "notebook"})
+    monkeypatch.setattr("core.git.ticket_workspace.fleet_runs_in_flight", lambda: {"USR-1": "notebook"})
     git = FakeGit(old=True)
     with caplog.at_level("WARNING"):
         report = mod.sync(root=Path("."), git=git, http=FakeHttp())

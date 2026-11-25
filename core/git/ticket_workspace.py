@@ -54,6 +54,28 @@ from core.common.time import utc_now
 
 logger = logging.getLogger("darkfac.git.ticket_workspace")
 
+
+def fleet_runs_in_flight() -> dict[str, str]:
+    """``{ticket: host}`` of live fleet `run_ticket.py` children on this host; unreadable inventory means none."""
+    try:
+        from core.line.fleet_dispatcher import running_fleet_runs
+
+        return running_fleet_runs()
+    except Exception:  # noqa: BLE001 - never block a sync on a failed process scan
+        logger.exception("inventario de runs da frota indisponivel")
+        return {}
+
+
+def fast_forward_deferral(target: str, *, ignore_ticket: str = "") -> Optional[str]:
+    """EC-02: fleet children run straight from the shared checkout; moving its HEAD mid-run would mix
+    modules of two commits. Returns the reason to defer the fast-forward (the next cycle retries), or None.
+    ``ignore_ticket`` is the caller's own run, which is never a reason to wait."""
+    in_flight = {t for t in fleet_runs_in_flight() if t != ignore_ticket}
+    if not in_flight:
+        return None
+    logger.warning("fast-forward do checkout adiado: fleet_runs_in_flight=%s target=%s", sorted(in_flight), target)
+    return f"fast-forward deferred: fleet runs in flight ({', '.join(sorted(in_flight))})"
+
 WORKTREES_DIRNAME = ".worktrees"
 # Roots swept for dead directories, relative to the main checkout.
 WORKTREE_ROOTS: tuple[Path, ...] = (Path(WORKTREES_DIRNAME), Path(".claude") / "worktrees")
@@ -1379,14 +1401,16 @@ def find_preserved_workspaces(
         recorded_base = recorded.stdout.strip() if recorded.returncode == 0 else ""
         if recorded_base:
             wrong_base = recorded_base != base_ref
-        else:  # legacy branch without metadata: at least require a common history with the base
-            wrong_base = runner(["merge-base", base_ref, "HEAD"], path).returncode != 0
+        else:  # legacy branch without metadata: every commit past the base must cite this ticket
+            log = runner(["log", "--format=%B%x00", f"{base_ref}..HEAD"], path)
+            messages = [m for m in log.stdout.split("\x00") if m.strip()]
+            wrong_base = log.returncode != 0 or not all(ticket_id.upper() in m.upper() for m in messages)
         if wrong_base:
             logger.warning(
                 "worktree preservada ignorada por base divergente: path=%s ticket=%s base_registrada=%s base_esperada=%s",
                 path, ticket_id, recorded_base or "desconhecida", base_ref,
             )
-            lookup.notes.append(f"{path} (base {recorded_base or 'sem historia comum'} difere de {base_ref}; ignorada)")
+            lookup.notes.append(f"{path} (base {recorded_base or 'sem metadado e commits que nao citam o ticket'} difere de {base_ref}; ignorada)")
             continue
         if "locked" in entry or "prunable" in entry:
             lookup.notes.append(f"{path} (worktree bloqueada/prunable no git; ignorada)")

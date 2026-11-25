@@ -248,12 +248,12 @@ workers. Ele não herda `DARKFAC_PROJECT_ROOT`. Durante a entrega, `run_ticket.p
 `DARKFAC_PROJECT_ROOT` para a worktree do ticket em cada tentativa do portão, inclusive nos retries
 remotos. Assim o portão recusa uma worktree candidata suja.
 
-Como o filho roda do checkout compartilhado, `node_sync` adia o fast-forward do Notebook enquanto
+Como o filho roda do checkout compartilhado, `node_sync` e a sincronização pós-merge (`GitAutonomyManager._cleanup`) adiam o fast-forward enquanto
 houver `run_ticket.py` da frota em voo (`running_fleet_runs`), com `logger.warning`
 (`fleet_runs_in_flight=...`); o próximo ciclo tenta de novo. Dois `gate_timeout` seguidos no mesmo
 `main_sha` colocam o ticket em hold com causa `gate_timeout_repeated`. Uma worktree preservada só é
 reaproveitada se a base registrada em `branch.<ticket>.darkfacbase` for a base atual do projeto, e o
-`progress.json` órfão só é arquivado pelo host que o gravou (`host`).
+`progress.json` órfão só é arquivado pelo host que o gravou (`host`). Worktree legada sem `darkfacbase` só é reaproveitada se todos os commits após a base citarem o ID do ticket. O despachante entrega ao filho o registro selecionado em `STATE_ROOT/runs/<ID>.dispatch_ticket.json` (`DARKFAC_DISPATCH_TICKET`), que o intake prefere ao ledger local.
 
 ## Pin de execução e admissão (USR-510)
 

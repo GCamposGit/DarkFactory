@@ -2288,6 +2288,22 @@ def _resume_delivery(
         )
 
 
+def _dispatched_ticket(ticket_id: str) -> Optional[UserTicket]:
+    """Ticket version the fleet dispatcher selected and handed over (DARKFAC_DISPATCH_TICKET), if valid.
+
+    The local ledger may lag origin/main; the dispatcher's record wins. Unreadable or foreign files are ignored.
+    """
+    raw = os.environ.get("DARKFAC_DISPATCH_TICKET", "").strip()
+    if not raw:
+        return None
+    try:
+        ticket = UserTicket.model_validate_json(Path(raw).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("DARKFAC_DISPATCH_TICKET ilegivel (%s): %s", raw, exc)
+        return None
+    return ticket if ticket.id == ticket_id else None
+
+
 def _ticket_from_origin_main(ticket_id: str, worktree: Path) -> Optional[UserTicket]:
     """USR-314: look the ticket up in the ledger of ``origin/main`` (registered after the worktree was cut).
 
@@ -3466,7 +3482,7 @@ def _stage_intake(args: argparse.Namespace) -> tuple[Optional[UserTicket], int]:
             print(f"\n[+] Novo ticket criado: {ticket.id} - '{ticket.title}'")
         return ticket, 0
     if args.ticket_id:
-        ticket = store.get_ticket(args.ticket_id)
+        ticket = _dispatched_ticket(args.ticket_id) or store.get_ticket(args.ticket_id)
         if ticket is None:  # USR-335: checkout compartilhado atrasado; procurar no ledger de origin/main
             ticket = _ticket_from_origin_main(args.ticket_id, PROJECT_ROOT)
         if ticket is None:

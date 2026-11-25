@@ -495,6 +495,11 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
     }
     if recovery:
         updates["DARKFAC_RECOVERY_MODE"] = "1"
+    # The ticket version the dispatcher selected (origin/main); the child must not re-read a stale local ledger.
+    dispatch_ticket = shared_state / "runs" / f"{ticket_id}.dispatch_ticket.json"
+    dispatch_ticket.parent.mkdir(parents=True, exist_ok=True)
+    dispatch_ticket.write_text(json.dumps(dict(demand), ensure_ascii=False, default=str), encoding="utf-8")
+    updates["DARKFAC_DISPATCH_TICKET"] = str(dispatch_ticket)
     if host.worker_url:
         # Gate pin stays on DARKFAC_TEST_WORKERS unless ordered workers are explicitly configured;
         # admission reads the fleet list via DARKFAC_ADMISSION_WORKERS (USR-510 / USR-471).
