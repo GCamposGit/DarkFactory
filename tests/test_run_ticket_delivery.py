@@ -587,6 +587,45 @@ def test_small_ticket_cherry_pick_conflict_that_agent_cannot_resolve_goes_to_hol
     assert len(rows) == 1 and rows[0]["cause"] == "rebase_conflict"
 
 
+def test_interrupted_cherry_pick_replay_is_restored_and_not_inferred_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(run_ticket, "_registered_ticket_rebase_worktree", lambda *_args: True)
+    monkeypatch.setattr(run_ticket, "pick", lambda *_args, **_kwargs: ("codex", "test-model"))
+    from core.line import failure_alerts
+
+    monkeypatch.setattr(failure_alerts, "notify_deterministic_failure", lambda **_kwargs: None)
+    repo = _conflict_repo(tmp_path, {"mod.py": ("value = 1\n", "value = 2\n")})
+
+    def _head(path: Path) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    candidate = _head(repo)
+    calls = 0
+
+    def crash(*_args: object, **_kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        raise KeyboardInterrupt  # the process dies mid-inference, leaving the cherry-pick behind
+
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", crash)
+    ok, files, message = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    with pytest.raises(KeyboardInterrupt):
+        run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, message)
+    assert _head(repo) != candidate
+
+    ok, files, message = run_ticket.rebase_on_origin_main(repo, keep_conflict=True)
+    assert ok is False and files == ["mod.py"]
+    done, _remaining, reason = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, message)
+
+    assert done is False and "recovery_interrupted" in reason and calls == 1
+    assert _head(repo) == candidate
+    assert (repo / "mod.py").read_text(encoding="utf-8") == "value = 1\n"
+
+
 def test_unresolved_rebase_conflict_preserves_technical_failure_with_rc_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
