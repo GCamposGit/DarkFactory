@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from core.learning_pack.storage import DEFAULT_PACKS_DIR
 from core.owner_actions.models import ActionKind
-from core.paths import project_root, state_root
+from core.paths import state_root
 
 logger = logging.getLogger(__name__)
 
@@ -296,12 +296,13 @@ def _run_artifacts(ticket_id: str, artifacts_dir: Path) -> Path:
 
 
 def _merge_receipt(run_dir: Path) -> tuple[str | None, datetime | None]:
-    """(merge_sha, written_at) of the `merge.json` receipt that run_ticket writes after the merge."""
+    """(merge_sha, end of delivery) from `merge.json`; the end is the latest of merge/deploy receipts."""
     path = run_dir / "merge.json"
     sha = _read_json(path).get("merge_sha")
     if not isinstance(sha, str) or not _SHA_RE.match(sha.strip()):
         return None, None
-    return sha.strip(), datetime.fromtimestamp(path.stat().st_mtime, UTC)
+    mtimes = [p.stat().st_mtime for p in (path, run_dir / "deploy_report.json") if p.is_file()]
+    return sha.strip(), datetime.fromtimestamp(max(mtimes), UTC)
 
 
 def _smoke_passed(run_dir: Path, merge_sha: str) -> bool:
@@ -315,21 +316,20 @@ def _has_learning_pack(ticket_id: str, packs_dir: Path) -> bool:
 
 
 def _merge_on_default_branch(merge_sha: str, repo: Path | None, default_branch: str) -> bool:
-    """True when ``merge_sha`` is reachable from the project's default branch (remote ref first)."""
+    """True when ``merge_sha`` is an ancestor of ``origin/<default_branch>`` (never a local branch)."""
     if repo is None or not repo.is_dir():
         return False
-    for ref in (f"origin/{default_branch}", default_branch):
-        try:
-            result = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", merge_sha, ref],
-                cwd=repo, capture_output=True, text=True, timeout=20,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("v0_proof: git merge-base falhou para %s: %s", merge_sha, type(exc).__name__)
-            return False
-        if result.returncode == 0:
-            return True
-    return False
+    try:
+        # Best effort: a failed fetch just leaves the last known remote ref.
+        subprocess.run(["git", "fetch", "-q", "origin", default_branch], cwd=repo, capture_output=True, timeout=60)
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", merge_sha, f"origin/{default_branch}"],
+            cwd=repo, capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("v0_proof: git merge-base falhou para %s: %s", merge_sha, type(exc).__name__)
+        return False
+    return result.returncode == 0
 
 
 def _owner_touches(
@@ -369,7 +369,6 @@ def _delivery_evidence(
     owner_actions: list[Any],
     packs_dir: Path,
     artifacts_dir: Path,
-    fallback_repo: Path,
     channel: str,
 ) -> DeliveryEvidence:
     """Facts of one ticket read from what run_ticket emits: merge/deploy receipts and learning pack."""
@@ -381,9 +380,9 @@ def _delivery_evidence(
         notes.append(f"projeto_nao_registrado:{ticket.project_id}")
     on_default = False
     if merge_sha:
-        repo = project.resolve_path() if project is not None else fallback_repo
-        branch = project.default_branch if project is not None else "main"
-        on_default = _merge_on_default_branch(merge_sha, repo, branch)
+        # Unregistered project: no repo to prove against, never fall back to DarkFac's own.
+        if project is not None:
+            on_default = _merge_on_default_branch(merge_sha, project.resolve_path(), project.default_branch)
     actions, decisions, kinds = _owner_touches(ticket.id, owner_actions, _parse_dt(created), merged_at)
     when = merged_at or _parse_dt(created)
     return DeliveryEvidence(
@@ -412,7 +411,7 @@ def collect_v0_proof_evidence(
     owner_actions_store: Any | None = None,
     project_registry: Any | None = None,
     learning_packs_dir: Path | None = None,
-    repo_root: Path | None = None,
+    repo_root: Path | None = None,  # ignorado: cada projeto usa o proprio repositorio do registro
     artifacts_dir: Path | None = None,
     now: datetime | None = None,
     required_streak: int = REQUIRED_STREAK,
@@ -421,7 +420,7 @@ def collect_v0_proof_evidence(
 
     Per ticket: ``merge.json``/``deploy_report.json`` under ``core.line.ticket_engine.artifacts_root``,
     the ticket-keyed learning pack under ``.factory/learning_packs/`` and the ``merge_sha`` reachable
-    from the default branch of the project in the registry (external repos included; no commit in
+    from ``origin/<default_branch>`` of the project in the registry (external repos included; no commit in
     DarkFac's ``docs/manual/`` is required). The channel comes from the ``channel:<telegram|hub|chat>``
     tag ``submit_owner_demand`` attaches to the ticket; a ticket without it predates this
     instrumentation and is excluded from the candidate universe, not treated as disqualified.
@@ -503,7 +502,6 @@ def collect_v0_proof_evidence(
                 owner_actions=owner_actions,
                 packs_dir=learning_packs_dir or DEFAULT_PACKS_DIR,
                 artifacts_dir=artifacts_dir,
-                fallback_repo=repo_root or project_root(),
                 channel=channel,
             )
         )

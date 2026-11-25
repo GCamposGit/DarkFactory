@@ -69,17 +69,22 @@ Reaproveita as stores que a linha já escreve, sem criar uma fonte de verdade pa
   branch local) no repositório do projeto registrado (`ProjectDescriptor.resolve_path()`,
   `default_branch`, por exemplo `darkfac/m1-seo` para a mansaodolago). Vale para repositório externo:
   nenhum commit em `docs/manual/` da DarkFac é exigido.
+  A branch local nunca conta: só `origin/<branch>` (após `git fetch` dessa ref). Projeto fora do registro é
+  rejeitado, sem cair no repositório da DarkFac.
 - **Learning pack**: existência de `.factory/learning_packs/<ticket_id>.json` ou `.md`
   (`core.learning_pack.delivery.build_for_delivery`, mesma convenção usada por
   `core.ops.turn_guard`).
 - **Ações do owner**: `core.owner_actions.store.OwnerActionStore.list_actions()`, filtrando as que
-  referenciam o ticket em `blocks`/`depends_on` e foram criadas entre a criação do ticket e a gravação do `merge.json`.
+  referenciam o ticket em `blocks`/`depends_on` e foram criadas entre a criação do ticket e o último dos recibos `merge.json`/`deploy_report.json`.
 - **Projetos**: `core.projects.registry.get_project_registry()` fornece repositório e branch padrão; projeto não
   registrado fica sem merge verificável e a entrega não qualifica.
 
 Fonte indisponível nunca derruba o coletor: cada store é aberta dentro de um `try/except`
 específico, e a falha vira um código estruturado em `V0ProofReport.degraded_sources` (por exemplo
 `control_store_unavailable`) — nunca o texto bruto da exceção, que pode carregar uma credencial.
+
+O container de produção do DarkHub não tem os recibos da frota nem clones git, então o painel V0 ali
+mostra zero entregas qualificadas; o placar oficial é `python -m core.line.v0_proof` no host da frota.
 
 ## Relatório
 

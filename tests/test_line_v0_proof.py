@@ -1,9 +1,11 @@
 import json
+import os
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+from core.owner_actions.models import ActionKind
 from core.line.v0_proof import DeliveryEvidence, collect_v0_proof_evidence, evaluate_v0_proof
 
 NOW = datetime(2026, 2, 1, tzinfo=UTC)
@@ -80,47 +82,57 @@ def _emit_receipts(artifacts: Path, ticket_id: str, sha: str) -> None:
     )
 
 
-def test_collector_counts_external_delivery_from_engine_receipts_and_rejects_foreign_sha(tmp_path: Path) -> None:
+def test_collector_proves_merge_only_on_remote_default_branch_and_window_covers_smoke(tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "--bare", "-b", "darkfac/m1-seo", str(remote))
     repo = tmp_path / "external"
-    repo.mkdir()
-    _git(repo, "init", "-b", "darkfac/m1-seo")
+    _git(tmp_path, "clone", str(remote), str(repo))
+    _git(repo, "checkout", "-b", "darkfac/m1-seo")
     (repo / "a.txt").write_text("a", encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "m1")
-    on_branch = _git(repo, "rev-parse", "HEAD")
-    _git(repo, "checkout", "-b", "side")
+    _git(repo, "push", "-q", "origin", "darkfac/m1-seo")
+    pushed = _git(repo, "rev-parse", "HEAD")
     (repo / "b.txt").write_text("b", encoding="utf-8")
     _git(repo, "add", ".")
-    _git(repo, "commit", "-m", "side")
-    off_branch = _git(repo, "rev-parse", "HEAD")
-    _git(repo, "checkout", "darkfac/m1-seo")
+    _git(repo, "commit", "-m", "local only")
+    local_only = _git(repo, "rev-parse", "HEAD")
 
     artifacts = tmp_path / "artifacts"
-    _emit_receipts(artifacts, "MDL-01", on_branch)
-    _emit_receipts(artifacts, "MDL-02", off_branch)
+    for ticket_id, sha in (("MDL-01", pushed), ("MDL-02", local_only), ("MDL-03", pushed)):
+        _emit_receipts(artifacts, ticket_id, sha)
     packs = tmp_path / "packs"
     packs.mkdir()
-    (packs / "MDL-01.json").write_text("{}", encoding="utf-8")
-    (packs / "MDL-02.json").write_text("{}", encoding="utf-8")
+    for ticket_id in ("MDL-01", "MDL-02", "MDL-03"):
+        (packs / f"{ticket_id}.json").write_text("{}", encoding="utf-8")
 
     created = datetime(2026, 1, 1, tzinfo=UTC)
-    tickets = [_ticket("MDL-01", "mansaodolago", created), _ticket("MDL-02", "mansaodolago", created)]
-    project = SimpleNamespace(
-        default_branch="darkfac/m1-seo", resolve_path=lambda: repo, requires_commercial_acceptance=True
+    project = SimpleNamespace(default_branch="darkfac/m1-seo", resolve_path=lambda: repo)
+
+    def collect(ticket: SimpleNamespace, registered: bool = True, actions: list | None = None):
+        return collect_v0_proof_evidence(
+            demands_store=SimpleNamespace(list_tickets=lambda: [ticket]),
+            owner_actions_store=SimpleNamespace(list_actions=lambda: actions or []),
+            project_registry=SimpleNamespace(get_project=lambda _id: project if registered else None),
+            learning_packs_dir=packs, artifacts_dir=artifacts, now=NOW, required_streak=1,
+        )
+
+    external = collect(_ticket("MDL-01", "mansaodolago", created))
+    assert [d.ticket_id for d in external.qualified_deliveries] == ["MDL-01"]
+    assert external.qualified_deliveries[0].merge_sha == pushed
+    assert external.projects_involved == ["mansaodolago"]
+
+    assert collect(_ticket("MDL-02", "mansaodolago", created)).current_streak == 0  # unpushed commit
+    assert collect(_ticket("MDL-03", "ghost", created), registered=False).current_streak == 0
+
+    # An owner action between the merge and the smoke report still happened during the delivery.
+    run_dir = artifacts / "MDL-03" / ".darkfac" / "runs" / "MDL-03"
+    merge_time = (run_dir / "merge.json").stat().st_mtime
+    os.utime(run_dir / "merge.json", (merge_time - 3600, merge_time - 3600))
+    os.utime(run_dir / "deploy_report.json", (merge_time, merge_time))
+    action = SimpleNamespace(
+        blocks=["MDL-03"], depends_on=[], kind=ActionKind.ACTION,
+        created_at=datetime.fromtimestamp(merge_time - 1800, UTC),
     )
-    solo = collect_v0_proof_evidence(
-        demands_store=SimpleNamespace(list_tickets=lambda: tickets[:1]),
-        owner_actions_store=SimpleNamespace(list_actions=list),
-        project_registry=SimpleNamespace(get_project=lambda _id: project),
-        learning_packs_dir=packs, artifacts_dir=artifacts, now=NOW, required_streak=1,
-    )
-    assert [d.ticket_id for d in solo.qualified_deliveries] == ["MDL-01"]
-    assert solo.qualified_deliveries[0].merge_sha == on_branch
-    assert solo.projects_involved == ["mansaodolago"]
-    foreign = collect_v0_proof_evidence(
-        demands_store=SimpleNamespace(list_tickets=lambda: tickets[1:]),
-        owner_actions_store=SimpleNamespace(list_actions=list),
-        project_registry=SimpleNamespace(get_project=lambda _id: project),
-        learning_packs_dir=packs, artifacts_dir=artifacts, now=NOW, required_streak=1,
-    )
-    assert foreign.current_streak == 0
+    touched = collect(_ticket("MDL-03", "mansaodolago", created), actions=[action])
+    assert touched.current_streak == 0
