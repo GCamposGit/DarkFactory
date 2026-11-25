@@ -72,3 +72,5 @@ Bloqueio pela politica da branch (USR-475): com a branch atras do `origin/main` 
 ### Recuperacao de conflitos de rebase pequenos (USR-548)
 
 Quando o rebase de entrega conflita, `run_ticket.py` tenta reaplicar por `cherry-pick` os commits da branch do ticket sobre a nova base se o candidato tiver um ou dois commits desde o ancestral comum. O caminho e limitado aos arquivos do diff do ticket e recusa arquivos protegidos ou do ledger. Se o cherry-pick tambem conflitar, o agente recebe apenas esses caminhos como escopo e a automacao valida o resultado antes de continuar. Sem rota ou se a resolucao falhar, o candidato original e restaurado e o conflito permanece em hold com os arquivos identificados; tickets com mais de dois commits continuam pelo fluxo de recuperacao existente.
+
+O fast-forward do checkout compartilhado depois do merge (`_cleanup`) é adiado enquanto houver `run_ticket.py` de outro ticket da frota em voo (EC-02); o run do próprio ticket não bloqueia.

@@ -76,7 +76,6 @@ from core.infra.git_sha import current_git_sha, normalize_sha
 from core.paths import state_root
 
 logger = logging.getLogger("darkfac.line.fleet_dispatcher")
-_OPERATIONAL_CHECKOUT_LEDGER_HASHES: dict[str, str] = {}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATE_PATH = state_root() / "runs" / "fleet_dispatcher_state.json"
@@ -209,7 +208,6 @@ class InFlight:
     handle: Any  # tem .poll() -> int | None
     log_path: Optional[Path] = None
     started_at: float = 0.0
-    operational_checkout: Optional[Path] = None
     project_id: str = "darkfac"
     candidate_digest: str = "unknown"
     context_digest: str = "unknown"
@@ -417,88 +415,6 @@ def default_probe(host: HostSpec, stable_probes: int = 3) -> HostProbe:
                      observed_at=str(observed_at or datetime.now(timezone.utc).isoformat()))
 
 
-def _git_checked(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    """Run git and turn source/control failures into visible launch errors."""
-    result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        check=False, timeout=120, creationflags=CREATE_NO_WINDOW,
-    )
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"git {' '.join(args)} falhou (rc={result.returncode}): {detail}")
-    return result
-
-
-def _create_operational_checkout(ticket_id: str, host_id: str, demand: Mapping[str, Any]) -> Path:
-    """Create a clean launcher checkout and seed only the selected ticket into its ledger."""
-    from core.demands.models import UserTicket
-    from core.demands.store import DemandsStore
-    from core.git import ticket_workspace
-
-    main_root = ticket_workspace.main_checkout_root(PROJECT_ROOT)
-    _git_checked(["fetch", "origin", "main", "-q"], main_root)
-    stamp = f"{os.getpid()}-{time.time_ns()}-{uuid.uuid4().hex[:8]}"
-    path = main_root / ".worktrees" / f"fleet-dispatch-{ticket_id.lower()}-{host_id}-{stamp}"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        # `worktree add` can create its admin entry/directory before returning an
-        # error. Keep it inside the cleanup scope so a failed launch cannot leave
-        # an orphan that later collides with workspace discovery.
-        _git_checked(["worktree", "add", "--detach", str(path), "origin/main"], main_root)
-        ticket = UserTicket.model_validate(dict(demand))
-        if ticket.id != ticket_id:
-            raise ValueError(f"registro selecionado tem id {ticket.id}, esperado {ticket_id}")
-        ledger_path = path / ticket_workspace.TICKET_LEDGER_RELATIVE
-        DemandsStore(ledger_path).save_ticket(ticket)
-        ledger_hash = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
-        _OPERATIONAL_CHECKOUT_LEDGER_HASHES[os.path.normcase(os.path.realpath(path))] = ledger_hash
-        status = _git_checked(["status", "--porcelain=v1", "--untracked-files=all"], path).stdout.strip()
-        changed = [line[2:].strip() for line in status.splitlines() if len(line) >= 4]
-        if changed and changed != [".factory/demands/demands.json"]:
-            raise RuntimeError(f"checkout operacional recebeu arquivos inesperados: {changed}")
-    except Exception:
-        _remove_operational_checkout(path, main_root=main_root)
-        raise
-    return path
-
-
-def _remove_operational_checkout(path: Optional[Path], *, main_root: Optional[Path] = None) -> None:
-    if path is None:
-        return
-    try:
-        from core.git import ticket_workspace
-
-        root = main_root or ticket_workspace.main_checkout_root(PROJECT_ROOT)
-        key = os.path.normcase(os.path.realpath(path))
-        ledger_hash = _OPERATIONAL_CHECKOUT_LEDGER_HASHES.get(key)
-        discard_path_hashes = (
-            {ticket_workspace.TICKET_LEDGER_RELATIVE: ledger_hash} if ledger_hash is not None else {}
-        )
-        result = ticket_workspace.cleanup(
-            path,
-            root,
-            discard_path_hashes=discard_path_hashes,
-        )
-        if result.removed:
-            _OPERATIONAL_CHECKOUT_LEDGER_HASHES.pop(key, None)
-        if result.method == "preserved":
-            logger.warning(
-                "checkout operacional preservado: path=%s outcome=%s reason=%s detalhe=%s; "
-                "recuperacao possivel repetindo cleanup pelo despachante",
-                path, result.outcome, result.reason, result.detail,
-            )
-        elif not result.removed:
-            logger.error(
-                "nao foi possivel remover checkout operacional: path=%s outcome=%s reason=%s metodo=%s detalhe=%s; "
-                "recuperacao possivel repetindo cleanup apos liberar os handles",
-                path, result.outcome, result.reason, result.method, result.detail or "; ".join(result.errors),
-            )
-        else:
-            logger.info("checkout operacional removido: path=%s outcome=%s metodo=%s", path, result.outcome, result.method)
-    except Exception:
-        logger.exception("falha ao remover checkout operacional %s", path)
-
-
 def _admission_workers_for_pin(previous: str | None, pin_url: str) -> str:
     """Lista que a admissão lê: workers já no despachante, ou o default da frota, mais o pin.
 
@@ -524,7 +440,7 @@ def _admission_workers_for_pin(previous: str | None, pin_url: str) -> str:
     return ",".join(urls)
 
 
-def resumable_delivery_worktree(ticket_id: str) -> Optional[Path]:
+def resumable_delivery_worktree(ticket_id: str, project_id: str = "darkfac") -> Optional[Path]:
     """Worktree preservada com commits a frente de origin/main e plano valido, ou None (USR-447).
 
     Nesse caso o ticket nao precisa replanejar nem reconstruir: o launcher retoma a entrega.
@@ -533,8 +449,17 @@ def resumable_delivery_worktree(ticket_id: str) -> Optional[Path]:
     from core.git.ticket_workspace import find_preserved_workspaces
 
     try:
+        cwd, base = PROJECT_ROOT, "main"
+        if project_id != "darkfac":  # EC-02: external products resume in their own checkout
+            from core.projects.registry import get_project_registry
+            from core.projects.ticket_execution import project_checkout
+
+            project = get_project_registry().get_project(project_id)
+            if project is None:
+                return None
+            cwd, base = project_checkout(project), project.default_branch
         chosen = find_preserved_workspaces(
-            ticket_id, cwd=PROJECT_ROOT, ignore_paths=(".factory/demands/demands.json",),
+            ticket_id, cwd=cwd, base=base, ignore_paths=(".factory/demands/demands.json",),
         ).chosen
     except Exception as exc:  # noqa: BLE001 - sem busca, relancamento completo
         logger.warning("busca de worktree preservada de %s falhou: %s", ticket_id, exc)
@@ -556,22 +481,25 @@ def resumable_delivery_worktree(ticket_id: str) -> Optional[Path]:
 def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
                    run_id: Optional[str] = None, recovery: bool = False,
                    candidate_digest: str = "unknown") -> InFlight:
-    # The launcher runs from a temporary operational checkout, but its mutable
-    # control store is shared with the dispatcher and the other workers. Resolve
-    # the parent's effective root before the child env replaces DARKFAC_PROJECT_ROOT.
+    # EC-02: run_ticket.py starts straight from PROJECT_ROOT (no ephemeral fleet-dispatch-* clone);
+    # the shared state root is passed explicitly so the child reads the same control store and usage.
     from core.line.operating_harness import headless_executor_env
     from core.paths import state_root
 
     shared_state = state_root().resolve()
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{ticket_id}-{host.id}.log"
-    operational_checkout = _create_operational_checkout(ticket_id, host.id, demand)
     updates = {
         "DARKFAC_CANDIDATE_DIGEST": candidate_digest,
         "DARKFAC_RUN_LOG": str(log_path.resolve()),
     }
     if recovery:
         updates["DARKFAC_RECOVERY_MODE"] = "1"
+    # The ticket version the dispatcher selected (origin/main); the child must not re-read a stale local ledger.
+    dispatch_ticket = shared_state / "runs" / f"{ticket_id}.dispatch_ticket.json"
+    dispatch_ticket.parent.mkdir(parents=True, exist_ok=True)
+    dispatch_ticket.write_text(json.dumps(dict(demand), ensure_ascii=False, default=str), encoding="utf-8")
+    updates["DARKFAC_DISPATCH_TICKET"] = str(dispatch_ticket)
     if host.worker_url:
         # Gate pin stays on DARKFAC_TEST_WORKERS unless ordered workers are explicitly configured;
         # admission reads the fleet list via DARKFAC_ADMISSION_WORKERS (USR-510 / USR-471).
@@ -585,7 +513,7 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
         updates["DARKFAC_REMOTE_HARNESS"] = "off"
     env = headless_executor_env(
         os.environ,
-        project_root=operational_checkout,
+        project_root=PROJECT_ROOT,
         state_root=shared_state,
         host_id=host.id,
         run_id=run_id,
@@ -594,22 +522,18 @@ def default_launch(ticket_id: str, host: HostSpec, demand: Mapping[str, Any], *,
     # run_ticket binds project_root() to the candidate worktree for each gate invocation (USR-516).
     env.pop("DARKFAC_PROJECT_ROOT", None)
     env.pop("PROJECT_ROOT", None)
-    cmd = [sys.executable, str(operational_checkout / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
-    resume_worktree = resumable_delivery_worktree(ticket_id)
+    cmd = [sys.executable, str(PROJECT_ROOT / "run_ticket.py"), ticket_id, "--fleet", "--host-id", host.id]
+    resume_worktree = resumable_delivery_worktree(ticket_id, str(demand.get("project_id") or "darkfac"))
     if resume_worktree is not None:
         cmd.extend(["--resume-delivery", "--worktree", str(resume_worktree)])
     if run_id:
         cmd.extend(["--run-id", run_id])
     if recovery:
         cmd.append("--recovery")
-    try:
-        with open(log_path, "ab") as log:
-            proc = subprocess.Popen(cmd, cwd=operational_checkout, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                    creationflags=CREATE_NO_WINDOW)
-    except Exception:
-        _remove_operational_checkout(operational_checkout)
-        raise
-    return InFlight(ticket_id, host.id, proc, log_path, time.time(), operational_checkout)
+    with open(log_path, "ab") as log:
+        proc = subprocess.Popen(cmd, cwd=PROJECT_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                creationflags=CREATE_NO_WINDOW)
+    return InFlight(ticket_id, host.id, proc, log_path, time.time())
 
 
 def running_fleet_runs() -> dict[str, str]:
@@ -1235,7 +1159,6 @@ class FleetDispatcher:
             if rc is None:
                 continue
             del self.in_flight[host_id]
-            _remove_operational_checkout(job.operational_checkout)
             outcome = run_outcome.read_outcome(job.ticket_id, job.run_id)
             if outcome is not None:
                 rc = outcome.exit_code

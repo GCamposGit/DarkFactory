@@ -320,6 +320,9 @@ class AdmissionStore:
                 streak = int(row["infra_streak"]) if row else 0
                 if row and main_sha and row["main_sha"] != main_sha:
                     streak = 0
+                # EC-02: the same sha timing out the gate twice in a row stops retrying (no endless loop).
+                repeated = bool(fresh and cause == "gate_timeout" and row and row["last_cause"] == "gate_timeout"
+                                and streak >= 1)
                 if fresh:
                     candidate += int(category in {"candidate", "unknown"})
                     streak = streak + 1 if category == "infra" else 0
@@ -331,10 +334,15 @@ class AdmissionStore:
                                (project, ticket, candidate, streak, now.timestamp() + delay if delay else 0,
                                 cause, main_sha or (row["main_sha"] if row else ""), now.isoformat()))
                 new_hold = False
-                if fresh and (category == "owner" or (category in {"candidate", "unknown"} and candidate >= 3)):
+                if repeated:
+                    cause = "gate_timeout_repeated"
+                    category = classify(cause)
+                if fresh and (repeated or category == "owner"
+                              or (category in {"candidate", "unknown"} and candidate >= 3)):
                     fp = make_fingerprint(project_id=project, ticket_id=ticket, error=cause,
                                           resource_version="ticket_budget", main_sha=main_sha)
-                    new_hold = self.set_ticket_hold(fp, candidate if category != "owner" else 1, connection=db)
+                    new_hold = self.set_ticket_hold(
+                        fp, streak if repeated else candidate if category != "owner" else 1, connection=db)
                 attempt_count = int(db.execute(
                     "SELECT COUNT(*) FROM ticket_attempts WHERE project=? AND ticket=?", (project, ticket),
                 ).fetchone()[0])

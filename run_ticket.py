@@ -431,7 +431,9 @@ class SharedCheckoutDirty(RuntimeError):
         )
 
 
-def _resume_preserved_workspace(ticket: UserTicket, *, as_json: bool) -> Optional[TicketWorkspace]:
+def _resume_preserved_workspace(
+    ticket: UserTicket, *, as_json: bool, cwd: Optional[Path] = None, base: str = "main"
+) -> Optional[TicketWorkspace]:
     """Worktree an interrupted earlier attempt of this ticket left behind, or None (USR-225).
 
     A run that timed out keeps its worktree (and the agent's partial work); a second `run_ticket <ID>`
@@ -466,7 +468,7 @@ def _resume_preserved_workspace(ticket: UserTicket, *, as_json: bool) -> Optiona
 
     try:
         lookup = find_preserved_workspaces(
-            ticket.id, cwd=PROJECT_ROOT, ignore_paths=(LEDGER_RELATIVE,),
+            ticket.id, cwd=cwd or PROJECT_ROOT, base=base, ignore_paths=(LEDGER_RELATIVE,),
             preferred_path=preferred_build_path,
         )
     except Exception as exc:  # noqa: BLE001 - a lookup problem falls back to a new worktree
@@ -515,6 +517,12 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
                 "(skill 07) no onboarding e declare comandos de validação antes de executar tickets."
             )
         project_root = project_checkout(project)
+        workspace = _resume_preserved_workspace(
+            ticket, as_json=bool(getattr(args, "json", False)), cwd=project_root, base=project.default_branch
+        )
+        if workspace is not None:
+            # Reused worktree: setup already ran and the previous attempt's commits/diff stay intact.
+            return workspace
         workspace = create_workspace(ticket.id, cwd=project_root, base=project.default_branch)
         setup = setup_project(project, workspace.path)
         if not setup.ok:
@@ -1338,7 +1346,11 @@ def _invoke_fix_agent(
 # behind a sibling session's run on the same host instead of ever reaching collection -- reproduced live
 # while diagnosing USR-249's own delivery: a concurrent worktree held the lock for the full window,
 # leaving `discovered_count=0` with no code-level failure to fix.
+# A `TimeoutExpired` traceback inside a failing test is NOT here: that is a test failure (EC-02).
 _GATE_TIMEOUT_MARKERS = ("(timeout exceeded)", "[SUITE_LOCK] timed out")
+# `core/harness/affected.py` prints this (any `phase=`, collection or execution) when pytest hit the step
+# budget and exits 124; it is always infra, even with zero tests discovered.
+_GATE_STEP_TIMEOUT_MARKER = "[STEP_TIMEOUT]"
 # Remote-worker loss markers are infra only when the output carries no real pytest failure: if the
 # worker dropped and the local fallback then ran and reprovou a real test, that is fixable by the agent.
 # `[SUITE_LOCK] acquired slot`/`waiting` also appear in normal runs and are NOT infra signals.
@@ -1357,6 +1369,8 @@ def _gate_failure_is_timeout(gate_res: Any) -> bool:
     if getattr(gate_res, "timed_out", False):
         return True
     combined = f"{gate_res.stdout}\n{gate_res.stderr}"
+    if _GATE_STEP_TIMEOUT_MARKER in combined:
+        return True
     payload = _parse_harness_result(combined)
     if payload and payload.get("discovered_count", 0) > 0:
         return 124 in (payload.get("exit_codes") or {}).values()
@@ -2272,6 +2286,22 @@ def _resume_delivery(
         return _resume_delivery_scoped(
             ticket_id, worktree_path, skip_validation, no_commit, no_push, as_json, return_result, holder, stack
         )
+
+
+def _dispatched_ticket(ticket_id: str) -> Optional[UserTicket]:
+    """Ticket version the fleet dispatcher selected and handed over (DARKFAC_DISPATCH_TICKET), if valid.
+
+    The local ledger may lag origin/main; the dispatcher's record wins. Unreadable or foreign files are ignored.
+    """
+    raw = os.environ.get("DARKFAC_DISPATCH_TICKET", "").strip()
+    if not raw:
+        return None
+    try:
+        ticket = UserTicket.model_validate_json(Path(raw).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("DARKFAC_DISPATCH_TICKET ilegivel (%s): %s", raw, exc)
+        return None
+    return ticket if ticket.id == ticket_id else None
 
 
 def _ticket_from_origin_main(ticket_id: str, worktree: Path) -> Optional[UserTicket]:
@@ -3452,7 +3482,7 @@ def _stage_intake(args: argparse.Namespace) -> tuple[Optional[UserTicket], int]:
             print(f"\n[+] Novo ticket criado: {ticket.id} - '{ticket.title}'")
         return ticket, 0
     if args.ticket_id:
-        ticket = store.get_ticket(args.ticket_id)
+        ticket = _dispatched_ticket(args.ticket_id) or store.get_ticket(args.ticket_id)
         if ticket is None:  # USR-335: checkout compartilhado atrasado; procurar no ledger de origin/main
             ticket = _ticket_from_origin_main(args.ticket_id, PROJECT_ROOT)
         if ticket is None:

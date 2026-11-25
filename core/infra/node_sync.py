@@ -493,6 +493,7 @@ def classify_checkout(
     )
 
 
+from core.git.ticket_workspace import fast_forward_deferral
 from core.paths import state_root
 
 def _divergence_state_file() -> Path:
@@ -890,6 +891,8 @@ def sync(
                 for entry in git(root, ["status", "--porcelain", "--untracked-files=all"]).splitlines()
             ):
                 notebook.reason = "dirty worktree; no git operation attempted"
+            elif deferred := fast_forward_deferral(expected):
+                notebook.reason = deferred
             else:
                 # Fast-forward only when classification compared HEAD with the immutable candidate.
                 saved = stash_runtime_state(root, git)

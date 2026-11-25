@@ -131,6 +131,7 @@ python -m core.line.stale_active --dry-run
   commit, publicado em `main` com o token do GitHub App (`core/git/app_token.py`). E idempotente
   (marcador no diretorio de estado; ledger igual nao gera commit) e deve ser agendado separadamente, fora da publicacao de cotas. Le e escreve so numa worktree
   descartavel de `origin/main`: o checkout de quem chama nunca fica sujo (USR-414). O export de OAs reflete somente o control store e nunca importa linhas do Git. A protecao contra perda de ids continua valendo para demandas. O fetch sincroniza a ref `origin/main` antes do checkout da worktree e `next-id` respeita os ids gravados em todo o historico git para evitar reutilizacao de ids.
+- `core/infra/node_sync.py` adia o fast-forward do checkout do Notebook enquanto houver `run_ticket.py` da frota em voo (EC-02), para o filho não misturar módulos de dois commits; o próximo ciclo repete.
 - `core/infra/node_sync.py` trata os dois ledgers como arquivos gerados: antes do pull do Desktop
   (`/system/update`) e na remediacao do Notebook, edicoes locais sao copiadas para
   `<estado>/ledger_backups/` e revertidas (`git checkout`), entao o update nao aborta mais (USR-374).

@@ -566,3 +566,27 @@ def test_github_app_token_cached_and_injected_only_for_publishing(monkeypatch: p
     assert autonomy._app_env(["pr", "view", "1"], autonomy._PUBLISHING_GH) is None
     monkeypatch.setattr(app_token, "get_app_token", lambda *a, **k: None)
     assert autonomy._app_env(["push", "origin"], frozenset({"push"})) is None
+
+
+@pytest.mark.parametrize(
+    ("in_flight", "advances"), [({"USR-1": "notebook"}, False), ({"USR-9": "notebook"}, True), ({}, True)]
+)
+def test_post_merge_fast_forward_waits_for_other_fleet_runs(
+    test_remote_pair: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, in_flight: dict[str, str], advances: bool
+) -> None:
+    """EC-02: the shared checkout does not move under a live fleet child; the caller's own run never blocks."""
+    local, bare = test_remote_pair
+    other = local.parent / "other"
+    _git(local.parent, "clone", "--quiet", str(bare), str(other))
+    _git(other, "config", "user.name", "T")
+    _git(other, "config", "user.email", "t@darkfac.internal")
+    (other / "new.txt").write_text("n", encoding="utf-8")
+    _git(other, "add", "new.txt")
+    _git(other, "commit", "--quiet", "-m", "feat: new")
+    _git(other, "push", "--quiet", "origin", "main")
+    monkeypatch.setattr("core.git.ticket_workspace.fleet_runs_in_flight", lambda: in_flight)
+    before = _git(local, "rev-parse", "HEAD").stdout.strip()
+
+    GitAutonomyManager(local)._cleanup("ticket/usr-9", "main", local)
+
+    assert (_git(local, "rev-parse", "HEAD").stdout.strip() != before) is advances

@@ -1506,7 +1506,12 @@ class GitAutonomyManager:
             if co.returncode != 0:
                 logger.warning("checkout %s failed: %s", base, co.stderr.strip())
                 return False, False
-        if self._current_branch(main_root) == base and not self.is_dirty(cwd=main_root):
+        own = re.match(r"ticket/([a-z]+-\d+)", branch)
+        if self._current_branch(main_root) == base and not self.is_dirty(cwd=main_root) and not (
+            ticket_workspace.fast_forward_deferral(
+                f"origin/{base}", ignore_ticket=own.group(1).upper() if own else ""
+            )
+        ):
             ff = _run_git(["merge", "--ff-only", f"origin/{base}"], cwd=main_root)
             if ff.returncode != 0:
                 logger.warning("ff-only failed: %s", ff.stderr.strip())

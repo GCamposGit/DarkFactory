@@ -1071,7 +1071,7 @@ def test_dispatcher_reads_only_the_line_block_tag(tmp_path: Path):
 
 @pytest.fixture(autouse=True)
 def _no_preserved_worktree_lookup(monkeypatch):
-    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda _tid: None)
+    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda *_a: None)
 
 
 def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
@@ -1086,7 +1086,6 @@ def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
         return Process()
 
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
     monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {
         "Popen": staticmethod(popen),
         "STDOUT": -2,
@@ -1100,7 +1099,7 @@ def test_line_block_keeps_the_fleet_launch_argv(tmp_path: Path, monkeypatch):
         assert cmd[2:] == [tid, "--fleet", "--host-id", host.id]
         assert "line-block" not in cmd
     # candidato preservado com plano valido: retoma a entrega sem replanejar
-    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda _tid: tmp_path / "wt")
+    monkeypatch.setattr(fd, "resumable_delivery_worktree", lambda *_a: tmp_path / "wt")
     fd.default_launch("USR-12", host, {"id": "USR-12", "tags": []})
     assert calls[2][2:] == ["USR-12", "--fleet", "--host-id", host.id,
                             "--resume-delivery", "--worktree", str(tmp_path / "wt")]
@@ -2101,7 +2100,6 @@ def test_dispatch_preserves_effective_state_root_override(tmp_path: Path, monkey
 
     monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "shared-state"))
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
     monkeypatch.setattr(
         fd,
         "subprocess",
@@ -2130,7 +2128,6 @@ def test_dispatch_removes_checkout_project_root_but_keeps_derived_state_root(tmp
     monkeypatch.delenv("DARKFAC_STATE_ROOT", raising=False)
     monkeypatch.setattr(fd, "PROJECT_ROOT", checkout)
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "child-checkout")
     monkeypatch.setattr(
         fd, "subprocess",
         type("Subprocess", (), {
@@ -2168,7 +2165,6 @@ def _capture_launch_env(monkeypatch, tmp_path: Path, host: fd.HostSpec) -> dict[
             return None
 
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: tmp_path / "checkout")
     monkeypatch.setattr(
         fd,
         "subprocess",
@@ -2300,7 +2296,6 @@ def test_fleet_child_gets_its_own_checkout_and_drops_the_parent_session(tmp_path
     monkeypatch.setenv("GH_TOKEN", "ghp_keep")
     monkeypatch.setenv("DARKFAC_FLEET_DISABLED_HOSTS", "desktop")
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(fd, "_create_operational_checkout", lambda *_args: checkout)
     monkeypatch.setattr(
         fd,
         "subprocess",
@@ -2311,6 +2306,7 @@ def test_fleet_child_gets_its_own_checkout_and_drops_the_parent_session(tmp_path
         )(),
     )
 
+    monkeypatch.setattr(fd, "PROJECT_ROOT", checkout)
     fd.default_launch("USR-471", fd.HostSpec("notebook", 1), {"id": "USR-471"}, candidate_digest="digest-471")
 
     env = captured["env"]
@@ -2390,175 +2386,46 @@ def test_failure_without_log_still_has_reason(tmp_path: Path):
     assert row["kind"] == "infra" and "exit_code=75" in row["reason"]
 
 
-def test_dispatch_uses_clean_operational_worktree_and_only_selected_ticket(tmp_path: Path, monkeypatch):
-    """Shared runtime edits stay in place and cannot leak into the launched run_ticket checkout."""
-    import json
-    import subprocess
-
-    from core.demands.models import UserTicket
-
+def test_dispatch_launches_from_project_root_with_state_root_and_no_fleet_dispatch_checkout(
+    tmp_path: Path, monkeypatch
+):
+    """EC-02: no ephemeral `fleet-dispatch-*` clone; the shared state root travels in the child env."""
     root = tmp_path / "shared"
-    root.mkdir()
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
-
-    git("init", "-b", "main")
-    git("config", "user.email", "test@example.invalid")
-    git("config", "user.name", "Test")
-    (root / "run_ticket.py").write_text("# clean runner\n", encoding="utf-8")
-    ledger = root / ".factory" / "demands" / "demands.json"
-    ledger.parent.mkdir(parents=True)
-    ledger.write_text("[]\n", encoding="utf-8")
-    (root / ".gitignore").write_text(".worktrees/\n", encoding="utf-8")
-    git("add", "run_ticket.py", ".factory/demands/demands.json", ".gitignore")
-    git("commit", "-m", "baseline")
-    bare = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True, check=True)
-    git("remote", "add", "origin", str(bare))
-    git("push", "-u", "origin", "main")
-
-    foreign = '[{"id":"USR-900","title":"another session"}]\n'
-    ledger.write_text(foreign, encoding="utf-8")
-    shared_runtime = root / ".factory" / "queue_snapshot.json"
-    shared_runtime.parent.mkdir(parents=True, exist_ok=True)
-    shared_runtime.write_text('{"foreign":true}\n', encoding="utf-8")
-    ticket = UserTicket(id="USR-413", project_id="darkfac", title="isolated", problem_statement="test", status="planned")
+    (root / ".worktrees").mkdir(parents=True)
     launched = {}
 
     class Process:
         def poll(self):
             return None
 
-    def popen(cmd, **kwargs):
-        launched.update(cmd=cmd, cwd=kwargs["cwd"], env=kwargs["env"])
-        return Process()
-
     monkeypatch.setattr(fd, "PROJECT_ROOT", root)
     monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(root))
     monkeypatch.delenv("DARKFAC_STATE_ROOT", raising=False)
     monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {
-        "run": staticmethod(subprocess.run), "Popen": staticmethod(popen),
-        "STDOUT": subprocess.STDOUT,
+        "Popen": staticmethod(lambda cmd, **kw: launched.update(cmd=cmd, **kw) or Process()), "STDOUT": -2,
     })())
-    job = fd.default_launch(ticket.id, fd.HostSpec("notebook", 1), ticket.model_dump(mode="json"))
 
-    operational = job.operational_checkout
-    assert operational is not None and operational != root
-    from core.line.store_selection import default_control_db_path, default_control_store
+    job = fd.default_launch("USR-413", fd.HostSpec("notebook", 1), {"id": "USR-413"})
 
-    dispatcher_db = default_control_db_path()
+    assert launched["cwd"] == root and Path(launched["cmd"][1]) == root / "run_ticket.py"
     assert launched["env"]["DARKFAC_STATE_ROOT"] == str((root / ".factory").resolve())
-    # Resolve the launcher's store under the exact child environment and persist
-    # a queue row. The operational checkout can then be removed independently.
-    monkeypatch.setenv("DARKFAC_STATE_ROOT", launched["env"]["DARKFAC_STATE_ROOT"])
-    launcher_db = default_control_db_path()
-    assert launcher_db == dispatcher_db
-    launcher_store = default_control_store()
-    launcher_store.upsert_ticket(
-        "darkfac", "USR-413", "planned", {"id": "USR-413"}, datetime.now(timezone.utc)
-    )
-    assert default_control_store().list_tickets("darkfac") == [{"id": "USR-413"}]
-    assert launched["cwd"] == operational
-    assert Path(launched["cmd"][1]).parent == operational
-    operational_tickets = json.loads(
-        (operational / ".factory/demands/demands.json").read_text(encoding="utf-8")
-    )
-    assert [row["id"] for row in operational_tickets] == [ticket.id]
-    assert not (operational / ".factory/queue_snapshot.json").exists()
-    assert ledger.read_text(encoding="utf-8") == foreign
-    assert shared_runtime.read_text(encoding="utf-8") == '{"foreign":true}\n'
-    fd._remove_operational_checkout(operational)
-    assert not operational.exists()
-    assert default_control_db_path() == dispatcher_db
-    assert default_control_store().list_tickets("darkfac") == [{"id": "USR-413"}]
+    assert "DARKFAC_PROJECT_ROOT" not in launched["env"]
+    assert list((root / ".worktrees").glob("fleet-dispatch-*")) == []
+    assert job.ticket_id == "USR-413"
+    import json
 
-    # A `worktree add` that partially succeeds and then reports an error must
-    # still be removed; otherwise later dispatches discover a stale checkout.
-    real_git_checked = fd._git_checked
-    partial_path = {}
-
-    def fail_after_worktree_add(args, cwd):
-        result = real_git_checked(args, cwd)
-        if list(args[:2]) == ["worktree", "add"]:
-            partial_path["path"] = Path(args[3])
-            raise RuntimeError("git reported a late worktree creation failure")
-        return result
-
-    monkeypatch.setattr(fd, "_git_checked", fail_after_worktree_add)
-    with pytest.raises(RuntimeError, match="late worktree creation failure"):
-        fd._create_operational_checkout(ticket.id, "notebook", ticket.model_dump(mode="json"))
-    assert not partial_path["path"].exists()
-    assert str(partial_path["path"]) not in git("worktree", "list", "--porcelain").stdout
+    handed = json.loads(Path(launched["env"]["DARKFAC_DISPATCH_TICKET"]).read_text(encoding="utf-8"))
+    assert handed == {"id": "USR-413"}  # the selected record travels with the child
 
 
-def test_operational_checkout_source_failure_is_visible_and_not_dispatched(tmp_path: Path, monkeypatch):
-    cfg = fd.DispatcherConfig(hosts=[fd.HostSpec("grokbox", 1)], state_path=tmp_path / "state.json")
-    dispatcher = fd.FleetDispatcher(
-        cfg, demands_loader=lambda: [_d("USR-41")],
-        probe=lambda _host: fd.HostProbe(True), clock=lambda: 1000.0,
-    )
-
-    def source_failure(ticket_id, host_id, demand):
-        raise RuntimeError("git fetch origin main falhou (rc=128): source unavailable")
-
-    monkeypatch.setattr(fd, "_create_operational_checkout", source_failure)
-    cycle = dispatcher.run_cycle()
-
-    assert cycle["dispatched"] == []
-    assert cycle["idle_reasons"]["grokbox"].startswith("lancamento_falhou:git fetch origin main")
-    assert dispatcher.admission_store.budget("darkfac", "USR-41")["infra_streak"] == 1
-    failure = cycle["recent_failures"][-1]
-    assert failure["kind"] == "launch" and "source unavailable" in failure["reason"]
-
-
-def test_operational_checkout_cleanup_uses_protected_cleanup_and_logs_recovery(tmp_path, monkeypatch, caplog):
-    from core.git.ticket_workspace import CleanupResult
-
-    checkout = tmp_path / "operational-checkout"
-    checkout.mkdir()
-    holder = "python (pid 17192)"
-    calls = []
-
-    def protected_cleanup(path, main_root, **kwargs):
-        calls.append((path, main_root, kwargs.get("discard_path_hashes")))
-        return CleanupResult(
-            path=path, removed=False, method="preserved",
-            detail=f"{path} is in use; preserved because processes have cwd inside it: {holder}",
-        )
-
-    monkeypatch.setattr("core.git.ticket_workspace.cleanup", protected_cleanup)
-    monkeypatch.setattr(fd, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr("core.git.ticket_workspace.main_checkout_root", lambda _path: tmp_path)
-    monkeypatch.setitem(
-        fd._OPERATIONAL_CHECKOUT_LEDGER_HASHES,
-        os.path.normcase(os.path.realpath(checkout)),
-        "a" * 64,
-    )
-
-    fd._remove_operational_checkout(checkout)
-
-    assert calls == [
-        (checkout, tmp_path, {".factory/demands/demands.json": "a" * 64})
-    ]
-    assert "checkout operacional preservado" in caplog.text
-    assert str(checkout) in caplog.text and holder in caplog.text
-    assert "recuperacao possivel" in caplog.text
-
-
-def test_reap_cleans_operational_checkout_after_job_exits_without_changing_deploy_batch(tmp_path, monkeypatch):
+def test_reap_keeps_deploy_batch_after_job_exits(tmp_path, monkeypatch):
     e = Env(tmp_path, [_d("USR-01")], free=("grokbox",))
-    checkout = tmp_path / "operational-checkout"
-    calls = []
-    monkeypatch.setattr(fd, "_remove_operational_checkout", lambda path: calls.append(path))
     e.d.run_cycle()
-    job = e.d.in_flight["grokbox"]
-    job.operational_checkout = checkout
     e.handles["USR-01"].rc = 0
     e.mark_delivered("USR-01")
 
     e.d.run_cycle()
-    assert calls == [checkout]
     assert e.d.pending_deploy and e.d.deploys == 0
     e.now += e.d.config.deploy_window_sec + 1
     e.d.run_cycle()
@@ -2583,9 +2450,11 @@ def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
                             f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
     store = e.d.admission_store
     assert not store.recovery_state()["active"]  # falha repetida nunca serializa a frota
-    assert [h["ticket_id"] for h in store.ticket_holds()] == ([] if cause == "gate_timeout" else ["USR-01"])
-    if cause == "gate_failed":
-        assert store.ticket_holds()[0]["cause"] == cause
+    assert [h["ticket_id"] for h in store.ticket_holds()] == ["USR-01"]
+    # EC-02: the same candidate timing out the gate repeatedly holds with its own cause instead of looping.
+    expected = "gate_timeout_repeated" if cause == "gate_timeout" else cause
+    if cause in ("gate_failed", "gate_timeout"):
+        assert store.ticket_holds()[0]["cause"] == expected
 
 
 def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
@@ -2731,25 +2600,18 @@ def _one_cycle(dispatcher):
 def _plant_live_work(dispatcher, tmp_path: Path, monkeypatch):
     from core.line import pending_delivery as pending
 
-    checkout = tmp_path / "operational-checkout"
-    checkout.mkdir()
-    (checkout / "keep.txt").write_text("stay", encoding="utf-8")
     handle = _LiveHandle()
     child = _LiveHandle()
-    dispatcher.in_flight["grokbox"] = fd.InFlight("USR-508", "grokbox", handle, operational_checkout=checkout)
+    dispatcher.in_flight["grokbox"] = fd.InFlight("USR-508", "grokbox", handle)
     pending._children[508508] = child
-    removed: list[bool] = []
-    monkeypatch.setattr(fd, "_remove_operational_checkout", lambda *_a, **_k: removed.append(True))
-    return handle, child, checkout, removed, pending
+    return handle, child, pending
 
 
-def _assert_live_work_untouched(handle, child, checkout: Path, removed: list[bool]) -> None:
+def _assert_live_work_untouched(handle, child) -> None:
     for actor in (handle, child):
         assert "kill" not in actor.calls
         assert "terminate" not in actor.calls
         assert "wait" not in actor.calls
-    assert removed == []
-    assert (checkout / "keep.txt").read_text(encoding="utf-8") == "stay"
 
 
 def test_changed_checkout_sha_reexecs_before_cycle_and_leaves_live_work(tmp_path: Path, monkeypatch) -> None:
@@ -2757,7 +2619,7 @@ def test_changed_checkout_sha_reexecs_before_cycle_and_leaves_live_work(tmp_path
     dispatcher, execs = _sha_dispatcher(
         tmp_path, _ShaSeq([_SHA_A, _SHA_B]), launch_argv=["--loop", "--resume-only"],
     )
-    handle, child, checkout, removed, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    handle, child, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
     cycles: list[str] = []
     dispatcher.run_cycle = lambda: cycles.append("cycle")
     try:
@@ -2770,8 +2632,8 @@ def test_changed_checkout_sha_reexecs_before_cycle_and_leaves_live_work(tmp_path
         [sys.executable, "-m", "core.line.fleet_dispatcher", "--loop", "--resume-only"],
     )]
     assert fd.IMPORT_RESTART_SHA_ENV not in os.environ
-    _assert_live_work_untouched(handle, child, checkout, removed)
-    assert dispatcher.in_flight["grokbox"].operational_checkout == checkout
+    _assert_live_work_untouched(handle, child)
+    assert dispatcher.in_flight["grokbox"].handle is handle
 
 
 def test_exec_failure_is_logged_and_the_loop_continues(tmp_path: Path, monkeypatch, caplog) -> None:
@@ -2781,7 +2643,7 @@ def test_exec_failure_is_logged_and_the_loop_continues(tmp_path: Path, monkeypat
         raise OSError("exec recusado")
 
     dispatcher, _execs = _sha_dispatcher(tmp_path, _ShaSeq([_SHA_A, _SHA_B]), exec_fn=boom)
-    handle, child, checkout, removed, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    handle, child, pending = _plant_live_work(dispatcher, tmp_path, monkeypatch)
     try:
         cycle = _one_cycle(dispatcher)
     finally:
@@ -2790,7 +2652,7 @@ def test_exec_failure_is_logged_and_the_loop_continues(tmp_path: Path, monkeypat
     assert "reinicio do despachante falhou" in caplog.text
     assert cycle["code_sha"] == _SHA_B
     assert cycle["code_sha_changed"] is True
-    _assert_live_work_untouched(handle, child, checkout, removed)
+    _assert_live_work_untouched(handle, child)
 
 
 @pytest.mark.parametrize("startup,later", [(_SHA_A, _SHA_A), ("A" * 40, "a" * 40)])
@@ -3303,7 +3165,7 @@ def test_stale_import_restarts_once_after_cycle_when_head_is_unchanged(
     )
     seen = _track_cycle(dispatcher, events)
     monkeypatch.setattr(fd.time, "sleep", _main_thread_sleep(lambda _seconds: events.append("sleep")))
-    handle, child, checkout, removed, planted = _plant_live_work(dispatcher, tmp_path, monkeypatch)
+    handle, child, planted = _plant_live_work(dispatcher, tmp_path, monkeypatch)
     try:
         dispatcher.run_forever(stop=_stop_after(1))
         assert os.environ[fd.IMPORT_RESTART_SHA_ENV] == dispatcher._startup_sha == _SHA_A
@@ -3322,7 +3184,7 @@ def test_stale_import_restarts_once_after_cycle_when_head_is_unchanged(
     assert cycle["resumptions"][0]["cause"] == "stale_dispatcher_import"
     assert cycle["resumptions"][0]["missing"] == "core.line.routing"
     assert path.read_bytes() == before
-    _assert_live_work_untouched(handle, child, checkout, removed)
+    _assert_live_work_untouched(handle, child)
 
 
 def test_stale_import_with_restart_sha_records_the_cause_and_sleeps(

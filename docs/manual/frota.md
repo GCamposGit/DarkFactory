@@ -237,20 +237,23 @@ excluídos não são sondados. Sem candidatos elegíveis, o modo automático inf
 e continua localmente; `--remote-required` termina com causa estruturada
 `no_eligible_workers`, sem criar dispatcher ou reiniciar host.
 
-Cada despacho inicia `run_ticket.py` em um worktree operacional limpo criado de `origin/main`.
-O despachante copia para esse checkout somente o registro do ticket selecionado; arquivos
-alterados no checkout compartilhado, inclusive estado de runtime, ficam preservados e fora
-da execução. Falhas ao atualizar a referência ou criar o worktree aparecem como falha de
-lançamento no estado do ciclo e colocam o ticket em cooldown; não são tratadas como despacho
-bem-sucedido.
+Cada despacho inicia `run_ticket.py` direto de `PROJECT_ROOT`, sem clone efêmero `fleet-dispatch-*`
+(EC-02). `run_ticket.py` cria a única worktree do ticket (`.worktrees/<ticket>-<ts>`) ou reaproveita a
+preservada de uma tentativa anterior, para `darkfac` e para projetos externos (checkout resolvido por
+`project_checkout`).
 
 O processo filho recebe `DARKFAC_STATE_ROOT` resolvido no checkout do despachante (ou o
 override configurado), pois fila, reservas e demais dados mutáveis são compartilhados entre
-workers. Ele não herda `DARKFAC_PROJECT_ROOT`: essa variável apontaria para o checkout
-operacional e faria o portão confundir alterações locais nesse checkout com sujeira do
-candidato. Durante a entrega, `run_ticket.py` define `DARKFAC_PROJECT_ROOT` para a worktree
-do ticket em cada tentativa do portão, inclusive nos retries remotos. Assim o portão recusa
-uma worktree candidata suja e ignora alterações presentes apenas no checkout operacional.
+workers. Ele não herda `DARKFAC_PROJECT_ROOT`. Durante a entrega, `run_ticket.py` define
+`DARKFAC_PROJECT_ROOT` para a worktree do ticket em cada tentativa do portão, inclusive nos retries
+remotos. Assim o portão recusa uma worktree candidata suja.
+
+Como o filho roda do checkout compartilhado, `node_sync` e a sincronização pós-merge (`GitAutonomyManager._cleanup`) adiam o fast-forward enquanto
+houver `run_ticket.py` da frota em voo (`running_fleet_runs`), com `logger.warning`
+(`fleet_runs_in_flight=...`); o próximo ciclo tenta de novo. Dois `gate_timeout` seguidos no mesmo
+`main_sha` colocam o ticket em hold com causa `gate_timeout_repeated`. Uma worktree preservada só é
+reaproveitada se a base registrada em `branch.<ticket>.darkfacbase` for a base atual do projeto, e o
+`progress.json` órfão só é arquivado pelo host que o gravou (`host`). Worktree legada sem `darkfacbase` só é reaproveitada se todos os commits após a base citarem o ID do ticket. O despachante entrega ao filho o registro selecionado em `STATE_ROOT/runs/<ID>.dispatch_ticket.json` (`DARKFAC_DISPATCH_TICKET`), que o intake prefere ao ledger local.
 
 ## Pin de execução e admissão (USR-510)
 
@@ -311,7 +314,7 @@ em `<state_root>/backups/worktree_archive/<nome>-<timestamp>/` (`changes.patch` 
 arquivos existem; sem arquivo verificado a worktree é preservada (`archive_failed`). Ticket
 aberto, checkout principal, worktree com lock ou com processo vivo nunca são arquivados.
 O registro `cleanup_pending` não bloqueia mais a classificação: a worktree é reavaliada a cada
-varredura. Registros `discard_path_changed` vêm de checkouts `fleet-dispatch-*` cujo ledger foi
+varredura. Registros `discard_path_changed` vêm de checkouts `fleet-dispatch-*` legados cujo ledger foi
 alterado pelo próprio ticket depois do hash gravado na criação; como o HEAD destacado carrega
 commits fora da base, eles seguem preservados (`detached_outside_base`).
 
@@ -337,7 +340,7 @@ interpretador que já está rodando e os argumentos originais da largada:
 ```
 
 A substituição não chama `kill`, `terminate` nem `wait` nos handles em voo nem nos filhos
-de `pending_delivery`, e não remove o checkout operacional. Esses runs continuam no
+de `pending_delivery`, e não remove worktrees. Esses runs continuam no
 sistema; o processo novo os enxerga pelo inventário de processos.
 
 SHA igual, SHA ilegível, `--once` e `--dry-run` não substituem o processo por essa

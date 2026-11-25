@@ -79,6 +79,7 @@ class BuildReport(BaseModel):
     plan_digest: str = ""
     candidate_digest: str = ""
     worktree: str = ""
+    host: str = ""  # machine that wrote the checkpoint (EC-02); empty on older artifacts
 
 
 class ValidationReport(BaseModel):
