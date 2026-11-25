@@ -2446,9 +2446,11 @@ def test_official_delivery_cause_ignores_gate_tail(tmp_path, cause):
                             f'[ERRO NA ENTREGA] causa: {cause}; erro: x\n{{"cause": "{nested}"}}')
     store = e.d.admission_store
     assert not store.recovery_state()["active"]  # falha repetida nunca serializa a frota
-    assert [h["ticket_id"] for h in store.ticket_holds()] == ([] if cause == "gate_timeout" else ["USR-01"])
-    if cause == "gate_failed":
-        assert store.ticket_holds()[0]["cause"] == cause
+    assert [h["ticket_id"] for h in store.ticket_holds()] == ["USR-01"]
+    # EC-02: the same candidate timing out the gate repeatedly holds with its own cause instead of looping.
+    expected = "gate_timeout_repeated" if cause == "gate_timeout" else cause
+    if cause in ("gate_failed", "gate_timeout"):
+        assert store.ticket_holds()[0]["cause"] == expected
 
 
 def test_fleet_reservation_refusal_counts_as_lock_not_failure(tmp_path):
