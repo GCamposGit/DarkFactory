@@ -592,7 +592,8 @@ def rebase_on_origin_main(cwd: Path, keep_conflict: bool = False) -> tuple[bool,
     """
     from core.git.autonomy import _run_git
 
-    _restore_interrupted_replay(cwd)
+    if not _restore_interrupted_replay(cwd):
+        return False, [], "interrupted_replay_restore_failed"
     if _rebase_in_progress(cwd):
         conflicts = _unmerged_files(cwd)
         return False, conflicts, "rebase already in progress; continuing preserved worktree state"
@@ -625,7 +626,8 @@ def rebase_on_project_base(cwd: Path, base: str, keep_conflict: bool = False) ->
     """Synchronize a client ticket branch with the project's registered default branch."""
     from core.git.autonomy import _run_git
 
-    _restore_interrupted_replay(cwd)
+    if not _restore_interrupted_replay(cwd):
+        return False, [], "interrupted_replay_restore_failed"
     if _rebase_in_progress(cwd):
         conflicts = _unmerged_files(cwd)
         return False, conflicts, "rebase already in progress; continuing preserved worktree state"
@@ -799,8 +801,10 @@ def _try_cherry_pick_ticket_commits(
 
     def restore(paths: list[str], reason: str) -> tuple[bool, list[str], str, bool]:
         _run_git(["cherry-pick", "--abort"], cwd=cwd)
-        _run_git(["reset", "--hard", candidate], cwd=cwd)
-        marker.unlink(missing_ok=True)
+        if _run_git(["reset", "--hard", candidate], cwd=cwd).returncode == 0:
+            marker.unlink(missing_ok=True)
+        else:  # keep the marker so the next delivery restores the candidate before anything else
+            reason = f"{reason}+candidate_restore_failed"
         return False, paths, reason, True
 
     _abort_rebase(cwd)
@@ -878,13 +882,16 @@ def _try_cherry_pick_ticket_commits(
     return True, [], "rebased successfully", True
 
 
-def _restore_interrupted_replay(cwd: Path) -> None:
-    """Put the ticket branch back on its candidate if a cherry-pick replay was interrupted."""
+def _restore_interrupted_replay(cwd: Path) -> bool:
+    """Put the ticket branch back on its candidate if a cherry-pick replay was interrupted.
+
+    Returns False only when a replay marker exists and the candidate could not be restored.
+    """
     from core.git.autonomy import _run_git
 
     git_dir_text = _run_git(["rev-parse", "--git-dir"], cwd=cwd).stdout.strip()
     if not git_dir_text:
-        return
+        return True
     git_dir = Path(git_dir_text)
     if not git_dir.is_absolute():
         git_dir = cwd / git_dir
@@ -892,11 +899,14 @@ def _restore_interrupted_replay(cwd: Path) -> None:
     try:
         candidate = marker.read_text(encoding="utf-8").strip()
     except OSError:
-        return
+        return True
     _run_git(["cherry-pick", "--abort"], cwd=cwd)
     if candidate and _run_git(["reset", "--hard", candidate], cwd=cwd).returncode == 0:
         marker.unlink(missing_ok=True)
         logger.warning("interrupted cherry-pick replay restored to candidate %s in %s", candidate[:12], cwd)
+        return True
+    logger.error("interrupted cherry-pick replay could not be restored in %s; marker kept", cwd)
+    return False
 
 
 def _default_rebase_resume(ticket: UserTicket, cwd: Path) -> str:
@@ -2541,7 +2551,9 @@ def _deliver_sync(
     Returns (True, result) when the delivery must stop here, else (False, current_sha).
     """
     progress.phase("gate", "running", f"sincronizando com origin/{base_branch} antes do portao")
-    if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
+    # An interrupted cherry-pick replay must be undone before committing a half-resolved tree.
+    replay_restored = _restore_interrupted_replay(target_worktree)
+    if replay_restored and not no_commit and git_mgr.is_dirty(cwd=target_worktree):
         if not as_json:
             print("[+] Comitando alterações pendentes antes do rebase...")
         git_mgr.commit_ticket(
