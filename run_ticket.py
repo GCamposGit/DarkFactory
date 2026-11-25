@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -600,6 +600,8 @@ def rebase_on_origin_main(cwd: Path, keep_conflict: bool = False) -> tuple[bool,
     """
     from core.git.autonomy import _run_git
 
+    if not _restore_interrupted_replay(cwd):
+        return False, [], "interrupted_replay_restore_failed"
     if _rebase_in_progress(cwd):
         conflicts = _unmerged_files(cwd)
         return False, conflicts, "rebase already in progress; continuing preserved worktree state"
@@ -632,6 +634,8 @@ def rebase_on_project_base(cwd: Path, base: str, keep_conflict: bool = False) ->
     """Synchronize a client ticket branch with the project's registered default branch."""
     from core.git.autonomy import _run_git
 
+    if not _restore_interrupted_replay(cwd):
+        return False, [], "interrupted_replay_restore_failed"
     if _rebase_in_progress(cwd):
         conflicts = _unmerged_files(cwd)
         return False, conflicts, "rebase already in progress; continuing preserved worktree state"
@@ -747,8 +751,12 @@ def _abort_rebase(cwd: Path) -> None:
     _run_git(["rebase", "--abort"], cwd=cwd)
 
 
+_REPLAY_MARKER = "darkfac-replay-candidate"
+
+
 def _try_cherry_pick_ticket_commits(
     ticket: UserTicket, cwd: Path, *, route: Optional[tuple[str, str]] = None,
+    reserve_inference: Optional[Callable[[], bool]] = None,
 ) -> tuple[bool, list[str], str, bool]:
     """Replay a small ticket diff on the current rebase base, resolving only its own paths.
 
@@ -794,27 +802,47 @@ def _try_cherry_pick_ticket_commits(
     if any(audit_paths([path]) for path in ticket_paths):
         return False, [], "", False
 
-    _abort_rebase(cwd)
-    reset = _run_git(["reset", "--hard", upstream], cwd=cwd)
-    if reset.returncode != 0:
-        _run_git(["reset", "--hard", candidate], cwd=cwd)
-        return True, ticket_paths, "cherry_pick_reset_failed", True
+    # Persist the candidate before leaving the rebase: a crash mid-replay is restored by
+    # _restore_interrupted_replay on the next delivery instead of keeping a partial HEAD.
+    marker = git_dir / _REPLAY_MARKER
+    marker.write_text(candidate, encoding="utf-8")
 
+    def restore(paths: list[str], reason: str) -> tuple[bool, list[str], str, bool]:
+        _run_git(["cherry-pick", "--abort"], cwd=cwd)
+        if _run_git(["reset", "--hard", candidate], cwd=cwd).returncode == 0:
+            marker.unlink(missing_ok=True)
+        else:  # keep the marker so the next delivery restores the candidate before anything else
+            reason = f"{reason}+candidate_restore_failed"
+        return False, paths, reason, True
+
+    _abort_rebase(cwd)
+    if _run_git(["reset", "--hard", upstream], cwd=cwd).returncode != 0:
+        return restore(ticket_paths, "cherry_pick_reset_failed")
+
+    agent_used = False
     for commit in commits:
         picked = _run_git(["cherry-pick", commit], cwd=cwd)
         if picked.returncode == 0:
             continue
         conflicts = _unmerged_files(cwd)
         if not conflicts or any(path not in ticket_paths for path in conflicts):
-            _run_git(["cherry-pick", "--abort"], cwd=cwd)
-            _run_git(["reset", "--hard", candidate], cwd=cwd)
-            return False, conflicts or ticket_paths, "cherry_pick_conflict_outside_ticket_diff", True
+            return restore(conflicts or ticket_paths, "cherry_pick_conflict_outside_ticket_diff")
+        if agent_used:
+            # One inference per fingerprint: a second conflicting commit is not resolved here.
+            return restore(conflicts, "rebase_conflict_recovery_exhausted")
 
         chosen_route = route or _rebase_development_route(ticket)
         if chosen_route is None:
-            _run_git(["cherry-pick", "--abort"], cwd=cwd)
-            _run_git(["reset", "--hard", candidate], cwd=cwd)
-            return False, conflicts, "cherry_pick_conflict_no_route", True
+            return restore(conflicts, "cherry_pick_conflict_no_route")
+
+        try:
+            reserved = reserve_inference() if reserve_inference is not None else True
+        except Exception as exc:  # noqa: BLE001 - never launch an untracked model attempt
+            logger.warning("cherry-pick inference reservation failed for %s: %s", ticket.id, exc)
+            reserved = False
+        if not reserved:
+            return restore(conflicts, "rebase_conflict_inference_already_spent")
+        agent_used = True
 
         allowed_paths = set(ticket_paths)
         feedback = (
@@ -828,10 +856,8 @@ def _try_cherry_pick_ticket_commits(
         try:
             _invoke_fix_agent(cwd, ticket, "rebase-conflito", feedback, route=chosen_route)
         except Exception as exc:  # noqa: BLE001 - always leave the ticket branch recoverable
-            _run_git(["cherry-pick", "--abort"], cwd=cwd)
-            _run_git(["reset", "--hard", candidate], cwd=cwd)
             logger.warning("cherry-pick conflict resolution failed for %s: %s", ticket.id, exc)
-            return False, conflicts, "cherry_pick_resolution_failed", True
+            return restore(conflicts, "cherry_pick_resolution_failed")
         status = _run_git(["status", "--porcelain", "-z"], cwd=cwd)
         changed_paths: set[str] = set()
         entries = status.stdout.split("\0")
@@ -845,19 +871,50 @@ def _try_cherry_pick_ticket_commits(
             and "<<<<<<<" in (cwd / path).read_text(encoding="utf-8", errors="replace")
         ]
         if changed_paths - allowed_paths or unresolved or marker_paths:
-            _run_git(["cherry-pick", "--abort"], cwd=cwd)
-            _run_git(["reset", "--hard", candidate], cwd=cwd)
-            return False, sorted(set(conflicts + unresolved + marker_paths)), "cherry_pick_resolution_failed", True
+            # Same failure vocabulary as the rebase path: an untouched conflict exhausts the
+            # recovery, staged markers are rejected, anything else is out of the ticket scope.
+            reason = (
+                "rebase_conflict_recovery_exhausted" if unresolved
+                else "rebase_conflict_unresolved_markers" if marker_paths
+                else "cherry_pick_resolution_out_of_scope"
+            )
+            return restore(sorted(set(conflicts + unresolved + marker_paths)), reason)
 
         for path in conflicts:
             _run_git(["add", "--", path], cwd=cwd)
-        continued = _rebase_git(cwd, "cherry-pick", "--continue")
-        if continued.returncode != 0:
-            _run_git(["cherry-pick", "--abort"], cwd=cwd)
-            _run_git(["reset", "--hard", candidate], cwd=cwd)
-            return False, conflicts, "cherry_pick_continue_failed", True
+        if _rebase_git(cwd, "cherry-pick", "--continue").returncode != 0:
+            return restore(conflicts, "cherry_pick_continue_failed")
 
-    return True, [], "cherry-picked ticket commits onto updated base", True
+    marker.unlink(missing_ok=True)
+    logger.info("rebase recovered for %s by replaying %d ticket commit(s)", ticket.id, len(commits))
+    return True, [], "rebased successfully", True
+
+
+def _restore_interrupted_replay(cwd: Path) -> bool:
+    """Put the ticket branch back on its candidate if a cherry-pick replay was interrupted.
+
+    Returns False only when a replay marker exists and the candidate could not be restored.
+    """
+    from core.git.autonomy import _run_git
+
+    git_dir_text = _run_git(["rev-parse", "--git-dir"], cwd=cwd).stdout.strip()
+    if not git_dir_text:
+        return True
+    git_dir = Path(git_dir_text)
+    if not git_dir.is_absolute():
+        git_dir = cwd / git_dir
+    marker = git_dir / _REPLAY_MARKER
+    try:
+        candidate = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        return True
+    _run_git(["cherry-pick", "--abort"], cwd=cwd)
+    if candidate and _run_git(["reset", "--hard", candidate], cwd=cwd).returncode == 0:
+        marker.unlink(missing_ok=True)
+        logger.warning("interrupted cherry-pick replay restored to candidate %s in %s", candidate[:12], cwd)
+        return True
+    logger.error("interrupted cherry-pick replay could not be restored in %s; marker kept", cwd)
+    return False
 
 
 def _default_rebase_resume(ticket: UserTicket, cwd: Path) -> str:
@@ -1027,7 +1084,7 @@ def resolve_rebase_conflict(
             # A concurrent process or a restart saw the same fingerprint first. Do not race it.
             return technical_failure(f"rebase_recovery_already_claimed:{fingerprint.sha256[:16]}")
         replay_ok, replay_files, replay_reason, replay_eligible = _try_cherry_pick_ticket_commits(
-            ticket, cwd,
+            ticket, cwd, reserve_inference=lambda: store.reserve_rebase_inference(fingerprint),
         )
         if replay_eligible:
             if replay_ok:
@@ -2508,7 +2565,9 @@ def _deliver_sync(
     Returns (True, result) when the delivery must stop here, else (False, current_sha).
     """
     progress.phase("gate", "running", f"sincronizando com origin/{base_branch} antes do portao")
-    if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
+    # An interrupted cherry-pick replay must be undone before committing a half-resolved tree.
+    replay_restored = _restore_interrupted_replay(target_worktree)
+    if replay_restored and not no_commit and git_mgr.is_dirty(cwd=target_worktree):
         if not as_json:
             print("[+] Comitando alterações pendentes antes do rebase...")
         git_mgr.commit_ticket(
