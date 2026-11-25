@@ -301,7 +301,14 @@ def _merge_receipt(run_dir: Path) -> tuple[str | None, datetime | None]:
     sha = _read_json(path).get("merge_sha")
     if not isinstance(sha, str) or not _SHA_RE.match(sha.strip()):
         return None, None
-    mtimes = [p.stat().st_mtime for p in (path, run_dir / "deploy_report.json") if p.is_file()]
+    mtimes: list[float] = []
+    for receipt in (path, run_dir / "deploy_report.json"):
+        try:
+            mtimes.append(receipt.stat().st_mtime)
+        except OSError:
+            continue  # receipt cleared concurrently: that delivery simply does not count now
+    if not mtimes:
+        return None, None
     return sha.strip(), datetime.fromtimestamp(max(mtimes), UTC)
 
 
@@ -323,7 +330,7 @@ def _merge_on_default_branch(merge_sha: str, repo: Path | None, default_branch: 
         # Best effort: a failed fetch just leaves the last known remote ref.
         subprocess.run(["git", "fetch", "-q", "origin", default_branch], cwd=repo, capture_output=True, timeout=60)
         result = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", merge_sha, f"origin/{default_branch}"],
+            ["git", "merge-base", "--is-ancestor", merge_sha, f"refs/remotes/origin/{default_branch}"],
             cwd=repo, capture_output=True, text=True, timeout=20,
         )
     except (OSError, subprocess.SubprocessError) as exc:
