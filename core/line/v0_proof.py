@@ -6,16 +6,17 @@ menos 1 e de um produto real (``project_id`` diferente de ``darkfac``); os tres 
 
 ``evaluate_v0_proof`` e pura (sem I/O, sem relogio implicito): aplica a regra sobre uma lista de
 ``DeliveryEvidence`` ja coletada, na ordem cronologica em que as entregas aconteceram.
-``collect_v0_proof_evidence`` monta essa lista a partir do control store da linha
-(``core.line.owner_intake``), do ``DemandsStore`` (o canal vem da tag ``channel:<canal>`` que
-``owner_intake.submit_owner_demand`` grava no ticket), do ``OwnerActionStore`` e dos arquivos de
-learning pack por ticket em ``.factory/learning_packs/`` -- nunca cria uma fonte de verdade
-paralela a essas stores.
+``collect_v0_proof_evidence`` monta essa lista a partir do que o motor unico (``run_ticket.py``)
+realmente emite: o recibo ``merge.json`` e o ``deploy_report.json`` do ticket
+(``core.line.ticket_engine.artifacts_root``), o learning pack em ``.factory/learning_packs/`` e a
+presenca do ``merge_sha`` na branch padrao do projeto no registro (``ProjectDescriptor``). O canal
+vem da tag ``channel:<canal>`` do ``DemandsStore``; as acoes do owner, do ``OwnerActionStore``.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 import subprocess
@@ -27,7 +28,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.learning_pack.storage import DEFAULT_PACKS_DIR
-from core.line.owner_intake import extract_run_delivery_evidence, open_line_store, run_state, ticket_external_id
 from core.owner_actions.models import ActionKind
 from core.paths import project_root, state_root
 
@@ -56,10 +56,10 @@ class DeliveryEvidence(BaseModel):
     owner_decisions_count: int = 0  # ActionKind.DECISION tied to the ticket during the run (<=1: the aceite)
     intervention_types: list[str] = Field(default_factory=list)
     learning_pack_linked: bool = False
-    manual_page_changed: bool = False
     merge_sha: str | None = None
+    merge_on_default_branch: bool = False  # merge_sha reachable from the project's default branch
     smoke_passed: bool = False
-    delivery_evidence: str = ""  # human-readable evidence (extract_run_delivery_evidence)
+    delivery_evidence: str = ""  # ticket.delivery_evidence (PR url or commit)
     occurred_at: str | None = None
     source_notes: list[str] = Field(default_factory=list)  # degraded facts about THIS delivery
 
@@ -80,7 +80,6 @@ class QualifiedDelivery(BaseModel):
     delivery_evidence: str = ""
     smoke_passed: bool = False
     learning_pack_linked: bool = False
-    manual_page_changed: bool = False
     owner_interventions_count: int = 0
     owner_intervention_types: list[str] = Field(default_factory=list)
     learning_pack_ref: str | None = None
@@ -103,7 +102,6 @@ class V0ProofSlot(BaseModel):
     delivery_evidence: str = ""
     smoke_passed: bool = False
     learning_pack_linked: bool = False
-    manual_page_changed: bool = False
     occurred_at: str | None = None
     owner_interventions_count: int = 0
     owner_intervention_types: list[str] = Field(default_factory=list)
@@ -134,10 +132,10 @@ def _disqualify_reasons(delivery: DeliveryEvidence) -> list[str]:
         reasons.append(f"mais_de_uma_decisao_do_owner:{delivery.owner_decisions_count}")
     if not delivery.learning_pack_linked:
         reasons.append("learning_pack_ausente")
-    if not delivery.manual_page_changed:
-        reasons.append("manual_nao_atualizado")
     if not delivery.merge_sha:
         reasons.append("sem_sha_de_merge")
+    elif not delivery.merge_on_default_branch:
+        reasons.append("merge_fora_da_branch_padrao")
     if not delivery.smoke_passed:
         reasons.append("smoke_nao_verde")
     if any(code in {"owner_actions_store_unavailable", "owner_actions_read_failed"} for code in delivery.source_notes):
@@ -157,8 +155,8 @@ def evaluate_v0_proof(
     ``deliveries`` must already be in chronological order (oldest first). A delivery qualifies
     with a channel in ``{telegram, hub, chat}``, no owner action created during the run outside
     grill and aceite (grill itself never creates an ``OwnerAction``; at most one owner decision --
-    the single-touch acceptance -- is tolerated), a linked learning pack, a changed
-    ``docs/manual/`` page, a merge SHA and a green smoke. Any missing item disqualifies the
+    the single-touch acceptance -- is tolerated), a linked learning pack, a merge SHA
+    reachable from the project's default branch and a green smoke. Any missing item disqualifies the
     delivery and resets the running streak to zero; an in-progress delivery never counts as green.
     ``criterion_met`` requires the trailing streak to reach ``required_streak``, cover the three
     channels, and include at least one delivery whose ``project_id`` is not ``darkfac``.
@@ -178,7 +176,6 @@ def evaluate_v0_proof(
             delivery_evidence=item.delivery_evidence,
             smoke_passed=item.smoke_passed,
             learning_pack_linked=item.learning_pack_linked,
-            manual_page_changed=item.manual_page_changed,
             owner_interventions_count=item.owner_actions_count + item.owner_decisions_count,
             owner_intervention_types=item.intervention_types,
             learning_pack_ref=f".factory/learning_packs/{item.ticket_id}" if item.learning_pack_linked else None,
@@ -247,7 +244,6 @@ def build_v0_proof_slots(
                 delivery_evidence=item.delivery_evidence,
                 smoke_passed=item.smoke_passed,
                 learning_pack_linked=item.learning_pack_linked,
-                manual_page_changed=item.manual_page_changed,
                 owner_interventions_count=item.owner_interventions_count,
                 owner_intervention_types=item.owner_intervention_types,
                 learning_pack_ref=item.learning_pack_ref,
@@ -286,44 +282,54 @@ def _parse_dt(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _merge_sha_from_status(status: dict[str, Any]) -> str | None:
-    for job in status.get("jobs") or []:
-        if job.get("stage") == "integration" and job.get("status") == "succeeded":
-            refs = job.get("output_refs") or []
-            if len(refs) >= 2 and isinstance(refs[1], str) and _SHA_RE.match(refs[1]):
-                return refs[1]
-    return None
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
-def _build_deploy_smoke_passed(status: dict[str, Any]) -> bool:
-    """Whether the build_deploy stage (core.line.stage_release) recorded a green smoke ref."""
-    for job in status.get("jobs") or []:
-        if job.get("stage") == "build_deploy" and job.get("status") == "succeeded":
-            refs = job.get("output_refs") or []
-            if any(isinstance(ref, str) and ref.startswith("smoke:") for ref in refs):
-                return True
-    return False
+def _run_artifacts(ticket_id: str, artifacts_dir: Path) -> Path:
+    """`.darkfac/runs/<ticket>/` of the single engine (`core.line.ticket_engine.run_workspace`)."""
+    return artifacts_dir / ticket_id / ".darkfac" / "runs" / ticket_id
+
+
+def _merge_receipt(run_dir: Path) -> tuple[str | None, datetime | None]:
+    """(merge_sha, written_at) of the `merge.json` receipt that run_ticket writes after the merge."""
+    path = run_dir / "merge.json"
+    sha = _read_json(path).get("merge_sha")
+    if not isinstance(sha, str) or not _SHA_RE.match(sha.strip()):
+        return None, None
+    return sha.strip(), datetime.fromtimestamp(path.stat().st_mtime, UTC)
+
+
+def _smoke_passed(run_dir: Path, merge_sha: str) -> bool:
+    """`deploy_report.json` of the same sha with a green smoke."""
+    report = _read_json(run_dir / "deploy_report.json")
+    return report.get("sha") == merge_sha and report.get("smoke_ok") is True
 
 
 def _has_learning_pack(ticket_id: str, packs_dir: Path) -> bool:
     return any((packs_dir / f"{ticket_id}.{ext}").is_file() for ext in ("json", "md"))
 
 
-def _manual_page_changed(repo_root: Path, merge_sha: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "show", "--name-only", "--pretty=format:", merge_sha],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("v0_proof: git show falhou para %s: %s", merge_sha, type(exc).__name__)
+def _merge_on_default_branch(merge_sha: str, repo: Path | None, default_branch: str) -> bool:
+    """True when ``merge_sha`` is reachable from the project's default branch (remote ref first)."""
+    if repo is None or not repo.is_dir():
         return False
-    if result.returncode != 0:
-        return False
-    return any(line.strip().replace("\\", "/").startswith("docs/manual/") for line in result.stdout.splitlines())
+    for ref in (f"origin/{default_branch}", default_branch):
+        try:
+            result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", merge_sha, ref],
+                cwd=repo, capture_output=True, text=True, timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("v0_proof: git merge-base falhou para %s: %s", merge_sha, type(exc).__name__)
+            return False
+        if result.returncode == 0:
+            return True
+    return False
 
 
 def _owner_touches(
@@ -359,110 +365,72 @@ def _owner_touches(
 def _delivery_evidence(
     *,
     ticket: Any,
-    line_store: Any,
+    project: Any,
     owner_actions: list[Any],
     packs_dir: Path,
-    repo_root: Path,
+    artifacts_dir: Path,
+    fallback_repo: Path,
     channel: str,
 ) -> DeliveryEvidence:
+    """Facts of one ticket read from what run_ticket emits: merge/deploy receipts and learning pack."""
+    run_dir = _run_artifacts(ticket.id, artifacts_dir)
+    merge_sha, merged_at = _merge_receipt(run_dir)
+    created = ticket.created_at if getattr(ticket, "created_at", None) else None
     notes: list[str] = []
-    occurred_at = ticket.created_at.isoformat() if getattr(ticket, "created_at", None) else None
-    run_id: str | None = None
-    finder = getattr(line_store, "find_intake_runs", None)
-    if finder is None:
-        notes.append("store_sem_find_intake_runs")
-    else:
-        try:
-            pairs = finder("owner", ticket_external_id(ticket.id))
-            run_id = pairs[-1][1] if pairs else None
-        except Exception:
-            logger.warning("v0_proof: find_intake_runs falhou para %s", ticket.id, exc_info=True)
-            notes.append("run_lookup_failed")
-
-    if run_id is None:
-        notes.append("run_nao_encontrado")
-        return DeliveryEvidence(
-            ticket_id=ticket.id,
-            project_id=ticket.project_id,
-            channel=channel,
-            occurred_at=occurred_at,
-            source_notes=notes,
-        )
-
-    state = run_state(line_store, run_id)
-    delivery_evidence = extract_run_delivery_evidence(line_store, run_id)
-
-    status: dict[str, Any] = {}
-    getter = getattr(line_store, "get_run_status", None)
-    if getter is None:
-        notes.append("store_sem_get_run_status")
-    else:
-        try:
-            status = getter(run_id) or {}
-        except Exception:
-            logger.warning("v0_proof: get_run_status falhou para run %s", run_id, exc_info=True)
-            notes.append("run_status_unavailable")
-
-    merge_sha = _merge_sha_from_status(status)
-    window_start = _parse_dt(status.get("created_at"))
-    window_end = _parse_dt(status.get("completed_at")) or _parse_dt(status.get("updated_at"))
-    owner_actions_count, owner_decisions_count, intervention_types = _owner_touches(
-        ticket.id, owner_actions, window_start, window_end
-    )
-
+    if project is None:
+        notes.append(f"projeto_nao_registrado:{ticket.project_id}")
+    on_default = False
+    if merge_sha:
+        repo = project.resolve_path() if project is not None else fallback_repo
+        branch = project.default_branch if project is not None else "main"
+        on_default = _merge_on_default_branch(merge_sha, repo, branch)
+    actions, decisions, kinds = _owner_touches(ticket.id, owner_actions, _parse_dt(created), merged_at)
+    when = merged_at or _parse_dt(created)
     return DeliveryEvidence(
         ticket_id=ticket.id,
         project_id=ticket.project_id,
         channel=channel,
-        run_id=run_id,
-        in_progress=state == "in_flight",
-        owner_actions_count=owner_actions_count,
-        owner_decisions_count=owner_decisions_count,
-        intervention_types=intervention_types,
+        run_id=ticket.id if merge_sha else None,
+        in_progress=str(getattr(ticket.status, "value", ticket.status)) == "in_progress",
+        owner_actions_count=actions,
+        owner_decisions_count=decisions,
+        intervention_types=kinds,
         learning_pack_linked=_has_learning_pack(ticket.id, packs_dir),
-        manual_page_changed=_manual_page_changed(repo_root, merge_sha) if merge_sha else False,
         merge_sha=merge_sha,
-        smoke_passed=_build_deploy_smoke_passed(status),
-        delivery_evidence=delivery_evidence,
-        occurred_at=(window_end or window_start).isoformat() if (window_end or window_start) else occurred_at,
+        merge_on_default_branch=on_default,
+        smoke_passed=_smoke_passed(run_dir, merge_sha) if merge_sha else False,
+        delivery_evidence=str(getattr(ticket, "delivery_evidence", None) or ""),
+        occurred_at=when.isoformat() if when else None,
         source_notes=notes,
     )
 
 
 def collect_v0_proof_evidence(
     *,
-    store: Any | None = None,
+    store: Any | None = None,  # ignorado: o motor unico nao grava mais o DAG da linha (mantido p/ chamadores)
     demands_store: Any | None = None,
     owner_actions_store: Any | None = None,
     project_registry: Any | None = None,
     learning_packs_dir: Path | None = None,
     repo_root: Path | None = None,
+    artifacts_dir: Path | None = None,
     now: datetime | None = None,
     required_streak: int = REQUIRED_STREAK,
 ) -> V0ProofReport:
-    """Assembles ``DeliveryEvidence`` from the line's existing stores and applies the V0 rule.
+    """Assembles ``DeliveryEvidence`` from what the single engine emits and applies the V0 rule.
 
-    Reuses ``open_line_store``/``run_state``/``extract_run_delivery_evidence``
-    (``core.line.owner_intake``), ``DemandsStore`` (the channel comes from the
-    ``channel:<telegram|hub|chat>`` tag ``submit_owner_demand`` attaches to the ticket -- there is
-    no separate channel store), ``OwnerActionStore`` and the ticket-keyed learning pack files under
-    ``.factory/learning_packs/``. A ticket without a ``channel:`` tag predates this instrumentation
-    (or did not go through ``submit_owner_demand``) and is excluded from the candidate universe,
-    not treated as a disqualifying entry.
+    Per ticket: ``merge.json``/``deploy_report.json`` under ``core.line.ticket_engine.artifacts_root``,
+    the ticket-keyed learning pack under ``.factory/learning_packs/`` and the ``merge_sha`` reachable
+    from the default branch of the project in the registry (external repos included; no commit in
+    DarkFac's ``docs/manual/`` is required). The channel comes from the ``channel:<telegram|hub|chat>``
+    tag ``submit_owner_demand`` attaches to the ticket; a ticket without it predates this
+    instrumentation and is excluded from the candidate universe, not treated as disqualified.
 
     Never raises: an unreachable source is recorded in ``degraded_sources`` with a structured code,
     never the raw exception text (it may carry a connection string or other credential).
     """
     moment = now or datetime.now(UTC)
     degraded: list[str] = []
-
-    line_store = store
-    if line_store is None:
-        try:
-            line_store = open_line_store()
-        except Exception:
-            logger.warning("v0_proof: control store da linha indisponivel", exc_info=True)
-            degraded.append("control_store_unavailable")
 
     demands = demands_store
     if demands is None:
@@ -504,8 +472,10 @@ def collect_v0_proof_evidence(
             logger.warning("v0_proof: ProjectRegistry indisponivel", exc_info=True)
             degraded.append("project_registry_unavailable")
 
-    packs_dir = learning_packs_dir or DEFAULT_PACKS_DIR
-    repo = repo_root or project_root()
+    if artifacts_dir is None:
+        from core.line.ticket_engine import artifacts_root
+
+        artifacts_dir = artifacts_root()
 
     tickets: list[Any] = []
     if demands is not None:
@@ -516,26 +486,27 @@ def collect_v0_proof_evidence(
             degraded.append("demands_read_failed")
 
     deliveries: list[DeliveryEvidence] = []
-    if line_store is not None:
-        for ticket in tickets:
-            channel = _channel_from_tags(ticket.tags)
-            if not channel:
-                continue
-            evidence = _delivery_evidence(
+    for ticket in tickets:
+        channel = _channel_from_tags(ticket.tags)
+        if not channel:
+            continue
+        project = None
+        if registry is not None:
+            try:
+                project = registry.get_project(ticket.project_id)
+            except Exception:
+                logger.warning("v0_proof: consulta ao ProjectRegistry falhou", exc_info=True)
+        deliveries.append(
+            _delivery_evidence(
                 ticket=ticket,
-                line_store=line_store,
+                project=project,
                 owner_actions=owner_actions,
-                packs_dir=packs_dir,
-                repo_root=repo,
+                packs_dir=learning_packs_dir or DEFAULT_PACKS_DIR,
+                artifacts_dir=artifacts_dir,
+                fallback_repo=repo_root or project_root(),
                 channel=channel,
             )
-            if registry is not None:
-                try:
-                    if registry.get_project(ticket.project_id) is None:
-                        evidence.source_notes.append(f"projeto_nao_registrado:{ticket.project_id}")
-                except Exception:
-                    logger.warning("v0_proof: consulta ao ProjectRegistry falhou", exc_info=True)
-            deliveries.append(evidence)
+        )
 
     deliveries.sort(key=lambda item: (_parse_dt(item.occurred_at) or datetime.max.replace(tzinfo=UTC), item.ticket_id))
     return evaluate_v0_proof(
