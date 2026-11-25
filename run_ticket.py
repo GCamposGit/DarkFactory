@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -741,6 +741,7 @@ def _abort_rebase(cwd: Path) -> None:
 
 def _try_cherry_pick_ticket_commits(
     ticket: UserTicket, cwd: Path, *, route: Optional[tuple[str, str]] = None,
+    reserve_inference: Optional[Callable[[], bool]] = None,
 ) -> tuple[bool, list[str], str, bool]:
     """Replay a small ticket diff on the current rebase base, resolving only its own paths.
 
@@ -808,6 +809,16 @@ def _try_cherry_pick_ticket_commits(
             _run_git(["reset", "--hard", candidate], cwd=cwd)
             return False, conflicts, "cherry_pick_conflict_no_route", True
 
+        try:
+            reserved = reserve_inference() if reserve_inference is not None else True
+        except Exception as exc:  # noqa: BLE001 - never launch an untracked model attempt
+            logger.warning("cherry-pick inference reservation failed for %s: %s", ticket.id, exc)
+            reserved = False
+        if not reserved:
+            _run_git(["cherry-pick", "--abort"], cwd=cwd)
+            _run_git(["reset", "--hard", candidate], cwd=cwd)
+            return False, conflicts, "rebase_conflict_inference_already_spent", True
+
         allowed_paths = set(ticket_paths)
         feedback = (
             f"Resolva o cherry-pick do ticket {ticket.id} sobre origin/main.\n"
@@ -839,7 +850,14 @@ def _try_cherry_pick_ticket_commits(
         if changed_paths - allowed_paths or unresolved or marker_paths:
             _run_git(["cherry-pick", "--abort"], cwd=cwd)
             _run_git(["reset", "--hard", candidate], cwd=cwd)
-            return False, sorted(set(conflicts + unresolved + marker_paths)), "cherry_pick_resolution_failed", True
+            # Same failure vocabulary as the rebase path: an untouched conflict exhausts the
+            # recovery, staged markers are rejected, anything else is out of the ticket scope.
+            reason = (
+                "rebase_conflict_recovery_exhausted" if unresolved
+                else "rebase_conflict_unresolved_markers" if marker_paths
+                else "cherry_pick_resolution_out_of_scope"
+            )
+            return False, sorted(set(conflicts + unresolved + marker_paths)), reason, True
 
         for path in conflicts:
             _run_git(["add", "--", path], cwd=cwd)
@@ -849,7 +867,8 @@ def _try_cherry_pick_ticket_commits(
             _run_git(["reset", "--hard", candidate], cwd=cwd)
             return False, conflicts, "cherry_pick_continue_failed", True
 
-    return True, [], "cherry-picked ticket commits onto updated base", True
+    logger.info("rebase recovered for %s by replaying %d ticket commit(s)", ticket.id, len(commits))
+    return True, [], "rebased successfully", True
 
 
 def _default_rebase_resume(ticket: UserTicket, cwd: Path) -> str:
@@ -1019,7 +1038,7 @@ def resolve_rebase_conflict(
             # A concurrent process or a restart saw the same fingerprint first. Do not race it.
             return technical_failure(f"rebase_recovery_already_claimed:{fingerprint.sha256[:16]}")
         replay_ok, replay_files, replay_reason, replay_eligible = _try_cherry_pick_ticket_commits(
-            ticket, cwd,
+            ticket, cwd, reserve_inference=lambda: store.reserve_rebase_inference(fingerprint),
         )
         if replay_eligible:
             if replay_ok:

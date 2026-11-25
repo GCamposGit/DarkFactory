@@ -537,7 +537,7 @@ def test_small_ticket_rebase_conflict_replays_commit_and_limits_agent_to_ticket_
     monkeypatch.setattr(run_ticket, "_invoke_fix_agent", resolve_cherry_pick)
     done, remaining, reason = run_ticket.resolve_rebase_conflict(_TICKET_412, repo, files, message)
 
-    assert done is True and remaining == [] and "cherry-picked" in reason
+    assert done is True and remaining == [] and reason == "rebased successfully"
     assert (repo / "mod.py").read_text(encoding="utf-8") == "value = 3\n"
     assert (repo / "extra.py").read_text(encoding="utf-8") == "ticket follow-up\n"
     assert subprocess.run(
