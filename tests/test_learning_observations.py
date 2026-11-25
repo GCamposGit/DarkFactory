@@ -5,12 +5,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from core.learning.observations import (
     consolidate_by_cause,
     load_observations,
     record_intervention_outcome,
     record_observation,
 )
+from core.learning.models import PreferenceCategory
 from core.learning.tracker import ContinuousLearningTracker
 from core.line.retrospective import RetrospectiveLesson, record_lessons_in_learning_tracker
 from core.learning.models import MistakeCategory
@@ -39,7 +42,7 @@ def test_interaction_is_sanitized_project_scoped_and_recovered_after_restart(tmp
     assert records[0]["run_id"] == "run-7"
     assert records[0]["identity"] == "interaction:request-7"
     assert "secret-value" not in json.dumps(records)
-    assert "secret-value" not in (root / "learning" / "learning_ledger.json").read_text(encoding="utf-8")
+    assert "secret-value" not in (root / "learning" / "learning_ledger.live.json").read_text(encoding="utf-8")
     assert load_observations("product-b", root=root) == []
 
 
@@ -113,3 +116,75 @@ def test_other_harness_failure_is_linked_and_cause_consolidates_with_independent
         "interventions_before": 3,
         "interventions_after": 1,
     }
+
+
+def test_record_turn_cli_leaves_checkout_clean_and_turn_is_primed(tmp_path: Path, monkeypatch, capsys) -> None:
+    """EC-03: live turns go to the untracked overlay; the tracked seed ledger stays byte-identical."""
+    import subprocess
+
+    from core.learning import cli, tracker as tracker_module
+
+    repo_gitignore = Path(__file__).resolve().parents[1] / ".gitignore"
+    seed = tmp_path / ".factory" / "learning" / "learning_ledger.json"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("{}", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(repo_gitignore.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=tmp_path, check=True, capture_output=True, text=True,
+        ).stdout
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-q", "-m", "seed")
+    seed_bytes = seed.read_bytes()
+
+    monkeypatch.setattr(tracker_module, "DEFAULT_LEDGER_FILE", seed)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path))
+    for prompt in ("turno de coordenacao", "segundo turno"):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["learning", "record-turn", "--prompt", prompt, "--intent", "evitar sujeira", "--project", "darkfac"],
+        )
+        cli.main()
+    capsys.readouterr()
+
+    assert git("status", "--porcelain") == ""
+    assert seed.read_bytes() == seed_bytes
+    fresh = ContinuousLearningTracker(ledger_file=seed)
+    assert [t.turn_id for t in fresh.ledger.turns] == [1, 2]
+    assert "turno de coordenacao" in fresh.get_active_system1_context(project_id="darkfac")
+
+
+def test_stale_trackers_do_not_lose_each_others_updates(tmp_path: Path) -> None:
+    ledger = tmp_path / ".factory" / "learning" / "learning_ledger.json"
+    a = ContinuousLearningTracker(ledger_file=ledger, session_id="a")
+    b = ContinuousLearningTracker(ledger_file=ledger, session_id="b")
+    a.record_turn("turno", "intencao", project_id="p")
+    b.register_preference(PreferenceCategory.WORKFLOW, "regra", "exemplo")
+    fresh = ContinuousLearningTracker(ledger_file=ledger)
+    assert len(fresh.ledger.turns) == 1
+    assert len(fresh.ledger.preferences) == 1
+
+
+def test_observation_lock_times_out_instead_of_spinning(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    from core.learning import observations
+
+    def always_busy(*_args: object, **_kwargs: object) -> None:
+        raise OSError("busy")
+
+    if os.name == "nt":
+        import msvcrt
+
+        monkeypatch.setattr(msvcrt, "locking", always_busy)
+    else:
+        import fcntl
+
+        monkeypatch.setattr(fcntl, "flock", always_busy)
+    with pytest.raises(observations.ObservationLockTimeout):
+        with observations._exclusive_file_lock(tmp_path / "x.lock", timeout=0.05):
+            pass

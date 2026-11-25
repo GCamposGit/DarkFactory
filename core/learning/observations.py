@@ -44,6 +44,13 @@ def canonical_cause(cause: str | None) -> str:
     return value or "unspecified"
 
 
+LOCK_TIMEOUT_SECONDS = float(os.environ.get("DARKFAC_DEMANDS_LOCK_TIMEOUT", "30"))
+
+
+class ObservationLockTimeout(TimeoutError):
+    """Raised when the observation lock cannot be acquired before the deadline."""
+
+
 def _project_path(project_id: str, root: Path | None = None) -> Path:
     project = sanitize_text(project_id).strip()
     if not project:
@@ -59,7 +66,9 @@ def _lock_path(observation_path: Path) -> Path:
 
 
 @contextmanager
-def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+def _exclusive_file_lock(lock_path: Path, timeout: float | None = None) -> Iterator[None]:
+    """Process lock with a deadline: a persistent OSError raises ``ObservationLockTimeout`` instead of spinning."""
+    deadline = time.monotonic() + (LOCK_TIMEOUT_SECONDS if timeout is None else timeout)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as lock_file:
         if os.name == "nt":
@@ -74,7 +83,9 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
                 try:
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                     break
-                except OSError:
+                except OSError as exc:
+                    if time.monotonic() >= deadline:
+                        raise ObservationLockTimeout(f"observation lock {lock_path} not acquired: {exc}") from exc
                     time.sleep(0.01)
             try:
                 yield
@@ -84,7 +95,14 @@ def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
         else:
             import fcntl
 
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            while True:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as exc:
+                    if time.monotonic() >= deadline:
+                        raise ObservationLockTimeout(f"observation lock {lock_path} not acquired: {exc}") from exc
+                    time.sleep(0.01)
             try:
                 yield
             finally:
