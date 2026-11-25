@@ -41,8 +41,7 @@ desqualifica a entrega e zera a sequência (a próxima entrega qualificada recom
 | Nenhuma ação do owner fora do grill e do aceite | `owner_actions_count == 0` |
 | No máximo uma decisão do owner (o toque de aceite) | `owner_decisions_count <= 1` |
 | Learning pack vinculado ao ticket | `learning_pack_linked` |
-| Página de `docs/manual/` alterada no merge | `manual_page_changed` |
-| SHA de merge presente | `merge_sha` |
+| SHA de merge presente e alcançável na branch padrão do projeto | `merge_sha` + `merge_on_default_branch` |
 | Smoke do deploy verde | `smoke_passed` |
 | Entrega não está em andamento | `not in_progress` (uma entrega em andamento nunca conta como verde) |
 
@@ -61,27 +60,31 @@ Reaproveita as stores que a linha já escreve, sem criar uma fonte de verdade pa
   Um ticket sem essa tag é anterior à instrumentação (ou não passou por
   `submit_owner_demand`) e é **excluído do universo de candidatos**, não tratado como entrega
   desqualificada — não faz parte do que a V0 está medindo.
-- **Run e evidência de entrega**: `core.line.owner_intake.open_line_store`, `run_state` e
-  `extract_run_delivery_evidence`, localizando o run pelo `ticket_external_id` (mesmo esquema de
-  `channel="owner"` + `ticket:<id>` usado por `submit_ticket_to_line`).
-- **SHA de merge e smoke**: lidos diretamente dos jobs do run (`get_run_status`): o job do estágio
-  `integration` guarda `[pr_url, merge_sha]`; o job do estágio `build_deploy`
-  (`core.line.stage_release.ReleaseStageHandler`) guarda uma referência `smoke:<run_id>:<sha>` só
-  quando o smoke pós-deploy passou.
-- **Página de manual alterada**: `git show --name-only <merge_sha>` no repositório, checando se
-  algum caminho começa com `docs/manual/`.
+- **Recibos do motor único**: `run_ticket.py` grava, por ticket, `merge.json` (`merge_sha`) e
+  `deploy_report.json` (`sha`, `smoke_ok`) em
+  `<STATE_ROOT>/artifacts/ticket_runs/<ID>/.darkfac/runs/<ID>/` (`core.line.ticket_engine`). O coletor
+  lê esses dois arquivos; o smoke só vale quando o `sha` do deploy é o do merge e `smoke_ok` é `true`.
+  Não há consulta às tabelas do DAG antigo da linha.
+- **Merge na branch padrão do projeto**: `git merge-base --is-ancestor <merge_sha> origin/<branch>` (ou a
+  branch local) no repositório do projeto registrado (`ProjectDescriptor.resolve_path()`,
+  `default_branch`, por exemplo `darkfac/m1-seo` para a mansaodolago). Vale para repositório externo:
+  nenhum commit em `docs/manual/` da DarkFac é exigido.
+  A branch local nunca conta: só `origin/<branch>` (após `git fetch` dessa ref). Projeto fora do registro é
+  rejeitado, sem cair no repositório da DarkFac.
 - **Learning pack**: existência de `.factory/learning_packs/<ticket_id>.json` ou `.md`
   (`core.learning_pack.delivery.build_for_delivery`, mesma convenção usada por
   `core.ops.turn_guard`).
 - **Ações do owner**: `core.owner_actions.store.OwnerActionStore.list_actions()`, filtrando as que
-  referenciam o ticket em `blocks`/`depends_on` e foram criadas dentro da janela do run
-  (`created_at` até `completed_at`/`updated_at`).
-- **Projetos**: `core.projects.registry.get_project_registry()` só para anotar (em
-  `source_notes`, sem desqualificar) quando o `project_id` do ticket não está registrado.
+  referenciam o ticket em `blocks`/`depends_on` e foram criadas entre a criação do ticket e o último dos recibos `merge.json`/`deploy_report.json`.
+- **Projetos**: `core.projects.registry.get_project_registry()` fornece repositório e branch padrão; projeto não
+  registrado fica sem merge verificável e a entrega não qualifica.
 
 Fonte indisponível nunca derruba o coletor: cada store é aberta dentro de um `try/except`
 específico, e a falha vira um código estruturado em `V0ProofReport.degraded_sources` (por exemplo
 `control_store_unavailable`) — nunca o texto bruto da exceção, que pode carregar uma credencial.
+
+O container de produção do DarkHub não tem os recibos da frota nem clones git, então o painel V0 ali
+mostra zero entregas qualificadas; o placar oficial é `python -m core.line.v0_proof` no host da frota.
 
 ## Relatório
 
@@ -139,9 +142,8 @@ python -m core.line.acceptance status
 sessão exigida — mesmo padrão de `GET /api/line/live` e `GET /api/line/status`) devolve o
 `V0ProofReport` tipado direto de `collect_v0_proof_evidence`, incluindo o novo campo `slots`:
 exatamente `REQUIRED_STREAK` (5) entradas, mais antiga primeiro, cada uma com `filled`,
-`ticket_id`, `project_id`, `channel`, `run_id`, `merge_sha`, `delivery_evidence` (texto com o
-PR/commit, o mesmo de `extract_run_delivery_evidence`), `smoke_passed`, `learning_pack_linked` e
-`manual_page_changed`. Quando a sequência qualificada tem menos de 5 entregas, os slots iniciais
+`ticket_id`, `project_id`, `channel`, `run_id`, `merge_sha`, `delivery_evidence` (PR/commit do ticket), `smoke_passed` e
+`learning_pack_linked`. Quando a sequência qualificada tem menos de 5 entregas, os slots iniciais
 vêm com `filled=False` (`build_v0_proof_slots`) — o painel mostra essas posições como "aguardando
 demanda" em vez de escondê-las, para deixar claro quantas faltam.
 
@@ -159,7 +161,7 @@ dos candidatos bloqueados quando não há runs ativos (USR-533).
 O painel `/live` (`hub/frontend/live.html` + `live.js` + `live.css`) busca esse endpoint em um
 ciclo próprio (a cada 60 s, independente do SSE da esteira) e desenha a seção "Prova da V0" na
 coluna lateral: o rótulo do cabeçalho mostra `cumprido` ou `streak/5`; cada slot preenchido mostra
-ticket, projeto, canal, os três selos (`smoke`, `learning pack`, `manual`) e um link para o PR/commit
+ticket, projeto, canal, os selos (`smoke`, `learning pack`) e um link para o PR/commit
 quando `delivery_evidence` traz uma URL; slots vazios aparecem como um cartão tracejado
 "aguardando demanda", sem poluir a tela quando a prova ainda não começou. Quando `missing` ou
 `degraded_sources` não está vazio, uma linha de nota aparece abaixo dos slots com o que falta e,
@@ -211,7 +213,7 @@ python -m core.line.v0_proof --report
 O CLI e `GET /api/line/v0-proof` usam o mesmo coletor e o mesmo `V0ProofReport`. A sequência
 qualificada é cronológica por conclusão do run e mantém exatamente cinco slots, preenchendo os
 mais antigos primeiro. Os requisitos de cinco entregas seguidas, Telegram/Hub/chat, projeto
-externo, merge, smoke, manual e learning pack continuam necessários.
+externo, merge na branch padrão, smoke e learning pack continuam necessários.
 
 ### Evidência operacional da coordenação
 
