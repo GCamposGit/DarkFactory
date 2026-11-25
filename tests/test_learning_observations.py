@@ -5,12 +5,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from core.learning.observations import (
     consolidate_by_cause,
     load_observations,
     record_intervention_outcome,
     record_observation,
 )
+from core.learning.models import PreferenceCategory
 from core.learning.tracker import ContinuousLearningTracker
 from core.line.retrospective import RetrospectiveLesson, record_lessons_in_learning_tracker
 from core.learning.models import MistakeCategory
@@ -153,3 +156,35 @@ def test_record_turn_cli_leaves_checkout_clean_and_turn_is_primed(tmp_path: Path
     fresh = ContinuousLearningTracker(ledger_file=seed)
     assert [t.turn_id for t in fresh.ledger.turns] == [1, 2]
     assert "turno de coordenacao" in fresh.get_active_system1_context(project_id="darkfac")
+
+
+def test_stale_trackers_do_not_lose_each_others_updates(tmp_path: Path) -> None:
+    ledger = tmp_path / ".factory" / "learning" / "learning_ledger.json"
+    a = ContinuousLearningTracker(ledger_file=ledger, session_id="a")
+    b = ContinuousLearningTracker(ledger_file=ledger, session_id="b")
+    a.record_turn("turno", "intencao", project_id="p")
+    b.register_preference(PreferenceCategory.WORKFLOW, "regra", "exemplo")
+    fresh = ContinuousLearningTracker(ledger_file=ledger)
+    assert len(fresh.ledger.turns) == 1
+    assert len(fresh.ledger.preferences) == 1
+
+
+def test_observation_lock_times_out_instead_of_spinning(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    from core.learning import observations
+
+    def always_busy(*_args: object, **_kwargs: object) -> None:
+        raise OSError("busy")
+
+    if os.name == "nt":
+        import msvcrt
+
+        monkeypatch.setattr(msvcrt, "locking", always_busy)
+    else:
+        import fcntl
+
+        monkeypatch.setattr(fcntl, "flock", always_busy)
+    with pytest.raises(observations.ObservationLockTimeout):
+        with observations._exclusive_file_lock(tmp_path / "x.lock", timeout=0.05):
+            pass

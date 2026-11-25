@@ -5,12 +5,13 @@ contrastive trajectory analysis, Code Judge verification, and policy debt prunin
 """
 
 import os
+from contextlib import contextmanager
 import sys
 import json
 import uuid
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Iterator, List, Dict, Any, Optional
 from datetime import datetime, timezone
 
 from core.learning.models import (
@@ -75,6 +76,17 @@ class ContinuousLearningTracker:
         self.ledger.last_updated = datetime.now(timezone.utc).isoformat()
         with self._lock:
             atomic_write_json(self.live_file, self.ledger.to_dict())
+
+    @contextmanager
+    def _txn(self) -> Iterator[None]:
+        """Read-modify-write under the cross-process lock: re-read the overlay, mutate, save.
+
+        Never nest: an inner transaction would reload and drop the outer, unsaved mutation.
+        """
+        with self._lock:
+            self.ledger = self._load_or_initialize()
+            yield
+            self.save()
 
     @staticmethod
     def is_checkpoint_turn(prompt_count: int, was_followup: bool = False) -> bool:
@@ -161,24 +173,26 @@ class ContinuousLearningTracker:
         identity: Optional[str] = None,
     ) -> InteractionTurn:
         """Records a new prompt turn and increments prompt counter."""
-        with self._lock:  # cross-process: re-read the overlay so concurrent turns are not lost
-            self.ledger = self._load_or_initialize()
+        with self._txn():
             turn = self._append_turn(
                 user_prompt_summary, perceived_intent, was_followup, one_shot_success,
                 missing_context_or_gap, target_skill,
             )
         resolved_project = project_id or os.environ.get("DARKFAC_PROJECT_ID") or project_root().name
-        record_observation(
-            project_id=resolved_project,
-            identity=identity or f"interaction:{self.session_id}:{turn.turn_id}",
-            kind="interaction",
-            summary=turn.user_prompt_summary,
-            intention=turn.perceived_intent,
-            harness=harness,
-            run_id=run_id or self.session_id,
-            cause=cause,
-            root=self.learning_dir.parent,
-        )
+        try:
+            record_observation(
+                project_id=resolved_project,
+                identity=identity or f"interaction:{self.session_id}:{turn.turn_id}",
+                kind="interaction",
+                summary=turn.user_prompt_summary,
+                intention=turn.perceived_intent,
+                harness=harness,
+                run_id=run_id or self.session_id,
+                cause=cause,
+                root=self.learning_dir.parent,
+            )
+        except TimeoutError as exc:  # lock held too long: the turn is already in the ledger
+            print(f"[WARN] observation not recorded: {exc}")
         return turn
 
     def _append_turn(
@@ -202,7 +216,6 @@ class ContinuousLearningTracker:
             target_skill=sanitize_text(target_skill) or None,
         )
         self.ledger.turns.append(turn)
-        self.save()
         return turn
 
     # -------------------------------------------------------------
@@ -243,8 +256,8 @@ class ContinuousLearningTracker:
             key_delta=key_delta,
             inferred_preference_id=pref_id,
         )
-        self.ledger.contrasts.append(contrast)
-        self.save()
+        with self._txn():
+            self.ledger.contrasts.append(contrast)
         return contrast
 
     # -------------------------------------------------------------
@@ -262,48 +275,46 @@ class ContinuousLearningTracker:
     ) -> UserPreference:
         """Registers or reinforces a user preference."""
         clean_rule = rule.strip()
-        for pref in self.ledger.preferences:
-            if pref.active and pref.rule.strip().lower() == clean_rule.lower():
-                pref.times_reinforced += 1
-                pref.confidence = min(1.0, pref.confidence + 0.1)
-                pref.context_or_example = f"{pref.context_or_example} | {context_or_example}"
-                self.save()
-                return pref
+        with self._txn():
+            for pref in self.ledger.preferences:
+                if pref.active and pref.rule.strip().lower() == clean_rule.lower():
+                    pref.times_reinforced += 1
+                    pref.confidence = min(1.0, pref.confidence + 0.1)
+                    pref.context_or_example = f"{pref.context_or_example} | {context_or_example}"
+                    return pref
 
-        pref_id = f"pref_{uuid.uuid4().hex[:8]}"
-        new_pref = UserPreference(
-            preference_id=pref_id,
-            category=category,
-            rule=clean_rule,
-            context_or_example=context_or_example,
-            confidence=confidence,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            times_reinforced=1,
-            origin=origin,
-            status=status,
-        )
-        self.ledger.preferences.append(new_pref)
-        self.save()
-        return new_pref
+            new_pref = UserPreference(
+                preference_id=f"pref_{uuid.uuid4().hex[:8]}",
+                category=category,
+                rule=clean_rule,
+                context_or_example=context_or_example,
+                confidence=confidence,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                times_reinforced=1,
+                origin=origin,
+                status=status,
+            )
+            self.ledger.preferences.append(new_pref)
+            return new_pref
 
     def evaluate_preference(self, preference_id: str, gate_id: str) -> UserPreference:
         """Promote a candidate only when its referenced verification passed."""
-        preference = next(
-            (item for item in self.ledger.preferences if item.preference_id == preference_id),
-            None,
-        )
-        if preference is None:
-            raise ValueError(f"Unknown preference: {preference_id}")
-        gate = next(
-            (item for item in self.ledger.verifications if item.gate_id == gate_id),
-            None,
-        )
-        if gate is None:
-            raise ValueError(f"Unknown verification gate: {gate_id}")
-        preference.verification_gate_id = gate_id
-        preference.set_status(PolicyStatus.ACTIVE if gate.passed else PolicyStatus.EVALUATED)
-        self.save()
-        return preference
+        with self._txn():
+            preference = next(
+                (item for item in self.ledger.preferences if item.preference_id == preference_id),
+                None,
+            )
+            if preference is None:
+                raise ValueError(f"Unknown preference: {preference_id}")
+            gate = next(
+                (item for item in self.ledger.verifications if item.gate_id == gate_id),
+                None,
+            )
+            if gate is None:
+                raise ValueError(f"Unknown verification gate: {gate_id}")
+            preference.verification_gate_id = gate_id
+            preference.set_status(PolicyStatus.ACTIVE if gate.passed else PolicyStatus.EVALUATED)
+            return preference
 
     # -------------------------------------------------------------
     # Deterministic Code Judge Verification (Voyager / RSI Pattern)
@@ -348,8 +359,8 @@ class ContinuousLearningTracker:
             output_snippet=output_snippet,
             executed_at=datetime.now(timezone.utc).isoformat(),
         )
-        self.ledger.verifications.append(gate)
-        self.save()
+        with self._txn():
+            self.ledger.verifications.append(gate)
         return gate
 
     # -------------------------------------------------------------
@@ -397,8 +408,8 @@ class ContinuousLearningTracker:
             origin=PolicyOrigin.RCA,
             status=policy_status,
         )
-        self.ledger.mistakes.append(rca)
-        self.save()
+        with self._txn():
+            self.ledger.mistakes.append(rca)
         return rca
 
     # -------------------------------------------------------------
@@ -425,8 +436,8 @@ class ContinuousLearningTracker:
             applied_actions=applied_actions or [],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        self.ledger.transfers.append(transfer)
-        self.save()
+        with self._txn():
+            self.ledger.transfers.append(transfer)
         return transfer
 
     # -------------------------------------------------------------
@@ -437,28 +448,27 @@ class ContinuousLearningTracker:
         System 2 curation: detects duplicate, subsumed, or near-identical rules,
         consolidates them into canonical rules, and deactivates redundant entries.
         """
-        seen: Dict[str, UserPreference] = {}
         pruned_ids: List[str] = []
         consolidated = 0
+        with self._txn():
+            seen: Dict[str, UserPreference] = {}
 
-        for pref in self.ledger.preferences:
-            if not pref.active:
-                continue
+            for pref in self.ledger.preferences:
+                if not pref.active:
+                    continue
 
-            normalized_key = "".join(ch for ch in pref.rule.lower() if ch.isalnum())
-            if normalized_key in seen:
-                # Merge into canonical
-                canonical = seen[normalized_key]
-                canonical.times_reinforced += pref.times_reinforced
-                canonical.confidence = max(canonical.confidence, pref.confidence)
-                canonical.context_or_example = f"{canonical.context_or_example} | {pref.context_or_example}"
-                pref.set_status(PolicyStatus.RETIRED)
-                pruned_ids.append(pref.preference_id)
-                consolidated += 1
-            else:
-                seen[normalized_key] = pref
-
-        self.save()
+                normalized_key = "".join(ch for ch in pref.rule.lower() if ch.isalnum())
+                if normalized_key in seen:
+                    # Merge into canonical
+                    canonical = seen[normalized_key]
+                    canonical.times_reinforced += pref.times_reinforced
+                    canonical.confidence = max(canonical.confidence, pref.confidence)
+                    canonical.context_or_example = f"{canonical.context_or_example} | {pref.context_or_example}"
+                    pref.set_status(PolicyStatus.RETIRED)
+                    pruned_ids.append(pref.preference_id)
+                    consolidated += 1
+                else:
+                    seen[normalized_key] = pref
         active_count = sum(1 for p in self.ledger.preferences if p.active)
         return PolicyDebtReport(
             redundant_count=len(pruned_ids),
