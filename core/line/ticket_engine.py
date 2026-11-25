@@ -461,6 +461,17 @@ def resumable_build(ws: workspace.RunWorkspace, candidate_digest: str, worktree:
         )
     if not candidate_digest or not worktree:
         raise BuildEvidenceMismatch("evidencia atual de candidato/worktree ausente")
+    if report.worktree != worktree and not Path(report.worktree).exists():
+        # EC-02: the worktree this checkpoint proves is gone, so no diff or commit of it can be
+        # resumed. Keep the file for audit and restart BUILD cleanly instead of holding the ticket.
+        orphaned = path.with_name(path.name + ".orphaned")
+        os.replace(path, orphaned)
+        logging.getLogger(__name__).warning(
+            "progress.json orfao reiniciado: ticket=%s worktree_anterior=%s worktree_atual=%s "
+            "fatias_perdidas=%d arquivo=%s",
+            ws.run_id, report.worktree, worktree, len(report.tickets_done), orphaned,
+        )
+        return None
     current_plan_digest = plan_digest(ws)
     if (
         report.plan_digest != current_plan_digest

@@ -448,6 +448,38 @@ def test_prepare_workspace_without_a_preserved_worktree_creates_a_new_one(
     assert os.path.normcase(str(workspace.path.parent)) == os.path.normcase(str(repo.local / ".worktrees"))
 
 
+def test_external_project_retry_reuses_the_preserved_worktree_and_its_commits(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EC-02: a retry of a non-darkfac ticket resumes in its own checkout instead of a new timestamped worktree."""
+    setups: list[Path] = []
+    project = SimpleNamespace(
+        id="mansao", default_branch="main", commands=SimpleNamespace(validate_cmds=["true"]),
+    )
+    monkeypatch.setattr(
+        "core.projects.registry.get_project_registry",
+        lambda: SimpleNamespace(get_project=lambda _pid: project),
+    )
+    monkeypatch.setattr("core.projects.ticket_execution.project_checkout", lambda _p: repo.local)
+    monkeypatch.setattr(
+        "core.projects.ticket_execution.setup_project",
+        lambda _p, path: setups.append(path) or SimpleNamespace(ok=True),
+    )
+    ticket = run_ticket.UserTicket(id="MDL-01", project_id="mansao", title="externo", problem_statement="p")
+    args = run_ticket.build_parser().parse_args(["MDL-01"])
+
+    first = run_ticket._prepare_workspace(args, ticket)
+    (first.path / "impl.py").write_text("x = 1\n", encoding="utf-8")
+    _git(first.path, "add", "impl.py")
+    _git(first.path, "commit", "--quiet", "-m", "wip")
+
+    second = run_ticket._prepare_workspace(args, ticket)
+
+    assert second.path == first.path and (second.path / "impl.py").is_file()
+    assert setups == [first.path]
+    assert len(_worktree_names(repo)) == 1
+
+
 def test_build_checkpoint_selects_its_worktree_over_a_newer_preserved_attempt(
     repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

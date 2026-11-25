@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from core.demands.models import DeliveryStatus, UserTicket
 from core.demands.store import DemandsStore
 from core.git.autonomy import GitAutonomyManager, TicketCompletionReport
@@ -344,7 +346,13 @@ def test_gate_failure_gives_up_after_max_fix_attempts(tmp_path: Path, capsys) ->
     assert "--resume-delivery USR-245" in captured.err
 
 
-def test_gate_timeout_fails_immediately_without_reinvoking_the_agent(tmp_path: Path, capsys) -> None:
+@pytest.mark.parametrize("gate_stdout", [
+    "[STEP_FAIL] unit_and_integration_tests_parallel (timeout exceeded)\n",
+    "[STEP_TIMEOUT] affected tests phase=collection\n",  # EC-02: affected.py budget hit, exit 75, no fix agent
+])
+def test_gate_timeout_fails_immediately_without_reinvoking_the_agent(
+    tmp_path: Path, capsys, gate_stdout: str
+) -> None:
     """USR-249 (USR-239 incident): the official gate reprova por timeout interno do passo (3000s),
     nao por um teste de verdade -- `runner.py::run_step` retorna ao processo normalmente (0/1/2, nunca
     124), com `[STEP_FAIL] ... (timeout exceeded)` no stdout. A autocorrecao do USR-245 reinvocou o
@@ -389,6 +397,7 @@ def test_gate_timeout_fails_immediately_without_reinvoking_the_agent(tmp_path: P
     assert fix_calls == [], "the agent must never be reinvoked after a gate timeout (USR-249)"
     assert result["ok"] is False
     assert result["cause"] == "gate_timeout"
+    assert result["exit_code"] == 75
     assert result["self_correction_log"] == [{
         "event": "timeout", "attempt": 1, "stage": "gate", "cause": "gate_timeout",
         "duration_s": 3000.1, "limit_s": run_ticket.GATE_TIMEOUT_S,

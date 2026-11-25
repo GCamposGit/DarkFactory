@@ -431,7 +431,9 @@ class SharedCheckoutDirty(RuntimeError):
         )
 
 
-def _resume_preserved_workspace(ticket: UserTicket, *, as_json: bool) -> Optional[TicketWorkspace]:
+def _resume_preserved_workspace(
+    ticket: UserTicket, *, as_json: bool, cwd: Optional[Path] = None, base: str = "main"
+) -> Optional[TicketWorkspace]:
     """Worktree an interrupted earlier attempt of this ticket left behind, or None (USR-225).
 
     A run that timed out keeps its worktree (and the agent's partial work); a second `run_ticket <ID>`
@@ -466,7 +468,7 @@ def _resume_preserved_workspace(ticket: UserTicket, *, as_json: bool) -> Optiona
 
     try:
         lookup = find_preserved_workspaces(
-            ticket.id, cwd=PROJECT_ROOT, ignore_paths=(LEDGER_RELATIVE,),
+            ticket.id, cwd=cwd or PROJECT_ROOT, base=base, ignore_paths=(LEDGER_RELATIVE,),
             preferred_path=preferred_build_path,
         )
     except Exception as exc:  # noqa: BLE001 - a lookup problem falls back to a new worktree
@@ -515,6 +517,12 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
                 "(skill 07) no onboarding e declare comandos de validação antes de executar tickets."
             )
         project_root = project_checkout(project)
+        workspace = _resume_preserved_workspace(
+            ticket, as_json=bool(getattr(args, "json", False)), cwd=project_root, base=project.default_branch
+        )
+        if workspace is not None:
+            # Reused worktree: setup already ran and the previous attempt's commits/diff stay intact.
+            return workspace
         workspace = create_workspace(ticket.id, cwd=project_root, base=project.default_branch)
         setup = setup_project(project, workspace.path)
         if not setup.ok:
@@ -1281,7 +1289,11 @@ def _invoke_fix_agent(
 # behind a sibling session's run on the same host instead of ever reaching collection -- reproduced live
 # while diagnosing USR-249's own delivery: a concurrent worktree held the lock for the full window,
 # leaving `discovered_count=0` with no code-level failure to fix.
-_GATE_TIMEOUT_MARKERS = ("(timeout exceeded)", "[SUITE_LOCK] timed out")
+_GATE_TIMEOUT_MARKERS = (
+    "(timeout exceeded)", "[SUITE_LOCK] timed out", "phase=collection", "TimeoutExpired",
+)
+# `core/harness/affected.py` prints this when pytest hit the step budget; it is always infra (EC-02).
+_GATE_STEP_TIMEOUT_MARKER = "[STEP_TIMEOUT]"
 # Remote-worker loss markers are infra only when the output carries no real pytest failure: if the
 # worker dropped and the local fallback then ran and reprovou a real test, that is fixable by the agent.
 # `[SUITE_LOCK] acquired slot`/`waiting` also appear in normal runs and are NOT infra signals.
