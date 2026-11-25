@@ -49,9 +49,37 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # Desktop app data dir (split so the model-id census does not read it as a model id).
 _CLAUDE_DESKTOP_GLOB = "Claude" "-Data/claude_*/claude" "-code/*/*/claude.exe"
+_CLAUDE_VERSION_BUDGET_SECONDS = 4.0
+_CLAUDE_PATH_VERSION_RE = re.compile(r"claude.code[\\/](\d+)\.(\d+)\.(\d+)[\\/]")
 _CLAUDE_MODEL_REJECTION_MARKERS = (
     "unrecognized_model", "issue with the selected model", "model_not_found", "invalid model",
 )
+
+
+def _claude_executable_names() -> List[str]:
+    """`claude` plus every PATHEXT spelling (.exe/.cmd/.bat...), so PATH scanning needs no `which`."""
+    exts = [e.lower() for e in os.environ.get("PATHEXT", "").split(";") if e]
+    return list(dict.fromkeys(["claude", *(f"claude{e}" for e in [*exts, ".exe", ".cmd", ".bat"])]))
+
+
+def _claude_error_text(stdout: str, stderr: str) -> str:
+    """CLI diagnostics only: stderr, non-JSON lines, and error/result events; never assistant text."""
+    parts: List[str] = [stderr]
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            parts.append(line)
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "error" or event.get("error"):
+            parts.append(json.dumps(event.get("error", event), default=str))
+        elif event.get("type") == "result" and (
+            event.get("is_error") or str(event.get("subtype", "")).startswith("error")
+        ):
+            parts += [str(event.get("result", "")), str(event.get("subtype", ""))]
+    return "\n".join(parts).casefold()
 
 
 def _run_probe_command(
@@ -76,15 +104,23 @@ def _run_probe_command(
 def _terminate_probe_process_tree(process: subprocess.Popen[str]) -> None:
     """Stop and reap the quota CLI and descendants before its sandbox is removed."""
     if os.name == "nt":
+        failure: Optional[str] = None
         try:
-            subprocess.run(
+            killed = subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True, check=False, timeout=10,
                 creationflags=_CREATE_NO_WINDOW,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            if process.poll() is None:
+            if killed.returncode != 0 and process.poll() is None:
+                failure = f"exit={killed.returncode}"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            failure = type(exc).__name__
+        if failure is not None and process.poll() is None:
+            logger.warning("probe_process_tree_kill_failed pid=%s taskkill=%s; falling back to kill()", process.pid, failure)
+            try:
                 process.kill()
+            except OSError as exc:
+                logger.warning("probe_process_kill_failed pid=%s error=%s", process.pid, type(exc).__name__)
     else:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -1723,7 +1759,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
     _version_cache: Dict[Tuple[str, float], Tuple[int, ...]] = {}
 
     @classmethod
-    def _claude_version(cls, path: str) -> Optional[Tuple[int, ...]]:
+    def _claude_version(cls, path: str, timeout: float = 4.0) -> Optional[Tuple[int, ...]]:
         """Semantic version from `--version`; only a clean exit counts and only success is cached."""
         try:
             mtime = Path(path).stat().st_mtime
@@ -1742,7 +1778,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 creationflags=(_CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0,
                 start_new_session=os.name != "nt",
             )
-            out, _ = process.communicate(timeout=4)
+            out, _ = process.communicate(timeout=timeout)
             found = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
             if process.returncode == 0 and found:
                 cls._version_cache[key] = tuple(int(part) for part in found.groups())
@@ -1772,7 +1808,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         for directory in os.environ.get("PATH", "").split(os.pathsep):
             if not directory:
                 continue
-            for name in ("claude.exe", "claude.cmd", "claude"):
+            for name in _claude_executable_names():
                 candidate = Path(directory) / name
                 if candidate.is_file():
                     found.append(str(candidate))
@@ -1788,7 +1824,19 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 deduped.append(c)
         if len(deduped) < 2:
             return deduped
-        return sorted(deduped, key=lambda path: cls._claude_version(path) or (0,), reverse=True)
+        # One shared --version budget for all candidates (the router waits ~10 s in total); a version
+        # embedded in the path (desktop app layout) needs no subprocess at all.
+        deadline = time.monotonic() + _CLAUDE_VERSION_BUDGET_SECONDS
+        versions: Dict[str, Tuple[int, ...]] = {}
+        for path in deduped:
+            from_path = _CLAUDE_PATH_VERSION_RE.search(path)
+            if from_path:
+                versions[path] = tuple(int(part) for part in from_path.groups())
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining > 0.2:
+                versions[path] = cls._claude_version(path, timeout=min(4.0, remaining)) or (0,)
+        return sorted(deduped, key=lambda path: versions.get(path, (0,)), reverse=True)
 
     @classmethod
     def _find_claude(cls) -> Optional[str]:
@@ -1930,11 +1978,11 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         self._record_probe_cleanup(sandbox)
         stdout = result.stdout.decode("utf-8", errors="replace") if isinstance(result.stdout, bytes) else (result.stdout or "")
         stderr = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
-        text = f"{stdout}\n{stderr}".casefold()
-        model_rejected = "failed to authenticate" not in text and any(
-            marker in text for marker in _CLAUDE_MODEL_REJECTION_MARKERS
+        diagnostics = _claude_error_text(stdout, stderr)
+        model_rejected = "failed to authenticate" not in diagnostics and any(
+            marker in diagnostics for marker in _CLAUDE_MODEL_REJECTION_MARKERS
         )
-        if "unrecognized_model" in text:
+        if "unrecognized_model" in diagnostics:
             # The quota windows belong to the account, not to the model. The CLI prints this
             # diagnostic and still answers with real rate-limit events, so the reading stands:
             # refusing it left Claude "unknown" and the whole line without a planning route.
@@ -1982,7 +2030,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                     "used_percentage": float(Decimal(str(utilization)) * Decimal("100")),
                     "resets_at": window.get("resetsAt", info.get("resetsAt")),
                 }
-        return limits, effective_models, model_rejected and not limits
+        return limits, effective_models, model_rejected
 
     def _record_probe_cleanup(self, sandbox: ProbeSandbox) -> None:
         """Expose explicit cleanup outcome without changing the quota verdict."""

@@ -998,7 +998,7 @@ def test_find_claude_picks_newest_across_path_and_desktop_app(tmp_path: Path, mo
     monkeypatch.setattr("core.usage.adapters.subprocess.Popen", FakeProc)
     assert ClaudeCodeAccountAdapter._claude_candidates() == [str(newer), str(desktop), str(old)]
     assert ClaudeCodeAccountAdapter._find_claude() == str(newer)
-    assert len(calls) == 3  # one version call per distinct install; the which() duplicate is deduped, then cached
+    assert len(calls) == 2  # the desktop build's version comes from its path; which() duplicate deduped
 
 
 def test_claude_version_timeout_kills_tree_and_failures_are_not_cached(tmp_path: Path, monkeypatch) -> None:
@@ -1100,3 +1100,66 @@ def test_claude_headless_probe_does_not_retry_on_auth_failure_or_timeout(tmp_pat
     adapter = next(a for a in build_default_adapters(tmp_path) if a.spec.provider_id == "anthropic")
     adapter.inspect(force=True)
     assert len(argvs) == 1
+
+
+def test_claude_error_text_ignores_assistant_text_and_reads_error_events() -> None:
+    from core.usage.adapters import _claude_error_text
+
+    chatty = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "unrecognized_model is a word"}]}})
+    assert "unrecognized_model" not in _claude_error_text(chatty, "")
+    failing = json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                          "result": "There's an issue with the selected model"})
+    assert "issue with the selected model" in _claude_error_text(failing, "")
+    assert "unrecognized_model" in _claude_error_text("[claude-code:unrecognized_model] {}", "")
+
+
+def test_probe_tree_kill_falls_back_to_kill_when_taskkill_fails(monkeypatch, caplog) -> None:
+    from core.usage import adapters as adapters_mod
+
+    monkeypatch.setattr(adapters_mod.os, "name", "nt")
+    monkeypatch.setattr(adapters_mod, "_CREATE_NO_WINDOW", 0)
+    monkeypatch.setattr(adapters_mod.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 128, b"", b""))
+
+    class Proc:
+        pid, killed = 1, False
+
+        def poll(self):
+            return 0 if self.killed else None
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    proc = Proc()
+    with caplog.at_level("WARNING"):
+        adapters_mod._terminate_probe_process_tree(proc)
+    assert proc.killed and "probe_process_tree_kill_failed" in caplog.text
+
+
+def test_claude_candidates_share_one_version_budget(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    dirs = [tmp_path / f"d{i}" for i in range(3)]
+    for d in dirs:
+        d.mkdir()
+        (d / "claude.bat").write_text("", encoding="utf-8")  # found through PATHEXT, not which()
+    monkeypatch.setenv("PATH", os.pathsep.join(map(str, dirs)))
+    monkeypatch.setenv("PATHEXT", ".COM;.BAT")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "x"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "x"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _n: None)
+    timeouts: list[float] = []
+    clock = {"t": 0.0}
+    monkeypatch.setattr("core.usage.adapters.time.monotonic", lambda: clock["t"])
+
+    def fake_version(path, timeout=4.0):
+        timeouts.append(timeout)
+        clock["t"] += timeout  # every probe burns its whole allowance
+        return None
+
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_claude_version", staticmethod(fake_version))
+    assert len(ClaudeCodeAccountAdapter._claude_candidates()) == 3
+    assert sum(timeouts) <= 4.0 and len(timeouts) == 1
