@@ -39,7 +39,7 @@ def test_interaction_is_sanitized_project_scoped_and_recovered_after_restart(tmp
     assert records[0]["run_id"] == "run-7"
     assert records[0]["identity"] == "interaction:request-7"
     assert "secret-value" not in json.dumps(records)
-    assert "secret-value" not in (root / "learning" / "learning_ledger.json").read_text(encoding="utf-8")
+    assert "secret-value" not in (root / "learning" / "learning_ledger.live.json").read_text(encoding="utf-8")
     assert load_observations("product-b", root=root) == []
 
 
@@ -113,3 +113,43 @@ def test_other_harness_failure_is_linked_and_cause_consolidates_with_independent
         "interventions_before": 3,
         "interventions_after": 1,
     }
+
+
+def test_record_turn_cli_leaves_checkout_clean_and_turn_is_primed(tmp_path: Path, monkeypatch, capsys) -> None:
+    """EC-03: live turns go to the untracked overlay; the tracked seed ledger stays byte-identical."""
+    import subprocess
+
+    from core.learning import cli, tracker as tracker_module
+
+    repo_gitignore = Path(__file__).resolve().parents[1] / ".gitignore"
+    seed = tmp_path / ".factory" / "learning" / "learning_ledger.json"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("{}", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(repo_gitignore.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=tmp_path, check=True, capture_output=True, text=True,
+        ).stdout
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-q", "-m", "seed")
+    seed_bytes = seed.read_bytes()
+
+    monkeypatch.setattr(tracker_module, "DEFAULT_LEDGER_FILE", seed)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path))
+    for prompt in ("turno de coordenacao", "segundo turno"):
+        monkeypatch.setattr(
+            "sys.argv",
+            ["learning", "record-turn", "--prompt", prompt, "--intent", "evitar sujeira", "--project", "darkfac"],
+        )
+        cli.main()
+    capsys.readouterr()
+
+    assert git("status", "--porcelain") == ""
+    assert seed.read_bytes() == seed_bytes
+    fresh = ContinuousLearningTracker(ledger_file=seed)
+    assert [t.turn_id for t in fresh.ledger.turns] == [1, 2]
+    assert "turno de coordenacao" in fresh.get_active_system1_context(project_id="darkfac")

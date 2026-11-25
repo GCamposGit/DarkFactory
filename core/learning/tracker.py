@@ -27,11 +27,15 @@ from core.learning.models import (
     PolicyOrigin,
     PolicyStatus,
 )
+from core.demands.store import _lock_for
 from core.paths import project_root, state_root
+from core.runtime_artifacts import atomic_write_json
 from core.learning.observations import load_observations, record_observation, sanitize_text
 
 DEFAULT_LEARNING_DIR = state_root() / "learning"
 DEFAULT_LEDGER_FILE = DEFAULT_LEARNING_DIR / "learning_ledger.json"
+# EC-03: live events go to this untracked overlay (gitignored); the tracked ledger is only the seed.
+LIVE_LEDGER_NAME = "learning_ledger.live.json"
 
 
 class ContinuousLearningTracker:
@@ -40,19 +44,20 @@ class ContinuousLearningTracker:
     def __init__(self, ledger_file: Optional[Path] = None, session_id: Optional[str] = None):
         self.ledger_file = ledger_file or DEFAULT_LEDGER_FILE
         self.learning_dir = self.ledger_file.parent
+        self.live_file = self.ledger_file.with_name(LIVE_LEDGER_NAME)
+        self._lock = _lock_for(self.live_file)
         self.session_id = session_id or f"session_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         self.ledger = self._load_or_initialize()
 
     def _load_or_initialize(self) -> LearningLedger:
         """Loads existing learning ledger or initializes a new one."""
-        if self.ledger_file.exists():
+        source = self.live_file if self.live_file.exists() else self.ledger_file
+        if source.exists():
             try:
-                with open(self.ledger_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    ledger = LearningLedger.from_dict(data)
-                    return ledger
+                with open(source, "r", encoding="utf-8") as f:
+                    return LearningLedger.from_dict(json.load(f))
             except Exception as e:
-                print(f"[WARN] Failed to parse learning ledger from {self.ledger_file}: {e}. Reinitializing.")
+                print(f"[WARN] Failed to parse learning ledger from {source}: {e}. Reinitializing.")
 
         return LearningLedger(
             session_id=self.session_id,
@@ -66,11 +71,10 @@ class ContinuousLearningTracker:
         )
 
     def save(self) -> None:
-        """Persists the ledger to disk atomically."""
-        os.makedirs(self.learning_dir, exist_ok=True)
+        """Persists the ledger to the untracked live overlay (never the tracked seed), atomically."""
         self.ledger.last_updated = datetime.now(timezone.utc).isoformat()
-        with open(self.ledger_file, "w", encoding="utf-8") as f:
-            json.dump(self.ledger.to_dict(), f, indent=2, ensure_ascii=False)
+        with self._lock:
+            atomic_write_json(self.live_file, self.ledger.to_dict())
 
     @staticmethod
     def is_checkpoint_turn(prompt_count: int, was_followup: bool = False) -> bool:
@@ -157,6 +161,35 @@ class ContinuousLearningTracker:
         identity: Optional[str] = None,
     ) -> InteractionTurn:
         """Records a new prompt turn and increments prompt counter."""
+        with self._lock:  # cross-process: re-read the overlay so concurrent turns are not lost
+            self.ledger = self._load_or_initialize()
+            turn = self._append_turn(
+                user_prompt_summary, perceived_intent, was_followup, one_shot_success,
+                missing_context_or_gap, target_skill,
+            )
+        resolved_project = project_id or os.environ.get("DARKFAC_PROJECT_ID") or project_root().name
+        record_observation(
+            project_id=resolved_project,
+            identity=identity or f"interaction:{self.session_id}:{turn.turn_id}",
+            kind="interaction",
+            summary=turn.user_prompt_summary,
+            intention=turn.perceived_intent,
+            harness=harness,
+            run_id=run_id or self.session_id,
+            cause=cause,
+            root=self.learning_dir.parent,
+        )
+        return turn
+
+    def _append_turn(
+        self,
+        user_prompt_summary: str,
+        perceived_intent: str,
+        was_followup: bool,
+        one_shot_success: bool,
+        missing_context_or_gap: Optional[str],
+        target_skill: Optional[str],
+    ) -> InteractionTurn:
         self.ledger.prompt_count += 1
         turn = InteractionTurn(
             turn_id=self.ledger.prompt_count,
@@ -170,18 +203,6 @@ class ContinuousLearningTracker:
         )
         self.ledger.turns.append(turn)
         self.save()
-        resolved_project = project_id or os.environ.get("DARKFAC_PROJECT_ID") or project_root().name
-        record_observation(
-            project_id=resolved_project,
-            identity=identity or f"interaction:{self.session_id}:{turn.turn_id}",
-            kind="interaction",
-            summary=turn.user_prompt_summary,
-            intention=turn.perceived_intent,
-            harness=harness,
-            run_id=run_id or self.session_id,
-            cause=cause,
-            root=self.learning_dir.parent,
-        )
         return turn
 
     # -------------------------------------------------------------
