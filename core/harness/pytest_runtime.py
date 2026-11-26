@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TextIO
 
 
 def with_workers(command: list[str], workers: int) -> list[str]:
@@ -36,10 +39,58 @@ def _last_failed_cache_exists(root: Path) -> bool:
         return False
 
 
-def run_with_serial_retry(command: list[str], *, cwd: Path, timeout: float, **kwargs: Any) -> subprocess.CompletedProcess[str]:
-    """Retry a crashed parallel pytest once, sharing its original time budget."""
+class StreamedTimeout(subprocess.TimeoutExpired):
+    """Timeout whose output was already echoed live; callers must not print it again."""
+
+
+def run_streaming(
+    command: list[str], *, cwd: Path, timeout: float, heartbeat_s: float = 30.0,
+    out: TextIO | None = None, **_ignored: Any,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command echoing its output line by line (flushed) while still capturing it."""
+    sink = out or sys.stdout
+    process = subprocess.Popen(
+        command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    chunks: list[str] = []
+
+    def pump() -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            chunks.append(line)
+            sink.write(line)
+            sink.flush()
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
     started = time.monotonic()
-    result = subprocess.run(command, cwd=cwd, timeout=timeout, **kwargs)
+    while True:
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            process.kill()
+            reader.join(5)
+            process.wait()
+            raise StreamedTimeout(command, timeout, output="".join(chunks))
+        reader.join(min(heartbeat_s, remaining))
+        if not reader.is_alive():
+            break
+        print(f"[TEST_PROGRESS] running elapsed_sec={time.monotonic() - started:.0f} output_lines={len(chunks)}",
+              file=sink, flush=True)
+    process.wait()
+    result: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(command, process.returncode, stdout="".join(chunks))
+    result.streamed = True  # type: ignore[attr-defined]
+    return result
+
+
+def run_with_serial_retry(
+    command: list[str], *, cwd: Path, timeout: float,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None, **kwargs: Any,
+) -> subprocess.CompletedProcess[str]:
+    """Retry a crashed parallel pytest once, sharing its original time budget."""
+    run = runner or subprocess.run
+    started = time.monotonic()
+    result = run(command, cwd=cwd, timeout=timeout, **kwargs)
     parallel = any(token == "-n" and command[i + 1] not in ("0", "1")
                    for i, token in enumerate(command[:-1]))
     output = result.stdout or ""
@@ -54,4 +105,4 @@ def run_with_serial_retry(command: list[str], *, cwd: Path, timeout: float, **kw
     if remaining <= 0:
         raise subprocess.TimeoutExpired(command, timeout, output=output)
     # Keep the first crash out of the verdict; the serial attempt is authoritative.
-    return subprocess.run(retry, cwd=cwd, timeout=remaining, **kwargs)
+    return run(retry, cwd=cwd, timeout=remaining, **kwargs)

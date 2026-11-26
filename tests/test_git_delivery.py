@@ -15,7 +15,14 @@ from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.git.autonomy import DeliveryReport, GitAutonomyManager
 from core.git import autonomy as autonomy_module
+from core.git import ticket_workspace as ticket_workspace_module
 from core.roadmap.models import DeliveryStatus
+
+
+@pytest.fixture(autouse=True)
+def _no_host_fleet_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real process inventory would defer the fast-forward whenever this host runs a fleet ticket."""
+    monkeypatch.setattr(ticket_workspace_module, "fleet_runs_in_flight", lambda: {})
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -340,6 +347,12 @@ def _seed_ticket(local: Path, ticket_id: str) -> None:
     )
 
 
+def _ledger_commits(repo: Path) -> list[str]:
+    """Commits (any ref) that touched the demands ledger."""
+    out = _git(repo, "log", "--all", "--format=%h", "--", ".factory/demands/demands.json")
+    return out.split()
+
+
 def test_complete_ticket_uses_delivery(env: tuple[Path, Path, FakeGh]) -> None:
     local, bare, gh = env
     _seed_ticket(local, "USR-76")
@@ -516,13 +529,10 @@ def test_complete_ticket_closes_queue_row_without_shared_ledger(
     assert payload["id"] == "USR-413"
     assert payload["status"] == "completed"
     assert payload["delivery_evidence"]
-    stored = DemandsStore(ledger).get_ticket("USR-413")
-    assert stored is not None and stored.status == DeliveryStatus.IMPLEMENTING
-    assert stored.delivery_evidence.startswith("candidate:")
     assert payload["delivery_evidence"] == f"{rep.delivery.merge_sha}:merged"
-    ids = [row["id"] for row in json.loads(ledger.read_text(encoding="utf-8"))]
-    assert ids.count("USR-413") == 1
-    assert "USR-1" in ids
+    assert len(_ledger_commits(local)) == 1
+    assert _git(local, "status", "--porcelain", "--", ".factory/demands/demands.json") == ""
+    assert [row["id"] for row in json.loads(ledger.read_text(encoding="utf-8"))] == ["USR-1"]
 
 
 def test_complete_ticket_absent_from_worktree_and_queue(
@@ -611,12 +621,8 @@ def test_complete_ticket_gitfile_queue_opens_pr_without_shared_ledger(
     assert payload["status"] == "completed"
     assert payload["delivery_evidence"]
     committed = json.loads(_git(local, "show", "HEAD:.factory/demands/demands.json"))
-    ids = [row["id"] for row in committed]
-    assert ids.count("USR-413") == 1
-    assert "USR-1" in ids
-    stored = next(row for row in committed if row["id"] == "USR-413")
-    assert stored["status"] == "implementing"
-    assert stored["delivery_evidence"].startswith("candidate:")
+    assert [row["id"] for row in committed] == ["USR-1"]
+    assert len(_ledger_commits(local)) == 1
     assert payload["delivery_evidence"] == f"{rep.delivery.merge_sha}:merged"
     assert not shared.exists()
     assert queue.get_ticket("USR-1") is None
@@ -689,6 +695,88 @@ def test_complete_ticket_commercial_project_awaits(env: tuple[Path, Path, FakeGh
     assert not any(c[:2] == ["pr", "merge"] for c in gh.calls)
     ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-77")
     assert ticket.status == DeliveryStatus.PLANNED
+
+
+LEDGER = ".factory/demands/demands.json"
+
+
+def test_ledger_projection_helpers() -> None:
+    from core.git.ticket_workspace import is_ledger_projection, without_ledger_projection
+
+    assert is_ledger_projection(LEDGER) and is_ledger_projection(LEDGER.replace("/", "\\"))
+    assert not is_ledger_projection(".factory/demands/other.json")
+    assert without_ledger_projection(["a.py", LEDGER, "b.py"]) == ["a.py", "b.py"]
+
+
+def test_commit_ticket_exclude_ledger_never_ships_the_ledger(env: tuple[Path, Path, FakeGh]) -> None:
+    local, _, _ = env
+    _seed_ticket(local, "USR-1")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: seed ledger")
+    DemandsStore(local / LEDGER).save_ticket(
+        UserTicket(id="USR-2", project_id="darkfac", title="Outro", status=DeliveryStatus.PLANNED)
+    )
+    _git(local, "add", LEDGER)  # even a pre-staged ledger stays out of the delivery commit
+    (local / "feature.py").write_text("x = 1\n", encoding="utf-8")
+
+    sha = GitAutonomyManager(local).commit_ticket("USR-1", "Feature", cwd=local, exclude_ledger=True)
+
+    assert _git(local, "show", "--name-only", "--format=", sha).split() == ["feature.py"]
+    assert _git(local, "diff", "--cached", "--name-only") == ""
+    assert "USR-2" in (local / LEDGER).read_text(encoding="utf-8")
+
+
+def test_complete_ticket_records_in_control_store_and_leaves_worktree_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-577: the delivery commit has no ledger, the worktree is clean, completion lives in the control store."""
+    local, gh = _gitfile_env(tmp_path)
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(local))
+    _seed_ticket(local, "USR-76")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: seed ledger")
+    _git(local, "push", "--quiet", "origin", "main")
+    seeded = _git(local, "rev-parse", "HEAD")
+    (local / "c.txt").write_text("c\n", encoding="utf-8")
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-76", cwd=local, gh_runner=gh)
+
+    assert rep.ok, rep.message
+    assert rep.delivery is not None and rep.delivery.merge_sha
+    assert _git(local, "diff", "--name-only", seeded, rep.delivery.merge_sha).split() == ["c.txt"]
+    assert _git(local, "status", "--porcelain") == ""
+    stored = queue.get_ticket("USR-76")
+    assert stored is not None and stored.status == DeliveryStatus.COMPLETED
+    assert stored.delivery_evidence == f"{rep.delivery.merge_sha}:merged"
+    assert [row["status"] for row in _queue_rows(state)] == ["completed"]
+
+
+def test_complete_ticket_rebases_over_origin_ledger_change_without_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-577: origin/main moved the ledger; delivering the same ticket must not conflict on it."""
+    local, gh = _gitfile_env(tmp_path)
+    state, queue = _isolate_queue(monkeypatch, tmp_path)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(local))
+    _seed_ticket(local, "USR-76")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: seed ledger")
+    _git(local, "push", "--quiet", "origin", "main")
+    other = _other_clone(gh.bare, tmp_path)
+    DemandsStore(other / LEDGER).save_ticket(
+        UserTicket(id="USR-76", project_id="darkfac", title="Ticket de teste", status=DeliveryStatus.IMPLEMENTING)
+    )
+    _git(other, "commit", "--quiet", "-am", "chore(ledger): outro ciclo")
+    _git(other, "push", "--quiet", "origin", "main")
+    (local / "c.txt").write_text("c\n", encoding="utf-8")
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-76", cwd=local, gh_runner=gh)
+
+    assert rep.ok, rep.message
+    assert rep.delivery is not None and rep.delivery.action == "merged"
+    assert queue.get_ticket("USR-76").status == DeliveryStatus.COMPLETED
+    assert _git(local, "status", "--porcelain") == ""
 
 
 def test_delivery_report_model() -> None:

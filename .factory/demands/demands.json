@@ -15426,5 +15426,35 @@
     "dependencies": [],
     "created_at": "2026-11-23T09:49:34.151889Z",
     "updated_at": "2026-11-27T11:30:32.724152Z"
+  },
+  {
+    "id": "USR-577",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "EC-2026-11 residuais: demands.json na entrega, superficie *_ENV, affected lento, evidencia externa e pausa do despachante",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Residuos do plano EC-2026-11 (sessao Claude 25/11), agrupados num unico ticket por ordem do owner: (1) EC-03 pedia que run_ticket nunca mexesse em .factory/demands/demands.json na worktree, mas o contrato de entrega leva o status completed do ticket no commit (tests/test_git_delivery.py:146/609 falham se filtrar); precisa redesenho (control store como fonte da conclusao). (2) Docs-Unchanged automatico (#958) nao ve superficie definida por constantes (*_ENV, ROUTE) -> trailer indevido possivel. (3) python -m core.harness.affected --run em mudanca de run_ticket.py fica 30-60 min silencioso no Windows (saida so no fim; RAM gate 1 worker). (4) fleet_dispatcher._delivery_evidence registra entrega externa 'delivered' (sem [DELIVERY_MERGED]) como falha no_delivery_evidence. (5) Nao existe pausa operacional do despachante sem parar a tarefa agendada (negado ao agente pelo classificador).",
+    "core_journey": [
+      "Residuos do plano EC-2026-11 (sessao Claude 25/11), agrupados num unico ticket por ordem do owner: (1) EC-03 pedia que run_ticket nunca mexesse em .factory/demands/demands.json na worktree, mas o contrato de entrega leva o status completed do ticket no commit (tests/test_git_delivery.py:146/609 falham se filtrar); precisa redesenho (control store como fonte da conclusao). (2) Docs-Unchanged automatico (#958) nao ve superficie definida por constantes (*_ENV, ROUTE) -> trailer indevido possivel. (3) python -m core.harness.affected --run em mudanca de run_ticket.py fica 30-60 min silencioso no Windows (saida so no fim; RAM gate 1 worker). (4) fleet_dispatcher._delivery_evidence registra entrega externa 'delivered' (sem [DELIVERY_MERGED]) como falha no_delivery_evidence. (5) Nao existe pausa operacional do despachante sem parar a tarefa agendada (negado ao agente pelo classificador)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Entrega conclui ticket sem filtrar demands.json e sem conflito de rebase no ledger; trailer nao sai quando constante *_ENV/rota muda; affected --run imprime progresso e termina em <15 min ou delega ao host Linux; entrega externa delivered nao vira falha na frota; existe arquivo/flag de pausa do despachante documentado no manual"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-26T01:14:53.490629Z",
+    "updated_at": "2026-11-26T01:14:53.490629Z"
   }
 ]

@@ -28,6 +28,14 @@ O orçamento dos afetados usa a coleta real (inclusive parametrizações):
 externo `affected_tests` tem piso de 1800s para que uma configuração antiga
 de 120s não trunque esse orçamento. O mesmo prazo interno cobre seleção, coleta,
 execução e eventual retry.
+Durante `--run` o pytest sai ao vivo (uma linha por arquivo de teste, com flush
+imediato) e, sem saída nova, uma linha `[TEST_PROGRESS] running elapsed_sec=...`
+a cada 30s; não há mais janela silenciosa até o fim. Fora de
+`DARKFAC_GATE_SCOPE=full`, coleta e execução somam no máximo
+`DARKFAC_AFFECTED_MAX_SECONDS` (padrão 900s = 15 min; `0` desliga). Ao estourar, o
+processo mata o pytest, imprime `[AFFECTED_TIME_CAP] {...}` (JSON com `error`,
+`phase`, `cap_sec`, `elapsed_sec` e a ação: delegar o portão ao host Linux ou ao CI,
+ou elevar a variável), seguido de `[STEP_TIMEOUT]`, e sai com código 124.
 O launcher mantém seu envelope externo para os demais contratos e fila do lock.
 Se a ACL impedir a leitura/criação do lock canônico ou a gravação do sidecar,
 `SuiteLock` libera qualquer slot canônico adquirido e tenta um diretório por

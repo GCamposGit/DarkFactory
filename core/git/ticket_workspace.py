@@ -133,6 +133,16 @@ def without_delivery_scratch(paths: Iterable[str]) -> list[str]:
     return [path for path in paths if not is_delivery_scratch(str(path))]
 
 
+def is_ledger_projection(path: str) -> bool:
+    """True for the worktree copy of the demands ledger, a projection that never ships in a delivery."""
+    return str(path).replace("\\", "/") == TICKET_LEDGER_RELATIVE
+
+
+def without_ledger_projection(paths: Iterable[str]) -> list[str]:
+    """``paths`` minus the demands ledger projection, preserving order and spelling."""
+    return [path for path in paths if not is_ledger_projection(str(path))]
+
+
 def drop_delivery_scratch_commands(ls_files_z: str, *, chunk: int = _SCRATCH_INDEX_CHUNK) -> list[list[str]]:
     """``git update-index --force-remove`` argv lists for scratch paths in ``ls_files_z``.
 

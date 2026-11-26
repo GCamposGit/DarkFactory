@@ -949,6 +949,10 @@ PR_COLLECTION_TIMEOUT_PER_FILE_S = 10.0
 PR_COLLECTION_TIMEOUT_MAX_S = 600.0
 PR_FINALIZATION_RESERVE_S = 20.0
 AFFECTED_DEADLINE_ENV = "DARKFAC_AFFECTED_DEADLINE"
+#: Teto de tempo (collection + execucao) do perfil de PR; estourar e erro estruturado que
+#: manda delegar ao host Linux/CI. 0 desliga. Nao vale para DARKFAC_GATE_SCOPE=full.
+AFFECTED_TIME_CAP_ENV = "DARKFAC_AFFECTED_MAX_SECONDS"
+AFFECTED_TIME_CAP_DEFAULT_S = 900.0
 
 
 def select_pr_tests(repo_root: Path, base_ref: str = "origin/main") -> Selection:
@@ -1022,6 +1026,36 @@ def _xdist_available() -> bool:
     return importlib.util.find_spec("xdist") is not None
 
 
+def affected_time_cap_seconds() -> float:
+    raw = os.environ.get(AFFECTED_TIME_CAP_ENV, "").strip()
+    try:
+        return float(raw) if raw else AFFECTED_TIME_CAP_DEFAULT_S
+    except ValueError:
+        LOGGER.warning("invalid %s=%r; using default", AFFECTED_TIME_CAP_ENV, raw)
+        return AFFECTED_TIME_CAP_DEFAULT_S
+
+
+def _stream_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    from core.harness.pytest_runtime import run_streaming
+
+    return run_streaming(command, **kwargs)  # type: ignore[arg-type]
+
+
+def _print_time_cap_error(phase: str, cap_s: float, elapsed_s: float, selected: int) -> None:
+    payload = {
+        "error": "affected_time_cap_exceeded",
+        "phase": phase,
+        "cap_sec": round(cap_s),
+        "elapsed_sec": round(elapsed_s),
+        "selected_tests": selected,
+        "action": (
+            "delegue este portao ao host Linux ou ao CI (python -m core.harness.affected --run la); "
+            f"para insistir neste host, eleve {AFFECTED_TIME_CAP_ENV}"
+        ),
+    }
+    print(f"[AFFECTED_TIME_CAP] {json.dumps(payload, ensure_ascii=False, sort_keys=True)}", flush=True)
+
+
 def _collect_test_count(repo_root: Path, command: list[str], timeout: float) -> tuple[int, int]:
     result = subprocess.run(
         [*command, "--collect-only"], cwd=repo_root, timeout=timeout,
@@ -1039,7 +1073,7 @@ def run_pytest(
     repo_root: Path, selection: Selection, extra_args: Sequence[str], *, deadline: float | None = None,
 ) -> int:
     """Run a bounded selection with RAM-aware serial degradation and one crash retry."""
-    from core.harness.pytest_runtime import run_with_serial_retry
+    from core.harness.pytest_runtime import StreamedTimeout, run_with_serial_retry
     from core.line import gate_ram
 
     if selection.mode == "none":
@@ -1060,15 +1094,24 @@ def run_pytest(
     workers = workers if workers > 1 else 0
     xdist = _xdist_available()
     command = [sys.executable, "-m", "pytest", *targets, "-q", *extra_args]
+    # Sem -q o pytest imprime uma linha por arquivo de teste; a coleta segue em -q (um node id por linha).
+    run_command = [token for token in command if token != "-q"] + ["--no-header"]
     if xdist:
         command += ["-n", "0"]
+    started = time.monotonic()
     if deadline is None:
-        deadline = time.monotonic() + PR_TIMEOUT_MAX_S - PR_FINALIZATION_RESERVE_S
+        deadline = started + PR_TIMEOUT_MAX_S - PR_FINALIZATION_RESERVE_S
+    cap_s = 0.0 if full else affected_time_cap_seconds()
+    cap_deadline = started + cap_s if cap_s > 0 else float("inf")
+    deadline = min(deadline, cap_deadline)
+    count = 0
+    cap_bound = False
     phase = "collection"
     try:
         collection_timeout = selected_collection_timeout(len(targets), deadline - time.monotonic())
         if collection_timeout <= 0:
             raise subprocess.TimeoutExpired(command, 0)
+        cap_bound = deadline == cap_deadline and collection_timeout >= deadline - time.monotonic()
         print(f"[TEST_PHASE] collection files={len(targets)} timeout_sec={collection_timeout:.0f}", flush=True)
         code, count = _collect_test_count(repo_root, command, collection_timeout)
         if code:
@@ -1077,13 +1120,14 @@ def run_pytest(
         now = time.monotonic()
         deadline = min(deadline, now + selected_test_timeout(count))
         timeout = deadline - now
+        cap_bound = deadline == cap_deadline
         print(f"[TEST_BUDGET] selected={count} timeout_sec={max(0, timeout):.0f} workers={workers}", flush=True)
         passes = [(workers, "not serial"), (0, "serial")] if xdist and workers > 1 else [(0, None)]
         codes = []
         for worker_count, marker in passes:
             from core.harness.pytest_runtime import with_workers
 
-            cmd = with_workers(command, worker_count) if xdist else list(command)
+            cmd = with_workers(run_command, worker_count) if xdist else list(run_command)
             if worker_count > 1:
                 cmd += ["--dist", "worksteal"]
             if marker:
@@ -1093,18 +1137,21 @@ def run_pytest(
                 raise subprocess.TimeoutExpired(cmd, 0)
             print(f"[TEST_PHASE] execution marker={marker or 'all'} workers={worker_count}", flush=True)
             result = run_with_serial_retry(
-                cmd, cwd=repo_root, timeout=remaining,
+                cmd, cwd=repo_root, timeout=remaining, runner=_stream_run,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
             )
-            print(result.stdout or "")
+            if not getattr(result, "streamed", False):
+                print(result.stdout or "")
             codes.append(0 if marker and result.returncode == PYTEST_EXIT_NO_TESTS_COLLECTED else result.returncode)
         return next((code for code in codes if code), 0)
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout
         if isinstance(stdout, bytes):
             stdout = stdout.decode("utf-8", errors="replace")
-        if stdout:
+        if stdout and not isinstance(exc, StreamedTimeout):
             print(stdout)
+        if cap_bound:
+            _print_time_cap_error(phase, cap_s, time.monotonic() - started, count or len(targets))
         print(f"[STEP_TIMEOUT] affected tests phase={phase}", flush=True)
         return 124
 
