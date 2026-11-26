@@ -94,6 +94,24 @@ def test_hub_api_intake_success_202(isolated_hub) -> None:
     assert claim.job_key.run_id == data["run_id"]
 
 
+def test_owner_channel_tag_lands_on_the_root_demand_only(isolated_hub) -> None:
+    """A split demand counts once for the V0 proof: milestone children never inherit `channel:<x>`."""
+    from core.workflow.control_contracts import IntakeCommand
+
+    intake = AutonomousIntakeService(store=isolated_hub["control_store"], demands_store=isolated_hub["demands_store"])
+    root = intake.accept(IntakeCommand(
+        project_id="darkfac", channel="telegram", external_id="tg-1", mode="autonomous", policy_ref="p",
+        payload={"title": "raiz", "problem": "demanda do owner", "journey": [], "non_goals": [], "criteria": []},
+    ))
+    child = intake.accept(IntakeCommand(
+        project_id="darkfac", channel="telegram", external_id="run-1:m2", mode="autonomous", policy_ref="p",
+        payload={"title": "marco 2", "problem": "filho", "journey": [], "non_goals": [], "criteria": [], "depends_on": root.run_id},
+    ))
+    store = isolated_hub["demands_store"]
+    assert "channel:telegram" in store.get_ticket(root.demand_id).tags
+    assert "channel:telegram" not in store.get_ticket(child.demand_id).tags
+
+
 def test_hub_api_intake_projects_explicit_priority(isolated_hub) -> None:
     payload = _sample_demand_payload("Prioridade explícita")
     payload["priority"] = 12

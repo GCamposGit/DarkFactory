@@ -56,9 +56,9 @@ Reaproveita as stores que a linha já escreve, sem criar uma fonte de verdade pa
 
 - **Canal**: toda entrada de demanda do owner grava
   (`owner_intake.submit_owner_demand`, o intake autônomo `AutonomousIntakeService` para os canais
-  `telegram`/`hub`/`chat`, o `/demand` do Telegram, o Hub e `run_ticket.py --create [--channel]`, que
-  assume `chat` ao rodar na hora e nenhum canal com `--queue-only`, usado pelos tickets da própria
-  fábrica; ver `docs/manual/fila.md`) grava uma tag `channel:<telegram|hub|chat>` no `UserTicket` criado a
+  `telegram`/`hub`/`chat`, o `/demand` do Telegram, o Hub e `run_ticket.py --create --channel <x>`;
+  nenhum canal é inferido, e tickets da própria fábrica ficam sem a tag; ver `docs/manual/fila.md`).
+  Marcos filhos de uma demanda dividida (`depends_on`) não herdam a tag: a demanda raiz conta uma vez grava uma tag `channel:<telegram|hub|chat>` no `UserTicket` criado a
   partir do parâmetro `source`. O coletor lê essa tag de volta via `DemandsStore.list_tickets()`.
   Um ticket sem essa tag é anterior à instrumentação (ou não passou por
   `submit_owner_demand`) e é **excluído do universo de candidatos**, não tratado como entrega

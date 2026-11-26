@@ -359,6 +359,7 @@ def test_deploy_none_uses_local_smoke_and_skips_remote_deploy(tmp_path: Path) ->
 
     assert result.outcome == "success"
     assert adapter.start_calls == []  # no remote deploy attempted
+    assert handler.smoke_ran is False  # 'none' without any smoke command: nothing executed, never a claimed smoke
 
 
 # --------------------------------------------------------------------------

@@ -169,9 +169,7 @@ def test_build_ticket_uses_next_sequential_id(tmp_path: Path) -> None:
     ticket = run_ticket._build_ticket(args, store)
     assert ticket.id == "USR-08"
     assert ticket.acceptance_criteria == ["c1"]
-    assert "channel:chat" in ticket.tags  # interactive run: chat
-    queued = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--title", "defeito interno"])
-    assert not [t for t in run_ticket._build_ticket(queued, store).tags if t.startswith("channel:")]  # factory-made
+    assert not [x for x in ticket.tags if x.startswith("channel:")]  # no channel is ever inferred
     hub = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--channel", "hub", "--title", "pedido do hub"])
     assert "channel:hub" in run_ticket._build_ticket(hub, store).tags
 
@@ -315,10 +313,11 @@ def test_external_delivery_records_pack_in_darkfac_state_and_honest_smoke(tmp_pa
     assert v0_proof._has_learning_pack("EXT-01", tmp_path / "state" / "learning_packs")
     assert list(product_repo.iterdir()) == []  # never committed into the product repo
 
-    def smoke_ok(project: object) -> object:
-        run_ticket._stage_deploy_smoke(rws, ticket, project, "a" * 40, True, MagicMock())
-        return json.loads((workspace.context_dir(rws) / ticket_engine.DEPLOY_REPORT_FILE).read_text(encoding="utf-8"))["smoke_ok"]
+    def report(project: object, smoke_ran: bool) -> dict:
+        run_ticket._stage_deploy_smoke(rws, ticket, project, "a" * 40, True, MagicMock(), smoke_ran)
+        return json.loads((workspace.context_dir(rws) / ticket_engine.DEPLOY_REPORT_FILE).read_text(encoding="utf-8"))
 
-    assert smoke_ok(SimpleNamespace(deploy=None, smoke=[])) is None  # nothing ran: never a claimed smoke
-    assert smoke_ok(SimpleNamespace(deploy=None, smoke=[object()])) is True
-    assert smoke_ok(SimpleNamespace(deploy=object(), smoke=[])) is True
+    none_ran = report(SimpleNamespace(deploy=object(), smoke=[]), False)  # deploy 'none' without smoke: nothing ran
+    assert none_ran["smoke_ok"] is None and none_ran["smoke_applicable"] is False
+    assert not ticket_engine.DeployReport(**none_ran).pending  # final: no merged_awaiting_deploy, no redeploy
+    assert report(SimpleNamespace(deploy=None, smoke=[object()]), True)["smoke_ok"] is True

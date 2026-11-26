@@ -30,7 +30,7 @@ O comando grava o ticket (status `planned`) no control store e termina. Não cri
 
 ## Canal da demanda (EC-05)
 
-Demanda do owner nasce com a tag `channel:<telegram|hub|chat>` (Hub em `create_demand_ticket`, Telegram no `/demand`, intake autonomo pelo canal do comando); a prova da V0 so conta tickets com ela. Ticket da propria fabrica nao recebe a tag.
+Demanda do owner nasce com a tag `channel:<telegram|hub|chat>` (Hub em `create_demand_ticket`, Telegram no `/demand`, intake autonomo pelo canal do comando); a prova da V0 so conta tickets com ela. Ticket da propria fabrica nao recebe a tag, nem os marcos filhos de uma demanda dividida.
 
 ## Leitura
 

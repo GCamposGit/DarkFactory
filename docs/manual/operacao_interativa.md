@@ -90,7 +90,7 @@ original permanece preservado em hold tecnico. O fluxo completo esta em
 
 ## Entrega de ticket so na fila (USR-424)
 
-`run_ticket.py --create` marca o ticket com `channel:chat` quando roda na hora; com `--queue-only` (defeitos e tickets da fabrica) nao marca canal. Demanda do owner enfileirada passa `--channel chat|hub|telegram` (EC-05).
+`run_ticket.py --create` so marca `channel:<x>` com `--channel chat|hub|telegram` explicito (EC-05); defeitos e tickets da fabrica nunca levam canal.
 
 `--resume-delivery` resolve o id antes de exigir o `demands.json` da worktree, nesta ordem: ledger da worktree, fila duravel do control store, arquivo do checkout compartilhado e `origin/main`. A fila materializa o mesmo id no ledger da worktree, sem `next_ticket_id`, sem o agente de correcao e sem copiar o ledger compartilhado. O arquivo do checkout compartilhado segue para a entrega sem gravar a worktree e sem criar linha na fila. Id so em `origin/main` continua encontrado; o rebase posterior traz a linha. Id ausente nos quatro locais encerra com exit 1, `ok=false`, `cause=ticket_absent` e `error` no formato `Ticket <ID> not found in demands store`. O stderr cita o ledger da worktree, a control store, o checkout compartilhado e `origin/main`. O ledger e o `control.db` permanecem como estavam. `run_ticket.py USR-XXX` carrega o id no ledger do checkout (a fila entra nessa leitura) e, se faltar, em `origin/main`.
 

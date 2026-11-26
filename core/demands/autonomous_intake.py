@@ -33,7 +33,7 @@ from core.workflow.control_store import ControlStore
 logger = logging.getLogger(__name__)
 
 
-OWNER_CHANNELS = frozenset({"telegram", "hub", "chat"})  # tagged `channel:<x>` for the V0 proof
+OWNER_CHANNELS = frozenset({"telegram", "hub", "chat"})  # tagged `channel:<x>` for the V0 proof; milestone children (`depends_on`) are not demands of their own
 
 
 class AutonomousIntakeService:
@@ -91,7 +91,7 @@ class AutonomousIntakeService:
                 acceptance_criteria=list(payload.get("criteria", [])),
                 suggested_files=list(payload.get("suggested_files", [])),
                 reachability_contract=reachability or "",
-                tags=[f"channel:{command.channel}"] if command.channel in OWNER_CHANNELS else [],
+                tags=[f"channel:{command.channel}"] if command.channel in OWNER_CHANNELS and "depends_on" not in payload else [],
             )
             self.demands_store.save_ticket(ticket)
         except Exception as exc:

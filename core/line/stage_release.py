@@ -125,6 +125,8 @@ class DeployReport(BaseModel):
     smoke_ok: Optional[bool]
     deployed: bool = True
     detail: str = ""
+    # False: an external project with no smoke to run (EC-05): `smoke_ok None` there is final, not pending.
+    smoke_applicable: bool = True
 
     @model_validator(mode="after")
     def _smoke_required_once_deployed(self) -> "DeployReport":
@@ -135,7 +137,7 @@ class DeployReport(BaseModel):
     @property
     def pending(self) -> bool:
         """Merged, deploy (and smoke) not run yet: merged-awaiting-deploy, never 'delivered'."""
-        return self.smoke_ok is None and not self.deployed
+        return self.smoke_ok is None and not self.deployed and self.smoke_applicable
 
 
 class ReleaseError(RuntimeError):
@@ -220,6 +222,7 @@ class GitRefReleaseStateStore:
         if not project.repo_url:
             raise ReleaseError(f"project '{project.id}' has no repo_url for release state")
         self.project = project
+        self.smoke_ran = False  # True once a smoke (local command or HTTP probe) really executed
         self.repo_url = normalize_repo_url(project.repo_url)
 
     def _mirror(self) -> Path:
@@ -733,11 +736,13 @@ class ReleaseStageHandler:
         extra_entries: list[str] = (),
     ) -> tuple[bool, str]:
         deploy = self.project.deploy
+        self.smoke_ran = False
         if deploy is None or deploy.type == DeployTargetType.NONE:
             commands = resolve_commands(self.project, Path(self.project.path or "."))
             logs: list[str] = []
             if not commands.smoke and not extra_entries:
                 return True, "(sem smoke local configurado; deploy 'none' considerado ok)"
+            self.smoke_ran = True
             for cmd in commands.smoke:
                 try:
                     proc = subprocess.run(
@@ -767,6 +772,7 @@ class ReleaseStageHandler:
         if not self._has_executable_smoke(list(extra_entries), target_config):
             return False, "smoke_not_configured: nenhum probe HTTP executável para o deploy"
 
+        self.smoke_ran = True
         logs = []
         for check in self.project.smoke:
             ok, log = _run_smoke_http(
