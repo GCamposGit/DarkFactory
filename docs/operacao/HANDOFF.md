@@ -1,7 +1,22 @@
 # Handoff operacional
 
-Versao: 16
-Atualizado em: 2026-11-25 (Antigravity, planejamento cirúrgico aprovado pelo owner)
+Versao: 17
+Atualizado em: 2026-11-25 noite (Claude Code, coordenação do plano EC-2026-11)
+
+## Estado do plano EC-2026-11 em 25/11 noite (ler primeiro)
+
+| Bloco | Estado | Evidência |
+|---|---|---|
+| `EC-01` | parcial | checkout `C:\dev\DarkFac` limpo no main; worktrees 108 → 36; holds de 9 tickets cancelados liberados; OA-099/100/101 `done`. Pausar o despachante (`Stop/Disable-ScheduledTask DarkFac-Fleet-Dispatcher`) foi **negado pelo classificador de permissões**. Lixo de `.factory/backups/trash` e `.factory/tmp` não limpo. |
+| `EC-02` | concluído | `#954` → `0d7fba51` |
+| `EC-03` | parte 1 concluída | `#956` → `2f15816c` (overlay `.factory/learning/learning_ledger.live.json`, gitignored). Parte 2 (`Docs-Unchanged` automático, detecção por AST) no PR `#958`. O item "não mexer em `demands.json` na worktree" conflita com o contrato de entrega (o commit leva o `completed` do ticket) e precisa de redesenho. |
+| `EC-04` | concluído | `#953` → `a20de752`; owner renovou o login (OA-101) e `accounts --refresh` mostra `claude connected` |
+| `EC-05` | código concluído, entrega pendente | `#957` → `4cf09fd8` (v0_proof com recibos reais e ancestralidade em `refs/remotes/origin/<default_branch>`), `#959` → `3134fd5f` (learning pack externo, smoke honesto com `smoke_applicable`, tag `channel:` só explícita). `MDL-01..03` com holds liberados; a frota estava sem host livre (Notebook `workers=0`, grokbox sem health, Desktop com run órfão). Rodar `run_ticket.py MDL-0x` pela sessão foi negado pelo classificador (trabalho de cliente): fica com a frota ou com o owner. |
+
+- `USR-279` reaberto como `accepted` (placar real `0/5`; não vai para a frota).
+- Holds de `USR-537/545/568/569` (`fix_agent_no_changes`) ficam até o `#958` mesclar.
+- `MDL-01..03` não carregam tag `channel:`; marcar retroativamente foi negado pelo classificador (decisão do owner se contam para a V0).
+- Revisão cruzada: Codex/Grok abaixo do piso até ~26/11 17:00 UTC; PRs `#958`/`#959` revisados por `opus` com persona adversarial (degrau "mesma família, outro modelo" da cascata).
 
 ## Prioridade imediata da coordenação: Plano `EC-2026-11` (`EC-01` → `EC-05`)
 

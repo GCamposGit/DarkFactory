@@ -3137,8 +3137,8 @@
       "description": "Pausa temporariamente o loop do despachante durante a cirurgia, remove ~75 worktrees órfãs e lixo em .factory/backups/trash e .factory/tmp preservando as worktrees válidas de MDL-01..03, reconcilia tickets já mesclados e limpa holds espúrios em admission.sqlite3. Ver seção EC-01 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
       "item_type": "operations",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Primeira ação obrigatória da sessão de coordenação antes de despachar qualquer ticket.",
+      "delivery_status": "implementing",
+      "state_rationale": "Checkout compartilhado limpo no main, worktrees de 108 para 36, holds de tickets cancelados liberados, OA-099/100/101 resolvidas. Pausa do despachante negada pelo classificador de permissoes (reportado ao owner).",
       "horizon": "now",
       "confidence": "high",
       "parent_id": "EC-2026-11",
@@ -3184,8 +3184,8 @@
       "description": "Unifica reuso de worktree para darkfac e projetos externos sem cair em BuildEvidenceMismatch, elimina o checkout efêmero fleet-dispatch-* propagando DARKFAC_STATE_ROOT e classifica [STEP_TIMEOUT] como espera transitória (código 75) sem chamar fix_agent. Absorve USR-572. Ver seção EC-02 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
       "item_type": "infrastructure",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Elimina na causa raiz os três maiores geradores de ticket_holds na frota.",
+      "delivery_status": "completed",
+      "state_rationale": "Mesclado em main: reuso universal de worktree, fim do fleet-dispatch duplo e STEP_TIMEOUT como infra (codigo 75).",
       "horizon": "now",
       "confidence": "high",
       "parent_id": "EC-2026-11",
@@ -3221,6 +3221,13 @@
           "label": "Especificação EC-02",
           "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
           "verified": false
+        },
+        {
+          "evidence_id": "commit:EC-02:0d7fba5",
+          "evidence_kind": "git_commit",
+          "label": "Commit 0d7fba5 em main - fix(line): reuso universal de worktree, fim do fleet-dispatch duplo e STEP_TIMEOUT como infra [EC-02] (PR #954)",
+          "locator": "git:0d7fba5",
+          "verified": true
         }
       ]
     },
@@ -3231,8 +3238,8 @@
       "description": "Move gravações de turno do learning_ledger para STATE_ROOT sem sujar C:\\dev\\DarkFac, garante zero mutação de demands.json em branches de código e anexa Docs-Unchanged automático em ajustes internos que não alteram contratos operacionais do owner. Ver seção EC-03 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
       "item_type": "infrastructure",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Elimina conflitos crônicos de rebase em docs/manual/ e falha código 3 de node_sync no pós-deploy.",
+      "delivery_status": "implementing",
+      "state_rationale": "Parte 1 mesclada (record-turn grava overlay fora do git; checkout limpo). Parte 2 (Docs-Unchanged automatico) no PR #958. O item 'nunca mexer em demands.json na worktree' conflita com o contrato de entrega (o commit leva o status completed) e precisa de redesenho.",
       "horizon": "now",
       "confidence": "high",
       "parent_id": "EC-2026-11",
@@ -3268,6 +3275,13 @@
           "label": "Especificação EC-03",
           "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
           "verified": false
+        },
+        {
+          "evidence_id": "commit:EC-03:2f15816",
+          "evidence_kind": "git_commit",
+          "label": "Commit 2f15816 em main - fix(learning): record-turn grava no estado de runtime e nao suja o checkout [EC-03] (PR #956)",
+          "locator": "git:2f15816",
+          "verified": true
         }
       ]
     },
@@ -3278,8 +3292,8 @@
       "description": "Corrige descoberta do binário atualizado do Claude Code em adapters.py, usa alias resiliente na sonda sem falhar fechado por shim antigo e reutiliza snapshot fresco (< 5 min) entre fatias do mesmo ticket. Absorve USR-554. Ver seção EC-04 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
       "item_type": "quality",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Restaura opus e sonnet para planejamento, desenvolvimento e revisão cruzada, zerando route_wait artificial.",
+      "delivery_status": "completed",
+      "state_rationale": "Mesclado em main e validado no host apos o owner renovar o login (OA-101): accounts --refresh mostra claude connected e pick planning/development usa leitura viva.",
       "horizon": "now",
       "confidence": "high",
       "parent_id": "EC-2026-11",
@@ -3315,6 +3329,13 @@
           "label": "Especificação EC-04",
           "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
           "verified": false
+        },
+        {
+          "evidence_id": "commit:EC-04:a20de75",
+          "evidence_kind": "git_commit",
+          "label": "Commit a20de75 em main - fix(usage): sonda do Claude Code acha o binario novo, alias resiliente e cache [EC-04] (PR #953)",
+          "locator": "git:a20de75",
+          "verified": true
         }
       ]
     },
@@ -3325,8 +3346,8 @@
       "description": "Habilita geração de Learning Pack em projetos externos no run_ticket.py, alinha v0_proof.py aos artefatos reais do motor único respeitando requires_commercial_acceptance e entrega MDL-01, MDL-02 e MDL-03 na branch darkfac/m1-seo a partir das worktrees preservadas. Absorve USR-557. Ver seção EC-05 de docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Converte o trabalho já construído dos três tickets do piloto Mansão do Lago em entregas validadas e contabilizáveis na prova da V0.",
+      "delivery_status": "implementing",
+      "state_rationale": "Codigo mesclado: v0_proof conta recibos reais e exige merge_sha na branch padrao remota do projeto (#957); motor gera learning pack externo, smoke honesto e tag de canal explicita (#959). Falta entregar MDL-01..03 em darkfac/m1-seo (holds liberados; frota sem host livre).",
       "horizon": "now",
       "confidence": "high",
       "parent_id": "EC-2026-11",
@@ -3371,6 +3392,20 @@
           "label": "Especificação EC-05",
           "locator": "docs/plans/PLANO_ESTABILIZACAO_CIRURGICA_2026-11-25.md",
           "verified": false
+        },
+        {
+          "evidence_id": "commit:EC-05:4cf09fd",
+          "evidence_kind": "git_commit",
+          "label": "Commit 4cf09fd em main - fix(line): v0_proof conta as entregas reais do motor unico, inclusive externas [EC-05] (PR #957)",
+          "locator": "git:4cf09fd",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:EC-05:3134fd5",
+          "evidence_kind": "git_commit",
+          "label": "Commit 3134fd5 em main - fix(line): projeto externo com learning pack, smoke honesto e canal da demanda [EC-05] (PR #959)",
+          "locator": "git:3134fd5",
+          "verified": true
         }
       ]
     },
