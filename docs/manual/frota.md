@@ -143,7 +143,9 @@ da espera. A linha fica `waiting` ou `running` com a mesma causa de recuperaçã
 
 `merge.json` com `merge_sha` permanece na trilha de evidência de deploy. Divergência
 de SHA, digest, veredito ou família fica `deploy_evidence_mismatch`. Evidência coerente
-fica `merged_awaiting_deploy`.
+fica `merged_awaiting_deploy`. Exceção: um projeto externo sem smoke aplicável grava
+`smoke_applicable: false` no `deploy_report.json`; com evidência coerente a espera vira
+terminal (`proof: merged_no_smoke`) e nunca dispara o redeploy da DarkFac (EC-05).
 
 Ticket `completed` com outra causa e sem prova de deploy fica `blocked` com causa
 `deploy_evidence_missing`.
