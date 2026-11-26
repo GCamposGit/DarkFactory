@@ -252,8 +252,9 @@ def test_review_may_approve_on_final_independent_round(
     assert len(agent.calls) == 3
 
 
+@pytest.mark.parametrize("publish", [True, False])
 def test_resume_after_approval_is_idempotent_and_does_not_call_agent_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    publish: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
@@ -263,10 +264,10 @@ def test_resume_after_approval_is_idempotent_and_does_not_call_agent_again(
     agent = _ScriptedAgent([{"verdict": "approve", "blocking": [], "non_blocking": []}])
     stage = ReviewStage(run_agent_func=agent, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config())
 
-    result1 = stage.run(project, run_id)
+    result1 = stage.run(project, run_id, publish=publish)
     assert result1.outcome == "success"
 
-    result2 = stage.run(project, run_id)
+    result2 = stage.run(project, run_id, publish=publish)
     assert result2.outcome == "success"
     assert result2.output_refs == result1.output_refs
     assert len(agent.calls) == 1  # second call short-circuits on persisted state
