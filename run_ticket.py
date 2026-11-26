@@ -3157,6 +3157,41 @@ def _latest_review_feedback(rws: Any) -> str:
     return reviews[-1].read_text(encoding="utf-8", errors="replace") if reviews else ""
 
 
+def _apply_review_fix_and_revalidate(
+    ticket: UserTicket,
+    target_worktree: Path,
+    current_branch: str,
+    current_sha: str,
+    resume_cmd: str,
+    skip_validation: bool,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    cancelled_payload: Any,
+    rws: Any,
+) -> tuple[Any, Optional[str]]:
+    """Apply development autofix after `changes_required` and re-run the validation gate."""
+    feedback = _latest_review_feedback(rws)
+    _invoke_fix_agent(target_worktree, ticket, "revisao independente", feedback)
+    _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "revisao")
+    if commit_error:
+        return None, f"fix_commit_failed: {commit_error}"
+    gate_outcome = _run_gate_with_self_correction(
+        target_worktree, current_branch, current_sha, ticket, resume_cmd,
+        skip_validation, as_json, return_result, progress, cancelled_payload, [],
+    )
+    if gate_outcome is not None:
+        return gate_outcome, None
+    if not skip_validation:
+        ticket_engine.write_validation(
+            rws,
+            True,
+            "core/harness/runner.py --quick",
+            candidate_digest=_candidate_binding(rws, target_worktree, _review_base_branch(ticket))[0] or "",
+        )
+    return None, None
+
+
 def _stage_review(
     ticket: UserTicket,
     target_worktree: Path,
@@ -3174,6 +3209,8 @@ def _stage_review(
 
     `changes_required` reinvokes the development agent with the review, commits its fix and re-runs
     the gate before the next round (rounds are capped by `run_caps.review_rounds` in the stage).
+    Infra route-fallback retries (`review_agent_crash`, timeouts, invalid JSON) switch routes
+    without consuming `review_rounds`, bounded separately so they never loop forever.
 
     An approval whose binding still matches this candidate is reused: the reviewer agent does not run
     (USR-424). ``merge.json`` and the previous deploy report were already removed by ``clear_delivery``.
@@ -3183,8 +3220,12 @@ def _stage_review(
         if not as_json:
             print("--> Estagio REVIEW: aprovacao vigente para este candidato; revisor nao reexecutado.")
         return None
+    max_rounds = load_routing_config().run_caps.review_rounds
+    max_route_retries = max(len(stage_review._DEFAULT_HOST_CAPS) * 2, 6)
+    rounds_used = 0
+    route_retries = 0
     cause = "review_not_attempted"
-    for _attempt in range(load_routing_config().run_caps.review_rounds):
+    while rounds_used < max_rounds and route_retries < max_route_retries:
         if _cancelled():
             return cancelled_payload()
         logger.info("estagio REVIEW: revisao por outra familia de modelo")
@@ -3207,21 +3248,19 @@ def _stage_review(
         if result.outcome != "retry" or "not_before" in (result.cause_code or ""):
             break
         if (result.cause_code or "").startswith("retry:development"):
-            feedback = _latest_review_feedback(rws)
-            _invoke_fix_agent(target_worktree, ticket, "revisao independente", feedback)
-            _changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "revisao")
-            if commit_error:
-                cause = f"fix_commit_failed: {commit_error}"
-                break
-            gate_outcome = _run_gate_with_self_correction(
-                target_worktree, current_branch, current_sha, ticket, resume_cmd,
-                skip_validation, as_json, return_result, progress, cancelled_payload, [],
+            rounds_used += 1
+            route_retries = 0
+            gate_outcome, fix_error = _apply_review_fix_and_revalidate(
+                ticket, target_worktree, current_branch, current_sha, resume_cmd,
+                skip_validation, as_json, return_result, progress, cancelled_payload, rws,
             )
             if gate_outcome is not None:
                 return gate_outcome
-            if not skip_validation:
-                ticket_engine.write_validation(rws, True, "core/harness/runner.py --quick",
-                    candidate_digest=_candidate_binding(rws, target_worktree, _review_base_branch(ticket))[0] or "")
+            if fix_error:
+                cause = fix_error
+                break
+        else:
+            route_retries += 1
     progress.set_outcome(cause, "review_changes_required")
     return _delivery_stage_refused(
         ticket, Stage.REVIEW, cause, target_worktree, current_branch, resume_cmd, progress, as_json, return_result

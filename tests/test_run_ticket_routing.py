@@ -1064,3 +1064,60 @@ def test_review_candidate_filters_antigravity_in_headless_without_ls_address(
     monkeypatch.setenv("ANTIGRAVITY_LS_ADDRESS", "127.0.0.1:5387")
     _REAL_REVIEW_CANDIDATE(_TICKET, tmp_path, SimpleNamespace())
     assert "harness:antigravity" in seen_caps[-1]
+
+
+def test_stage_review_does_not_burn_review_rounds_on_route_fallback_retries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    outcomes = iter([
+        SimpleNamespace(outcome="retry", cause_code="retry:development"),
+        SimpleNamespace(outcome="retry", cause_code="review_agent_crash"),
+        SimpleNamespace(outcome="success", cause_code=None),
+    ])
+    calls = {"review": 0, "fix": 0, "commit": 0, "gate": 0, "refused": []}
+
+    monkeypatch.setattr(run_ticket, "_reuse_current_approval", lambda *_a, **_kw: False)
+    monkeypatch.setattr(
+        run_ticket,
+        "load_routing_config",
+        lambda: SimpleNamespace(run_caps=SimpleNamespace(review_rounds=2)),
+    )
+
+    def fake_review(*_a: Any, **_kw: Any) -> Any:
+        calls["review"] += 1
+        return next(outcomes)
+
+    monkeypatch.setattr(run_ticket, "_review_candidate", fake_review)
+    monkeypatch.setattr(run_ticket, "_latest_review_feedback", lambda _rws: "fix me")
+    monkeypatch.setattr(run_ticket, "_invoke_fix_agent", lambda *_a, **_kw: calls.__setitem__("fix", calls["fix"] + 1))
+    monkeypatch.setattr(
+        run_ticket,
+        "_commit_fix_agent_changes_safely",
+        lambda *_a, **_kw: (calls.__setitem__("commit", calls["commit"] + 1) or (True, None)),
+    )
+    monkeypatch.setattr(
+        run_ticket,
+        "_run_gate_with_self_correction",
+        lambda *_a, **_kw: calls.__setitem__("gate", calls["gate"] + 1),
+    )
+    monkeypatch.setattr(run_ticket, "_delivery_stage_refused", lambda *_a, **_kw: calls["refused"].append(_a[2]) or "REFUSED")
+
+    res = run_ticket._stage_review(
+        _TICKET, tmp_path, "ticket/usr-99", "deadbeef", "resume", True, False, True, MagicMock(), lambda: "CANCELLED", SimpleNamespace()
+    )
+    assert res is None
+    assert calls == {"review": 3, "fix": 1, "commit": 1, "gate": 1, "refused": []}
+
+    repeated = {"review": 0}
+    monkeypatch.setattr(
+        run_ticket,
+        "_review_candidate",
+        lambda *_a, **_kw: repeated.__setitem__("review", repeated["review"] + 1)
+        or SimpleNamespace(outcome="retry", cause_code="review_agent_crash"),
+    )
+    res2 = run_ticket._stage_review(
+        _TICKET, tmp_path, "ticket/usr-99", "deadbeef", "resume", True, False, True, MagicMock(), lambda: "CANCELLED", SimpleNamespace()
+    )
+    assert res2 == "REFUSED"
+    assert repeated["review"] == max(len(run_ticket.stage_review._DEFAULT_HOST_CAPS) * 2, 6)
+    assert calls["refused"] == ["review_retry:review_agent_crash"]

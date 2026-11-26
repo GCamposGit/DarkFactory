@@ -31,7 +31,7 @@
     },
     {
       "name": "layer_contracts",
-      "cmd": "lint-imports",
+      "cmd": "python -c \"from importlinter.cli import lint_imports_command; lint_imports_command()\"",
       "quick": true,
       "kind": "check",
       "profiles": [
