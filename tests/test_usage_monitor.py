@@ -492,6 +492,7 @@ def test_find_claude_prefers_npm_install_over_path_cache(tmp_path: Path, monkeyp
     monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setenv("PATH", "")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nolocal"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "nohome"))
     monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: "codex-cache/claude.ps1")
     assert ClaudeCodeAccountAdapter._find_claude() == str(npm)
 
@@ -502,8 +503,25 @@ def test_find_claude_falls_back_to_path_when_npm_missing(tmp_path: Path, monkeyp
     monkeypatch.setenv("APPDATA", str(tmp_path / "missing"))
     monkeypatch.setenv("PATH", "")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "nolocal"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "nohome"))
     monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: "codex-cache/claude.ps1")
     assert ClaudeCodeAccountAdapter._find_claude() == "codex-cache/claude.ps1"
+
+    legacy = tmp_path / "nohome" / ".claude" / "bin" / "claude.exe"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("", encoding="utf-8")
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _name: None)
+    assert ClaudeCodeAccountAdapter._claude_candidates(rank=False) == [str(legacy)]
+
+    real_is_file = Path.is_file
+
+    def guarded_is_file(self: Path) -> bool:
+        if self.name == "claude":
+            raise PermissionError("access denied")
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", guarded_is_file)
+    assert ClaudeCodeAccountAdapter._claude_candidates(rank=False) == [str(legacy)]
 
 
 def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None:
@@ -995,10 +1013,14 @@ def test_find_claude_picks_newest_across_path_and_desktop_app(tmp_path: Path, mo
         def communicate(self, timeout=None):
             return self.out, ""
 
+    from core.harness import remote_worker
+
     monkeypatch.setattr("core.usage.adapters.subprocess.Popen", FakeProc)
     assert ClaudeCodeAccountAdapter._claude_candidates() == [str(newer), str(desktop), str(old)]
     assert ClaudeCodeAccountAdapter._find_claude() == str(newer)
-    assert len(calls) == 2  # the desktop build's version comes from its path; which() duplicate deduped
+    assert remote_worker.find_claude_binary() == str(newer)
+    assert remote_worker._has_claude_binary() is True
+    assert len(calls) == 2  # the desktop build's version comes from its path; _has_claude_binary spawns 0 probes
 
 
 def test_claude_version_timeout_kills_tree_and_failures_are_not_cached(tmp_path: Path, monkeypatch) -> None:

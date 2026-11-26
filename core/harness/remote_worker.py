@@ -1614,19 +1614,17 @@ def find_antigravity_binary() -> Optional[str]:
 
 
 def find_claude_binary() -> Optional[str]:
-    """Locate Claude Code CLI executable on Windows or Linux."""
-    executable = shutil.which("claude") or shutil.which("claude.exe")
-    if executable:
-        return executable
-    user_profile = Path.home()
-    candidates = [
-        user_profile / ".claude" / "bin" / "claude.exe",
-        user_profile / "AppData" / "Roaming" / "npm" / "claude.cmd",
-    ]
-    for c in candidates:
-        if _safe_is_file(c):
-            return str(c)
-    return None
+    """Locate the newest installed Claude Code CLI executable on Windows or Linux."""
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    return ClaudeCodeAccountAdapter._find_claude()
+
+
+def _has_claude_binary() -> bool:
+    """Cheap existence check for /health without spawning `--version` subprocesses."""
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+
+    return bool(ClaudeCodeAccountAdapter._claude_candidates(rank=False))
 
 
 def find_deepseek_binary() -> Optional[str]:
@@ -1651,7 +1649,7 @@ def get_available_harnesses() -> list[str]:
         ("codex", find_codex_binary),
         ("grok", find_grok_binary),
         ("antigravity", find_antigravity_binary),
-        ("claude", find_claude_binary),
+        ("claude", _has_claude_binary),
         ("deepseek", find_deepseek_binary),
     ]
     for name, fn in finders:
