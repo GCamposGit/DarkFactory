@@ -62,6 +62,14 @@ def _claude_executable_names() -> List[str]:
     return list(dict.fromkeys(["claude", *(f"claude{e}" for e in [*exts, ".exe", ".cmd", ".bat"])]))
 
 
+def _safe_is_file(path: Path) -> bool:
+    """Return True iff `path` is a regular file, ignoring OSError (e.g. Windows WinError 5)."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def _claude_error_text(stdout: str, stderr: str) -> str:
     """CLI diagnostics only: stderr, non-JSON lines, and error/result events; never assistant text."""
     parts: List[str] = [stderr]
@@ -1790,7 +1798,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         return None
 
     @classmethod
-    def _claude_candidates(cls) -> List[str]:
+    def _claude_candidates(cls, *, rank: bool = True) -> List[str]:
         """Every installed Claude Code, newest version first (ties keep discovery order)."""
         user_home = Path.home()
         app_data = os.environ.get("APPDATA")
@@ -1801,16 +1809,24 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         if local_app_data:
             raw.append(Path(local_app_data) / "Programs" / "Claude" / "claude.exe")
             # The desktop app keeps its own Claude Code build here.
-            raw += sorted(Path(local_app_data).glob(_CLAUDE_DESKTOP_GLOB))
-        raw += [user_home / ".local" / "bin" / "claude.exe", user_home / ".local" / "bin" / "claude"]
-        found = [str(c) for c in raw if c.is_file()]
+            try:
+                raw += sorted(Path(local_app_data).glob(_CLAUDE_DESKTOP_GLOB))
+            except OSError:
+                pass
+        raw += [
+            user_home / ".local" / "bin" / "claude.exe",
+            user_home / ".local" / "bin" / "claude",
+            user_home / ".claude" / "bin" / "claude.exe",
+            user_home / ".claude" / "bin" / "claude",
+        ]
+        found = [str(c) for c in raw if _safe_is_file(c)]
         # shutil.which only returns the first PATH hit; walk the whole PATH.
         for directory in os.environ.get("PATH", "").split(os.pathsep):
             if not directory:
                 continue
             for name in _claude_executable_names():
                 candidate = Path(directory) / name
-                if candidate.is_file():
+                if _safe_is_file(candidate):
                     found.append(str(candidate))
         direct = shutil.which("claude") or shutil.which("claude.cmd")
         if direct:
@@ -1822,7 +1838,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             if norm not in seen:
                 seen.add(norm)
                 deduped.append(c)
-        if len(deduped) < 2:
+        if not rank or len(deduped) < 2:
             return deduped
         # One shared --version budget for all candidates (the router waits ~10 s in total); a version
         # embedded in the path (desktop app layout) needs no subprocess at all.
