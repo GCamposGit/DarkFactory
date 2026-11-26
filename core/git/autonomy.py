@@ -614,8 +614,11 @@ class GitAutonomyManager:
         if kind == "implementation":
             from core.harness import docs_sync
 
-            staged = _run_git(["diff", "--cached", "--name-only"], cwd=target_dir).stdout.splitlines()
-            trailer = docs_sync.internal_only_trailer(target_dir, staged, commit_msg)
+            try:
+                trailer = docs_sync.internal_only_trailer(target_dir, commit_msg)
+            except Exception as exc:  # o trailer e conveniencia: sem ele a entrega segue
+                logger.warning("Docs-Unchanged automatico ignorado para %s: %s", ticket_id, exc)
+                trailer = ""
             if trailer:
                 commit_msg = f"{commit_msg.rstrip()}\n\n{trailer}\n"
 

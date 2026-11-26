@@ -593,30 +593,53 @@ def test_post_merge_fast_forward_waits_for_other_fleet_runs(
 
 
 
+
+
 _BASE_CLI = "def run(parser):\n    parser.add_argument(\n        \"--resume-delivery\",\n        help=\"x\",\n    )\n    return 1\n"
 _TRAILER = "Docs-Unchanged: ajuste interno sem mudanca de contrato operacional"
+_INTERNAL = _BASE_CLI.replace("return 1", "return 2")
 
 
-@pytest.mark.parametrize(
-    ("new_code", "message", "trailers"),
-    [
-        (_BASE_CLI.replace("return 1", "return 2"), None, 1),
-        (_BASE_CLI.replace("--resume-delivery", "--continue-delivery"), None, 0),
-        (_BASE_CLI.replace("    return 1", "    parser.add_argument(\"--novo\")\n    return 1"), None, 0),
-        ("@router.get('/novo')\n" + _BASE_CLI, None, 0),
-        (_BASE_CLI.replace("return 1", "return 2"), "feat: x\n\ndocs-unchanged: motivo proprio\n", 1),
-    ],
-)
+def _cli(old: str, new: str) -> str:
+    return _BASE_CLI.replace(old, new)
+
+
+_CASES = {
+    "internal": ({"mod.py": _INTERNAL}, None, False, 1),
+    "flag_rename_continuation_line": ({"mod.py": _cli("--resume-delivery", "--continue-delivery")}, None, False, 0),
+    "new_flag": ({"mod.py": _cli("    return 1", "    parser.add_argument(\"--novo\")\n    return 1")}, None, False, 0),
+    "positional_arg": ({"mod.py": _cli("    return 1", "    parser.add_argument(\"alvo\")\n    return 1")}, None, False, 0),
+    "choices_change": ({"mod.py": _cli("help=", "choices=[1], help=")}, None, False, 0),
+    "add_parser": ({"mod.py": _cli("    return 1", "    sub.add_parser(\"novo\")\n    return 1")}, None, False, 0),
+    "new_route": ({"mod.py": "@router.get('/novo')\n" + _BASE_CLI}, None, False, 0),
+    "router_prefix": ({"mod.py": "router = APIRouter(prefix='/a')\n" + _INTERNAL}, None, False, 0),
+    "non_py_covered": ({"ext.ps1": "Write-Host 2\n"}, None, False, 0),
+    "deleted_covered": ({"gone.py": None}, None, False, 0),
+    "lowercase_trailer_not_duplicated": ({"mod.py": _INTERNAL}, "feat: x\n\ndocs-unchanged: motivo proprio\n", False, 1),
+    "helper_raises": ({"mod.py": _INTERNAL}, None, True, 0),
+}
+
+
+@pytest.mark.parametrize(("changes", "message", "helper_raises", "trailers"), _CASES.values(), ids=_CASES.keys())
 def test_commit_ticket_docs_trailer_only_for_internal_change(
-    test_git_repo: Path, new_code: str, message: str | None, trailers: int
+    test_git_repo: Path, monkeypatch: pytest.MonkeyPatch, changes: dict, message: str | None,
+    helper_raises: bool, trailers: int,
 ) -> None:
     (test_git_repo / "docs" / "manual").mkdir(parents=True)
-    (test_git_repo / "docs" / "manual" / "x.md").write_text("<!-- covers: mod.py -->\n# X\n", encoding="utf-8")
-    (test_git_repo / "mod.py").write_text(_BASE_CLI, encoding="utf-8")
+    (test_git_repo / "docs" / "manual" / "x.md").write_text(
+        "<!-- covers: mod.py, ext.ps1, gone.py -->\n# X\n", encoding="utf-8")
+    for name, content in {"mod.py": _BASE_CLI, "ext.ps1": "Write-Host 1\n", "gone.py": "X = 1\n"}.items():
+        (test_git_repo / name).write_text(content, encoding="utf-8")
     _git(test_git_repo, "add", "-A")
     _git(test_git_repo, "commit", "--quiet", "-m", "chore: base")
+    for name, content in changes.items():
+        if content is None:
+            (test_git_repo / name).unlink()
+        else:
+            (test_git_repo / name).write_text(content, encoding="utf-8")
+    if helper_raises:
+        monkeypatch.setattr("core.harness.docs_sync.load_pages", lambda root: 1 / 0)
 
-    (test_git_repo / "mod.py").write_text(new_code, encoding="utf-8")
     GitAutonomyManager(test_git_repo).commit_ticket("USR-1", "ajuste", cwd=test_git_repo, custom_message=message)
 
     body = _git(test_git_repo, "log", "-n", "1", "--format=%B").stdout.lower()
