@@ -319,7 +319,8 @@ def _smoke_passed(run_dir: Path, merge_sha: str) -> bool:
 
 
 def _has_learning_pack(ticket_id: str, packs_dir: Path) -> bool:
-    return any((packs_dir / f"{ticket_id}.{ext}").is_file() for ext in ("json", "md"))
+    names = (ticket_id, f"lp-{ticket_id.lower()}")  # the store names a pack `lp-<id>` (ticket_extras)
+    return any((packs_dir / f"{n}.{ext}").is_file() for n in names for ext in ("json", "md"))
 
 
 def _merge_on_default_branch(merge_sha: str, repo: Path | None, default_branch: str) -> bool:

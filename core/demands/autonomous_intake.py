@@ -33,6 +33,9 @@ from core.workflow.control_store import ControlStore
 logger = logging.getLogger(__name__)
 
 
+OWNER_CHANNELS = frozenset({"telegram", "hub", "chat"})  # tagged `channel:<x>` for the V0 proof
+
+
 class AutonomousIntakeService:
     """Transactional intake service providing atomic intake commitment and documentary handling."""
 
@@ -88,6 +91,7 @@ class AutonomousIntakeService:
                 acceptance_criteria=list(payload.get("criteria", [])),
                 suggested_files=list(payload.get("suggested_files", [])),
                 reachability_contract=reachability or "",
+                tags=[f"channel:{command.channel}"] if command.channel in OWNER_CHANNELS else [],
             )
             self.demands_store.save_ticket(ticket)
         except Exception as exc:

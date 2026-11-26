@@ -28,6 +28,10 @@ O comando grava o ticket (status `planned`) no control store e termina. Não cri
 `ticket/queue-*`, PR nem merge. O Telegram usa o mesmo caminho.
 `--project` precisa existir em `.factory/projects.json` (ou ser `darkfac`); projeto desconhecido sai com código 2 sem registrar ticket. O registro não sonda cota.
 
+## Canal da demanda (EC-05)
+
+Demanda do owner nasce com a tag `channel:<telegram|hub|chat>` (Hub em `create_demand_ticket`, Telegram no `/demand`, intake autonomo pelo canal do comando); a prova da V0 so conta tickets com ela. Ticket da propria fabrica nao recebe a tag.
+
 ## Leitura
 
 `core.demands.store.DemandsStore` (usado pelo despachante, Hub e `/tickets`) lê o control store

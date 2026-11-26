@@ -287,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicit scope limit for newly created ticket (repeatable). Never invented: omit when unknown.",
     )
     parser.add_argument("--project", default="darkfac", help="Project identifier (default: darkfac)")
+    parser.add_argument(
+        "--channel", choices=("telegram", "hub", "chat"), default=None,
+        help="With --create: channel of the owner demand (tag channel:<x>, read by the V0 proof). "
+        "Default: chat when the ticket runs right away; none with --queue-only (factory-made tickets)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Inspect quotas and resolve route without modifying code")
     parser.add_argument("--skip-validation", action="store_true", help="Skip running runner.py --quick after development")
     parser.add_argument("--no-commit", action="store_true", help="Do not automatically commit after validation pass")
@@ -372,7 +377,14 @@ def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
         non_goals=[g.strip() for g in (getattr(args, "non_goals", None) or []) if g and g.strip()],
         acceptance_criteria=list(args.criteria),
         status=DeliveryStatus.PLANNED,
+        tags=[f"channel:{channel}"] if (channel := _demand_channel(args)) else [],
     )
+
+
+def _demand_channel(args: argparse.Namespace) -> Optional[str]:
+    """Owner channel of a created ticket: explicit `--channel`, else chat for an immediate run; a
+    `--queue-only` ticket is factory-made (defects, meta) and never counts as an owner demand."""
+    return getattr(args, "channel", None) or (None if getattr(args, "queue_only", False) else "chat")
 
 
 def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
@@ -2811,7 +2823,7 @@ def _deliver_worktree(
         )
         if bound_digest and not ticket_engine.review_approves(rws, bound_digest, bound_policy):
             return refused(Stage.REVIEW, "review_not_bound_to_candidate")
-    learning = None if external_project else ticket_extras.build_learning(target_worktree, ticket.id, "origin/main")
+    learning = ticket_extras.build_learning(target_worktree, ticket.id, f"origin/{base_branch}")
     try:
         require_artifact(Stage.VALIDATE, rws)
         require_artifact(Stage.REVIEW, rws)
@@ -3200,8 +3212,12 @@ def _stage_deploy_smoke(
     never reaches here); the factory's own deploy is the fleet's single post-merge redeploy."""
     if external_project and project is not None:
         deployed = project.deploy is not None
-        detail = "deploy e smoke do projeto aprovados" if deployed else "sem deploy declarado; smoke HTTP aprovado"
-        ticket_engine.write_deploy(rws, merge_sha, True, deployed, detail)
+        if deployed or project.smoke:  # a failure of either never reaches here (the delivery failed)
+            ticket_engine.write_deploy(rws, merge_sha, True, deployed, "deploy e smoke do projeto aprovados")
+        else:
+            ticket_engine.write_deploy(
+                rws, merge_sha, None, False, "sem deploy nem smoke declarados no projeto: nenhum smoke executado"
+            )
         return
     # Not run here: smoke_ok None = deploy pending (merged-awaiting-deploy), never a claimed smoke.
     ticket_engine.write_deploy(

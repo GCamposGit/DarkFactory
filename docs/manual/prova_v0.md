@@ -54,8 +54,11 @@ botão do Telegram, ver `docs/manual/fila.md`), não cria `OwnerAction`. Por iss
 
 Reaproveita as stores que a linha já escreve, sem criar uma fonte de verdade paralela:
 
-- **Canal**: `owner_intake.submit_owner_demand` (entrada única do Telegram, Hub e chat, ver
-  `docs/manual/fila.md`) grava uma tag `channel:<telegram|hub|chat>` no `UserTicket` criado a
+- **Canal**: toda entrada de demanda do owner grava
+  (`owner_intake.submit_owner_demand`, o intake autônomo `AutonomousIntakeService` para os canais
+  `telegram`/`hub`/`chat`, o `/demand` do Telegram, o Hub e `run_ticket.py --create [--channel]`, que
+  assume `chat` ao rodar na hora e nenhum canal com `--queue-only`, usado pelos tickets da própria
+  fábrica; ver `docs/manual/fila.md`) grava uma tag `channel:<telegram|hub|chat>` no `UserTicket` criado a
   partir do parâmetro `source`. O coletor lê essa tag de volta via `DemandsStore.list_tickets()`.
   Um ticket sem essa tag é anterior à instrumentação (ou não passou por
   `submit_owner_demand`) e é **excluído do universo de candidatos**, não tratado como entrega
@@ -71,7 +74,8 @@ Reaproveita as stores que a linha já escreve, sem criar uma fonte de verdade pa
   nenhum commit em `docs/manual/` da DarkFac é exigido.
   A branch local nunca conta: só `origin/<branch>` (após `git fetch` dessa ref). Projeto fora do registro é
   rejeitado, sem cair no repositório da DarkFac.
-- **Learning pack**: existência de `.factory/learning_packs/<ticket_id>.json` ou `.md`
+- **Learning pack**: existência de `learning_packs/<ticket_id>.json|md` ou do nome `lp-<ticket_id>` do
+  `LearningPackStore` (estado da DarkFac, nunca o repositório do produto; vale para projeto interno e externo)
   (`core.learning_pack.delivery.build_for_delivery`, mesma convenção usada por
   `core.ops.turn_guard`).
 - **Ações do owner**: `core.owner_actions.store.OwnerActionStore.list_actions()`, filtrando as que

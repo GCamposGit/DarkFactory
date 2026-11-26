@@ -169,6 +169,12 @@ def test_build_ticket_uses_next_sequential_id(tmp_path: Path) -> None:
     ticket = run_ticket._build_ticket(args, store)
     assert ticket.id == "USR-08"
     assert ticket.acceptance_criteria == ["c1"]
+    assert "channel:chat" in ticket.tags  # interactive run: chat
+    queued = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--title", "defeito interno"])
+    assert not [t for t in run_ticket._build_ticket(queued, store).tags if t.startswith("channel:")]  # factory-made
+    hub = run_ticket.build_parser().parse_args(["--create", "--queue-only", "--channel", "hub", "--title", "pedido do hub"])
+    assert "channel:hub" in run_ticket._build_ticket(hub, store).tags
+
 @pytest.mark.parametrize(("cause", "stage", "expected"), [
     ("route_wait", "preflight", 75), ("context", "plan", 75),
     ("agent_timeout", "agent", 1), ("gate_timeout", "gate", 75),
@@ -291,3 +297,28 @@ def test_ci_fix_without_changes_counts_candidate_instead_of_waiting_for_owner(tm
     assert failed_ci()["exit_code"] == 1
     assert requeues == [("USR-99",)]
     assert AdmissionStore(state_root() / "admission.sqlite3").budget("darkfac", ticket.id)["candidate_failures"] == 1
+
+
+def test_external_delivery_records_pack_in_darkfac_state_and_honest_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from core.learning_pack.delivery import LearningPackArtifact
+    from core.line import ticket_engine, ticket_extras, v0_proof, workspace
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    product_repo = tmp_path / "product"
+    product_repo.mkdir()
+    ticket = run_ticket.UserTicket(id="EXT-01", project_id="produto", title="entrega externa", problem_statement="problema suficientemente longo")
+    rws = ticket_engine.run_workspace(ticket)
+    art = LearningPackArtifact(ticket="EXT-01", base_ref="origin/main", head_ref="HEAD", layman="Troca simples.", dev="Mudou a.py.")
+    assert ticket_extras.publish_learning(rws, art, tmp_path / "state" / "learning_packs")
+    assert v0_proof._has_learning_pack("EXT-01", tmp_path / "state" / "learning_packs")
+    assert list(product_repo.iterdir()) == []  # never committed into the product repo
+
+    def smoke_ok(project: object) -> object:
+        run_ticket._stage_deploy_smoke(rws, ticket, project, "a" * 40, True, MagicMock())
+        return json.loads((workspace.context_dir(rws) / ticket_engine.DEPLOY_REPORT_FILE).read_text(encoding="utf-8"))["smoke_ok"]
+
+    assert smoke_ok(SimpleNamespace(deploy=None, smoke=[])) is None  # nothing ran: never a claimed smoke
+    assert smoke_ok(SimpleNamespace(deploy=None, smoke=[object()])) is True
+    assert smoke_ok(SimpleNamespace(deploy=object(), smoke=[])) is True
