@@ -1043,7 +1043,7 @@ class ReviewStage:
                     outcome="failed", cause_code="review_forced_approval_legacy",
                     output_refs=[last_sha] if last_sha else [],
                 )
-            return StageResult(outcome="success", output_refs=[last_sha] if last_sha else [])
+            return StageResult(outcome="success", output_refs=[last_sha or f"review:{run_id}:{last.round}"])
 
         if state.rounds and state.rounds[-1].verdict != "invalidated" and len(state.rounds) > max_rounds:
             last = state.rounds[-1]
