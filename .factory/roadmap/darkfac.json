@@ -3239,7 +3239,7 @@
       "item_type": "infrastructure",
       "lifecycle_stage": "execution",
       "delivery_status": "implementing",
-      "state_rationale": "Parte 1 mesclada (record-turn grava overlay fora do git; checkout limpo). Parte 2 (Docs-Unchanged automatico) no PR #958. O item 'nunca mexer em demands.json na worktree' conflita com o contrato de entrega (o commit leva o status completed) e precisa de redesenho.",
+      "state_rationale": "Parte 1 (#956, overlay do ledger fora do git) e parte 2 (#958, Docs-Unchanged automatico conservador por AST) mescladas. Falta so o item 'nao mexer em demands.json na worktree', que conflita com o contrato de entrega e foi para o ticket agrupado de redesenho.",
       "horizon": "now",
       "confidence": "high",
       "parent_id": "EC-2026-11",
@@ -3281,6 +3281,13 @@
           "evidence_kind": "git_commit",
           "label": "Commit 2f15816 em main - fix(learning): record-turn grava no estado de runtime e nao suja o checkout [EC-03] (PR #956)",
           "locator": "git:2f15816",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:EC-03:d12422b",
+          "evidence_kind": "git_commit",
+          "label": "Commit d12422b em main - fix(line): Docs-Unchanged automatico para ajuste interno [EC-03] (PR #958)",
+          "locator": "git:d12422b",
           "verified": true
         }
       ]
