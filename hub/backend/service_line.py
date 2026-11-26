@@ -399,6 +399,8 @@ class LineDemandsMixin:
 
     def create_demand_ticket(self, ticket: UserTicket) -> UserTicket:
         """Create and insert a specified user demand into the backlog and invalidate roadmap cache."""
+        if not any(t.startswith("channel:") for t in ticket.tags):
+            ticket.tags = [*ticket.tags, "channel:hub"]  # V0 proof: demand typed in the Hub
         saved = self.demands_service.create_ticket(ticket)
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(ticket.project_id)

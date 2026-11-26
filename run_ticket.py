@@ -287,6 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicit scope limit for newly created ticket (repeatable). Never invented: omit when unknown.",
     )
     parser.add_argument("--project", default="darkfac", help="Project identifier (default: darkfac)")
+    parser.add_argument(
+        "--channel", choices=("telegram", "hub", "chat"), default=None,
+        help="With --create: channel of the owner demand (tag channel:<x>, read by the V0 proof). "
+        "Default: none (no channel is inferred; factory-made tickets are not owner demands)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Inspect quotas and resolve route without modifying code")
     parser.add_argument("--skip-validation", action="store_true", help="Skip running runner.py --quick after development")
     parser.add_argument("--no-commit", action="store_true", help="Do not automatically commit after validation pass")
@@ -372,7 +377,14 @@ def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
         non_goals=[g.strip() for g in (getattr(args, "non_goals", None) or []) if g and g.strip()],
         acceptance_criteria=list(args.criteria),
         status=DeliveryStatus.PLANNED,
+        tags=[f"channel:{channel}"] if (channel := _demand_channel(args)) else [],
     )
+
+
+def _demand_channel(args: argparse.Namespace) -> Optional[str]:
+    """Owner channel of a created ticket: only an explicit `--channel` (tickets made by the factory
+    itself, defects and meta, never count as owner demands)."""
+    return getattr(args, "channel", None)
 
 
 def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
@@ -2637,15 +2649,16 @@ def _deliver_external_project(
     no_push: bool,
     progress: ProgressPublisher,
     project: Any,
-) -> Any:
-    """Branch delivery (PR/merge/deploy/smoke) of a ticket from an external project."""
+) -> tuple[Any, bool]:
+    """Branch delivery (PR/merge/deploy/smoke) of an external project: (report, a smoke really ran)."""
     if git_mgr.is_dirty(cwd=target_worktree):
         git_mgr.commit_ticket(
             ticket_id=ticket.id, title=ticket.title, cwd=target_worktree,
             custom_message=f"feat: {ticket.title} [{ticket.id}]",
         )
     if no_push:
-        return None
+        return None, False
+    smoke_ran = False
     delivery = git_mgr.deliver_branch(
         ticket.id, ticket.title, cwd=target_worktree, base=project.default_branch,
         merge=not project.requires_commercial_acceptance, kind="implementation",
@@ -2653,7 +2666,7 @@ def _deliver_external_project(
     )
     if delivery.ok and delivery.merge_sha and project.deploy is not None:
         progress.phase("deploy", "running", f"deploy pós-merge do projeto {project.id}")
-        release_error = _release_external_project(
+        release_error, smoke_ran = _release_external_project(
             project, ticket, delivery, progress, git_mgr.root
         )
         if release_error:
@@ -2670,7 +2683,9 @@ def _deliver_external_project(
             delivery.ok = False
             delivery.action = "error"
             delivery.message = smoke_error
-    return delivery
+        else:
+            smoke_ran = True
+    return delivery, smoke_ran
 
 
 def _publish_resumed_prior_phases(
@@ -2811,7 +2826,7 @@ def _deliver_worktree(
         )
         if bound_digest and not ticket_engine.review_approves(rws, bound_digest, bound_policy):
             return refused(Stage.REVIEW, "review_not_bound_to_candidate")
-    learning = None if external_project else ticket_extras.build_learning(target_worktree, ticket.id, "origin/main")
+    learning = ticket_extras.build_learning(target_worktree, ticket.id, f"origin/{base_branch}")
     try:
         require_artifact(Stage.VALIDATE, rws)
         require_artifact(Stage.REVIEW, rws)
@@ -2822,8 +2837,9 @@ def _deliver_worktree(
     if _cancelled():
         return cancelled_payload()
     completion_report = None
+    smoke_ran = False
     if external_project and project is not None and not no_commit:
-        completion_report = _deliver_external_project(
+        completion_report, smoke_ran = _deliver_external_project(
             git_mgr, ticket, target_worktree, no_push, progress, project
         )
     elif not no_commit:
@@ -2864,7 +2880,7 @@ def _deliver_worktree(
             ticket_engine.write_merge(rws, pr_url, merge_sha)
             require_artifact(Stage.MERGE, rws)
             run_outcome.merged(ticket.id, ticket.project_id)
-            _stage_deploy_smoke(rws, ticket, project, merge_sha, external_project, progress)
+            _stage_deploy_smoke(rws, ticket, project, merge_sha, external_project, progress, smoke_ran)
             awaiting_deploy = bool(getattr(require_artifact(Stage.DEPLOY_SMOKE, rws), "pending", False))
             ticket_extras.publish_learning(rws, learning)
         except (StageArtifactMissing, ValueError) as exc:
@@ -3194,14 +3210,20 @@ def _stage_review(
 
 
 def _stage_deploy_smoke(
-    rws: Any, ticket: UserTicket, project: Any, merge_sha: str, external_project: bool, progress: ProgressPublisher
+    rws: Any, ticket: UserTicket, project: Any, merge_sha: str, external_project: bool, progress: ProgressPublisher,
+    smoke_ran: bool = False,
 ) -> None:
     """DEPLOY_SMOKE artifact. An external project's deploy/smoke already ran in the delivery (a failure
     never reaches here); the factory's own deploy is the fleet's single post-merge redeploy."""
     if external_project and project is not None:
-        deployed = project.deploy is not None
-        detail = "deploy e smoke do projeto aprovados" if deployed else "sem deploy declarado; smoke HTTP aprovado"
-        ticket_engine.write_deploy(rws, merge_sha, True, deployed, detail)
+        if smoke_ran:  # a failing smoke never reaches here (the delivery failed)
+            ticket_engine.write_deploy(
+                rws, merge_sha, True, project.deploy is not None, "deploy e smoke do projeto aprovados"
+            )
+        else:  # final, not pending: the delivery completes and v0_proof does not count a smoke
+            ticket_engine.write_deploy(
+                rws, merge_sha, None, False, "nenhum smoke executado na entrega do projeto", smoke_applicable=False
+            )
         return
     # Not run here: smoke_ok None = deploy pending (merged-awaiting-deploy), never a claimed smoke.
     ticket_engine.write_deploy(
@@ -3223,10 +3245,10 @@ def _describe_workspace(workspace: TicketWorkspace) -> str:
 
 def _release_external_project(
     project: Any, ticket: UserTicket, report: Any, progress: ProgressPublisher, project_root: Path
-) -> Optional[str]:
-    """Run the project's configured post-merge deploy/smoke flow, if one is declared."""
+) -> tuple[Optional[str], bool]:
+    """Run the project's post-merge deploy/smoke flow, if declared: (error, a smoke really ran)."""
     if project.deploy is None or not getattr(report, "merge_sha", None):
-        return None
+        return None, False
     from core.line.stage_release import ReleaseStageHandler
     from core.workflow.control_contracts import Claim, JobKey, StageContext
     from datetime import datetime, timezone
@@ -3246,8 +3268,8 @@ def _release_external_project(
     )
     result = handler.handle(context)
     if result.outcome != "success":
-        return f"release do projeto {project.id} terminou em {result.outcome}: {result.cause_code or ''}"
-    return None
+        return f"release do projeto {project.id} terminou em {result.outcome}: {result.cause_code or ''}", False
+    return None, handler.smoke_ran
 
 
 def _smoke_external_project(project: Any) -> Optional[str]:

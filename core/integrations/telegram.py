@@ -1434,6 +1434,7 @@ class TelegramGateway:
                             title=arg_str[:70],
                             problem_statement=arg_str,
                             project_id="darkfac",
+                            extra_tags=["channel:telegram"],
                         ),
                         force_heuristic=True,
                     )

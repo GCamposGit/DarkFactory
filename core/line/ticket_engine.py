@@ -556,9 +556,12 @@ def write_merge(ws: workspace.RunWorkspace, pr_url: str, merge_sha: str) -> None
 
 
 def write_deploy(
-    ws: workspace.RunWorkspace, sha: str, smoke_ok: Optional[bool], deployed: bool, detail: str = ""
+    ws: workspace.RunWorkspace, sha: str, smoke_ok: Optional[bool], deployed: bool, detail: str = "",
+    smoke_applicable: bool = True,
 ) -> None:
-    report = DeployReport(sha=sha, smoke_ok=smoke_ok, deployed=deployed, detail=detail)
+    report = DeployReport(
+        sha=sha, smoke_ok=smoke_ok, deployed=deployed, detail=detail, smoke_applicable=smoke_applicable
+    )
     workspace.write_context(ws, DEPLOY_REPORT_FILE, report.model_dump_json(indent=2))
 
 

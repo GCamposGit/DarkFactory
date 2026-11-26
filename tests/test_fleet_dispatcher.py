@@ -1248,6 +1248,18 @@ def test_ci_recovery_with_merge_sha_keeps_the_deploy_evidence_trail(tmp_path: Pa
     assert pd.tick(tmp_path, directory=directory, now=row.next_check + 2)[0]["status"] == "merged_awaiting_deploy"
     assert calls == []
 
+    # External delivery with no applicable smoke is terminal: never a DarkFac redeploy wait.
+    import json
+    (context / "deploy_report.json").write_text(
+        json.dumps({"sha": "a" * 40, "deployed": False, "smoke_ok": None, "smoke_applicable": False}),
+        encoding="utf-8",
+    )
+    saved.status = "waiting"
+    pd._save(directory / "USR-99.json", saved)
+    outcome = pd.tick(tmp_path, directory=directory, now=row.next_check + 3)[0]
+    assert outcome["status"] == "terminal" and outcome["proof"] == "merged_no_smoke", outcome
+    assert calls == []
+
 
 
 def test_pending_delivery_resume_isolates_parent_interactive_env(tmp_path: Path, monkeypatch):

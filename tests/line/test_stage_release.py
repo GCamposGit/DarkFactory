@@ -167,6 +167,12 @@ def test_success_deploys_and_records_last_good_sha(tmp_path: Path) -> None:
     state = handler.state_store.load(project.id)
     assert state.last_good_sha == context.input_refs[-1]
     assert state.last_success_operation_id == result.output_refs[0]
+    assert handler.smoke_ran is True
+
+    # Resumed delivery of the same sha takes the idempotent path: success, but no smoke claimed.
+    again = _handler(project, adapter, tmp_path, opener)
+    assert again.handle(context).outcome == "success"
+    assert again.smoke_ran is False
 
 
 def test_remote_deploy_without_executable_smoke_fails_before_deploy(tmp_path: Path) -> None:
@@ -359,6 +365,7 @@ def test_deploy_none_uses_local_smoke_and_skips_remote_deploy(tmp_path: Path) ->
 
     assert result.outcome == "success"
     assert adapter.start_calls == []  # no remote deploy attempted
+    assert handler.smoke_ran is False  # 'none' without any smoke command: nothing executed, never a claimed smoke
 
 
 # --------------------------------------------------------------------------

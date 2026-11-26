@@ -125,6 +125,8 @@ class DeployReport(BaseModel):
     smoke_ok: Optional[bool]
     deployed: bool = True
     detail: str = ""
+    # False: an external project with no smoke to run (EC-05): `smoke_ok None` there is final, not pending.
+    smoke_applicable: bool = True
 
     @model_validator(mode="after")
     def _smoke_required_once_deployed(self) -> "DeployReport":
@@ -135,7 +137,7 @@ class DeployReport(BaseModel):
     @property
     def pending(self) -> bool:
         """Merged, deploy (and smoke) not run yet: merged-awaiting-deploy, never 'delivered'."""
-        return self.smoke_ok is None and not self.deployed
+        return self.smoke_ok is None and not self.deployed and self.smoke_applicable
 
 
 class ReleaseError(RuntimeError):
@@ -464,6 +466,9 @@ class ReleaseStageHandler:
         resource_coordinator: Optional[Any] = None,
     ) -> None:
         self.project = project
+        # True only when a smoke (local command or HTTP probe) really executed in this handler; the
+        # idempotent "already released" path leaves it False (never claims a smoke it did not run).
+        self.smoke_ran = False
         # Disk hygiene around Dokploy deploys (2026-10-06 VPS incident): called with "pre-deploy" and
         # "post-deploy"; best effort, never changes the stage outcome.
         self.disk_cleaner = disk_cleaner or _default_disk_cleaner
@@ -733,11 +738,13 @@ class ReleaseStageHandler:
         extra_entries: list[str] = (),
     ) -> tuple[bool, str]:
         deploy = self.project.deploy
+        self.smoke_ran = False
         if deploy is None or deploy.type == DeployTargetType.NONE:
             commands = resolve_commands(self.project, Path(self.project.path or "."))
             logs: list[str] = []
             if not commands.smoke and not extra_entries:
                 return True, "(sem smoke local configurado; deploy 'none' considerado ok)"
+            self.smoke_ran = True
             for cmd in commands.smoke:
                 try:
                     proc = subprocess.run(
@@ -767,6 +774,7 @@ class ReleaseStageHandler:
         if not self._has_executable_smoke(list(extra_entries), target_config):
             return False, "smoke_not_configured: nenhum probe HTTP executável para o deploy"
 
+        self.smoke_ran = True
         logs = []
         for check in self.project.smoke:
             ok, log = _run_smoke_http(
