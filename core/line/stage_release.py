@@ -222,7 +222,6 @@ class GitRefReleaseStateStore:
         if not project.repo_url:
             raise ReleaseError(f"project '{project.id}' has no repo_url for release state")
         self.project = project
-        self.smoke_ran = False  # True once a smoke (local command or HTTP probe) really executed
         self.repo_url = normalize_repo_url(project.repo_url)
 
     def _mirror(self) -> Path:
@@ -467,6 +466,9 @@ class ReleaseStageHandler:
         resource_coordinator: Optional[Any] = None,
     ) -> None:
         self.project = project
+        # True only when a smoke (local command or HTTP probe) really executed in this handler; the
+        # idempotent "already released" path leaves it False (never claims a smoke it did not run).
+        self.smoke_ran = False
         # Disk hygiene around Dokploy deploys (2026-10-06 VPS incident): called with "pre-deploy" and
         # "post-deploy"; best effort, never changes the stage outcome.
         self.disk_cleaner = disk_cleaner or _default_disk_cleaner

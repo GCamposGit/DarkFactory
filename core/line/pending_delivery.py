@@ -498,6 +498,11 @@ def _release_paths(row: PendingDelivery) -> tuple[Path, Path, dict]:
     return release, release.with_name("merge.json"), report
 
 
+def _awaits_deploy(report: dict) -> bool:
+    """Merged but not deployed yet. An external delivery with no applicable smoke is terminal, not pending."""
+    return bool(report.get("sha")) and not report.get("deployed") and report.get("smoke_applicable") is not False
+
+
 def _evidence_incoherent(release: Path, report: dict) -> str:
     """Empty when the deploy bundle matches. Otherwise the blocked cause."""
     try:
@@ -629,7 +634,7 @@ def _reconcile_terminal_wait(path: Path, row: PendingDelivery, now: float) -> di
         )
         path.unlink(missing_ok=True)
         return {"ticket": row.ticket_id, "status": "terminal", "proof": status, "stage": row.stage}
-    if report.get("sha") and not report.get("deployed"):
+    if _awaits_deploy(report):
         problem = _evidence_incoherent(release, report)
         if problem:
             return _block_wait(path, row, problem, _evidence_token(release, report, problem), now=now)
@@ -639,7 +644,8 @@ def _reconcile_terminal_wait(path: Path, row: PendingDelivery, now: float) -> di
             now=now,
         )
         return {"ticket": row.ticket_id, "status": "merged_awaiting_deploy", "sha": report["sha"], "stage": row.stage}
-    if not release.is_file() or not report.get("deployed") or not report.get("sha"):
+    no_smoke = report.get("smoke_applicable") is False
+    if not release.is_file() or not (report.get("deployed") or no_smoke) or not report.get("sha"):
         cause = "deploy_evidence_missing"
         return _block_wait(path, row, cause, _evidence_token(release, report, cause), now=now)
     problem = _evidence_incoherent(release, report)
@@ -647,10 +653,11 @@ def _reconcile_terminal_wait(path: Path, row: PendingDelivery, now: float) -> di
         return _block_wait(path, row, problem, _evidence_token(release, report, problem), now=now)
     _record_reconciliation(
         path, row, to_status="terminal", to_cause="", reason="coherent deployed release is durable",
-        evidence=f"deployed_sha:{report['sha']}", now=now,
+        evidence=f"{'merged_no_smoke' if no_smoke else 'deployed'}_sha:{report['sha']}", now=now,
     )
     path.unlink(missing_ok=True)
-    return {"ticket": row.ticket_id, "status": "terminal", "proof": "deployed", "stage": row.stage}
+    proof = "merged_no_smoke" if no_smoke else "deployed"
+    return {"ticket": row.ticket_id, "status": "terminal", "proof": proof, "stage": row.stage}
 
 
 def _check_completed_deploy_evidence(
@@ -661,7 +668,7 @@ def _check_completed_deploy_evidence(
     merge_path = release.with_name("merge.json")
     if not report and ticket.get("status") == "completed" and merge_path.is_file():
         report = {"sha": json.loads(merge_path.read_text(encoding="utf-8")).get("merge_sha"), "deployed": False}
-    if report.get("sha") and not report.get("deployed"):
+    if _awaits_deploy(report):
         try:
             merge = json.loads(merge_path.read_text(encoding="utf-8"))
             validation = json.loads(release.with_name("validation.json").read_text(encoding="utf-8"))
