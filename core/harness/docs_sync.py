@@ -9,6 +9,7 @@ com o trailer ``Docs-Unchanged: <motivo>`` libera o intervalo.
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import re
 import subprocess
@@ -18,7 +19,7 @@ from pathlib import Path
 
 MANUAL_DIR = "docs/manual"
 _COVERS_RE = re.compile(r"^\s*<!--\s*covers:\s*(.*?)\s*-->\s*$")
-_TRAILER_RE = re.compile(r"^Docs-Unchanged:[ \t]*(\S.*)$", re.MULTILINE)
+_TRAILER_RE = re.compile(r"^Docs-Unchanged:[ \t]*(\S.*)$", re.MULTILINE | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,68 @@ def _matches(path: str, pattern: str) -> bool:
 def has_unchanged_trailer(messages: str) -> bool:
     """True se alguma mensagem de commit tem ``Docs-Unchanged: <motivo>`` nao vazio."""
     return bool(_TRAILER_RE.search(messages))
+
+
+INTERNAL_TRAILER = "Docs-Unchanged: ajuste interno sem mudanca de contrato operacional"
+# Superficie publica: parser de CLI, rotas HTTP e contratos que o owner opera. Compara a AST
+# canonica antes/depois; na duvida (nao-.py, D/R/C, erro de parse) nao ha trailer.
+_OWNER_CONTRACT_PATHS = (".env.example", ".factory/config/", ".factory/owner_actions/")
+_SURFACE_CALLS = frozenset({
+    "add_argument", "add_parser", "add_subparsers", "add_argument_group", "add_mutually_exclusive_group",
+    "set_defaults", "APIRouter", "FastAPI", "include_router", "mount", "add_api_route", "add_api_websocket_route",
+})
+_ROUTE_DECORATORS = frozenset({"get", "post", "put", "delete", "patch", "api_route", "websocket", "route"})
+
+
+def _call_name(func: ast.expr) -> str:
+    return func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+
+
+def _surface(source: str) -> list[str]:
+    """Multiconjunto ordenado de chamadas de superficie e decorators de rota (``SyntaxError`` sobe)."""
+    out: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and _call_name(node.func) in _SURFACE_CALLS:
+            out.append(ast.dump(node))
+        decorators = getattr(node, "decorator_list", [])
+        out += [ast.dump(d) for d in decorators if isinstance(d, ast.Call) and _call_name(d.func) in _ROUTE_DECORATORS]
+    return sorted(out)
+
+
+def _blob(root: Path, spec: str) -> str | None:
+    proc = subprocess.run(
+        ["git", "show", spec], cwd=root, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=20,
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def internal_only_trailer(root: Path, message: str = "") -> str:
+    """Trailer ``Docs-Unchanged`` quando o indice so traz ajuste interno de modulo coberto pelo manual.
+
+    Conservador: vazio se ja ha trailer, se nada coberto muda, se algum arquivo coberto nao e .py
+    ou foi apagado/renomeado/copiado, se algum .py coberto muda a superficie (AST) ou nao da para
+    comparar, ou se um contrato do owner muda (a documentacao segue exigida).
+    """
+    if has_unchanged_trailer(message):
+        return ""
+    status = _git(root, "diff", "--cached", "--name-status").splitlines()
+    staged = [path for line in status for path in line.split("\t")[1:]]
+    covered = {v.covered_file for v in find_violations(staged, load_pages(root))}
+    if not covered or any(p.startswith(_OWNER_CONTRACT_PATHS) for p in staged):
+        return ""
+    for line in status:
+        kind, *paths = line.split("\t")
+        if covered.intersection(paths) and (kind[0] != "M" or not paths[0].endswith(".py")):
+            return ""
+    for path in sorted(covered):
+        before, after = _blob(root, f"HEAD:{path}"), _blob(root, f":{path}")
+        try:
+            if before is None or after is None or _surface(before) != _surface(after):
+                return ""
+        except SyntaxError:
+            return ""
+    return INTERNAL_TRAILER
 
 
 def find_violations(

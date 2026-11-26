@@ -611,6 +611,17 @@ class GitAutonomyManager:
                 f"DarkFac-Autonomy: zero-human-touch\n"
             )
 
+        if kind == "implementation":
+            from core.harness import docs_sync
+
+            try:
+                trailer = docs_sync.internal_only_trailer(target_dir, commit_msg)
+            except Exception as exc:  # o trailer e conveniencia: sem ele a entrega segue
+                logger.warning("Docs-Unchanged automatico ignorado para %s: %s", ticket_id, exc)
+                trailer = ""
+            if trailer:
+                commit_msg = f"{commit_msg.rstrip()}\n\n{trailer}\n"
+
         # 4. Commit
         res = _run_git([*_fallback_identity_args(target_dir), "commit", "-m", commit_msg], cwd=target_dir)
         if res.returncode != 0:
