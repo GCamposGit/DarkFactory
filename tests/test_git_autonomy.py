@@ -590,3 +590,35 @@ def test_post_merge_fast_forward_waits_for_other_fleet_runs(
     GitAutonomyManager(local)._cleanup("ticket/usr-9", "main", local)
 
     assert (_git(local, "rev-parse", "HEAD").stdout.strip() != before) is advances
+
+
+
+_BASE_CLI = "def run(parser):\n    parser.add_argument(\n        \"--resume-delivery\",\n        help=\"x\",\n    )\n    return 1\n"
+_TRAILER = "Docs-Unchanged: ajuste interno sem mudanca de contrato operacional"
+
+
+@pytest.mark.parametrize(
+    ("new_code", "message", "trailers"),
+    [
+        (_BASE_CLI.replace("return 1", "return 2"), None, 1),
+        (_BASE_CLI.replace("--resume-delivery", "--continue-delivery"), None, 0),
+        (_BASE_CLI.replace("    return 1", "    parser.add_argument(\"--novo\")\n    return 1"), None, 0),
+        ("@router.get('/novo')\n" + _BASE_CLI, None, 0),
+        (_BASE_CLI.replace("return 1", "return 2"), "feat: x\n\ndocs-unchanged: motivo proprio\n", 1),
+    ],
+)
+def test_commit_ticket_docs_trailer_only_for_internal_change(
+    test_git_repo: Path, new_code: str, message: str | None, trailers: int
+) -> None:
+    (test_git_repo / "docs" / "manual").mkdir(parents=True)
+    (test_git_repo / "docs" / "manual" / "x.md").write_text("<!-- covers: mod.py -->\n# X\n", encoding="utf-8")
+    (test_git_repo / "mod.py").write_text(_BASE_CLI, encoding="utf-8")
+    _git(test_git_repo, "add", "-A")
+    _git(test_git_repo, "commit", "--quiet", "-m", "chore: base")
+
+    (test_git_repo / "mod.py").write_text(new_code, encoding="utf-8")
+    GitAutonomyManager(test_git_repo).commit_ticket("USR-1", "ajuste", cwd=test_git_repo, custom_message=message)
+
+    body = _git(test_git_repo, "log", "-n", "1", "--format=%B").stdout.lower()
+    assert body.count("docs-unchanged:") == trailers
+    assert (_TRAILER.lower() in body) is (trailers == 1 and message is None)

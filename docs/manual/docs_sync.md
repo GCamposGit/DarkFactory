@@ -40,3 +40,7 @@ Codigo 0 = ok; 1 = lista "arquivo coberto alterado -> pagina que deveria mudar".
       - name: Docs-sync do manual
         run: python -m core.harness.docs_sync --base origin/${{ github.base_ref }} --head HEAD
 ```
+
+## Trailer automatico (EC-03)
+
+Na entrega, `GitAutonomyManager.commit_ticket` (kind `implementation`) acrescenta `Docs-Unchanged: ajuste interno sem mudanca de contrato operacional` quando o indice so traz ajuste interno de modulo coberto: o conjunto de flags (`"--x"`) e de rotas (decorators FastAPI) de cada `.py` e igual antes e depois, e nenhum contrato do owner (`.env.example`, `.factory/config/`, `.factory/owner_actions/`) muda. Renomear flag ou rota continua exigindo a pagina. Trailer ja presente (qualquer caixa) nao e duplicado.

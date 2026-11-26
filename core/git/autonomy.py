@@ -611,6 +611,14 @@ class GitAutonomyManager:
                 f"DarkFac-Autonomy: zero-human-touch\n"
             )
 
+        if kind == "implementation":
+            from core.harness import docs_sync
+
+            staged = _run_git(["diff", "--cached", "--name-only"], cwd=target_dir).stdout.splitlines()
+            trailer = docs_sync.internal_only_trailer(target_dir, staged, commit_msg)
+            if trailer:
+                commit_msg = f"{commit_msg.rstrip()}\n\n{trailer}\n"
+
         # 4. Commit
         res = _run_git([*_fallback_identity_args(target_dir), "commit", "-m", commit_msg], cwd=target_dir)
         if res.returncode != 0:

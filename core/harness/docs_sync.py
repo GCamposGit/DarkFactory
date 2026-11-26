@@ -18,7 +18,7 @@ from pathlib import Path
 
 MANUAL_DIR = "docs/manual"
 _COVERS_RE = re.compile(r"^\s*<!--\s*covers:\s*(.*?)\s*-->\s*$")
-_TRAILER_RE = re.compile(r"^Docs-Unchanged:[ \t]*(\S.*)$", re.MULTILINE)
+_TRAILER_RE = re.compile(r"^Docs-Unchanged:[ \t]*(\S.*)$", re.MULTILINE | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,41 @@ def _matches(path: str, pattern: str) -> bool:
 def has_unchanged_trailer(messages: str) -> bool:
     """True se alguma mensagem de commit tem ``Docs-Unchanged: <motivo>`` nao vazio."""
     return bool(_TRAILER_RE.search(messages))
+
+
+INTERNAL_TRAILER = "Docs-Unchanged: ajuste interno sem mudanca de contrato operacional"
+# Superficie publica: flags de CLI (literais "--x"), rotas HTTP (decorators FastAPI) e
+# contratos que o owner opera. Compara o conjunto antes/depois, nao so as linhas do diff.
+_OPTION_RE = re.compile(r"""["'](--[\w-]+)["']""")
+_ROUTE_RE = re.compile(r"""@\w+\.(?:get|post|put|delete|patch|api_route|websocket)\(\s*["']([^"']*)["']""")
+_OWNER_CONTRACT_PATHS = (".env.example", ".factory/config/", ".factory/owner_actions/")
+
+
+def _surface(text: str) -> set[str]:
+    return set(_OPTION_RE.findall(text)) | set(_ROUTE_RE.findall(text))
+
+
+def _blob(root: Path, spec: str) -> str:
+    proc = subprocess.run(
+        ["git", "show", spec], cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def internal_only_trailer(root: Path, staged: list[str], message: str = "") -> str:
+    """Trailer ``Docs-Unchanged`` quando o indice so traz ajuste interno de modulo coberto pelo manual.
+
+    Vazio se ja ha trailer, se nada coberto muda, se a pagina foi atualizada ou se algum arquivo
+    .py muda o conjunto de flags/rotas ou toca contrato do owner (a documentacao segue exigida).
+    """
+    if has_unchanged_trailer(message) or not find_violations(staged, load_pages(root)):
+        return ""
+    if any(p.startswith(_OWNER_CONTRACT_PATHS) for p in staged):
+        return ""
+    for path in (p for p in staged if p.endswith(".py")):
+        if _surface(_blob(root, f"HEAD:{path}")) != _surface(_blob(root, f":{path}")):
+            return ""
+    return INTERNAL_TRAILER
 
 
 def find_violations(
