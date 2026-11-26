@@ -1654,6 +1654,8 @@ def _gate_should_require_remote() -> bool:
 
 def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
     """USR-262: only when the gate would run locally (no idle remote worker); None = nothing to wait for."""
+    if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
+        return None
     full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
     if full and (gate_ram.remote_worker_available() or _gate_should_require_remote()):
         return None
@@ -1778,7 +1780,12 @@ def _gate_after_fix(
 def _gate_build_command(target_worktree: Path) -> list[str]:
     runner = str(target_worktree / "core" / "harness" / "runner.py")
     if os.environ.get("DARKFAC_GATE_SCOPE") != "full":
-        return [sys.executable, runner, "--profile", "pr", "--local"]
+        gate_cmd = [sys.executable, runner, "--profile", "pr"]
+        if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
+            gate_cmd.append("--remote-required")
+        else:
+            gate_cmd.append("--local")
+        return gate_cmd
     gate_cmd = [sys.executable, runner, "--quick"]
     if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
         # USR-366: o despachante da frota fixa o worker remoto do host (DARKFAC_TEST_WORKERS).
@@ -2379,6 +2386,8 @@ def _resolve_resume_ticket(ticket_id: str, target_worktree: Path) -> Optional[Us
     except queue_store.ControlStoreUnavailableError:
         queued = None
     if queued is not None:
+        if queued.project_id != "darkfac":
+            return queued
         writer = store if store is not None else DemandsStore(ledger)
         return writer.resolve_for_delivery(ticket_id)
     shared_ledger = PROJECT_ROOT / ".factory" / "demands" / "demands.json"
@@ -2651,6 +2660,16 @@ def _deliver_external_project(
     project: Any,
 ) -> tuple[Any, bool]:
     """Branch delivery (PR/merge/deploy/smoke) of an external project: (report, a smoke really ran)."""
+    from core.git.autonomy import DeliveryReport, _run_git
+
+    ledger_dirty = _run_git(["status", "--porcelain", "--", LEDGER_RELATIVE], cwd=target_worktree)
+    if ledger_dirty.returncode != 0 or (ledger_dirty.stdout or "").strip():
+        return DeliveryReport(
+            ok=False,
+            action="staged_inspect_failed",
+            branch=git_mgr._current_branch(target_worktree),
+            message=f"External project {ticket.project_id} has dirty or untracked {LEDGER_RELATIVE}; refusing to commit.",
+        ), False
     if git_mgr.is_dirty(cwd=target_worktree):
         git_mgr.commit_ticket(
             ticket_id=ticket.id, title=ticket.title, cwd=target_worktree,
@@ -3051,7 +3070,7 @@ def _require_plan_and_build(ticket: UserTicket, rws: Any, standalone: bool, work
         ticket_engine.write_build(
             rws, None, [ticket.id],
             plan_digest=ticket_engine.plan_digest(rws),
-            candidate_digest=_build_candidate_digest(ticket.id, worktree),
+            candidate_digest=_build_candidate_digest(ticket.id, worktree, project_id=ticket.project_id),
             worktree=str(worktree),
         )
     require_artifact(Stage.PLAN, rws)
@@ -3284,6 +3303,32 @@ def _smoke_external_project(project: Any) -> Optional[str]:
         if not ok:
             failures.append(detail)
     return "\n".join(failures) if failures else None
+
+
+def _emit_delivery_marker(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    completion_info: dict[str, Any],
+    progress: ProgressPublisher,
+    *,
+    delivered: bool,
+) -> None:
+    if not delivered:
+        return
+    stream = sys.stderr if args.json else sys.stdout
+    status = completion_info.get("status")
+    if ticket.project_id != "darkfac":
+        if args.no_commit or args.no_push:
+            return
+        if status == "awaiting_commercial_acceptance":
+            progress.set_outcome("PR externo aberto aguardando aceite comercial", "awaiting_commercial_acceptance")
+            print("[DELIVERY_EXTERNAL]", file=stream)
+        elif status == "delivered":
+            progress.set_outcome("entrega externa concluida", "delivered")
+            print("[DELIVERY_EXTERNAL]", file=stream)
+    elif status == "merged_awaiting_deploy":
+        progress.set_outcome("mergeado, aguardando deploy pos-merge", "merged_awaiting_deploy")
+        print("[DELIVERY_MERGED]", file=stream)
 
 
 @run_outcome.tracked
@@ -4130,7 +4175,7 @@ def _is_git_worktree(path: Path) -> bool:
     return (path / ".git").exists()
 
 
-def _non_git_candidate_digest(ticket_id: str, root: Path) -> str:
+def _non_git_candidate_digest(ticket_id: str, root: Path, *, exclude_ledger: bool = False) -> str:
     """Deterministic digest for isolated non-git test sandboxes that mock `_prepare_workspace`."""
     import hashlib
 
@@ -4145,13 +4190,13 @@ def _non_git_candidate_digest(ticket_id: str, root: Path) -> str:
         if source_path.resolve().is_relative_to(resolved_state_root):
             continue
         rel = source_path.relative_to(root).as_posix()
-        if rel == LEDGER_RELATIVE or rel.startswith(".darkfac/"):
+        if rel.startswith(".darkfac/") or (exclude_ledger and rel == LEDGER_RELATIVE):
             continue
         files.append((rel, hashlib.sha256(source_path.read_bytes()).hexdigest()))
     return safe_digest({"ticket": ticket_id, "worktree": str(root), "git": False, "files": files})
 
 
-def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
+def _build_candidate_digest(ticket_id: str, worktree: Path, *, project_id: str = "darkfac") -> str:
     """Identity of registered candidate plus this worktree's exact local BUILD contents.
 
     BUILD does not commit between slices, so HEAD alone cannot detect an interrupted in-flight
@@ -4164,11 +4209,15 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     from core.line.admission_store import safe_digest
     from core.line.fleet_dispatcher import ticket_candidate_digest
 
+    exclude_ledger = project_id != "darkfac"
     root = worktree.resolve()
     if not _is_git_worktree(root):
-        return _non_git_candidate_digest(ticket_id, root)
+        return _non_git_candidate_digest(ticket_id, root, exclude_ledger=exclude_ledger)
     head = _run_git(["rev-parse", "HEAD"], cwd=root)
-    tracked = _run_git(["diff", "--binary", "HEAD", "--"], cwd=root)
+    diff_args = ["diff", "--binary", "HEAD"]
+    if exclude_ledger:
+        diff_args.extend(["--", ".", f":!{LEDGER_RELATIVE}"])
+    tracked = _run_git(diff_args, cwd=root)
     untracked = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=root)
     if head.returncode or tracked.returncode or untracked.returncode:
         raise ticket_engine.BuildEvidenceMismatch(
@@ -4179,6 +4228,9 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     untracked_rows: list[tuple[str, str]] = []
     for relative in (untracked.stdout or "").split("\0"):
         if not relative:
+            continue
+        normalized_rel = relative.replace("\\", "/")
+        if exclude_ledger and normalized_rel == LEDGER_RELATIVE:
             continue
         source_path = root / relative
         resolved_path = source_path.resolve()
@@ -4195,7 +4247,7 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
             raise ticket_engine.BuildEvidenceMismatch(
                 f"nao foi possivel ler evidencia untracked {relative!r} ({type(exc).__name__})"
             ) from exc
-        untracked_rows.append((relative.replace("\\", "/"), content_digest))
+        untracked_rows.append((normalized_rel, content_digest))
     try:
         registered_candidates = ticket_candidate_digest(ticket_id)
     except Exception as exc:  # noqa: BLE001 - unavailable candidate identity must fail closed
@@ -4292,7 +4344,7 @@ def _stage_plan(
     plan_reused = False
     try:
         resumed = ticket_engine.resumable_build(
-            rws, _build_candidate_digest(ticket.id, workspace.path), str(workspace.path)
+            rws, _build_candidate_digest(ticket.id, workspace.path, project_id=ticket.project_id), str(workspace.path)
         )
     except ticket_engine.BuildEvidenceMismatch as exc:
         return _stage_build_evidence_mismatch(args, ticket, workspace, progress, str(exc))
@@ -4349,7 +4401,7 @@ def _stage_plan(
                     ticket_engine.write_build(
                         rws, route.get("harness"), [],
                         plan_digest=ticket_engine.plan_digest(rws),
-                        candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+                        candidate_digest=_build_candidate_digest(ticket.id, workspace.path, project_id=ticket.project_id),
                         worktree=str(workspace.path),
                     )
                     if not args.json:
@@ -4426,7 +4478,7 @@ def _stage_plan(
     ticket_engine.write_build(
         rws, route.get("harness"), [],
         plan_digest=ticket_engine.plan_digest(rws),
-        candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+        candidate_digest=_build_candidate_digest(ticket.id, workspace.path, project_id=ticket.project_id),
         worktree=str(workspace.path),
     )
     if not args.json:
@@ -4885,7 +4937,7 @@ def _stage_build(
     sequential = len(plan_items) > 1
     worktree_key = str(workspace.path)
     try:
-        candidate_digest = _build_candidate_digest(ticket.id, workspace.path)
+        candidate_digest = _build_candidate_digest(ticket.id, workspace.path, project_id=ticket.project_id)
         resumed = ticket_engine.resumable_build(rws, candidate_digest, worktree_key)
     except ticket_engine.BuildEvidenceMismatch as exc:
         resumed = _merged_completed_build_report(rws, workspace, plan_items, worktree_key)
@@ -4963,7 +5015,7 @@ def _stage_build(
         ticket_engine.write_build(
             rws, implementer, tickets_done,
             plan_digest=ticket_engine.plan_digest(rws),
-            candidate_digest=_build_candidate_digest(ticket.id, workspace.path),
+            candidate_digest=_build_candidate_digest(ticket.id, workspace.path, project_id=ticket.project_id),
             worktree=worktree_key,
         )
 
@@ -5158,9 +5210,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
     delivered = exit_code == 0 and completion_info.get("ok", False)
-    if delivered and completion_info.get("status") == "merged_awaiting_deploy":
-        progress.set_outcome("mergeado, aguardando deploy pos-merge", "merged_awaiting_deploy")
-        print("[DELIVERY_MERGED]", file=sys.stderr if args.json else sys.stdout)
+    _emit_delivery_marker(args, ticket, completion_info, progress, delivered=delivered)
     if exit_code == EXIT_ROUTE_WAIT:
         pass  # requeue: the outcome was already recorded by the waiting stage
     elif not delivered:

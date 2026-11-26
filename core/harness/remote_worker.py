@@ -44,6 +44,7 @@ from core.harness import cache as harness_cache
 from core.harness.markers import MARKER_HARNESS_RESULT
 from core.harness.process_identity import proc_start_ticks, same_process
 from core.harness.runner import _selected_steps as _harness_selected_steps
+from core.harness.runner import config_for_profile as _harness_config_for_profile
 from core.harness.runner import load_config as _load_harness_config
 from core.harness.runner import effective_step_timeout
 from core.harness.test_subagent import (
@@ -170,6 +171,10 @@ class WorkerHealthStatus(BaseModel):
         description="origin/main SHA + recent validated candidate SHAs, for thin `git bundle --not` negotiation",
     )
     harness_version: str = Field(default="1", description="Remote harness job protocol version")
+    supported_profiles: list[str] = Field(
+        default_factory=lambda: ["full", "pr"],
+        description="Gate profiles accepted by /harness/jobs on this worker",
+    )
     git_sha: Optional[str] = Field(
         default=None,
         description="Full `git rev-parse HEAD` (40 hex) of project_root; null when it cannot be read (USR-65)",
@@ -438,9 +443,26 @@ def apply_child_priority(cmd: list[str]) -> tuple[list[str], dict[str, Any]]:
     return [nice, "-n", str(POSIX_CHILD_NICE_INCREMENT), *cmd], {}
 
 
-def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool) -> float:
+def _job_command_and_timeout(worktree_path: Path, job: HarnessJob) -> tuple[list[str], float]:
+    """Resolve the runner CLI command and wall-clock timeout for a remote job."""
+    profile = job.profile if job.profile in ("full", "pr") else "full"
+    timeout_sec = _job_timeout_sec(
+        worktree_path, quick=job.quick, include_holdout=job.include_holdout, profile=profile
+    )
+    if profile == "pr":
+        return [sys.executable, "core/harness/runner.py", "--profile", "pr", "--local"], timeout_sec
+    cmd = [sys.executable, "core/harness/runner.py", "--quick", "--local"]
+    if job.include_holdout:
+        cmd.append("--holdout")
+    return cmd, timeout_sec
+
+
+def _job_timeout_sec(
+    worktree_path: Path, *, quick: bool, include_holdout: bool, profile: str = "full"
+) -> float:
     try:
         config, _config_hash = _load_harness_config(worktree_path / "harness.config.json")
+        config = _harness_config_for_profile(config, profile if profile in ("full", "pr") else "full")
         steps = _harness_selected_steps(config, quick=quick, include_holdout=include_holdout)
         if steps:
             return sum(effective_step_timeout(step) for step in steps) + JOB_TIMEOUT_BUFFER_SEC
@@ -727,6 +749,7 @@ class HarnessJob:
     #: USR-342: optional client-chosen idempotency key (candidate_sha + config_hash); a live job with the
     #: same key is returned by ``submit`` instead of creating a duplicate.
     client_dispatch_key: str = ""
+    profile: str = "full"
     status: str = "queued"  # queued | running | done | failed | cancelled
     log_chunks: list[str] = dataclass_field(default_factory=list)
     result_json: Optional[Dict[str, Any]] = None
@@ -779,6 +802,7 @@ class HarnessJob:
             "requesting_host": self.requesting_host,
             "ref_name": self.ref_name,
             "client_dispatch_key": self.client_dispatch_key,
+            "profile": self.profile,
             "status": self.status,
             "result_json": self.result_json,
             "returncode": self.returncode,
@@ -807,6 +831,7 @@ class HarnessJob:
             requesting_host=str(record.get("requesting_host", "unknown")),
             ref_name=str(record.get("ref_name", "")),
             client_dispatch_key=str(record.get("client_dispatch_key") or ""),
+            profile=(str(record.get("profile") or "full") if str(record.get("profile") or "full") in ("full", "pr") else "full"),
             status=str(record.get("status", "failed")),
             result_json=record.get("result_json"),
             returncode=record.get("returncode"),
@@ -1029,6 +1054,10 @@ class JobManager:
         if not re.fullmatch(r"[0-9a-f]{7,64}", candidate_sha or ""):
             return 400, {"error": "invalid or missing candidate_sha"}
 
+        profile = str(metadata.get("profile") or "full").strip().lower()
+        if profile not in ("full", "pr"):
+            return 400, {"error": f"invalid profile: {profile}"}
+
         dispatch_key = str(metadata.get("client_dispatch_key") or "").strip()[:200]
         existing = self._live_job_for_key(dispatch_key)
         if existing is not None:
@@ -1103,6 +1132,7 @@ class JobManager:
             requesting_host=str(metadata.get("requesting_host", "unknown")),
             ref_name=ref_name,
             client_dispatch_key=dispatch_key,
+            profile=profile,
         )
         with self._jobs_lock:
             existing = self._live_job_for_key(dispatch_key, locked=True)
@@ -1233,10 +1263,7 @@ class JobManager:
             worktree_was_created = worktree_path.exists()
             self._sync_requirements(worktree_path, job)
 
-            timeout_sec = _job_timeout_sec(worktree_path, quick=job.quick, include_holdout=job.include_holdout)
-            cmd = [sys.executable, "core/harness/runner.py", "--quick", "--local"]
-            if job.include_holdout:
-                cmd.append("--holdout")
+            cmd, timeout_sec = _job_command_and_timeout(worktree_path, job)
             cmd = _wrap_with_sigterm_probe(cmd, worktree_path)
             env = dict(os.environ)
             env["DARKFAC_HARNESS_WORKER_JOB"] = "1"
@@ -1936,6 +1963,7 @@ def _worker_health_status(
         observed_at=datetime.now(timezone.utc) if reading else None,
         known_shas=known_validated_shas(root_path),
         harness_version="1",
+        supported_profiles=["full", "pr"],
         git_sha=current_git_sha(root_path),
         instance_id=job_manager.instance_id,
         started_at=job_manager.started_at,

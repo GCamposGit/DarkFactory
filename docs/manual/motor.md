@@ -1,13 +1,14 @@
 <!-- covers: run_ticket.py, core/line/stages.py, core/line/ticket_engine.py, core/line/ticket_stages.py, core/line/ticket_extras.py, core/line/route_wait.py, core/line/admission.py, core/line/review_payload.py, core/line/stage_review.py, core/line/rebase_recovery.py -->
 # Motor da esteira
 
-Tickets validam pelo perfil `pr` local: afetados contra o merge-base de
+Tickets validam pelo perfil `pr`: local por padrão (`--local`) ou via worker remoto da frota com `--remote-required` quando `DARKFAC_FLEET_GATE_REMOTE=1` (sem bloquear na RAM do Notebook antes do envio remoto). O perfil executa afetados contra o merge-base de
 `origin/main`, contratos e fumaça fixa, sem pré-teste focal duplicado. Seleção
 incerta registra `scope=affected_fallback` e roda fumaça, deixando a suíte
-completa para Linux/CI. Com 1,5 GiB livres, o portão degrada para `-n 0`; abaixo
+completa para Linux/CI. Em execução local, com 1,5 GiB livres o portão degrada para `-n 0`; abaixo
 disso espera até 300s e retorna 75 (`gate_insufficient_ram`), sem chamar o agente
 de correção. `DARKFAC_GATE_SCOPE=full` restaura o caminho anterior com `--quick`
 e despacho remoto estrito. A admissão prévia permanece regida pelo seu contrato.
+`_build_candidate_digest` ignora `.factory/demands/demands.json` em projetos externos (`project_id != "darkfac"`), mantendo-o incluído no `darkfac`; entregas externas válidas (`delivered` ou `awaiting_commercial_acceptance`) emitem `[DELIVERY_EXTERNAL]` em vez de `[DELIVERY_MERGED]`.
 Detalhes de seleção, prazo e recuperação de crash em [portao.md](portao.md).
 
 ## Identidade headless e recibo de execução (USR-471)

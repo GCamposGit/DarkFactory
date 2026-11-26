@@ -687,3 +687,65 @@ def test_complete_ticket_commercial_project_awaits(env: tuple[Path, Path, FakeGh
 
 def test_delivery_report_model() -> None:
     assert DeliveryReport(ok=True, action="merged").cleaned is False
+
+
+def test_record_completion_external_project_does_not_create_demands_json(
+    env: tuple[Path, Path, FakeGh], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local, _bare, _gh = env
+    _state, queue = _isolate_queue(monkeypatch, tmp_path)
+    queue.register_ticket(UserTicket(
+        id="MDL-77",
+        project_id="mansaodolago",
+        title="External delivery",
+        problem_statement="client feature",
+        status=DeliveryStatus.PLANNED,
+    ))
+    (local / "client_feature.py").write_text("ready = True\n", encoding="utf-8")
+
+    sha = GitAutonomyManager(local)._record_completion("MDL-77", "External delivery", local)
+
+    assert sha
+    assert not (local / ".factory" / "demands" / "demands.json").exists()
+    assert _git(local, "show", "--name-only", "--format=", sha).strip() == "client_feature.py"
+
+
+def test_record_completion_external_project_ignores_residual_demands_json(
+    env: tuple[Path, Path, FakeGh], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local, _bare, _gh = env
+    _state, queue = _isolate_queue(monkeypatch, tmp_path)
+    queue.register_ticket(UserTicket(
+        id="MDL-78",
+        project_id="mansaodolago",
+        title="External delivery residual",
+        problem_statement="client feature",
+        status=DeliveryStatus.PLANNED,
+    ))
+    residual = local / ".factory" / "demands" / "demands.json"
+    residual.parent.mkdir(parents=True, exist_ok=True)
+    residual.write_text('{"tickets":[{"id":"LEGACY"}]}\n', encoding="utf-8")
+    _git(local, "add", ".factory/demands/demands.json")
+    _git(local, "commit", "-q", "-m", "chore: tracked residual ledger")
+
+    (local / "client_feature.py").write_text("ready = True\n", encoding="utf-8")
+    sha = GitAutonomyManager(local)._record_completion("MDL-78", "External delivery residual", local)
+
+    assert sha
+    assert _git(local, "show", "--name-only", "--format=", sha).strip() == "client_feature.py"
+    assert '"LEGACY"' in residual.read_text(encoding="utf-8")
+
+    # Even with control store unavailable (queue returns None), explicit project_id isolates external repos
+    # and fails closed if the external ledger itself is dirty or untracked.
+    monkeypatch.setattr(queue, "get_ticket", lambda _tid: None)
+    (local / "client_feature.py").write_text("ready = 2\n", encoding="utf-8")
+    sha2 = GitAutonomyManager(local)._record_completion(
+        "MDL-78", "External explicit project", local, project_id="mansaodolago"
+    )
+    assert _git(local, "show", "--name-only", "--format=", sha2).strip() == "client_feature.py"
+
+    residual.write_text('{"tickets":[{"id":"DIRTY"}]}\n', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="dirty or untracked"):
+        GitAutonomyManager(local)._record_completion(
+            "MDL-78", "External dirty ledger refused", local, project_id="mansaodolago"
+        )

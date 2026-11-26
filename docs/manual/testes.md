@@ -35,6 +35,8 @@ retry serial no mesmo orçamento, com `--lf` quando lastfailed existe e não est
 vazio; sem cache repete os alvos. Falha real ou segundo crash continua reprovando.
 Health/envio remoto têm timeout de socket limitado a 5s. Worker inacessível cede
 para o próximo e depois para local no PR; `required` só é estrito no escopo full.
+Quando o cliente usa `--profile pr --remote-required`, `remote_dispatch` envia
+`"profile": "pr"` nos metadados do job para que o worker execute o perfil PR.
 A ordem padrão de workers (`core.harness.remote_dispatch.DEFAULT_WORKERS`) é derivada
 de `.factory/config/line_fleet.json` (`Notebook > Grokbox > Desktop`, `USR-492`),
 podendo ser sobrescrita por `DARKFAC_TEST_WORKERS`.

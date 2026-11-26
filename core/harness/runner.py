@@ -876,6 +876,7 @@ def run_with_cache(
     no_cache: bool = False,
     local_only: bool = False,
     remote_required: bool = False,
+    profile: str = "full",
 ) -> bool:
     """Run the suite and record where the time went (USR-178).
 
@@ -897,11 +898,69 @@ def run_with_cache(
             no_cache=no_cache,
             local_only=local_only,
             remote_required=remote_required,
+            profile=profile,
             timings=timings,
         )
         return success
     finally:
         _finish_run_timing(timings, success)
+
+
+def _dispatch_remote_with_timings(
+    steps: list[HarnessStepConfig],
+    *,
+    config_hash: str,
+    quick: bool,
+    include_holdout: bool,
+    config_path: Path,
+    cache_key: str | None,
+    local_only: bool,
+    remote_required: bool,
+    profile: str,
+    timings: RunTimings,
+) -> bool | None:
+    if not steps:
+        timings.path = "local"
+        return None
+    with contextlib.suppress(Exception):
+        remote_dispatch.DISPATCH_ATTEMPTS.clear()
+    remote_started = time.perf_counter()
+    try:
+        remote_result = remote_dispatch.maybe_dispatch_remote(
+            steps=steps,
+            config_hash=config_hash,
+            quick=quick,
+            include_holdout=include_holdout,
+            config_path=config_path,
+            project_root=PROJECT_ROOT,
+            cache_lookup_enabled=cache_key is not None,
+            local_only=local_only,
+            remote_required=remote_required,
+            profile=profile,
+            emit_cache_hit=_emit_cache_hit,
+            notify_hub_on_pass=_notify_hub_on_pass,
+        )
+    finally:
+        attempts_getter = getattr(remote_dispatch, "dispatch_attempts", None)
+        with contextlib.suppress(Exception):
+            if callable(attempts_getter):
+                timings.remote_attempts = list(attempts_getter())
+    if remote_result is not None:
+        timings.path = "remote"
+        timings.exec_sec += time.perf_counter() - remote_started
+        return remote_result
+    timings.path = "local_after_remote" if timings.remote_attempts else "local"
+    return None
+
+
+def _ensure_pr_local_ram(profile: str, local_only: bool) -> None:
+    """Enforce the local PR memory floor before executing locally after remote fallback."""
+    if profile != "pr" or local_only:
+        return
+    from core.line import gate_ram
+
+    if not gate_ram.wait_for_gate_ram(scope="pr").ok:
+        raise GateResourceWait("gate_insufficient_ram")
 
 
 def _run_with_cache(
@@ -914,6 +973,7 @@ def _run_with_cache(
     no_cache: bool = False,
     local_only: bool = False,
     remote_required: bool = False,
+    profile: str = "full",
     timings: RunTimings,
 ) -> bool:
     """Cache-aware, single-flighted, remote-dispatch-aware wrapper around
@@ -973,41 +1033,22 @@ def _run_with_cache(
     # dispatches to the primary worker, it just never reuses/stores a
     # verdict there either). `None` means "not resolved remotely at all",
     # so every existing local code path below is completely unaffected.
-    if steps:
-        with contextlib.suppress(Exception):
-            remote_dispatch.DISPATCH_ATTEMPTS.clear()
-        remote_started = time.perf_counter()
-        try:
-            remote_result = remote_dispatch.maybe_dispatch_remote(
-                steps=steps,
-                config_hash=config_hash,
-                quick=quick,
-                include_holdout=include_holdout,
-                config_path=config_path,
-                project_root=PROJECT_ROOT,
-                cache_lookup_enabled=cache_key is not None,
-                local_only=local_only,
-                remote_required=remote_required,
-                emit_cache_hit=_emit_cache_hit,
-                notify_hub_on_pass=_notify_hub_on_pass,
-            )
-        finally:
-            # USR-178: remote seconds that did not resolve the run stay visible
-            # (separate from the lock queue and the local execution time).
-            attempts_getter = getattr(remote_dispatch, "dispatch_attempts", None)
-            with contextlib.suppress(Exception):
-                if callable(attempts_getter):
-                    timings.remote_attempts = list(attempts_getter())
-        if remote_result is not None:
-            timings.path = "remote"
-            timings.exec_sec += time.perf_counter() - remote_started
-            return remote_result
-        if timings.remote_attempts:
-            timings.path = "local_after_remote"
-        else:
-            timings.path = "local"
-    else:
-        timings.path = "local"
+    remote_result = _dispatch_remote_with_timings(
+        steps,
+        config_hash=config_hash,
+        quick=quick,
+        include_holdout=include_holdout,
+        config_path=config_path,
+        cache_key=cache_key,
+        local_only=local_only,
+        remote_required=remote_required,
+        profile=profile,
+        timings=timings,
+    )
+    if remote_result is not None:
+        return remote_result
+
+    _ensure_pr_local_ram(profile, local_only)
 
     if cache_key is None:
         # USR-135/147: take the machine-wide suite lock HERE, before spawning
@@ -1152,13 +1193,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.profile == "pr":
         args.no_cache = True
-        args.local = True
-        from core.line import gate_ram
+        if not args.remote_required:
+            args.local = True
+            from core.line import gate_ram
 
-        if not gate_ram.wait_for_gate_ram(scope="pr").ok:
-            print("[ERROR] gate_insufficient_ram")
-            print(MARKER_HARNESS_FAIL)
-            return 75
+            if not gate_ram.wait_for_gate_ram(scope="pr").ok:
+                print("[ERROR] gate_insufficient_ram")
+                print(MARKER_HARNESS_FAIL)
+                return 75
     if args.shard:
         try:
             test_shards.parse_shard(args.shard)
@@ -1185,6 +1227,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             no_cache=args.no_cache,
             local_only=args.local,
             remote_required=args.remote_required,
+            profile=args.profile,
         ) else 1
     except GateResourceWait as exc:
         print(f"[ERROR] {exc}")

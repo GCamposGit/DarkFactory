@@ -3965,3 +3965,37 @@ def test_default_converge_requires_node_retry_then_backup(monkeypatch):
         ("core.infra.backup_cron", "--once"): 1,
     })
     assert fd.default_converge(expected_sha=sha) == 1
+
+
+def test_external_delivery_marker_clears_budget_without_darkfac_deploy_or_failure(tmp_path: Path):
+    demand = {**_d("MDL-01"), "project_id": "mansaodolago"}
+    e = Env(tmp_path, [demand], free=("desktop",))
+    e.d.run_cycle()
+    job = e.d.in_flight["desktop"]
+    log = tmp_path / "mdl01.log"
+    log.write_text("[SUCESSO] Ticket MDL-01\n[DELIVERY_EXTERNAL]\n", encoding="utf-8")
+    job.log_path = log
+    e.handles["MDL-01"].rc = 0
+    demand["status"] = "completed"
+
+    e.d.run_cycle()
+    assert e.d.failures == []
+    assert e.d.pending_deploy is False
+    assert e.d.admission_store.budget("mansaodolago", "MDL-01")["candidate_failures"] == 0
+
+
+def test_external_commercial_acceptance_log_never_sets_pending_deploy(tmp_path: Path):
+    demand = {**_d("MDL-02"), "project_id": "mansaodolago"}
+    e = Env(tmp_path, [demand], free=("desktop",))
+    e.d.run_cycle()
+    job = e.d.in_flight["desktop"]
+    log = tmp_path / "mdl02.log"
+    log.write_text('{"status": "merged_awaiting_deploy"}\n[DELIVERY_EXTERNAL]\n', encoding="utf-8")
+    job.log_path = log
+    e.handles["MDL-02"].rc = 0
+
+    e.d.run_cycle()
+    assert demand["status"] == "planned"
+    assert e.d.failures == []
+    assert e.d.pending_deploy is False
+    assert e.d.admission_store.budget("mansaodolago", "MDL-02")["candidate_failures"] == 0

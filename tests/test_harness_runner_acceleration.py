@@ -582,3 +582,42 @@ def test_crash_retry_runs_a_real_serial_subprocess_without_cache(tmp_path):
     script = "import sys; print('EOFError' if sys.argv[-1] == '2' else '1 passed'); sys.exit(3 if sys.argv[-1] == '2' else 0)"
     result = pytest_runtime.run_with_serial_retry([sys.executable, "-c", script, "-n", "2"], cwd=tmp_path, timeout=30, stdout=subprocess.PIPE, text=True)
     assert result.returncode == 0 and result.stdout.strip() == "1 passed"
+
+
+def test_pr_remote_required_skips_pre_dispatch_local_ram_and_forwards_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import json
+    from core.line import gate_ram
+
+    cfg = tmp_path / "harness.config.json"
+    cfg.write_text(json.dumps({"steps": [{"name": "syntax", "cmd": "python -c pass", "quick": True, "kind": "check", "profiles": ["pr", "full"]}]}), encoding="utf-8")
+    monkeypatch.setattr(gate_ram, "wait_for_gate_ram", lambda **_kw: pytest.fail("must not check local RAM before remote dispatch"))
+    captured: list[dict] = []
+
+    def fake_run_with_cache(config, **kwargs):
+        captured.append(kwargs)
+        return True
+
+    monkeypatch.setattr(runner, "run_with_cache", fake_run_with_cache)
+    assert runner.main(["--profile", "pr", "--remote-required", "--config", str(cfg)]) == 0
+    assert captured[0]["local_only"] is False
+    assert captured[0]["remote_required"] is True
+    assert captured[0]["profile"] == "pr"
+
+
+def test_pr_remote_required_fallback_enforces_local_ram_and_returns_75(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    from types import SimpleNamespace
+    from core.harness import remote_dispatch
+    from core.line import gate_ram
+
+    cfg = tmp_path / "harness.config.json"
+    cfg.write_text(json.dumps({"steps": [{"name": "syntax", "cmd": "python -c pass", "quick": True, "kind": "check", "profiles": ["pr", "full"]}]}), encoding="utf-8")
+    monkeypatch.setattr(remote_dispatch, "maybe_dispatch_remote", lambda **_kw: None)
+    monkeypatch.setattr(gate_ram, "wait_for_gate_ram", lambda **kw: SimpleNamespace(ok=False, available_gib=0.9))
+
+    assert runner.main(["--profile", "pr", "--remote-required", "--config", str(cfg)]) == 75
+    assert "gate_insufficient_ram" in capsys.readouterr().out

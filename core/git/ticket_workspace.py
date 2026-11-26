@@ -1684,6 +1684,48 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
     return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
 
 
+def _cmdline_references_path(
+    proc: Any,
+    path: Path,
+    resolved_path: Path,
+    memo: dict[str, Any],
+    *,
+    gone_exceptions: tuple[type[BaseException], ...],
+    unknown_exceptions: tuple[type[BaseException], ...],
+) -> Optional[bool]:
+    """Fallback holder check via process cmdline when Windows handle enumeration overflows.
+
+    Returns ``None`` when ``cmdline()`` cannot be inspected so callers fail closed.
+    """
+    if memo.get("cmdline_unknown"):
+        return None
+    if "cmdline" not in memo:
+        cmdline_fn = getattr(proc, "cmdline", None)
+        if not callable(cmdline_fn):
+            memo["cmdline_unknown"] = True
+            return None
+        try:
+            memo["cmdline"] = tuple(str(arg) for arg in (cmdline_fn() or ()))
+        except gone_exceptions:
+            memo["cmdline"] = ()
+            return False
+        except unknown_exceptions:
+            memo["cmdline_unknown"] = True
+            return None
+        except Exception:  # noqa: BLE001 -- unexpected cmdline failure must not look like "no holder"
+            memo["cmdline_unknown"] = True
+            return None
+    raw_marker = str(path).replace("\\", "/").casefold()
+    resolved_marker = str(resolved_path).replace("\\", "/").casefold()
+    for arg in memo["cmdline"]:
+        if _is_within(arg, path):
+            return True
+        lowered = arg.replace("\\", "/").casefold()
+        if raw_marker in lowered or resolved_marker in lowered:
+            return True
+    return False
+
+
 def probe_worktree_holders(
     path: Path, *, _cache: Optional[dict[int, dict[str, Any]]] = None
 ) -> Optional[tuple[str, ...]]:
@@ -1705,6 +1747,7 @@ def probe_worktree_holders(
         logger.debug("psutil unavailable; preserving worktree %s", path)
         return None
     repository_root: Optional[Path] = None
+    resolved_path = path
     try:
         resolved_path = path.resolve()
         for candidate in (resolved_path, *resolved_path.parents):
@@ -1714,6 +1757,7 @@ def probe_worktree_holders(
     except OSError as exc:
         logger.debug("Could not resolve worktree path %s while inspecting process holders: %s", path, exc)
     found: list[str] = []
+    warned_overflow = False
     try:
         for proc in psutil.process_iter(["pid", "name"]):
             memo = _cache.setdefault(proc.pid, {}) if _cache is not None else {}
@@ -1735,17 +1779,47 @@ def probe_worktree_holders(
                 and (_is_within(path, cwd) or _is_within(repository_root, cwd))
             )
             if not using_path and process_cwd_is_related:
-                try:
-                    if "files" not in memo:
-                        memo["files"] = tuple(open_file.path for open_file in proc.open_files())
-                    using_path = any(_is_within(open_path, path) for open_path in memo["files"])
-                except (psutil.NoSuchProcess, psutil.ZombieProcess):
-                    continue
-                except psutil.AccessDenied:
-                    continue
-                except Exception:  # noqa: BLE001 -- unexpected errors must not look like "no holder"
-                    logger.warning("Could not inspect process paths for %s; preserving it", path)
-                    return None
+                if not memo.get("files_overflow"):
+                    try:
+                        if "files" not in memo:
+                            memo["files"] = tuple(open_file.path for open_file in proc.open_files())
+                        using_path = any(_is_within(open_path, path) for open_path in memo["files"])
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                    except psutil.AccessDenied:
+                        continue
+                    except RuntimeError as exc:
+                        if "SystemExtendedHandleInformation" in str(exc):
+                            if not warned_overflow:
+                                logger.warning(
+                                    "Windows open_files() handle buffer overflow while probing %s; falling back to cmdline inspection",
+                                    path,
+                                )
+                                warned_overflow = True
+                            memo["files"] = ()
+                            memo["files_overflow"] = True
+                        else:
+                            logger.warning("Could not inspect process paths for %s; preserving it", path)
+                            return None
+                    except Exception:  # noqa: BLE001 -- unexpected errors must not look like "no holder"
+                        logger.warning("Could not inspect process paths for %s; preserving it", path)
+                        return None
+                if not using_path and memo.get("files_overflow"):
+                    cmdline_match = _cmdline_references_path(
+                        proc,
+                        path,
+                        resolved_path,
+                        memo,
+                        gone_exceptions=(psutil.NoSuchProcess, psutil.ZombieProcess),
+                        unknown_exceptions=(psutil.AccessDenied, OSError),
+                    )
+                    if cmdline_match is None:
+                        logger.warning(
+                            "Could not inspect process cmdline after open_files overflow for %s; preserving it",
+                            path,
+                        )
+                        return None
+                    using_path = cmdline_match
             if using_path:
                 found.append(f"{proc.info.get('name')} (pid {proc.info.get('pid')})")
     except Exception:  # noqa: BLE001 -- cannot prove the worktree is idle

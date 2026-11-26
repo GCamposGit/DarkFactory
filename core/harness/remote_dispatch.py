@@ -528,6 +528,18 @@ def _policy_reject_reason(base_url: str, health: dict[str, Any]) -> str | None:
     return None if decision["eligible"] else str(decision["reason"])
 
 
+def _worker_supports_profile(health: dict[str, Any], profile: str) -> bool:
+    """Reject legacy real workers when dispatching a non-full gate profile (e.g. 'pr')."""
+    if profile == "full":
+        return True
+    if "supported_profiles" in health:
+        supported = health.get("supported_profiles")
+        return isinstance(supported, (list, tuple, set)) and profile in supported
+    if "harness_version" in health:
+        return False
+    return True
+
+
 def _effective_mode(*, remote_required: bool) -> str:
     full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
     if remote_required:
@@ -1336,6 +1348,7 @@ def _dispatch_one_job(
     include_holdout: bool,
     config_path: Path,
     total_timeout_sec: float,
+    profile: str = "full",
     resume_job_id: str | None = None,
 ) -> tuple[bool, HarnessResult | None] | None:
     if resume_job_id:
@@ -1357,16 +1370,18 @@ def _dispatch_one_job(
         print(f"[REMOTE] {base_url}: failed to create bundle ({exc}); skipping")
         return None
 
+    dispatch_key = f"{candidate_sha}:{config_hash}" if profile == "full" else f"{candidate_sha}:{config_hash}:{profile}"
     metadata = {
         "candidate_sha": candidate_sha,
         "tree_sha": tree_hash or "",
         "quick": quick,
         "include_holdout": include_holdout,
+        "profile": profile,
         "config_path": _relative_config_path(config_path, project_root),
         "requesting_host": socket.gethostname(),
         "config_hash": config_hash,
         # USR-342: lets the worker return the live job instead of creating a duplicate.
-        "client_dispatch_key": f"{candidate_sha}:{config_hash}",
+        "client_dispatch_key": dispatch_key,
     }
 
     try:
@@ -1742,6 +1757,7 @@ def maybe_dispatch_remote(
     cache_lookup_enabled: bool,
     local_only: bool,
     remote_required: bool,
+    profile: str = "full",
     emit_cache_hit: Callable[..., bool],
     notify_hub_on_pass: Callable[[], None],
 ) -> bool | None:
@@ -1832,6 +1848,11 @@ def maybe_dispatch_remote(
             _append_discard_attempt(base_url, "unstable_health", candidate_sha=candidate_sha, probe_started=probe_started, outcome="unstable")
             continue
         health = stable_health
+        if not _worker_supports_profile(health, profile):
+            _append_discard_attempt(
+                base_url, f"unsupported_profile:{profile}", candidate_sha=candidate_sha, probe_started=probe_started
+            )
+            continue
 
         worker_platform = str(health.get("platform_family") or "windows")
         worker_python = str(health.get("python_version") or "") or None
@@ -1866,6 +1887,7 @@ def maybe_dispatch_remote(
                 include_holdout=include_holdout,
                 config_path=config_path,
                 total_timeout_sec=total_timeout_sec,
+                profile=profile,
             )
         except _WorkerUnavailable as exc:
             _record_lost_attempt(base_url, health, candidate_sha, attempt_started, exc)

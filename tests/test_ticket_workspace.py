@@ -562,6 +562,96 @@ def test_probe_holders_skips_the_machine_wide_scan_when_the_repo_root_is_unknown
     assert ticket_workspace.probe_worktree_holders(orphan) == ()
 
 
+def test_cleanup_skips_windows_open_files_handle_buffer_overflow_only(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    ws_overflow = create_workspace("USR-win-overflow", cwd=repo.local)
+    overflow_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["codex.exe", "--help"],
+        info={"name": "codex.exe", "pid": 9001},
+    )
+    fake_psutil = SimpleNamespace(
+        process_iter=lambda _attrs: [overflow_proc],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=type("AccessDenied", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    with caplog.at_level("WARNING"):
+        ok_res = cleanup(ws_overflow.path, ws_overflow.main_root)
+    assert ok_res.removed and not ws_overflow.path.exists()
+    assert any("open_files() handle buffer overflow" in rec.message for rec in caplog.records)
+
+    ws_cmdline_held = create_workspace("USR-win-overflow-cmdline", cwd=repo.local)
+    holding_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["python.exe", str(ws_cmdline_held.path / "script.py")],
+        info={"name": "python.exe", "pid": 9003},
+    )
+    fake_psutil.process_iter = lambda _attrs: [holding_proc]
+    held_res = cleanup(ws_cmdline_held.path, ws_cmdline_held.main_root)
+    assert not held_res.removed and held_res.outcome == "blocked_process"
+    assert held_res.reason == "live_process"
+    assert ws_cmdline_held.path.exists()
+
+    ws_other_err = create_workspace("USR-win-other-err", cwd=repo.local)
+    other_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("unexpected handle error")),
+        cmdline=lambda: ["broken.exe"],
+        info={"name": "broken.exe", "pid": 9002},
+    )
+    fake_psutil.process_iter = lambda _attrs: [other_proc]
+    fail_res = cleanup(ws_other_err.path, ws_other_err.main_root)
+    assert not fail_res.removed and fail_res.outcome == "error"
+    assert fail_res.reason == "process_state_unknown"
+    assert ws_other_err.path.exists()
+
+    ws_unreadable_cmd = create_workspace("USR-win-overflow-denied", cwd=repo.local)
+    denied_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: (_ for _ in ()).throw(fake_psutil.AccessDenied()),
+        info={"name": "protected.exe", "pid": 9004},
+    )
+    fake_psutil.process_iter = lambda _attrs: [denied_proc]
+    denied_res = cleanup(ws_unreadable_cmd.path, ws_unreadable_cmd.main_root)
+    assert not denied_res.removed and denied_res.outcome == "error"
+    assert denied_res.reason == "process_state_unknown"
+    assert ws_unreadable_cmd.path.exists()
+
+    ws_cached_1 = create_workspace("USR-win-cache-1", cwd=repo.local)
+    ws_cached_2 = create_workspace("USR-win-cache-2", cwd=repo.local)
+    shared_proc = SimpleNamespace(
+        pid=9005,
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["python.exe", str(ws_cached_2.path / "held.py")],
+        info={"name": "python.exe", "pid": 9005},
+    )
+    fake_psutil.process_iter = lambda _attrs: [shared_proc]
+    snapshot_probe = ticket_workspace.snapshot_holder_probe()
+    assert snapshot_probe(ws_cached_1.path) == ()
+    assert snapshot_probe(ws_cached_2.path) == ("python.exe (pid 9005)",)
+
+    ws_posix_flag = create_workspace("USR-win-posix-flag", cwd=repo.local)
+    posix_flag_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["tool.exe", f"--log={ws_posix_flag.path.as_posix()}/out.log"],
+        info={"name": "tool.exe", "pid": 9006},
+    )
+    fake_psutil.process_iter = lambda _attrs: [posix_flag_proc]
+    posix_res = cleanup(ws_posix_flag.path, ws_posix_flag.main_root)
+    assert not posix_res.removed and posix_res.outcome == "blocked_process"
+    assert posix_res.reason == "live_process"
+    assert ws_posix_flag.path.exists()
+
+
 def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(
     repo: SimpleNamespace,
 ) -> None:

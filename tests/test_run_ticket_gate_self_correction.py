@@ -869,3 +869,25 @@ def test_gate_remote_unavailable_retries_on_other_host_then_passes(tmp_path: Pat
     assert "100.77.130.5" in seen_workers[0]
     assert "100.77.130.5" not in seen_workers[1] and "100.78.181.90" in seen_workers[1]
     assert os.environ["DARKFAC_TEST_WORKERS"] == "http://100.77.130.5:8080"
+
+
+def test_fleet_pr_gate_uses_remote_required_without_local_ram_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.line import line_lock
+
+    monkeypatch.delenv("DARKFAC_GATE_SCOPE", raising=False)
+    monkeypatch.setattr(line_lock, "is_fleet_mode", lambda: True)
+    monkeypatch.setenv("DARKFAC_FLEET_GATE_REMOTE", "1")
+    monkeypatch.setattr(
+        run_ticket.gate_ram,
+        "wait_for_gate_ram",
+        lambda **_kw: pytest.fail("fleet remote PR gate must not block on local RAM"),
+    )
+    assert run_ticket._wait_gate_ram_if_local(as_json=True) is None
+    cmd = run_ticket._gate_build_command(tmp_path)
+    assert cmd[-3:] == ["--profile", "pr", "--remote-required"]
+
+    monkeypatch.delenv("DARKFAC_FLEET_GATE_REMOTE", raising=False)
+    cmd_local = run_ticket._gate_build_command(tmp_path)
+    assert cmd_local[-3:] == ["--profile", "pr", "--local"]
