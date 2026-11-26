@@ -563,12 +563,13 @@ def test_probe_holders_skips_the_machine_wide_scan_when_the_repo_root_is_unknown
 
 
 def test_cleanup_skips_windows_open_files_handle_buffer_overflow_only(
-    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     ws_overflow = create_workspace("USR-win-overflow", cwd=repo.local)
     overflow_proc = SimpleNamespace(
         cwd=lambda: str(repo.local),
         open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["codex.exe", "--help"],
         info={"name": "codex.exe", "pid": 9001},
     )
     fake_psutil = SimpleNamespace(
@@ -579,13 +580,29 @@ def test_cleanup_skips_windows_open_files_handle_buffer_overflow_only(
     )
     monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
 
-    ok_res = cleanup(ws_overflow.path, ws_overflow.main_root)
+    with caplog.at_level("WARNING"):
+        ok_res = cleanup(ws_overflow.path, ws_overflow.main_root)
     assert ok_res.removed and not ws_overflow.path.exists()
+    assert any("open_files() handle buffer overflow" in rec.message for rec in caplog.records)
+
+    ws_cmdline_held = create_workspace("USR-win-overflow-cmdline", cwd=repo.local)
+    holding_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["python.exe", str(ws_cmdline_held.path / "script.py")],
+        info={"name": "python.exe", "pid": 9003},
+    )
+    fake_psutil.process_iter = lambda _attrs: [holding_proc]
+    held_res = cleanup(ws_cmdline_held.path, ws_cmdline_held.main_root)
+    assert not held_res.removed and held_res.outcome == "blocked_process"
+    assert held_res.reason == "live_process"
+    assert ws_cmdline_held.path.exists()
 
     ws_other_err = create_workspace("USR-win-other-err", cwd=repo.local)
     other_proc = SimpleNamespace(
         cwd=lambda: str(repo.local),
         open_files=lambda: (_ for _ in ()).throw(RuntimeError("unexpected handle error")),
+        cmdline=lambda: ["broken.exe"],
         info={"name": "broken.exe", "pid": 9002},
     )
     fake_psutil.process_iter = lambda _attrs: [other_proc]

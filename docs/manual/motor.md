@@ -8,7 +8,7 @@ completa para Linux/CI. Em execução local, com 1,5 GiB livres o portão degrad
 disso espera até 300s e retorna 75 (`gate_insufficient_ram`), sem chamar o agente
 de correção. `DARKFAC_GATE_SCOPE=full` restaura o caminho anterior com `--quick`
 e despacho remoto estrito. A admissão prévia permanece regida pelo seu contrato.
-`_build_candidate_digest` ignora `.factory/demands/demands.json`, e entregas de projetos externos concluídas emitem `[DELIVERY_EXTERNAL]` em vez de `[DELIVERY_MERGED]`.
+`_build_candidate_digest` ignora `.factory/demands/demands.json` em projetos externos (`project_id != "darkfac"`), mantendo-o incluído no `darkfac`; entregas externas válidas (`delivered` ou `awaiting_commercial_acceptance`) emitem `[DELIVERY_EXTERNAL]` em vez de `[DELIVERY_MERGED]`.
 Detalhes de seleção, prazo e recuperação de crash em [portao.md](portao.md).
 
 ## Identidade headless e recibo de execução (USR-471)

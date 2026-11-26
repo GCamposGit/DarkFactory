@@ -201,7 +201,11 @@ class _Attempt:
             path.with_suffix(".log").write_text(f"{cause}: {detail}\n" + redact_secrets(self.output), encoding="utf-8")
         if code:
             record_failure(self.ticket, self.project, cause, detail, run_id=self.run_id, phase=outcome.stage)
-        elif "[DELIVERY_MERGED]" in self.output or payload.get("status") == "merged_awaiting_deploy":
+        elif (
+            "[DELIVERY_MERGED]" in self.output
+            or "[DELIVERY_EXTERNAL]" in self.output
+            or payload.get("status") == "merged_awaiting_deploy"
+        ):
             from core.line.admission_store import AdmissionStore
             AdmissionStore(state_root() / "admission.sqlite3").reset_budget(self.project, self.ticket)
         return code

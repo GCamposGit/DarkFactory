@@ -1008,7 +1008,7 @@ class GitAutonomyManager:
         """
         ledger = cwd / _LEDGER_RELATIVE
         queued = _durable_queue_ticket(ticket_id)
-        if not ledger.is_file() and (queued is None or queued.project_id != "darkfac"):
+        if (queued is not None and queued.project_id != "darkfac") or (not ledger.is_file() and queued is None):
             if self.is_dirty(cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
             return self.get_current_sha(cwd)

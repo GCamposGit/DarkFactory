@@ -1684,6 +1684,34 @@ def classify_ownerless(facts: OwnerlessFacts) -> OwnerlessVerdict:
     return OwnerlessVerdict(path=path, eligible=True, reason="ownerless", detail="no owner for more than 48h")
 
 
+def _cmdline_references_path(
+    proc: Any,
+    path: Path,
+    resolved_path: Path,
+    memo: dict[str, Any],
+    ignorable_exceptions: tuple[type[BaseException], ...],
+) -> bool:
+    """Fallback holder check via process cmdline when Windows handle enumeration overflows."""
+    if "cmdline" not in memo:
+        cmdline_fn = getattr(proc, "cmdline", None)
+        if not callable(cmdline_fn):
+            memo["cmdline"] = ()
+        else:
+            try:
+                memo["cmdline"] = tuple(str(arg) for arg in (cmdline_fn() or ()))
+            except ignorable_exceptions:
+                memo["cmdline"] = ()
+    raw_marker = str(path).casefold()
+    resolved_marker = str(resolved_path).casefold()
+    for arg in memo["cmdline"]:
+        if _is_within(arg, path):
+            return True
+        lowered = arg.casefold()
+        if raw_marker in lowered or resolved_marker in lowered:
+            return True
+    return False
+
+
 def probe_worktree_holders(
     path: Path, *, _cache: Optional[dict[int, dict[str, Any]]] = None
 ) -> Optional[tuple[str, ...]]:
@@ -1705,6 +1733,7 @@ def probe_worktree_holders(
         logger.debug("psutil unavailable; preserving worktree %s", path)
         return None
     repository_root: Optional[Path] = None
+    resolved_path = path
     try:
         resolved_path = path.resolve()
         for candidate in (resolved_path, *resolved_path.parents):
@@ -1714,6 +1743,7 @@ def probe_worktree_holders(
     except OSError as exc:
         logger.debug("Could not resolve worktree path %s while inspecting process holders: %s", path, exc)
     found: list[str] = []
+    warned_overflow = False
     try:
         for proc in psutil.process_iter(["pid", "name"]):
             memo = _cache.setdefault(proc.pid, {}) if _cache is not None else {}
@@ -1745,13 +1775,23 @@ def probe_worktree_holders(
                     continue
                 except RuntimeError as exc:
                     if "SystemExtendedHandleInformation" in str(exc):
-                        # Windows raises this when system handle count exceeds psutil's fixed buffer;
-                        # proc.cwd() was already checked and non-forced removal still fails on open locks.
-                        logger.debug("Skipping Windows open_files buffer overflow while probing %s: %s", path, exc)
+                        if not warned_overflow:
+                            logger.warning(
+                                "Windows open_files() handle buffer overflow while probing %s; falling back to cmdline inspection",
+                                path,
+                            )
+                            warned_overflow = True
                         memo["files"] = ()
-                        continue
-                    logger.warning("Could not inspect process paths for %s; preserving it", path)
-                    return None
+                        using_path = _cmdline_references_path(
+                            proc,
+                            path,
+                            resolved_path,
+                            memo,
+                            (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied, OSError),
+                        )
+                    else:
+                        logger.warning("Could not inspect process paths for %s; preserving it", path)
+                        return None
                 except Exception:  # noqa: BLE001 -- unexpected errors must not look like "no holder"
                     logger.warning("Could not inspect process paths for %s; preserving it", path)
                     return None

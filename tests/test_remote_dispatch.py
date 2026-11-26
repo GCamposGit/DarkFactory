@@ -1419,3 +1419,40 @@ def test_remote_pr_profile_propagates_metadata_and_worker_command(
     manager = JobManager(worker_repo, state_dir=tmp_path / "worker_state")
     code, body = manager.submit(b"bytes", {"candidate_sha": "a" * 40, "profile": "invalid"})
     assert code == 400 and "invalid profile" in body["error"]
+
+
+def test_remote_pr_profile_skips_legacy_worker_without_supported_profiles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:9")
+    monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "probe_health",
+        lambda *a, **kw: {"busy": False, "harness_version": "1"},
+    )
+    monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda _u, h: h)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _r: "a" * 40)
+
+    assert remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=False, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=True, profile="pr",
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    ) is None
+    assert remote_dispatch.dispatch_attempts()[-1]["discard_reason"] == "unsupported_profile:pr"
+
+
+def test_worker_health_advertises_supported_profiles(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from core.harness.remote_worker import JobManager, WorkerHealthStatus, _worker_health_status
+
+    assert "pr" in WorkerHealthStatus(project_root=str(tmp_path)).supported_profiles
+    manager = JobManager(tmp_path, state_dir=tmp_path / "worker_state")
+    monkeypatch.setattr("core.harness.remote_worker.known_validated_shas", lambda _p: [])
+    monkeypatch.setattr("core.harness.remote_worker.current_git_sha", lambda _p: "a" * 40)
+    monkeypatch.setattr("core.harness.remote_worker.get_available_harnesses", lambda: [])
+    identity = SimpleNamespace(configured_node_id="desktop", source="cli")
+    health = _worker_health_status(manager, tmp_path, "desktop", identity)
+    assert health.supported_profiles == ["full", "pr"]

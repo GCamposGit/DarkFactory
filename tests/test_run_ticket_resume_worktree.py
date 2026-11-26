@@ -1041,11 +1041,78 @@ def test_external_ticket_resume_and_candidate_digest_ignore_demands_ledger(
 
     (repo.local / "seo.py").write_text("ok = True\n", encoding="utf-8")
     monkeypatch.setattr("core.line.fleet_dispatcher.ticket_candidate_digest", lambda _tid: "reg-digest")
-    clean_digest = run_ticket._build_candidate_digest("MDL-99", repo.local)
+    clean_ext = run_ticket._build_candidate_digest("MDL-99", repo.local, project_id="mansaodolago")
+    clean_int = run_ticket._build_candidate_digest("MDL-99", repo.local, project_id="darkfac")
 
     ledger = repo.local / ".factory" / "demands" / "demands.json"
     ledger.parent.mkdir(parents=True)
     ledger.write_text("[]", encoding="utf-8")
-    assert run_ticket._build_candidate_digest("MDL-99", repo.local) == clean_digest
+    assert run_ticket._build_candidate_digest("MDL-99", repo.local, project_id="mansaodolago") == clean_ext
+    assert run_ticket._build_candidate_digest("MDL-99", repo.local, project_id="darkfac") != clean_int
     _git(repo.local, "add", ".factory/demands/demands.json")
-    assert run_ticket._build_candidate_digest("MDL-99", repo.local) == clean_digest
+    assert run_ticket._build_candidate_digest("MDL-99", repo.local, project_id="mansaodolago") == clean_ext
+    assert run_ticket._build_candidate_digest("MDL-99", repo.local, project_id="darkfac") != clean_int
+
+
+@pytest.mark.parametrize(
+    ("project_id", "status", "no_push", "expected_marker", "expected_code"),
+    [
+        ("darkfac", "merged_awaiting_deploy", False, "[DELIVERY_MERGED]", "merged_awaiting_deploy"),
+        ("mansaodolago", "delivered", False, "[DELIVERY_EXTERNAL]", "delivered"),
+        ("mansaodolago", "awaiting_commercial_acceptance", False, "[DELIVERY_EXTERNAL]", "awaiting_commercial_acceptance"),
+        ("mansaodolago", "merged_awaiting_deploy", False, None, None),
+        ("mansaodolago", "unknown_status", False, None, None),
+        ("mansaodolago", "delivered", True, None, None),
+    ],
+)
+def test_emit_delivery_marker_respects_project_and_status(
+    capsys: pytest.CaptureFixture[str],
+    project_id: str,
+    status: str,
+    no_push: bool,
+    expected_marker: str | None,
+    expected_code: str | None,
+) -> None:
+    import argparse
+
+    outcomes: list[tuple[str, str]] = []
+
+    class FakeProgress:
+        def set_outcome(self, message: str, code: str) -> None:
+            outcomes.append((message, code))
+
+    ticket = run_ticket.UserTicket(
+        id="MDL-99", project_id=project_id, title="Ticket title", problem_statement="Problem statement",
+    )
+    args = argparse.Namespace(json=False, no_commit=False, no_push=no_push)
+    run_ticket._emit_delivery_marker(args, ticket, {"status": status}, FakeProgress(), delivered=True)
+
+    out = capsys.readouterr().out
+    if expected_marker:
+        assert expected_marker in out
+        assert outcomes == [(outcomes[0][0], expected_code)]
+    else:
+        assert out == ""
+        assert outcomes == []
+
+
+def test_delivery_success_result_preserves_awaiting_commercial_acceptance(tmp_path: Path) -> None:
+    from core.line import ticket_stages
+
+    ticket = run_ticket.UserTicket(
+        id="MDL-99", project_id="mansaodolago", title="Ticket title", problem_statement="Problem statement",
+    )
+    report = SimpleNamespace(
+        delivery=SimpleNamespace(action="awaiting_commercial_acceptance", pr_url="https://github.com/x/y/pull/1", merge_sha=None),
+        commit_sha="a" * 40,
+        sync_result=None,
+    )
+
+    class FakeProgress:
+        def export(self) -> dict[str, Any]:
+            return {"published": False}
+
+    payload = ticket_stages.delivery_success_result(
+        ticket, report, tmp_path, "ticket/mdl-99", "a" * 40, [], False, True, FakeProgress(), awaiting_deploy=False,
+    )
+    assert payload["status"] == "awaiting_commercial_acceptance"

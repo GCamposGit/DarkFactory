@@ -171,6 +171,10 @@ class WorkerHealthStatus(BaseModel):
         description="origin/main SHA + recent validated candidate SHAs, for thin `git bundle --not` negotiation",
     )
     harness_version: str = Field(default="1", description="Remote harness job protocol version")
+    supported_profiles: list[str] = Field(
+        default_factory=lambda: ["full", "pr"],
+        description="Gate profiles accepted by /harness/jobs on this worker",
+    )
     git_sha: Optional[str] = Field(
         default=None,
         description="Full `git rev-parse HEAD` (40 hex) of project_root; null when it cannot be read (USR-65)",
@@ -1959,6 +1963,7 @@ def _worker_health_status(
         observed_at=datetime.now(timezone.utc) if reading else None,
         known_shas=known_validated_shas(root_path),
         harness_version="1",
+        supported_profiles=["full", "pr"],
         git_sha=current_git_sha(root_path),
         instance_id=job_manager.instance_id,
         started_at=job_manager.started_at,

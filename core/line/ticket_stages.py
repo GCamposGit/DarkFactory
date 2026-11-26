@@ -340,6 +340,12 @@ def delivery_success_result(
                 f"deploy {deploy_status}; relatorio {deploy_artifact or '-'}."
             )
 
+    delivery_action = getattr(delivery, "action", None)
+    status = (
+        "merged_awaiting_deploy"
+        if awaiting_deploy
+        else ("awaiting_commercial_acceptance" if delivery_action == "awaiting_commercial_acceptance" else "delivered")
+    )
     success_payload = {
         "exit_code": 0,
         "ok": True,
@@ -347,7 +353,7 @@ def delivery_success_result(
         "branch": current_branch,
         "commit_sha": getattr(completion_report, "commit_sha", None) if completion_report else current_sha,
         "worktree": str(target_worktree),
-        "status": "merged_awaiting_deploy" if awaiting_deploy else "delivered",
+        "status": status,
         "pr_url": pr_url,
         "merge_sha": merge_sha,
         "deploy_status": deploy_status,

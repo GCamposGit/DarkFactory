@@ -604,3 +604,20 @@ def test_pr_remote_required_skips_pre_dispatch_local_ram_and_forwards_profile(
     assert captured[0]["local_only"] is False
     assert captured[0]["remote_required"] is True
     assert captured[0]["profile"] == "pr"
+
+
+def test_pr_remote_required_fallback_enforces_local_ram_and_returns_75(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    from types import SimpleNamespace
+    from core.harness import remote_dispatch
+    from core.line import gate_ram
+
+    cfg = tmp_path / "harness.config.json"
+    cfg.write_text(json.dumps({"steps": [{"name": "syntax", "cmd": "python -c pass", "quick": True, "kind": "check", "profiles": ["pr", "full"]}]}), encoding="utf-8")
+    monkeypatch.setattr(remote_dispatch, "maybe_dispatch_remote", lambda **_kw: None)
+    monkeypatch.setattr(gate_ram, "wait_for_gate_ram", lambda **kw: SimpleNamespace(ok=False, available_gib=0.9))
+
+    assert runner.main(["--profile", "pr", "--remote-required", "--config", str(cfg)]) == 75
+    assert "gate_insufficient_ram" in capsys.readouterr().out

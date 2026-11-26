@@ -528,6 +528,18 @@ def _policy_reject_reason(base_url: str, health: dict[str, Any]) -> str | None:
     return None if decision["eligible"] else str(decision["reason"])
 
 
+def _worker_supports_profile(health: dict[str, Any], profile: str) -> bool:
+    """Reject legacy real workers when dispatching a non-full gate profile (e.g. 'pr')."""
+    if profile == "full":
+        return True
+    if "supported_profiles" in health:
+        supported = health.get("supported_profiles")
+        return isinstance(supported, (list, tuple, set)) and profile in supported
+    if "harness_version" in health:
+        return False
+    return True
+
+
 def _effective_mode(*, remote_required: bool) -> str:
     full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
     if remote_required:
@@ -1836,6 +1848,11 @@ def maybe_dispatch_remote(
             _append_discard_attempt(base_url, "unstable_health", candidate_sha=candidate_sha, probe_started=probe_started, outcome="unstable")
             continue
         health = stable_health
+        if not _worker_supports_profile(health, profile):
+            _append_discard_attempt(
+                base_url, f"unsupported_profile:{profile}", candidate_sha=candidate_sha, probe_started=probe_started
+            )
+            continue
 
         worker_platform = str(health.get("platform_family") or "windows")
         worker_python = str(health.get("python_version") or "") or None
