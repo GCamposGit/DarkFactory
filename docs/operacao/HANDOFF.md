@@ -1,23 +1,23 @@
 # Handoff operacional
 
-Versao: 17
-Atualizado em: 2026-11-25 noite (Claude Code, coordenação do plano EC-2026-11)
+Versao: 18
+Atualizado em: 2026-11-26 tarde (Antigravity, coordenação do plano EC-2026-11)
 
-## Estado do plano EC-2026-11 em 25/11 noite (ler primeiro)
+## Estado do plano EC-2026-11 em 26/11 tarde (ler primeiro)
 
 | Bloco | Estado | Evidência |
 |---|---|---|
-| `EC-01` | parcial | checkout `C:\dev\DarkFac` limpo no main; worktrees 108 → 36; holds de 9 tickets cancelados liberados; OA-099/100/101 `done`. Pausar o despachante (`Stop/Disable-ScheduledTask DarkFac-Fleet-Dispatcher`) foi **negado pelo classificador de permissões**. Lixo de `.factory/backups/trash` e `.factory/tmp` não limpo. |
+| `EC-01` | parcial | checkout `C:\dev\DarkFac` limpo no `main`; worktrees 108 → 36; holds de 9 tickets cancelados liberados; OA-099/100/101 `done`; Desktop saudável em `100.78.181.90:8080` e convergido. Pausa do despachante (`Stop/Disable-ScheduledTask DarkFac-Fleet-Dispatcher`) negada pelo classificador e limpeza de `.factory/backups/trash` / `.factory/tmp` seguem pendentes. Holds `gate_timeout_repeated` de `USR-520`, `USR-537`, `USR-545`, `USR-568`, `USR-569` e `USR-577` agendados para liberação após este PR, mantendo `USR-446` em hold `review_changes_required`. |
 | `EC-02` | concluído | `#954` → `0d7fba51` |
-| `EC-03` | concluído (exceto item demands.json) | `#956` → `2f15816c` (overlay `.factory/learning/learning_ledger.live.json`, gitignored); `#958` → `d12422b3` (`Docs-Unchanged` automático conservador, superfície por AST). O item "não mexer em `demands.json` na worktree" conflita com o contrato de entrega (o commit leva o `completed` do ticket) e precisa de redesenho. |
-| `EC-04` | concluído | `#953` → `a20de752`; owner renovou o login (OA-101) e `accounts --refresh` mostra `claude connected` |
-| `EC-05` | código concluído, entrega pendente | `#957` → `4cf09fd8` (v0_proof com recibos reais e ancestralidade em `refs/remotes/origin/<default_branch>`), `#959` → `3134fd5f` (learning pack externo, smoke honesto com `smoke_applicable`, tag `channel:` só explícita). `MDL-01..03` com holds liberados; a frota estava sem host livre (Notebook `workers=0`, grokbox sem health, Desktop com run órfão). Rodar `run_ticket.py MDL-0x` pela sessão foi negado pelo classificador (trabalho de cliente): fica com a frota ou com o owner. |
+| `EC-03` | parcial | `#956` → `2f15816c` (overlay `.factory/learning/learning_ledger.live.json`, gitignored); `#958` → `d12422b3` (`Docs-Unchanged` automático conservador, superfície por AST); `#961` → `9dac33f9` (isolamento de `demands.json` em projeto externo). O item interno "não mexer em `demands.json` na worktree" conflita com o contrato de entrega e segue em redesenho no `USR-577`. |
+| `EC-04` | concluído | `#953` → `a20de752` (OA-101 resolvida e sonda de cota ativa); `#962` / `USR-578` → `2bf0b839` (unificação de `find_claude_binary()` e `/health` sem sonda). |
+| `EC-05` | aguardando aceite comercial | `#957` → `4cf09fd8` (`v0_proof` com recibos reais e ancestralidade remota); `#959` → `3134fd5f` (learning pack externo e smoke honesto); `#963` / `USR-579` → `ade26fb1` (`_stage_review` preserva `review_rounds` em falhas de rota e invoca `importlinter` via python); `#964` / `USR-580` → `96ffa4c0` (`DEPLOY_SMOKE` aceita `smoke_applicable=False`); `#965` / `USR-581` → `61073c46` (`stage_review` popula `output_refs` com `publish=False`). Entregas `mansaodolago` abertas contra `darkfac/m1-seo` (`origin/master` intocado em `04c87a24`): `MDL-01` → `Site_Mansaodolago#1`, `MDL-02` → `#2`, `MDL-03` → `#3`, Learning Packs `lp-mdl-01..03` gerados e tickets em `waiting_human`. |
 
-- Ticket agrupado dos residuais: `USR-577` (demands.json na entrega, superfície `*_ENV`, `affected --run` lento, evidência externa na frota, pausa do despachante).
-- `USR-279` reaberto como `accepted` (placar real `0/5`; não vai para a frota).
-- Holds de `USR-537/545/568/569` (`fix_agent_no_changes`) liberados após o `#958`.
-- `MDL-01..03` não carregam tag `channel:`; marcar retroativamente foi negado pelo classificador (decisão do owner se contam para a V0).
-- Revisão cruzada: Codex/Grok abaixo do piso até ~26/11 17:00 UTC; PRs `#958`/`#959` revisados por `opus` com persona adversarial (degrau "mesma família, outro modelo" da cascata).
+- `core.line.v0_proof`: `streak=0/5`, `criterion_met=False` (`MDL-01..03` aguardam aceite/merge do owner em `darkfac/m1-seo` e não carregam tag `channel:` — decisão aberta para o owner).
+- Ticket agrupado dos residuais de 25/11: `USR-577` (`demands.json` na entrega interna, superfície `*_ENV`, `affected --run` lento, evidência externa na frota, pausa do despachante).
+- Follow-ups de defeitos encontrados na sessão de 26/11 (enfileirados como `USR-*` após este PR): revisão CLI headless do Antigravity (`ANTIGRAVITY_CSRF_TOKEN` / limite de linha de comando / espera síncrona ou exclusão explícita), auto-reserva do `fleet_dispatcher` no Desktop empurrando `runner.py --profile pr --remote-required` para execução local, e transição automática para `waiting_human` em projeto externo com `requires_commercial_acceptance: true` + guarda pós-rodada final/novo commit no `stage_review` + endurecimento de saúde MCP `segundocerebro`.
+- `USR-279` segue como `accepted` (placar real `0/5`; não vai para a frota).
+- `OA-102` ignorada por instrução explícita do owner (execução conduzida diretamente na sessão interativa).
 
 ## Prioridade imediata da coordenação: Plano `EC-2026-11` (`EC-01` → `EC-05`)
 
@@ -58,7 +58,7 @@ O owner aprovou e priorizou o **Plano de Estabilização Cirúrgica** salvo em [
 ## Armadilhas ativas (até conclusão de `EC-01..05`)
 
 1. Para fechar entrega feita fora do launcher, use `Set-Location C:\dev\DarkFac; python -m core.demands.cli complete <TICKET> --sha <sha completo do origin/main> --evidence "..."`.
-2. Até `EC-03` entrar, `learning.cli record-turn` altera `.factory/learning/learning_ledger.json` rastreado no checkout compartilhado (`C:\dev\DarkFac`). Antes de avançar o checkout, rode `git -C C:\dev\DarkFac stash push -m <tag> -- .factory/learning/learning_ledger.json`, depois `git -C C:\dev\DarkFac merge --ff-only` e `git -C C:\dev\DarkFac stash pop`.
+2. Desde o `#956`, `learning.cli record-turn` grava o runtime em `.factory/learning/learning_ledger.live.json` (gitignored), mantendo `C:\dev\DarkFac` limpo no `main`.
 3. `dokploy_redeploy.py` sai com código 3 quando só o Notebook não converge por árvore suja. Confira as linhas `[NODE SYNC]` e `[RUNTIME IMAGE]`.
 4. Identificador literal de modelo neste arquivo ou no roadmap quebra `tests/test_model_id_ratchet_usr185.py`. Cite apenas aliases (`opus`, `sonnet`, `haiku`, `sol`, `luna`, `neon`, `flash`).
 5. `MDL-01..03` (`mansaodolago`, cliente real) miram exclusivamente a branch `darkfac/m1-seo` (`requires_commercial_acceptance: true`). Nada vai para `master` ou FTP sem aceite expresso do owner.
