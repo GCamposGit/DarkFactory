@@ -638,6 +638,19 @@ def test_cleanup_skips_windows_open_files_handle_buffer_overflow_only(
     assert snapshot_probe(ws_cached_1.path) == ()
     assert snapshot_probe(ws_cached_2.path) == ("python.exe (pid 9005)",)
 
+    ws_posix_flag = create_workspace("USR-win-posix-flag", cwd=repo.local)
+    posix_flag_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["tool.exe", f"--log={ws_posix_flag.path.as_posix()}/out.log"],
+        info={"name": "tool.exe", "pid": 9006},
+    )
+    fake_psutil.process_iter = lambda _attrs: [posix_flag_proc]
+    posix_res = cleanup(ws_posix_flag.path, ws_posix_flag.main_root)
+    assert not posix_res.removed and posix_res.outcome == "blocked_process"
+    assert posix_res.reason == "live_process"
+    assert ws_posix_flag.path.exists()
+
 
 def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(
     repo: SimpleNamespace,

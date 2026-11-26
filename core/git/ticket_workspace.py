@@ -1715,12 +1715,12 @@ def _cmdline_references_path(
         except Exception:  # noqa: BLE001 -- unexpected cmdline failure must not look like "no holder"
             memo["cmdline_unknown"] = True
             return None
-    raw_marker = str(path).casefold()
-    resolved_marker = str(resolved_path).casefold()
+    raw_marker = str(path).replace("\\", "/").casefold()
+    resolved_marker = str(resolved_path).replace("\\", "/").casefold()
     for arg in memo["cmdline"]:
         if _is_within(arg, path):
             return True
-        lowered = arg.casefold()
+        lowered = arg.replace("\\", "/").casefold()
         if raw_marker in lowered or resolved_marker in lowered:
             return True
     return False
