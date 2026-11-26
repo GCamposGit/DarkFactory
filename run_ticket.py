@@ -2660,6 +2660,16 @@ def _deliver_external_project(
     project: Any,
 ) -> tuple[Any, bool]:
     """Branch delivery (PR/merge/deploy/smoke) of an external project: (report, a smoke really ran)."""
+    from core.git.autonomy import DeliveryReport, _run_git
+
+    ledger_dirty = _run_git(["status", "--porcelain", "--", LEDGER_RELATIVE], cwd=target_worktree)
+    if ledger_dirty.returncode != 0 or (ledger_dirty.stdout or "").strip():
+        return DeliveryReport(
+            ok=False,
+            action="staged_inspect_failed",
+            branch=git_mgr._current_branch(target_worktree),
+            message=f"External project {ticket.project_id} has dirty or untracked {LEDGER_RELATIVE}; refusing to commit.",
+        ), False
     if git_mgr.is_dirty(cwd=target_worktree):
         git_mgr.commit_ticket(
             ticket_id=ticket.id, title=ticket.title, cwd=target_worktree,

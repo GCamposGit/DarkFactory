@@ -1171,7 +1171,17 @@ class FleetDispatcher:
             if rc == 0:
                 tail = _tail(job.log_path)
                 in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
-                if _delivery_evidence(tail):
+                if job.project_id != "darkfac":
+                    if _external_delivery_evidence(tail):
+                        self.admission_store.reset_budget(job.project_id, job.ticket_id)
+                        self._close_express_episode(job.ticket_id)
+                        self._release_reservation(job)
+                    else:
+                        self._record_failure(job, rc, "no_delivery_evidence", tail)
+                        if in_recovery:
+                            self.recovery = self.admission_store.record_recovery_receipt_cause("no_delivery_evidence")
+                        self._release_reservation(job)
+                elif _delivery_evidence(tail):
                     self.admission_store.reset_budget(job.project_id, job.ticket_id)
                     self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
@@ -1185,10 +1195,6 @@ class FleetDispatcher:
                     self.last_merge_at = self.clock()
                     self.pending_deploy = True
                     self._deferred_sha = None
-                elif job.project_id != "darkfac" and _external_delivery_evidence(tail):
-                    self.admission_store.reset_budget(job.project_id, job.ticket_id)
-                    self._close_express_episode(job.ticket_id)
-                    self._release_reservation(job)
                 elif not in_recovery:
                     self._record_failure(job, rc, "no_delivery_evidence", tail)
                     self._release_reservation(job)

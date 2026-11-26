@@ -998,7 +998,8 @@ class GitAutonomyManager:
         return [line for line in res.stdout.splitlines() if line.strip()]
 
     def _record_completion(
-        self, ticket_id: str, title: str, cwd: Path, custom_message: str | None = None
+        self, ticket_id: str, title: str, cwd: Path, custom_message: str | None = None,
+        project_id: Optional[str] = None,
     ) -> str:
         """Commit implementation and record its candidate SHA without closing the ticket.
 
@@ -1007,8 +1008,20 @@ class GitAutonomyManager:
         standalone-repo path: commit the tree and do not invent a ticket.
         """
         ledger = cwd / _LEDGER_RELATIVE
-        queued = _durable_queue_ticket(ticket_id)
-        if (queued is not None and queued.project_id != "darkfac") or (not ledger.is_file() and queued is None):
+        is_explicit_external = project_id is not None and project_id != "darkfac"
+        queued = None if is_explicit_external else _durable_queue_ticket(ticket_id)
+        is_queued_external = queued is not None and queued.project_id != "darkfac"
+        if is_explicit_external or is_queued_external:
+            ext_project = project_id if is_explicit_external else (queued.project_id if queued else "external")
+            ledger_dirty = _run_git(["status", "--porcelain", "--", _LEDGER_RELATIVE], cwd=cwd)
+            if ledger_dirty.returncode != 0 or (ledger_dirty.stdout or "").strip():
+                raise RuntimeError(
+                    f"External project {ext_project} has dirty or untracked {_LEDGER_RELATIVE}; refusing to commit."
+                )
+            if self.is_dirty(cwd):
+                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+            return self.get_current_sha(cwd)
+        if not ledger.is_file() and queued is None:
             if self.is_dirty(cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
             return self.get_current_sha(cwd)
@@ -1142,7 +1155,7 @@ class GitAutonomyManager:
         try:
             if kind not in ("queue", "implementation", "registry"):
                 raise ValueError(f"Unknown delivery kind: {kind}")
-            report = self._deliver(ticket_id, title, target, base, runner, merge, kind)
+            report = self._deliver(ticket_id, title, target, base, runner, merge, kind, project_id=project_id)
         except Exception as exc:  # fail-closed report instead of crashing the pipeline
             logger.exception("deliver_branch failed for %s", ticket_id)
             report = DeliveryReport(ok=False, action="error", message=str(exc))
@@ -1157,6 +1170,7 @@ class GitAutonomyManager:
     def _prepare_delivery(
         self, ticket_id: str, title: str, cwd: Path, base: str,
         kind: Literal["queue", "implementation", "registry"],
+        project_id: Optional[str] = None,
     ) -> tuple[Optional[DeliveryReport], str]:
         """Apply delivery-kind validation and ensure work is on a ticket branch."""
         # (a) commit if dirty
@@ -1176,7 +1190,7 @@ class GitAutonomyManager:
             changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
             if is_ledger_only(list(changed)):
                 return DeliveryReport(ok=False, action="no_changes", message="Implementation changes only the ledger."), ""
-            self._record_completion(ticket_id, title, cwd)
+            self._record_completion(ticket_id, title, cwd, project_id=project_id)
         else:
             changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
             if not is_ledger_only(list(changed)):
@@ -1349,8 +1363,9 @@ class GitAutonomyManager:
     def _deliver(
         self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool,
         kind: Literal["queue", "implementation", "registry"],
+        project_id: Optional[str] = None,
     ) -> DeliveryReport:
-        prepared, branch = self._prepare_delivery(ticket_id, title, cwd, base, kind)
+        prepared, branch = self._prepare_delivery(ticket_id, title, cwd, base, kind, project_id=project_id)
         if prepared is not None:
             return prepared
         synchronized = self._synchronize_delivery(ticket_id, cwd, base, branch, kind, merge)
@@ -1689,7 +1704,7 @@ class GitAutonomyManager:
         if inspection_error:
             return inspection_error
         commit_sha, commit_error = self._commit_completion(
-            ticket.id, ticket.title, ticket_id, target_dir, auto_commit, custom_message,
+            ticket.id, ticket.title, ticket_id, target_dir, auto_commit, custom_message, ticket.project_id,
         )
         if commit_error:
             return commit_error
@@ -1792,13 +1807,15 @@ class GitAutonomyManager:
 
     def _commit_completion(
         self, ticket_id: str, title: str, report_ticket_id: str, target_dir: Path,
-        auto_commit: bool, custom_message: Optional[str],
+        auto_commit: bool, custom_message: Optional[str], project_id: Optional[str] = None,
     ) -> tuple[Optional[str], Optional[TicketCompletionReport]]:
         if not auto_commit:
             return None, None
         self._phase("commit", "running", "commit da implementacao e do registro de conclusao")
         try:
-            sha = self._record_completion(ticket_id, title, target_dir, custom_message)
+            sha = self._record_completion(
+                ticket_id, title, target_dir, custom_message, project_id=project_id,
+            )
         except TicketAbsentError as exc:
             self._phase("commit", "failed", str(exc), "ticket_absent")
             return None, absent_ticket_report(report_ticket_id)

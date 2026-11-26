@@ -611,6 +611,33 @@ def test_cleanup_skips_windows_open_files_handle_buffer_overflow_only(
     assert fail_res.reason == "process_state_unknown"
     assert ws_other_err.path.exists()
 
+    ws_unreadable_cmd = create_workspace("USR-win-overflow-denied", cwd=repo.local)
+    denied_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: (_ for _ in ()).throw(fake_psutil.AccessDenied()),
+        info={"name": "protected.exe", "pid": 9004},
+    )
+    fake_psutil.process_iter = lambda _attrs: [denied_proc]
+    denied_res = cleanup(ws_unreadable_cmd.path, ws_unreadable_cmd.main_root)
+    assert not denied_res.removed and denied_res.outcome == "error"
+    assert denied_res.reason == "process_state_unknown"
+    assert ws_unreadable_cmd.path.exists()
+
+    ws_cached_1 = create_workspace("USR-win-cache-1", cwd=repo.local)
+    ws_cached_2 = create_workspace("USR-win-cache-2", cwd=repo.local)
+    shared_proc = SimpleNamespace(
+        pid=9005,
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        cmdline=lambda: ["python.exe", str(ws_cached_2.path / "held.py")],
+        info={"name": "python.exe", "pid": 9005},
+    )
+    fake_psutil.process_iter = lambda _attrs: [shared_proc]
+    snapshot_probe = ticket_workspace.snapshot_holder_probe()
+    assert snapshot_probe(ws_cached_1.path) == ()
+    assert snapshot_probe(ws_cached_2.path) == ("python.exe (pid 9005)",)
+
 
 def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(
     repo: SimpleNamespace,

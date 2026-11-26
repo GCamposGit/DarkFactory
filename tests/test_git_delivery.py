@@ -734,3 +734,18 @@ def test_record_completion_external_project_ignores_residual_demands_json(
     assert sha
     assert _git(local, "show", "--name-only", "--format=", sha).strip() == "client_feature.py"
     assert '"LEGACY"' in residual.read_text(encoding="utf-8")
+
+    # Even with control store unavailable (queue returns None), explicit project_id isolates external repos
+    # and fails closed if the external ledger itself is dirty or untracked.
+    monkeypatch.setattr(queue, "get_ticket", lambda _tid: None)
+    (local / "client_feature.py").write_text("ready = 2\n", encoding="utf-8")
+    sha2 = GitAutonomyManager(local)._record_completion(
+        "MDL-78", "External explicit project", local, project_id="mansaodolago"
+    )
+    assert _git(local, "show", "--name-only", "--format=", sha2).strip() == "client_feature.py"
+
+    residual.write_text('{"tickets":[{"id":"DIRTY"}]}\n', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="dirty or untracked"):
+        GitAutonomyManager(local)._record_completion(
+            "MDL-78", "External dirty ledger refused", local, project_id="mansaodolago"
+        )
