@@ -155,6 +155,8 @@ def _deployed(stage: Stage, directory: Path) -> BaseModel:
     report = _json(stage, directory, DEPLOY_REPORT_FILE, DeployReport)
     if report.pending:  # type: ignore[attr-defined]
         return report  # accepted only as "deploy pending": the caller reports merged-awaiting-deploy
+    if not report.smoke_applicable and not report.deployed and report.smoke_ok is None:  # type: ignore[attr-defined]
+        return report  # EC-05: external delivery without applicable smoke is final, not a smoke failure
     if not report.smoke_ok:  # type: ignore[attr-defined]
         raise StageArtifactMissing(stage, "smoke falhou")
     return report

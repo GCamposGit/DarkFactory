@@ -317,7 +317,14 @@ def test_external_delivery_records_pack_in_darkfac_state_and_honest_smoke(tmp_pa
         run_ticket._stage_deploy_smoke(rws, ticket, project, "a" * 40, True, MagicMock(), smoke_ran)
         return json.loads((workspace.context_dir(rws) / ticket_engine.DEPLOY_REPORT_FILE).read_text(encoding="utf-8"))
 
+    from core.line.stages import Stage, StageArtifactMissing, require_artifact
+
     none_ran = report(SimpleNamespace(deploy=object(), smoke=[]), False)  # deploy 'none' without smoke: nothing ran
     assert none_ran["smoke_ok"] is None and none_ran["smoke_applicable"] is False
     assert not ticket_engine.DeployReport(**none_ran).pending  # final: no merged_awaiting_deploy, no redeploy
+    assert require_artifact(Stage.DEPLOY_SMOKE, rws).smoke_applicable is False
+    ticket_engine.write_deploy(rws, "a" * 40, False, False, "smoke failed", smoke_applicable=False)
+    with pytest.raises(StageArtifactMissing):
+        require_artifact(Stage.DEPLOY_SMOKE, rws)
     assert report(SimpleNamespace(deploy=None, smoke=[object()]), True)["smoke_ok"] is True
+    assert require_artifact(Stage.DEPLOY_SMOKE, rws).smoke_ok is True
