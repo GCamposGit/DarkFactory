@@ -470,7 +470,7 @@ def test_ticket_gate_defaults_to_local_pr_even_with_required_remote(monkeypatch,
     monkeypatch.setenv("DARKFAC_FLEET_GATE_REMOTE", "1")
     monkeypatch.setattr(run_ticket.line_lock, "is_fleet_mode", lambda: fleet)
     command = run_ticket._gate_build_command(tmp_path)
-    assert command[2:] == ["--profile", "pr", "--local"]
+    assert command[2:] == ["--profile", "pr", "--remote-required" if fleet else "--local"]
     monkeypatch.setenv("DARKFAC_GATE_SCOPE", "full")
     command = run_ticket._gate_build_command(tmp_path)
     assert "--quick" in command and "--profile" not in command

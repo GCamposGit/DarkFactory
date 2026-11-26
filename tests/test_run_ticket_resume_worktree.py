@@ -1019,3 +1019,33 @@ def test_intake_prefers_the_ticket_the_dispatcher_handed_over(
     monkeypatch.setenv("DARKFAC_DISPATCH_TICKET", str(other))
     ticket, code = run_ticket._stage_intake(args)
     assert code == 0 and ticket.title == "versao velha"
+
+
+def test_external_ticket_resume_and_candidate_digest_ignore_demands_ledger(
+    repo: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """External repos keep their worktree free of .factory/demands/demands.json and ignore it in digests."""
+    from core.demands import queue_store
+
+    ext_ticket = run_ticket.UserTicket(
+        id="MDL-99",
+        project_id="mansaodolago",
+        title="SEO audit",
+        problem_statement="audit",
+    )
+    monkeypatch.setattr(queue_store, "get_ticket", lambda tid: ext_ticket if tid == "MDL-99" else None)
+    resolved = run_ticket._resolve_resume_ticket("MDL-99", repo.local)
+    assert resolved is not None and resolved.id == "MDL-99"
+    assert not (repo.local / ".factory" / "demands" / "demands.json").exists()
+
+    (repo.local / "seo.py").write_text("ok = True\n", encoding="utf-8")
+    monkeypatch.setattr("core.line.fleet_dispatcher.ticket_candidate_digest", lambda _tid: "reg-digest")
+    clean_digest = run_ticket._build_candidate_digest("MDL-99", repo.local)
+
+    ledger = repo.local / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text("[]", encoding="utf-8")
+    assert run_ticket._build_candidate_digest("MDL-99", repo.local) == clean_digest
+    _git(repo.local, "add", ".factory/demands/demands.json")
+    assert run_ticket._build_candidate_digest("MDL-99", repo.local) == clean_digest

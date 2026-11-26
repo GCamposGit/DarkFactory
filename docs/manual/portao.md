@@ -55,8 +55,11 @@ Cache por árvore, suite_lock e vínculo do veredito ao candidato permanecem.
 
 Health e envio remoto têm timeout de socket de no máximo 5s. Worker inacessível
 cede ao próximo; esgotados os workers, PR segue local mesmo com remoto required.
-`required` só é estrito com `DARKFAC_GATE_SCOPE=full`. O ticket PR já força local,
-portanto não espera wake, health ou job remoto.
+`required` só é estrito com `DARKFAC_GATE_SCOPE=full`. Na frota com
+`DARKFAC_FLEET_GATE_REMOTE=1`, o launcher passa `--profile pr --remote-required`,
+despachando o perfil `pr` para o worker remoto (sem checar RAM local antes) e só
+validando o piso local de 1,5 GiB se cair para execução local. Fora da frota,
+`runner.py --profile pr` continua local (`--local`).
 
 Quando `affected` recebe `--base HEAD` em uma worktree limpa, ele retorna somente
 os guards globais registrados sem montar o grafo de imports. Com qualquer mudanca

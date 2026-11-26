@@ -1007,7 +1007,8 @@ class GitAutonomyManager:
         standalone-repo path: commit the tree and do not invent a ticket.
         """
         ledger = cwd / _LEDGER_RELATIVE
-        if not ledger.is_file() and _durable_queue_ticket(ticket_id) is None:
+        queued = _durable_queue_ticket(ticket_id)
+        if not ledger.is_file() and (queued is None or queued.project_id != "darkfac"):
             if self.is_dirty(cwd):
                 self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
             return self.get_current_sha(cwd)

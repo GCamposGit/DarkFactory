@@ -562,6 +562,39 @@ def test_probe_holders_skips_the_machine_wide_scan_when_the_repo_root_is_unknown
     assert ticket_workspace.probe_worktree_holders(orphan) == ()
 
 
+def test_cleanup_skips_windows_open_files_handle_buffer_overflow_only(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws_overflow = create_workspace("USR-win-overflow", cwd=repo.local)
+    overflow_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("SystemExtendedHandleInformation buffer too big")),
+        info={"name": "codex.exe", "pid": 9001},
+    )
+    fake_psutil = SimpleNamespace(
+        process_iter=lambda _attrs: [overflow_proc],
+        NoSuchProcess=type("NoSuchProcess", (Exception,), {}),
+        ZombieProcess=type("ZombieProcess", (Exception,), {}),
+        AccessDenied=type("AccessDenied", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+
+    ok_res = cleanup(ws_overflow.path, ws_overflow.main_root)
+    assert ok_res.removed and not ws_overflow.path.exists()
+
+    ws_other_err = create_workspace("USR-win-other-err", cwd=repo.local)
+    other_proc = SimpleNamespace(
+        cwd=lambda: str(repo.local),
+        open_files=lambda: (_ for _ in ()).throw(RuntimeError("unexpected handle error")),
+        info={"name": "broken.exe", "pid": 9002},
+    )
+    fake_psutil.process_iter = lambda _attrs: [other_proc]
+    fail_res = cleanup(ws_other_err.path, ws_other_err.main_root)
+    assert not fail_res.removed and fail_res.outcome == "error"
+    assert fail_res.reason == "process_state_unknown"
+    assert ws_other_err.path.exists()
+
+
 def test_cleanup_pending_is_idempotent_and_cleared_after_a_successful_retry(
     repo: SimpleNamespace,
 ) -> None:

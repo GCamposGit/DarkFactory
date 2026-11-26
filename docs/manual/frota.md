@@ -14,7 +14,10 @@ para o procedimento de verificação ponta a ponta.
 
 O `/health` de cada worker remoto publica `workers`, `available_gib` e `observed_at`
 medidos no próprio host com o critério de RAM do portão. Um host ocupado, sem capacidade
-positiva ou sem leitura válida permanece fora da admissão.
+positiva ou sem leitura válida permanece fora da admissão. Workers remotos aceitam
+`profile="full"` (`--quick --local`) ou `profile="pr"` (`--profile pr --local`) nos
+metadados do job. Na colheita (`_reap`), entregas externas que emitem `[DELIVERY_EXTERNAL]`
+limpam o orçamento e a reserva sem acionar o deploy da fábrica nem `no_delivery_evidence`.
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
 Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,

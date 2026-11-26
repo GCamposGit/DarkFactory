@@ -60,7 +60,7 @@ da classificação de órfãos e não são retentados pela varredura diária.
 
 1. `DemandsStore.canonical_ticket` resolve o registro sem gravar: a linha do `demands.json` da worktree ou, se esse id nao estiver no arquivo, a fila do control store. Nao depende do ledger compartilhado do checkout. Id ausente nos dois lados devolve `TicketCompletionReport` com `ok=false` e `cause=ticket_absent`, sem criar linha e sem commit.
 2. `_inspect_completion_changes` exige, contra `origin/main`, algum arquivo alem de `.factory/demands/demands.json`. Branch so de ledger continua `no_changes` e nao fecha o ticket.
-3. `_commit_completion` e `_record_completion` materializam o mesmo ID da fila, se necessário, e gravam `candidate:<SHA>` como evidência provisória. O status continua aberto. Sem `auto_commit`, o fluxo recusa concluir.
+3. `_commit_completion` e `_record_completion` materializam o mesmo ID da fila, se necessário, e gravam `candidate:<SHA>` como evidência provisória. Em projetos externos (`project_id != "darkfac"`), `_record_completion` commita diretamente sem criar `.factory/demands/demands.json` no repositório do cliente. O status continua aberto. Sem `auto_commit`, o fluxo recusa concluir.
 4. `_deliver_completion` chama `deliver_branch`. Projetos com `requires_commercial_acceptance` recebem o status de espera após a abertura do PR. Sem `gh` autenticado, o fluxo preserva o candidato e registra a falha de entrega.
 5. `_verify_live_completion` roda so com `is_live_deploy` (USR-420). O SHA fica fixo e `node_sync.verify` recebe esse `expected_sha`. Host `excluded` nao conta como convergido; VPS excluida deixa `ok` falso. Falha reabre o ticket e abre um defeito `planned`.
 

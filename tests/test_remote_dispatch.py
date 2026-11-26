@@ -1363,3 +1363,59 @@ def test_submit_timeout_skips_worker_and_falls_back_in_pr(monkeypatch, tmp_path)
     ) is None
     assert len(seen) == 2
     assert [a["error_code"] for a in remote_dispatch.dispatch_attempts()] == ["worker_connection_failed"] * 2
+
+
+def test_remote_pr_profile_propagates_metadata_and_worker_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, copy_git_repo
+) -> None:
+    from core.harness.remote_worker import HarnessJob, _job_command_and_timeout
+
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:9")
+    monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda *a, **kw: {"busy": False})
+    monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda _u, h: h)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _r: "a" * 40)
+    monkeypatch.setattr(harness_cache, "tree_sha", lambda _r: "b" * 40)
+    bundle = tmp_path / "candidate.bundle"
+    bundle.write_bytes(b"bundle")
+    monkeypatch.setattr(remote_dispatch, "_create_bundle", lambda *a, **kw: bundle)
+    submitted_meta: list[dict] = []
+    monkeypatch.setattr(
+        remote_dispatch,
+        "_submit_job",
+        lambda _url, _b, meta: submitted_meta.append(meta) or {"status_code": 200, "body": {"job_id": "job-pr"}},
+    )
+    monkeypatch.setattr(
+        remote_dispatch,
+        "_stream_and_finalize",
+        lambda *a, **kw: (True, HarnessResult(
+            candidate_sha="a" * 40, config_hash="a" * 64, required_steps=["probe"],
+            started_steps=["probe"], passed_steps=["probe"], failed_steps=[],
+            discovered_count=1, passed_count=1, skipped_count=0, exit_codes={"probe": 0},
+        )),
+    )
+    assert remote_dispatch.maybe_dispatch_remote(
+        steps=_minimal_steps(), config_hash="a" * 64, quick=False, include_holdout=False,
+        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+        cache_lookup_enabled=False, local_only=False, remote_required=True, profile="pr",
+        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+    ) is True
+    assert submitted_meta[0]["profile"] == "pr"
+    assert submitted_meta[0]["client_dispatch_key"].endswith(":pr")
+
+    cmd_pr, _ = _job_command_and_timeout(
+        REPO_ROOT,
+        HarnessJob("j1", "a" * 40, "", False, False, "host", "refs/heads/main", profile="pr"),
+    )
+    assert cmd_pr[-4:] == ["core/harness/runner.py", "--profile", "pr", "--local"]
+    cmd_full, _ = _job_command_and_timeout(
+        REPO_ROOT,
+        HarnessJob("j2", "a" * 40, "", True, False, "host", "refs/heads/main", profile="full"),
+    )
+    assert cmd_full[-3:] == ["core/harness/runner.py", "--quick", "--local"]
+
+    worker_repo = copy_git_repo("empty", tmp_path / "worker_bad_profile")
+    manager = JobManager(worker_repo, state_dir=tmp_path / "worker_state")
+    code, body = manager.submit(b"bytes", {"candidate_sha": "a" * 40, "profile": "invalid"})
+    assert code == 400 and "invalid profile" in body["error"]

@@ -1654,6 +1654,8 @@ def _gate_should_require_remote() -> bool:
 
 def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
     """USR-262: only when the gate would run locally (no idle remote worker); None = nothing to wait for."""
+    if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
+        return None
     full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
     if full and (gate_ram.remote_worker_available() or _gate_should_require_remote()):
         return None
@@ -1778,7 +1780,12 @@ def _gate_after_fix(
 def _gate_build_command(target_worktree: Path) -> list[str]:
     runner = str(target_worktree / "core" / "harness" / "runner.py")
     if os.environ.get("DARKFAC_GATE_SCOPE") != "full":
-        return [sys.executable, runner, "--profile", "pr", "--local"]
+        gate_cmd = [sys.executable, runner, "--profile", "pr"]
+        if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
+            gate_cmd.append("--remote-required")
+        else:
+            gate_cmd.append("--local")
+        return gate_cmd
     gate_cmd = [sys.executable, runner, "--quick"]
     if line_lock.is_fleet_mode() and os.environ.get("DARKFAC_FLEET_GATE_REMOTE") == "1":
         # USR-366: o despachante da frota fixa o worker remoto do host (DARKFAC_TEST_WORKERS).
@@ -2379,6 +2386,8 @@ def _resolve_resume_ticket(ticket_id: str, target_worktree: Path) -> Optional[Us
     except queue_store.ControlStoreUnavailableError:
         queued = None
     if queued is not None:
+        if queued.project_id != "darkfac":
+            return queued
         writer = store if store is not None else DemandsStore(ledger)
         return writer.resolve_for_delivery(ticket_id)
     shared_ledger = PROJECT_ROOT / ".factory" / "demands" / "demands.json"
@@ -3286,6 +3295,25 @@ def _smoke_external_project(project: Any) -> Optional[str]:
     return "\n".join(failures) if failures else None
 
 
+def _emit_delivery_marker(
+    args: argparse.Namespace,
+    ticket: UserTicket,
+    completion_info: dict[str, Any],
+    progress: ProgressPublisher,
+    *,
+    delivered: bool,
+) -> None:
+    if not delivered:
+        return
+    stream = sys.stderr if args.json else sys.stdout
+    if completion_info.get("status") == "merged_awaiting_deploy":
+        progress.set_outcome("mergeado, aguardando deploy pos-merge", "merged_awaiting_deploy")
+        print("[DELIVERY_MERGED]", file=stream)
+    elif ticket.project_id != "darkfac" and not args.no_commit and not args.no_push:
+        progress.set_outcome("entrega externa concluida", "delivered")
+        print("[DELIVERY_EXTERNAL]", file=stream)
+
+
 @run_outcome.tracked
 def main(argv: Optional[list[str]] = None) -> int:
     """Run the launcher and report its phases to the live line board (USR-140, best-effort)."""
@@ -4168,7 +4196,7 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     if not _is_git_worktree(root):
         return _non_git_candidate_digest(ticket_id, root)
     head = _run_git(["rev-parse", "HEAD"], cwd=root)
-    tracked = _run_git(["diff", "--binary", "HEAD", "--"], cwd=root)
+    tracked = _run_git(["diff", "--binary", "HEAD", "--", ".", f":!{LEDGER_RELATIVE}"], cwd=root)
     untracked = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=root)
     if head.returncode or tracked.returncode or untracked.returncode:
         raise ticket_engine.BuildEvidenceMismatch(
@@ -4179,6 +4207,9 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
     untracked_rows: list[tuple[str, str]] = []
     for relative in (untracked.stdout or "").split("\0"):
         if not relative:
+            continue
+        normalized_rel = relative.replace("\\", "/")
+        if normalized_rel == LEDGER_RELATIVE:
             continue
         source_path = root / relative
         resolved_path = source_path.resolve()
@@ -4195,7 +4226,7 @@ def _build_candidate_digest(ticket_id: str, worktree: Path) -> str:
             raise ticket_engine.BuildEvidenceMismatch(
                 f"nao foi possivel ler evidencia untracked {relative!r} ({type(exc).__name__})"
             ) from exc
-        untracked_rows.append((relative.replace("\\", "/"), content_digest))
+        untracked_rows.append((normalized_rel, content_digest))
     try:
         registered_candidates = ticket_candidate_digest(ticket_id)
     except Exception as exc:  # noqa: BLE001 - unavailable candidate identity must fail closed
@@ -5158,9 +5189,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
     delivered = exit_code == 0 and completion_info.get("ok", False)
-    if delivered and completion_info.get("status") == "merged_awaiting_deploy":
-        progress.set_outcome("mergeado, aguardando deploy pos-merge", "merged_awaiting_deploy")
-        print("[DELIVERY_MERGED]", file=sys.stderr if args.json else sys.stdout)
+    _emit_delivery_marker(args, ticket, completion_info, progress, delivered=delivered)
     if exit_code == EXIT_ROUTE_WAIT:
         pass  # requeue: the outcome was already recorded by the waiting stage
     elif not delivered:

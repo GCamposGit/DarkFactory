@@ -1743,6 +1743,15 @@ def probe_worktree_holders(
                     continue
                 except psutil.AccessDenied:
                     continue
+                except RuntimeError as exc:
+                    if "SystemExtendedHandleInformation" in str(exc):
+                        # Windows raises this when system handle count exceeds psutil's fixed buffer;
+                        # proc.cwd() was already checked and non-forced removal still fails on open locks.
+                        logger.debug("Skipping Windows open_files buffer overflow while probing %s: %s", path, exc)
+                        memo["files"] = ()
+                        continue
+                    logger.warning("Could not inspect process paths for %s; preserving it", path)
+                    return None
                 except Exception:  # noqa: BLE001 -- unexpected errors must not look like "no holder"
                     logger.warning("Could not inspect process paths for %s; preserving it", path)
                     return None

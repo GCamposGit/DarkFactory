@@ -748,6 +748,11 @@ def _delivery_evidence(log_tail: str) -> bool:
     return "merged_awaiting_deploy" in log_tail or "[DELIVERY_MERGED]" in log_tail
 
 
+def _external_delivery_evidence(log_tail: str) -> bool:
+    """Delivery marker emitted by external projects that do not schedule DarkFac redeploy."""
+    return "[DELIVERY_EXTERNAL]" in log_tail
+
+
 def _reconcile_failure(exc: BaseException) -> dict[str, Any]:
     """Acao estavel quando o sweep inteiro levanta. O ciclo grava isto e segue."""
     detail = f"{type(exc).__name__}: {exc}"
@@ -1180,6 +1185,10 @@ class FleetDispatcher:
                     self.last_merge_at = self.clock()
                     self.pending_deploy = True
                     self._deferred_sha = None
+                elif job.project_id != "darkfac" and _external_delivery_evidence(tail):
+                    self.admission_store.reset_budget(job.project_id, job.ticket_id)
+                    self._close_express_episode(job.ticket_id)
+                    self._release_reservation(job)
                 elif not in_recovery:
                     self._record_failure(job, rc, "no_delivery_evidence", tail)
                     self._release_reservation(job)

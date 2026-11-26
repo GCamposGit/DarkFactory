@@ -687,3 +687,24 @@ def test_complete_ticket_commercial_project_awaits(env: tuple[Path, Path, FakeGh
 
 def test_delivery_report_model() -> None:
     assert DeliveryReport(ok=True, action="merged").cleaned is False
+
+
+def test_record_completion_external_project_does_not_create_demands_json(
+    env: tuple[Path, Path, FakeGh], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local, _bare, _gh = env
+    _state, queue = _isolate_queue(monkeypatch, tmp_path)
+    queue.register_ticket(UserTicket(
+        id="MDL-77",
+        project_id="mansaodolago",
+        title="External delivery",
+        problem_statement="client feature",
+        status=DeliveryStatus.PLANNED,
+    ))
+    (local / "client_feature.py").write_text("ready = True\n", encoding="utf-8")
+
+    sha = GitAutonomyManager(local)._record_completion("MDL-77", "External delivery", local)
+
+    assert sha
+    assert not (local / ".factory" / "demands" / "demands.json").exists()
+    assert _git(local, "show", "--name-only", "--format=", sha).strip() == "client_feature.py"
