@@ -15271,5 +15271,35 @@
     "dependencies": [],
     "created_at": "2026-11-23T09:58:22.803918Z",
     "updated_at": "2026-11-23T09:58:22.803918Z"
+  },
+  {
+    "id": "USR-522",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Learning pack vazio quando o ticket nao pode commitar na worktree",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": "candidate:afad1bb0dc08d4f21d7b4a76f3c1e7b071280bdf",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "scripts/stop_hook_artifacts.py exige .factory/learning_packs/<ID>.md|.json antes do fim do turno (core/ops/turn_guard.check_learning_pack), gerado por python -m core.learning_pack.delivery --base origin/main --head HEAD. Esse comando (core/learning_pack/delivery.py _collect) so faz git diff --numstat entre REFS DE COMMIT (base..head); nao olha git status/working tree. Em tickets cuja instrucao explicita e 'nao faca commit, push nem merge: a fabrica entrega' (ex.: USR-521 T2, e qualquer sub-ticket fatiado em worktree que nao comita), HEAD ainda e igual a origin/main quando o stop hook dispara, entao o pack gerado fica com 0 arquivos/0 testes mesmo havendo mudancas reais nao commitadas -- o hook aceita porque so confere a EXISTENCIA do arquivo (check_learning_pack), nao o conteudo. Resultado: o learning pack entregue (.factory/learning_packs/USR-521.md) ficou vazio/incorreto; qualquer ticket futuro na mesma situacao gera o mesmo pack vazio.",
+    "core_journey": [
+      "scripts/stop_hook_artifacts.py exige .factory/learning_packs/<ID>.md|.json antes do fim do turno (core/ops/turn_guard.check_learning_pack), gerado por python -m core.learning_pack.delivery --base origin/main --head HEAD. Esse comando (core/learning_pack/delivery.py _collect) so faz git diff --numstat entre REFS DE COMMIT (base..head); nao olha git status/working tree. Em tickets cuja instrucao explicita e 'nao faca commit, push nem merge: a fabrica entrega' (ex.: USR-521 T2, e qualquer sub-ticket fatiado em worktree que nao comita), HEAD ainda e igual a origin/main quando o stop hook dispara, entao o pack gerado fica com 0 arquivos/0 testes mesmo havendo mudancas reais nao commitadas -- o hook aceita porque so confere a EXISTENCIA do arquivo (check_learning_pack), nao o conteudo. Resultado: o learning pack entregue (.factory/learning_packs/USR-521.md) ficou vazio/incorreto; qualquer ticket futuro na mesma situacao gera o mesmo pack vazio."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste de regressao cobre o caso HEAD==base com working tree sujo (diff nao vazio) gerando um pack com arquivos/testes != 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-15T12:26:38.868911Z",
+    "updated_at": "2026-11-27T00:49:58.332630Z"
   }
 ]

@@ -73,7 +73,14 @@ def check_learning_pack(
     """Retorna o motivo do bloqueio ou None se o learning pack esta conforme."""
     paths_raw = _git(repo_root, "diff", "--name-only", f"{base}...{head}").split()
     paths_raw += [line[3:] for line in _git(repo_root, "status", "--porcelain").splitlines()]
-    if not any(p.replace("\\", "/").startswith(CODE_PREFIXES) for p in paths_raw):
+    paths = [
+        path
+        for raw_path in paths_raw
+        if (path := raw_path.replace("\\", "/"))
+        and not path.startswith(f"{PACK_DIR.as_posix()}/")
+    ]
+    has_code_changes = any(path.startswith(CODE_PREFIXES) for path in paths)
+    if not paths:
         return None
 
     ticket = ticket_id or detect_ticket(repo_root)
@@ -82,9 +89,36 @@ def check_learning_pack(
 
     ticket_upper = ticket.upper()
     pack_base = repo_root / PACK_DIR
-    for ext in ("md", "json"):
-        if (pack_base / f"{ticket_upper}.{ext}").is_file():
-            return None
+    pack_json = pack_base / f"{ticket_upper}.json"
+    pack_md = pack_base / f"{ticket_upper}.md"
+    regenerate = (
+        f"python -m core.learning_pack.delivery --base {base} --head {head} "
+        f"--ticket {ticket_upper} --out {PACK_DIR.as_posix()}"
+    )
+
+    if pack_json.is_file():
+        try:
+            pack_data = json.loads(pack_json.read_text(encoding="utf-8"))
+            files = pack_data["files"]
+            if not isinstance(files, list):
+                raise ValueError("campo 'files' deve ser uma lista")
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            return (
+                f"Learning pack JSON invalido para {ticket_upper} ({exc}). "
+                f"Gere novamente com: {regenerate}"
+            )
+        if not files:
+            return (
+                f"Learning pack vazio para {ticket_upper}, mas o repositorio tem mudancas detectaveis. "
+                f"Gere novamente com: {regenerate}"
+            )
+        return None
+
+    if pack_md.is_file():
+        return None
+
+    if not has_code_changes:
+        return None
 
     # Check in .factory/learning_packs storage
     from core.learning_pack.storage import LearningPackStore
@@ -94,8 +128,7 @@ def check_learning_pack(
 
     return (
         f"Sessao alterou codigo para {ticket_upper} sem learning pack. Gere com: "
-        f"python -m core.learning_pack.delivery --base {base} --head {head} "
-        f"--ticket {ticket_upper} --out {PACK_DIR.as_posix()}"
+        f"{regenerate}"
     )
 
 
