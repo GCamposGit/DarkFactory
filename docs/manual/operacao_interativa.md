@@ -116,6 +116,8 @@ python -m core.ops.turn_guard --finish-session --harness codex --status succeede
 
 O `turn_guard` valida se alteracoes em arquivos de codigo (`core/`, `hub/`, `scripts/`, `tests/`, `run_ticket.py`) possuem o respectivo learning pack em `.factory/learning_packs/`. Em caso de violacao, encerra com codigo de saida `2` e mensagem orientando a geracao do artefato. O hook `stop_hook_artifacts.py` delega a mesma verificacao ao `turn_guard`, assegurando fonte unica das regras.
 
+O `turn_guard` tambem valida o conteudo de `<ID>.json` (USR-522). Com mudancas detectaveis no diff contra a base ou na worktree (fora de `.factory/learning_packs/`), `files` vazio, JSON malformado ou sem a lista `files` encerra com codigo `2` e o comando para regerar o pack, mesmo quando as mudancas estao fora das pastas de codigo. Sem mudancas detectaveis, a checagem passa. A exigencia de existencia do pack continua restrita a alteracoes de codigo. Detalhes da geracao em [learning_pack.md](learning_pack.md).
+
 ## Encerramento e continuidade
 
 Antes de encerrar uma sessao, atualize `docs/operacao/HANDOFF.md`: incremente a versao, atualize a data e registre estado, decisoes, pendencias e o proximo passo para o operador seguinte. Nao inclua segredos, prompts ou dados pessoais. Mantenha `docs/FASE_ATUAL.md` alinhado quando mudar um fato operacional persistente.
