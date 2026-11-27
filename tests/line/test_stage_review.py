@@ -395,14 +395,14 @@ def test_grok_intermediate_response_fails_over_without_consuming_review_round(
 
     def agent(req: AgentRequest) -> AgentResult:
         calls.append(req.harness)
-        if req.harness == "grok":
+        if req.harness == "grok" or len(calls) > 2:
             # USR-535 envelope: schema-shaped structuredOutput paired with progress text.
             return AgentResult(
                 ok=True,
                 text=json.dumps({
                     "verdict": "changes_required", "blocking": [], "non_blocking": [],
                 }),
-                harness="grok", duration_s=0.01, structured_output_incomplete=True,
+                harness=req.harness, duration_s=0.01, structured_output_incomplete=True,
             )
         return AgentResult(
             ok=True,
@@ -446,6 +446,18 @@ def test_grok_intermediate_response_fails_over_without_consuming_review_round(
     assert [round_["round"] for round_ in state["rounds"]] == [1]
     assert state["rounds"][0]["verdict"] == "changes_required"
     assert (ctx / "review-1.md").is_file()
+    assert not (ctx / "review-2.md").exists()
+    assert not (ctx / "review_verdict.json").exists()
+
+    # An interim response after a legitimate round adds no round and does not exhaust the review.
+    third = stage.run(project, run_id)
+
+    assert calls == ["grok", "codex", "codex"]
+    assert third.outcome != "failed"
+    assert "review_exhausted_changes_required" not in (third.cause_code or "")
+    after = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert after["rounds"] == state["rounds"]
+    assert [item["harness"] for item in after["incomplete_response_routes"]] == ["grok", "codex"]
     assert not (ctx / "review-2.md").exists()
     assert not (ctx / "review_verdict.json").exists()
 

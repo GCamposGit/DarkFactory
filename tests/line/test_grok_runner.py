@@ -656,12 +656,31 @@ def test_structured_output_with_conflicting_text_verdict_is_marked_incomplete(
     assert result.structured_output_incomplete is True
 
 
-def test_progress_text_mentioning_blocking_findings_is_marked_incomplete(
-    install_fake, tmp_path: Path
+_FINAL_FINDINGS = {
+    "verdict": "changes_required",
+    "blocking": [{"file": "feature.py", "line": 1, "issue": "real defect", "fix": "correct it"}],
+    "non_blocking": [],
+}
+
+
+@pytest.mark.parametrize(
+    ("text", "incomplete"),
+    [
+        # Progress wording unrelated to the incident, with no final JSON: fail closed.
+        ("Opening the candidate files now.", True),
+        ("", True),
+        # A final verdict with findings: the JSON in `text` agrees semantically (key order aside).
+        ("Final verdict:\n" + json.dumps(_FINAL_FINDINGS, indent=2, sort_keys=True), False),
+    ],
+)
+def test_completeness_requires_text_json_equal_to_structured_output(
+    install_fake, tmp_path: Path, text: str, incomplete: bool
 ) -> None:
     payload = {
-        "text": "I am still reviewing the changed files and checking for blocking findings before deciding.",
-        "structuredOutput": {"verdict": "changes_required", "blocking": [], "non_blocking": []},
+        "text": text,
+        "structuredOutput": _FINAL_FINDINGS,
+        "usage": {"input_tokens": 900, "output_tokens": 12},
+        "total_cost_usd": 0.02,
     }
     install_fake(stdout=json.dumps(payload))
     schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
@@ -671,7 +690,10 @@ def test_progress_text_mentioning_blocking_findings_is_marked_incomplete(
     ))
 
     assert result.ok is True
-    assert result.structured_output_incomplete is True
+    assert result.structured_output_incomplete is incomplete
+    assert json.loads(result.text) == _FINAL_FINDINGS
+    assert result.usage == payload["usage"]
+    assert result.cost_usd == pytest.approx(0.02)
 
 
 def test_read_mode_with_output_schema_classifies_json_error_object(
