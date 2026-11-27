@@ -848,17 +848,28 @@ def test_valid_host_uses_this_host_id(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_child_exit_reports_sanitized_cause_without_claiming_admission(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The child log is what the real launcher prints when its workspace stage refuses a dirty checkout.
+    def refuse(_args: Any, _ticket: Any) -> None:
+        raise run_ticket.SharedCheckoutDirty(["\x1b[31mREADME.md\x1b[0m"])
+
+    monkeypatch.setattr(run_ticket, "_prepare_workspace", refuse)
+    workspace, exit_code = run_ticket._stage_workspace(
+        run_ticket.build_parser().parse_args([_TICKET]), _ticket(), SimpleNamespace(phase=lambda *_a, **_k: None),
+    )
+    child_stderr = capsys.readouterr().err
+    assert workspace is None
+
     class Failed:
         pid = 735
         _express_log_path = str(tmp_path / "child.log")
 
         def poll(self) -> int:
-            return 2
+            return exit_code
 
     log = Path(Failed._express_log_path)
-    log.write_text("[ERRO NA ENTREGA] causa: shared_checkout_dirty; erro: \x1b[31mREADME.md\x1b[0m\n", encoding="utf-8")
+    log.write_text(child_stderr + "[ESTEIRA] progresso mudo - sem Hub; fases_nao_publicadas=1\n", encoding="utf-8")
     code = run_express(
         _TICKET, port=_MemoryPort(_ticket()), checks=[], running=set(),
         spawn=lambda _argv, _launch_id: Failed(), receipt_dir=tmp_path,
@@ -867,7 +878,7 @@ def test_child_exit_reports_sanitized_cause_without_claiming_admission(
 
     assert code == 1
     assert "recusado:" in out
-    assert "shared_checkout_dirty" in out
+    assert "causa: shared_checkout_dirty" in out
     assert "\x1b" not in out
     assert "lancado" not in out and "admitido" not in out
 
@@ -902,6 +913,25 @@ def test_invalid_receipt_is_not_admission(
     assert code == 1
     assert "recusado:" in out
     assert "admitido" not in out and "lancado" not in out
+
+
+def test_stale_receipt_is_not_admission(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _spawned, fresh = _spawn_recorder(receipt_dir=tmp_path)
+
+    def spawn(argv: list[str], launch_id: str) -> Any:
+        process = fresh(argv, launch_id)
+        process.poll = lambda: 1
+        os.utime(tmp_path / f"{launch_id}.json", (1_000_000, 1_000_000))
+        return process
+
+    code = run_express(
+        _TICKET, port=_MemoryPort(_ticket()), checks=[], running=set(),
+        spawn=spawn, receipt_dir=tmp_path,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "recusado:" in out
+    assert "admitido" not in out
 
 
 @pytest.mark.parametrize("status", ["implementing", "validating"])

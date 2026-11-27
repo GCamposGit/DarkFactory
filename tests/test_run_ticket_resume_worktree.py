@@ -1175,3 +1175,35 @@ def test_admission_receipt_is_unique_atomic_and_names_the_selected_worktree(
             "launch_id": receipt_path.stem,
         }
     assert list(first.parent.glob("*.tmp")) == []
+
+
+def test_admission_receipt_appears_only_after_the_worktree_is_selected(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipts = repo.local / ".factory" / "tmp" / "launch_receipts"
+    monkeypatch.setenv("DARKFAC_LAUNCH_RECEIPT_ID", "attempt-1")
+    seen: dict[str, bool] = {}
+    admission_stage = run_ticket._stage_admission
+    workspace_stage = run_ticket._stage_workspace
+
+    def admitted(*args, **kwargs):
+        result = admission_stage(*args, **kwargs)
+        seen["after_admission"] = (receipts / "attempt-1.json").exists()
+        return result
+
+    def selected(*args, **kwargs):
+        result = workspace_stage(*args, **kwargs)
+        seen["after_workspace"] = (receipts / "attempt-1.json").exists()
+        return result
+
+    def planning(args, ticket, workspace, route, progress) -> int:
+        receipt = json.loads((receipts / "attempt-1.json").read_text(encoding="utf-8"))
+        seen["before_plan"] = receipt["worktree"] == str(workspace.path.resolve())
+        return 1
+
+    monkeypatch.setattr(run_ticket, "_stage_admission", admitted)
+    monkeypatch.setattr(run_ticket, "_stage_workspace", selected)
+    monkeypatch.setattr(run_ticket, "_stage_plan", planning)
+
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1
+    assert seen == {"after_admission": False, "after_workspace": False, "before_plan": True}

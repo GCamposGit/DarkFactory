@@ -24,7 +24,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -329,7 +328,9 @@ def _index_edits(
 _IN_FLIGHT_STATUSES = frozenset({"implementing", "validating"})
 _TERMINAL_STATUSES = frozenset({"completed", "cancelled", "canceled"})
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
-_ADMISSION_WAIT_SECONDS = 5.0
+# The child probes quotas (10 s+ per provider) and creates the worktree before its receipt. The wait
+# ends as soon as the receipt appears or the child exits.
+_ADMISSION_WAIT_SECONDS = 180.0
 _ADMISSION_POLL_SECONDS = 0.05
 _RECEIPT_ENV = "DARKFAC_LAUNCH_RECEIPT_ID"
 
@@ -467,7 +468,7 @@ def run_express(
     checks: Sequence[Callable[[], HostGap | None]] | None = None,
     host_id: str | None = None,
     running: set[str] | None = None,
-    spawn: Callable[[list[str]], Any] | None = None,
+    spawn: Callable[[list[str], str], Any] | None = None,
     run_ticket: Path | None = None,
     receipt_dir: Path | None = None,
     admission_wait_seconds: float = _ADMISSION_WAIT_SECONDS,
@@ -636,7 +637,7 @@ def _launch_failure_cause(process: Any) -> str:
     lines = [" ".join(ansi.sub("", line).split()) for line in tail.splitlines()]
     lines = [re.sub(r"[\x00-\x1f\x7f]", "", line) for line in lines if line.strip()]
     for line in reversed(lines):
-        match = re.search(r"\bcausa:\s*([a-z][a-z0-9_]{1,79})\b", line, re.IGNORECASE)
+        match = re.search(r"\[ERRO NA ENTREGA\].*?\bcausa:\s*([a-z][a-z0-9_]{1,79})\b", line)
         if match:
             return match.group(1)
         match = re.search(r"requisito ausente:\s*([a-z][a-z0-9_]{1,79})\s*:", line, re.IGNORECASE)

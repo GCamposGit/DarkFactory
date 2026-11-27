@@ -110,8 +110,11 @@ O filho não herda mais `stdout`/`stderr` em `DEVNULL`: a saída vai para
 (por exemplo `shared_checkout_dirty`, piso de cota ou qualquer outra causa classificada do
 launcher), o `express_lane` imprime `recusado: <ticket>; processo terminou (<código>); causa:
 <causa>`, lendo a última linha `[ERRO NA ENTREGA] causa: ...` ou `requisito ausente: ...:` do log
-(sequências ANSI e caracteres de controle são removidos antes de procurar a causa). Se o processo
-continuar vivo sem publicar o recibo dentro do prazo de espera, a saída é `recibo de admissao
+(sequências ANSI e caracteres de controle são removidos antes de procurar a causa). Fora do modo
+`--json`, o `run_ticket.py` imprime essa linha oficial nas recusas anteriores ao recibo (trava de
+linha, intake, PR ativo, admissão, roteamento, cancelamento e worktree, como
+`shared_checkout_dirty`). Se o processo continuar vivo sem publicar o recibo dentro do prazo de
+espera (180 s, para cobrir a sonda de cotas e a criação da worktree), a saída é `recibo de admissao
 ausente: <ticket>; processo continua ativo; log: <caminho>` — nem sucesso nem recusa definitiva, só
 ausência de prova. Nenhum desses três textos (`admitido`, `recusado`, `recibo de admissao
 ausente`) é intercambiável; só o primeiro autoriza tratar a via expressa como concluída.
