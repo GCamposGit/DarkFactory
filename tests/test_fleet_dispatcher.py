@@ -4247,6 +4247,7 @@ def test_open_pr_wait_is_persisted_with_the_pr_number_and_never_launches(tmp_pat
     assert env.d.admission_store.retry_reason("darkfac", "USR-01", main_sha=env.d._main_sha) == ""
 
     env.d.pr_inspector = lambda *_: None  # PR fechado: a espera some e o ticket volta a ser lancavel
+    env.now += 3600  # expira a reserva de admissao deixada pelo USR-90, que ocupa o unico host
     cycle = env.d.run_cycle()
     assert env.d._pr_waits == {} and cycle["pr_waits"] == []
     assert env.launched[-1] == ("USR-01", "notebook")
