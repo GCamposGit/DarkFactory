@@ -986,6 +986,21 @@ class GitAutonomyManager:
         oid = merge_commit.get("oid") if isinstance(merge_commit, dict) else None
         return str(data.get("state", "")), oid
 
+    def _pr_is_draft(self, number: int, cwd: Path, runner: GhRunner) -> tuple[Optional[bool], str]:
+        """Read the PR draft state before merging; errors must fail closed."""
+        res = runner(["pr", "view", str(number), "--json", "isDraft"], cwd)
+        if res.returncode != 0:
+            detail = sanitize((res.stderr or res.stdout).strip()) or "command failed"
+            return None, f"gh pr view failed while checking draft state: {detail}"
+        try:
+            data = json.loads(res.stdout or "{}")
+        except json.JSONDecodeError:
+            return None, "gh pr view returned invalid JSON while checking draft state"
+        is_draft = data.get("isDraft") if isinstance(data, dict) else None
+        if not isinstance(is_draft, bool):
+            return None, "gh pr view did not return a valid isDraft value"
+        return is_draft, ""
+
     def _changed_files(self, base: str, cwd: Path) -> list[str]:
         """Files the branch changes relative to its merge base with origin/base.
 
@@ -1393,6 +1408,22 @@ class GitAutonomyManager:
         blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
         if blocked is not None:
             return blocked
+        is_draft, draft_error = self._pr_is_draft(number, cwd, runner)
+        if is_draft is None:
+            return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch, message=draft_error)
+        promotion_note = ""
+        if is_draft:
+            ready_res = runner(["pr", "ready", str(number)], cwd)
+            if ready_res.returncode != 0:
+                detail = sanitize((ready_res.stderr or ready_res.stdout).strip()) or "command failed"
+                return DeliveryReport(
+                    ok=False,
+                    action="error",
+                    pr_url=pr_url,
+                    branch=branch,
+                    message=f"gh pr ready failed; merge withheld: {detail}",
+                )
+            promotion_note = f" PR #{number} draft promoted with gh pr ready."
         merge_args = ["pr", "merge", str(number), "--squash", "--delete-branch"]
         self._phase("merge", "running", f"squash merge do PR {pr_url}")
         merge_res = runner(merge_args, cwd)
@@ -1419,7 +1450,7 @@ class GitAutonomyManager:
                             "gh pr merge failed: the base branch policy still prohibits the merge after "
                             f"re-running the CI gate ({gate_note}); pending required checks: "
                             f"{', '.join(pending) or 'none reported'}; PR and branch left open. "
-                            f"gh said: {(merge_res.stderr or merge_res.stdout).strip()}"
+                            f"gh said: {(merge_res.stderr or merge_res.stdout).strip()}{promotion_note}"
                         ),
                     )
             elif _is_unmergeable(err):
@@ -1458,7 +1489,7 @@ class GitAutonomyManager:
         if state != "MERGED":
             return DeliveryReport(
                 ok=False, action="error", pr_url=pr_url, branch=branch,
-                message=f"gh pr merge failed: {(merge_res.stderr or merge_res.stdout).strip()}",
+                message=f"gh pr merge failed: {(merge_res.stderr or merge_res.stdout).strip()}{promotion_note}",
             )
 
         # (g) confirm merge sha reached origin/base
@@ -1484,7 +1515,7 @@ class GitAutonomyManager:
         return DeliveryReport(
             ok=True, action="merged", pr_url=pr_url, merge_sha=merge_sha, cleaned=cleaned,
             worktree_cleanup_attempted=worktree_cleanup_attempted, branch=branch,
-            message=f"PR {pr_url} merged into {base}. {gate_note}",
+            message=f"PR {pr_url} merged into {base}. {gate_note}.{promotion_note}",
         )
 
     def _register_catalog(self, ticket_id: str, title: str, cwd: Path, base: str, pr_url: str) -> None:

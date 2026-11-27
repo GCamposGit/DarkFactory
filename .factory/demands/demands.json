@@ -15396,5 +15396,35 @@
     "dependencies": [],
     "created_at": "2026-11-21T06:06:55.097578Z",
     "updated_at": "2026-11-27T10:22:34.807015Z"
+  },
+  {
+    "id": "USR-545",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Despachante nao deve redespachar ticket com PR ativo; adotar o PR na entrega",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": "candidate:9d5e8178cbbc99eb353d372c0b98f9a48a3eea12",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Em 23/11 01:27-06:39 o despachante lancou USR-542/543/544 no Notebook a cada ~6 min; todas as tentativas sairam com codigo 75 '[RECUSA] ja possui PR ativo' (#920/#924/#925, rascunhos com CI verde abertos fora da esteira). A recusa conta como espera (lock), entao o ticket volta ao rodizio para sempre, ocupa o unico host livre com sondas de cota e nenhum caminho promove, revisa ou mescla o PR. Evidencia: .factory/runs/fleet_dispatcher_state.json recent_failures e .factory/runs/outcomes/USR-542.json (stage preflight, cause lock). Relacionado: USR-418 (criou a recusa), USR-520.",
+    "core_journey": [
+      "Em 23/11 01:27-06:39 o despachante lancou USR-542/543/544 no Notebook a cada ~6 min; todas as tentativas sairam com codigo 75 '[RECUSA] ja possui PR ativo' (#920/#924/#925, rascunhos com CI verde abertos fora da esteira). A recusa conta como espera (lock), entao o ticket volta ao rodizio para sempre, ocupa o unico host livre com sondas de cota e nenhum caminho promove, revisa ou mescla o PR. Evidencia: .factory/runs/fleet_dispatcher_state.json recent_failures e .factory/runs/outcomes/USR-542.json (stage preflight, cause lock). Relacionado: USR-418 (criou a recusa), USR-520."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ticket com PR aberto do proprio ticket nao e relancado como BUILD; o despachante encaminha para a retomada de entrega (revisao, CI, merge) ou registra espera persistida com o numero do PR. Teste de comportamento cobre: PR rascunho com CI verde vira candidato de entrega; PR com CI vermelho vira correcao; sem relancamentos repetidos com codigo 75 no mesmo sha do main."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-23T09:49:34.151889Z",
+    "updated_at": "2026-11-27T11:30:32.724152Z"
   }
 ]

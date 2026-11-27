@@ -32,6 +32,7 @@ from core.git.ticket_workspace import (
     cleanup,
     create_workspace,
     ensure_local_excludes,
+    ensure_pr_delivery_workspace,
     find_orphan_dirs,
     purge_trash,
     shared_checkout_dirty_paths,
@@ -146,6 +147,98 @@ def test_a_worktree_name_is_never_reused_and_the_branch_stays_unique(repo: Simpl
 def test_queue_labels_get_a_timestamped_branch(repo: SimpleNamespace) -> None:
     ws = create_workspace("queue", cwd=repo.local, unique_branch=True, now_fn=lambda: NOW)
     assert ws.branch == f"ticket/queue-{STAMP}"
+
+
+def _push_pr_branch(repo: SimpleNamespace, branch: str, filename: str = "pr.txt") -> str:
+    """Publish ``branch`` (one commit ahead of main) on origin and leave no local branch behind."""
+    local = repo.local
+    _git(local, "switch", "--quiet", "-c", branch)
+    (local / filename).write_text("pr\n", encoding="utf-8")
+    _git(local, "add", filename)
+    _git(local, "commit", "--quiet", "-m", "feat: pr work")
+    _git(local, "push", "--quiet", "origin", branch)
+    sha = _git(local, "rev-parse", "HEAD")
+    _git(local, "switch", "--quiet", "main")
+    _git(local, "branch", "--quiet", "-D", branch)
+    return sha
+
+
+def _attach_pr_worktree(repo: SimpleNamespace, branch: str) -> TicketWorkspace:
+    """Worktree registered on a local copy of the PR branch, at the remote head."""
+    _git(repo.local, "fetch", "--quiet", "origin", f"{branch}:{branch}")
+    path = repo.local / ".worktrees" / f"usr-545-{STAMP}"
+    _git(repo.local, "worktree", "add", "--quiet", str(path), branch)
+    return TicketWorkspace(
+        ticket_id="USR-545", path=path, branch=branch, main_root=repo.local, base_ref="origin/main", base_sha=""
+    )
+
+
+def test_pr_delivery_workspace_is_cut_from_the_remote_head_and_then_reused(repo: SimpleNamespace) -> None:
+    head = _push_pr_branch(repo, "ticket/usr-545")
+    ws = ensure_pr_delivery_workspace("USR-545", "ticket/usr-545", cwd=repo.local, now_fn=lambda: NOW)
+
+    assert ws is not None
+    assert ws.path == repo.local / ".worktrees" / f"usr-545-{STAMP}" and ws.branch == "ticket/usr-545"
+    assert _git(ws.path, "rev-parse", "HEAD") == head and _git(ws.path, "status", "--porcelain") == ""
+    assert ws.base_ref == "origin/main" and ws.base_sha == _git(repo.local, "rev-parse", "origin/main")
+
+    again = ensure_pr_delivery_workspace("USR-545", "ticket/usr-545", cwd=repo.local, now_fn=lambda: NOW)
+    assert again is not None and again.path == ws.path
+    assert sorted(p.name for p in (repo.local / ".worktrees").iterdir()) == [f"usr-545-{STAMP}"]
+
+
+def test_pr_delivery_workspace_reuses_a_worktree_registered_for_the_branch(repo: SimpleNamespace) -> None:
+    _push_pr_branch(repo, "ticket/usr-545")
+    existing = _attach_pr_worktree(repo, "ticket/usr-545")
+
+    ws = ensure_pr_delivery_workspace("USR-545", "ticket/usr-545", cwd=repo.local, now_fn=lambda: NOW)
+    assert ws is not None and ws.path == existing.path
+    assert sorted(p.name for p in (repo.local / ".worktrees").iterdir()) == [existing.path.name]
+
+
+def test_pr_delivery_workspace_refuses_dirty_or_divergent_trees_and_keeps_local_work(repo: SimpleNamespace) -> None:
+    _push_pr_branch(repo, "ticket/usr-545")
+    existing = _attach_pr_worktree(repo, "ticket/usr-545")
+
+    (existing.path / "wip.txt").write_text("local work\n", encoding="utf-8")  # dirty
+    assert ensure_pr_delivery_workspace("USR-545", "ticket/usr-545", cwd=repo.local, now_fn=lambda: NOW) is None
+    (existing.path / "wip.txt").unlink()
+
+    (existing.path / "extra.txt").write_text("unpushed\n", encoding="utf-8")  # diverges from the PR head
+    _git(existing.path, "add", "extra.txt")
+    _git(existing.path, "commit", "--quiet", "-m", "wip: unpushed")
+    local_head = _git(existing.path, "rev-parse", "HEAD")
+    assert ensure_pr_delivery_workspace("USR-545", "ticket/usr-545", cwd=repo.local, now_fn=lambda: NOW) is None
+
+    assert _git(existing.path, "rev-parse", "HEAD") == local_head and (existing.path / "extra.txt").exists()
+    assert sorted(p.name for p in (repo.local / ".worktrees").iterdir()) == [existing.path.name]
+
+
+def test_pr_delivery_workspace_refuses_a_divergent_unattached_local_branch(repo: SimpleNamespace) -> None:
+    _push_pr_branch(repo, "ticket/usr-545")
+    _git(repo.local, "branch", "ticket/usr-545", "main")  # same name, different commit, no worktree
+    assert ensure_pr_delivery_workspace("USR-545", "ticket/usr-545", cwd=repo.local, now_fn=lambda: NOW) is None
+    assert _git(repo.local, "rev-parse", "ticket/usr-545") == _git(repo.local, "rev-parse", "main")
+    assert not (repo.local / ".worktrees" / f"usr-545-{STAMP}").exists()
+
+
+@pytest.mark.parametrize(
+    ("head_ref", "kwargs"),
+    [
+        ("ticket/usr-545", {"cross_repository": True}),  # fork head
+        ("ticket/usr-5450", {}),  # another ticket's branch
+        ("feature/other", {}),
+        ("ticket/usr-545-missing", {}),  # fetch fails: not on origin
+    ],
+)
+def test_pr_delivery_workspace_returns_none_without_creating_anything(
+    repo: SimpleNamespace, head_ref: str, kwargs: dict[str, bool]
+) -> None:
+    _push_pr_branch(repo, "ticket/usr-545")
+    _push_pr_branch(repo, "ticket/usr-5450", "other.txt")
+    _push_pr_branch(repo, "feature/other", "feature.txt")
+    assert ensure_pr_delivery_workspace("USR-545", head_ref, cwd=repo.local, now_fn=lambda: NOW, **kwargs) is None
+    assert not (repo.local / ".worktrees").exists() or not list((repo.local / ".worktrees").iterdir())
 
 
 def test_creation_keeps_worktrees_out_of_git_even_without_a_gitignore(repo: SimpleNamespace) -> None:

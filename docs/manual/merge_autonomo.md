@@ -41,6 +41,14 @@ A fabrica faz push e merge com um token de curta duracao de uma GitHub App, sem 
 3. `_open_delivery_pr` faz push (`--force-with-lease`; `--force` so para atualizar a head de um PR de fila ja aberto com o mesmo titulo) e cria ou reaproveita o PR. Ajusta titulo e label (`queue`, `implementation` ou `registry`). Implementacao tambem registra o catalogo.
 4. Com `merge` ligado, `_deliver` so chama `gh pr merge --squash --delete-branch` depois do portao de CI no head exato. Qualquer check em `fail` bloqueia o merge, incluindo `ledger-fast` e `pr-validation`; o caminho leve de ledger nao ignora os checks. Se nao houver workflow configurado, a ausencia de checks so e aceita depois da janela de tolerancia. Se o ruleset bloquear, o portao roda de novo e ha uma segunda tentativa de merge. Se o PR nao estiver mergeable, a branch e reaplicada em `origin/<base>` e o portao roda de novo, ate 3 vezes. O SHA do merge precisa aparecer em `origin/<base>` antes da limpeza da branch.
 
+### PR em rascunho na adocao (USR-545)
+
+Quando a entrega reaproveita um PR que esta em rascunho, `core/git/autonomy.py` o promove com
+`gh pr ready` somente depois do portao de CI e antes do `gh pr merge`. O estado vem de
+`gh pr view --json isDraft`. Se a leitura falhar, devolver JSON invalido ou nao trouxer um
+`isDraft` booleano, ou se `gh pr ready` falhar, a entrega devolve `error`, nao tenta o merge e
+mantem PR e branch abertos. A mensagem do relatorio registra a promocao quando ela ocorre.
+
 ## Limpeza de worktree ao concluir (USR-500)
 
 Depois do merge, `deliver_branch` tenta remover a worktree secundaria e a branch local pelo
