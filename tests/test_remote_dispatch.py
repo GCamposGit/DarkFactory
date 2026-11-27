@@ -1307,20 +1307,33 @@ def test_bundle_ignores_worker_commits_unknown_locally(tmp_path, copy_git_repo):
     finally:
         bundle.unlink()
 
-def test_pr_required_with_unreachable_workers_falls_back_locally(monkeypatch):
+@pytest.mark.parametrize(
+    ("flag", "env_mode", "probes"),
+    [(True, "auto", 2), (True, "off", 2), (False, "required", 2), (False, "auto", 2), (False, "off", 0)],
+)
+def test_pr_scope_flag_is_strict_while_env_modes_keep_local_fallback(monkeypatch, flag, env_mode, probes):
     monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
-    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "required")
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", env_mode)
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1,http://127.0.0.1:2")
     monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
     seen = []
     monkeypatch.setattr(remote_dispatch, "probe_health", lambda url, **kw: seen.append(url) or None)
-    result = remote_dispatch.maybe_dispatch_remote(
-        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
-        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
-        cache_lookup_enabled=False, local_only=False, remote_required=True,
-        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
-    )
-    assert result is None and len(seen) == 2
+
+    def run():
+        return remote_dispatch.maybe_dispatch_remote(
+            steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+            config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+            cache_lookup_enabled=False, local_only=False, remote_required=flag, profile="pr",
+            emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+        )
+
+    if flag:
+        with pytest.raises(remote_dispatch.RemoteRequiredError) as raised:
+            run()
+        assert raised.value.cause_code == "no_reachable_worker"
+    else:
+        assert run() is None
+    assert len(seen) == probes
 
 
 def test_health_and_submit_bound_unreachable_connection(monkeypatch, tmp_path):
@@ -1337,7 +1350,7 @@ def test_health_and_submit_bound_unreachable_connection(monkeypatch, tmp_path):
         remote_dispatch._submit_job("http://offline", bundle, {})
     assert all(t <= 5 for t in seen) and len(seen) == 2
 
-def test_submit_timeout_skips_worker_and_falls_back_in_pr(monkeypatch, tmp_path):
+def test_submit_timeout_exhausts_workers_and_raises_in_required_pr(monkeypatch, tmp_path):
     monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1,http://127.0.0.1:2")
     monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
@@ -1355,12 +1368,14 @@ def test_submit_timeout_skips_worker_and_falls_back_in_pr(monkeypatch, tmp_path)
         seen.append(url)
         raise TimeoutError("unreachable")
     monkeypatch.setattr(remote_dispatch, "_submit_job", timeout)
-    assert remote_dispatch.maybe_dispatch_remote(
-        steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
-        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
-        cache_lookup_enabled=False, local_only=False, remote_required=True,
-        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
-    ) is None
+    with pytest.raises(remote_dispatch.RemoteRequiredError) as raised:
+        remote_dispatch.maybe_dispatch_remote(
+            steps=_minimal_steps(), config_hash="a" * 64, quick=True, include_holdout=False,
+            config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+            cache_lookup_enabled=False, local_only=False, remote_required=True,
+            emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+        )
+    assert raised.value.cause_code == "all_workers_unavailable"
     assert len(seen) == 2
     assert [a["error_code"] for a in remote_dispatch.dispatch_attempts()] == ["worker_connection_failed"] * 2
 
@@ -1435,12 +1450,13 @@ def test_remote_pr_profile_skips_legacy_worker_without_supported_profiles(
     monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda _u, h: h)
     monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _r: "a" * 40)
 
-    assert remote_dispatch.maybe_dispatch_remote(
-        steps=_minimal_steps(), config_hash="a" * 64, quick=False, include_holdout=False,
-        config_path=Path("harness.config.json"), project_root=REPO_ROOT,
-        cache_lookup_enabled=False, local_only=False, remote_required=True, profile="pr",
-        emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
-    ) is None
+    with pytest.raises(remote_dispatch.RemoteRequiredError):
+        remote_dispatch.maybe_dispatch_remote(
+            steps=_minimal_steps(), config_hash="a" * 64, quick=False, include_holdout=False,
+            config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+            cache_lookup_enabled=False, local_only=False, remote_required=True, profile="pr",
+            emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+        )
     assert remote_dispatch.dispatch_attempts()[-1]["discard_reason"] == "unsupported_profile:pr"
 
 
@@ -1456,3 +1472,59 @@ def test_worker_health_advertises_supported_profiles(monkeypatch: pytest.MonkeyP
     identity = SimpleNamespace(configured_node_id="desktop", source="cli")
     health = _worker_health_status(manager, tmp_path, "desktop", identity)
     assert health.supported_profiles == ["full", "pr"]
+
+
+@pytest.mark.parametrize(
+    ("child_run_id", "lease_run_id", "reaches_worker"),
+    [
+        ("fleet-usr-583-own", "fleet-usr-583-own", True),
+        ("fleet-usr-583-own", "fleet-usr-999-other", False),
+        ("fleet-usr-583-own", "", False),
+        ("", "fleet-usr-583-own", False),
+    ],
+)
+def test_fleet_reservation_only_lets_its_own_run_reach_the_pinned_desktop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, child_run_id: str, lease_run_id: str, reaches_worker: bool,
+) -> None:
+    from core.line.admission_store import AdmissionStore
+
+    desktop = remote_dispatch.HOST_WORKER_URLS["desktop"]
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setenv("DARKFAC_GATE_SCOPE", "pr")
+    monkeypatch.setenv("DARKFAC_TEST_WORKERS", desktop)
+    monkeypatch.setenv("DARKFAC_RUN_ID", child_run_id)
+    monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
+    assert AdmissionStore(tmp_path / "state" / "admission.sqlite3").reserve(
+        project_id="darkfac", ticket_id="USR-583", candidate_digest="candidate", context_digest="context",
+        resource_version="resources", host_id="desktop", run_id=lease_run_id,
+    )
+    # Only the pinned Desktop answers; the other fleet hosts are offline.
+    monkeypatch.setattr(remote_dispatch, "probe_health", lambda url, **_kw: {
+        "node_id": "desktop", "busy": False, "workers": 1, "available_gib": 16,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    } if url == desktop else None)
+    monkeypatch.setattr(remote_dispatch, "_await_worker_stable", lambda _url, health: health)
+    monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda _root: "c" * 40)
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        remote_dispatch, "_dispatch_with_restart_retry",
+        lambda url, **_kw: submitted.append(url) or (True, None),
+    )
+
+    def run():
+        return remote_dispatch.maybe_dispatch_remote(
+            steps=_minimal_steps(), config_hash="a" * 64, quick=False, include_holdout=False,
+            config_path=Path("harness.config.json"), project_root=REPO_ROOT,
+            cache_lookup_enabled=False, local_only=False, remote_required=True, profile="pr",
+            emit_cache_hit=_noop_emit_cache_hit, notify_hub_on_pass=lambda: None,
+        )
+
+    if reaches_worker:
+        assert run() is True
+        assert submitted == [desktop]
+    else:
+        with pytest.raises(remote_dispatch.RemoteRequiredError, match="reservation_active"):
+            run()
+        assert submitted == []
+

@@ -214,6 +214,16 @@ As reservas de outros processos não são renovadas nem liberadas; leases vencid
 pelo reconciliador e só então o host volta a ser elegível. Se qualquer consulta canônica falhar,
 o dispatcher não inicia trabalho e publica `free_hosts` vazio naquele ciclo.
 
+A reserva local de admissão (`admission.sqlite3`) é exclusiva por host e grava o `run_id` do
+lançamento, o mesmo entregue ao filho em `DARKFAC_RUN_ID` (USR-583). Na política efetiva, o
+portão desse run enxerga o próprio host como elegível. Reserva de outro run, ou sem `run_id`
+(leases antigas), continua bloqueando. A admissão de ticket novo ignora essa exceção.
+
+`runner.py --remote-required` vale em qualquer escopo, inclusive `--profile pr`: sem worker
+utilizável o portão falha com `RemoteRequiredError` (`remote_required_unavailable`) e não roda a
+suíte local. `DARKFAC_REMOTE_HARNESS=required` só é estrito com `DARKFAC_GATE_SCOPE=full`; nos
+modos `auto` e `off` nada muda. `CI` e execução dentro de um job de worker seguem locais.
+
 ## Política efetiva de hosts e workers (USR-471 T2)
 
 A topologia persistente fica em `.factory/config/line_fleet.json`: cada host declara

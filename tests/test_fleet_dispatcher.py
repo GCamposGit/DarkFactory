@@ -593,9 +593,117 @@ def test_canonical_host_reservation_survives_restart_until_real_expiry(tmp_path)
         context_digest="context", resource_version="resources", host_id="desktop",
     )
     assert token
-    assert store.active_host_reservations() == [{"host_id": "desktop", "expires_at": (now + timedelta(seconds=30)).isoformat()}]
+    assert store.active_host_reservations() == [{
+        "host_id": "desktop",
+        "expires_at": (now + timedelta(seconds=30)).isoformat(),
+        "run_id": "",
+    }]
     restarted_store = AdmissionStore(tmp_path / "admission.sqlite3", clock=lambda: now + timedelta(seconds=31))
     assert restarted_store.active_host_reservations() == []
+
+
+class _EmptyControl:
+    def reconcile_fleet_reservations(self, now):
+        return None
+
+    def list_active_reservations(self):
+        return []
+
+
+def test_dispatcher_stores_run_id_before_launch_and_passes_it_to_the_child(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setenv("DARKFAC_RUN_ID", "parent-must-not-leak")
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+
+    def popen(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["env"] = kwargs["env"]
+        return Process()
+
+    monkeypatch.setattr(fd, "subprocess", type("Subprocess", (), {"Popen": staticmethod(popen), "STDOUT": -2})())
+
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    demand = _d("USR-583")
+
+    def launch(ticket_id, host, **kwargs):
+        captured["at_launch"] = store.active_host_reservations()
+        captured["launch_run_id"] = kwargs.get("run_id")
+        return fd.default_launch(
+            ticket_id, host, demand,
+            run_id=kwargs.get("run_id"),
+            recovery=bool(kwargs.get("recovery")),
+            candidate_digest=str(kwargs.get("candidate_digest") or "unknown"),
+        )
+
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("desktop", 1, "http://desktop")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [demand],
+        probe=lambda host: fd.HostProbe(True, "ready"),
+        launch=launch,
+        deploy=lambda: 0,
+        admission_store=store,
+        control_store_factory=_EmptyControl,
+    )
+
+    cycle = dispatcher.run_cycle()
+
+    job = dispatcher.in_flight["desktop"]
+    env = captured["env"]
+    assert cycle["dispatched"] == [{"ticket": "USR-583", "host": "desktop"}]
+    assert captured["at_launch"] == [{
+        "host_id": "desktop",
+        "expires_at": captured["at_launch"][0]["expires_at"],
+        "run_id": captured["launch_run_id"],
+    }]
+    assert job.run_id == captured["launch_run_id"]
+    assert env["DARKFAC_RUN_ID"] == job.run_id
+    assert env["DARKFAC_RUN_ID"] != "parent-must-not-leak"
+    assert captured["cmd"][captured["cmd"].index("--run-id") + 1] == job.run_id
+    assert str(job.run_id).startswith("fleet-usr-583-")
+    published = cycle["host_policy"]
+    desktop = next(row for row in published if row["host_id"] == "desktop")
+    assert desktop["canonical_reservation"]["run_id"] == job.run_id
+
+
+def test_identityless_host_reservation_still_blocks_dispatch(tmp_path, monkeypatch):
+    monkeypatch.delenv("DARKFAC_FLEET_DISABLED_HOSTS", raising=False)
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    assert store.reserve(
+        project_id="darkfac", ticket_id="USR-1", candidate_digest="legacy",
+        context_digest="legacy", resource_version="legacy", host_id="desktop",
+    )
+    launched: list[str] = []
+    dispatcher = fd.FleetDispatcher(
+        fd.DispatcherConfig(
+            hosts=[fd.HostSpec("desktop", 1, "http://desktop")],
+            state_path=tmp_path / "fleet.json",
+        ),
+        demands_loader=lambda: [_d("USR-583")],
+        probe=lambda host: fd.HostProbe(True, "ready"),
+        launch=lambda ticket_id, host, **kwargs: launched.append(ticket_id) or fd.InFlight(
+            ticket_id, host.id, Handle(), run_id=kwargs.get("run_id"),
+        ),
+        deploy=lambda: 0,
+        admission_store=store,
+        control_store_factory=_EmptyControl,
+    )
+
+    cycle = dispatcher.run_cycle()
+
+    assert launched == []
+    assert cycle["dispatched"] == []
+    assert cycle["skipped"]["USR-583"] == "admission_reserved"
+    assert store.active_host_reservations()[0]["run_id"] == ""
 
 
 @pytest.mark.parametrize("loop_args", [[], ["--loop"]])
@@ -1906,6 +2014,11 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
     assert [h["ticket_id"] for h in e.d.admission_store.ticket_holds()] == ["USR-99"]
     assert len(e.d.run_cycle()["dispatched"]) == 2
     e.d.admission_store.set_recovery(active=True, cause="context", fingerprint="fp")
+    # Those attempts still hold their host leases. This restart checks the recovery
+    # latch, so drop only the leases and keep the durable recovery state.
+    import sqlite3
+    with sqlite3.connect(e.d.admission_store.path) as db:
+        db.execute("DELETE FROM reservations")
 
     # A fresh dispatcher sees the durable latch and only dispatches one delivery globally.
     e.d = fd.FleetDispatcher(

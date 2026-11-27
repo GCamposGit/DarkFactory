@@ -15301,5 +15301,38 @@
     "dependencies": [],
     "created_at": "2026-11-15T12:26:38.868911Z",
     "updated_at": "2026-11-27T00:49:58.332630Z"
+  },
+  {
+    "id": "USR-583",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "fleet_dispatcher --host-id desktop faz runner.py --profile pr --remote-required cair no Notebook por auto-reserva",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "Quando core.line.fleet_dispatcher reserva o host desktop (--host-id desktop) para disparar um ticket, o processo filho executa runner.py --profile pr --remote-required, consulta remote_dispatch, enxerga a propria reserva da frota em admission.sqlite3, rejeita o Desktop como indisponivel e cai para execucao local lenta no Notebook apesar da flag --remote-required.",
+    "core_journey": [
+      "Quando core.line.fleet_dispatcher reserva o host desktop (--host-id desktop) para disparar um ticket, o processo filho executa runner.py --profile pr --remote-required, consulta remote_dispatch, enxerga a propria reserva da frota em admission.sqlite3, rejeita o Desktop como indisponivel e cai para execucao local lenta no Notebook apesar da flag --remote-required."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Run disparado pelo fleet_dispatcher no host desktop repassa identidade de reserva/run ao portao ou permite que o proprio job use o gate remoto designado sem auto-bloqueio",
+      "runner.py --profile pr --remote-required nao cai silenciosamente para execucao local lenta no Notebook por enxergar apenas a propria reserva do pai",
+      "Execucoes concorrentes de outros jobs continuam respeitando a exclusao mutua e reservas reais em admission.sqlite3",
+      "Testes unitarios/integracao cobrem o cenario fleet_dispatcher -> remote_dispatch e passam no portao oficial"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-26T19:19:18.476463Z",
+    "updated_at": "2026-11-26T19:19:18.476463Z"
   }
 ]

@@ -34,13 +34,24 @@ Crash xdist/INTERNALERROR/EOFError/exit 3 em execução paralela recebe um únic
 retry serial no mesmo orçamento, com `--lf` quando lastfailed existe e não está
 vazio; sem cache repete os alvos. Falha real ou segundo crash continua reprovando.
 Health/envio remoto têm timeout de socket limitado a 5s. Worker inacessível cede
-para o próximo e depois para local no PR; `required` só é estrito no escopo full.
+para o próximo candidato; se todos falharem, `--remote-required` falha com
+`[HARNESS_FAIL]` também no perfil PR, sem iniciar a suíte local no Notebook.
 Quando o cliente usa `--profile pr --remote-required`, `remote_dispatch` envia
 `"profile": "pr"` nos metadados do job para que o worker execute o perfil PR.
 A ordem padrão de workers (`core.harness.remote_dispatch.DEFAULT_WORKERS`) é derivada
 de `.factory/config/line_fleet.json` (`Notebook > Grokbox > Desktop`, `USR-492`),
 podendo ser sobrescrita por `DARKFAC_TEST_WORKERS`.
 Candidato imutável, suite_lock e `[HARNESS_PASS]` continuam obrigatórios.
+
+### Reserva do host e identidade do run (USR-583)
+
+Quando `fleet_dispatcher` lança um ticket num host reservado, cria o `run_id`
+antes da reserva e propaga a mesma identidade ao processo filho. O portão remoto
+pode reutilizar a reserva que pertence exatamente a esse `run_id`; isso permite
+que o job use o worker designado sem rejeitar a própria reserva como ocupação.
+Não se ignora uma reserva só porque o `host_id` coincide: reserva sem identidade
+ou pertencente a outro `run_id` continua bloqueando o host, preservando a exclusão
+mútua entre execuções concorrentes. Reservas antigas sem `run_id` seguem ativas.
 
 ## Observação de capacidade antes da admissão (USR-468)
 

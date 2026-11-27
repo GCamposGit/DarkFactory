@@ -266,20 +266,20 @@ precisa mudar. Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
 
 1. Worker da vez (na ordem Notebook > Grokbox > Desktop) offline (probe de
    `GET /health` falha) → tenta o próximo da ordem sem avisar; só roda
-   localmente quando nenhum deles responde. Uma queda do Grokbox em
+   localmente quando nenhum deles responde no modo `auto`. Uma queda do Grokbox em
    particular é esperada (owner, USR-492): nunca gera alerta nem bloqueia o
    ciclo, e ele volta a ser sondado no ciclo seguinte.
 2. Worker da vez ocupado (`busy: true` no `/health`, outro job já rodando —
    single worker thread FIFO no worker) → aguarda até
    `DARKFAC_REMOTE_BUSY_WAIT_SEC` (padrão 300s) fazendo polling do health;
-   se continuar ocupado, tenta o próximo da ordem.
+   se continuar ocupado, tenta o próximo da ordem. Se todos os workers ficarem
+   indisponíveis, o modo `required` falha em vez de iniciar localmente.
 3. Nenhum worker utilizável e `--remote-required`/
    `DARKFAC_REMOTE_HARNESS=required` **não** foi passado → roda localmente,
    silenciosamente (comportamento padrão, `auto`).
 4. Nenhum worker utilizável e `--remote-required`/`DARKFAC_REMOTE_HARNESS=
    required` foi passado → falha com `[HARNESS_FAIL]` em vez de rodar
-   localmente sem avisar (mesma seriedade de qualquer erro de configuração
-   do harness).
+   localmente sem avisar, em qualquer perfil, inclusive `pr`.
 
 5. **Job despachado que nunca entrega veredito (USR-162)** → o cliente não
    desiste mais de forma anônima. Causa raiz do incidente de 2026-10-08
@@ -304,18 +304,31 @@ precisa mudar. Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
    - Ao abandonar, o cliente imprime `[REMOTE_JOB_LOST] {json}` (job_id,
      causa, último status/offset, saúde do worker, se houve restart) e grava
      `<DARKFAC_HARNESS_STATE_DIR>/remote_jobs/<job_id>.json` com o rabo do
-     log; em seguida cai para execução local como nas regras 1-4. Um job
+     log; em seguida o modo `auto` pode seguir para execução local como nas
+     regras 1-4; no modo `required`, a perda sem veredito termina em falha e
+     não inicia a suíte local. Um job
      `failed` com `error_code` de infraestrutura (`worker_restarted`,
      `worker_internal_error`, `worker_setup_failed`) nunca é reportado como
      falha de teste.
 
-Três guardas de segurança desligam o despacho remoto **incondicionalmente**
-(mesmo com `--remote-required`, nunca lançam erro — apenas seguem local em
-silêncio): `CI` truthy; o processo já está rodando **dentro** de um job do
-worker (`DARKFAC_HARNESS_WORKER_JOB=1`, setado pelo próprio worker); ou a
-URL do worker resolve para a própria máquina que está despachando
-(self-dispatch — comparado por IP local e pelo `hostname` que o `/health`
-reporta), o que impede um loop worker→worker.
+`CI` truthy e um processo já rodando **dentro** de um job do worker
+(`DARKFAC_HARNESS_WORKER_JOB=1`, setado pelo próprio worker) desabilitam o
+despacho remoto. O self-dispatch também impede um loop worker→worker: o próprio
+host não é tratado como worker remoto elegível. Essas condições não autorizam
+o modo `required` a executar localmente em silêncio; o portão falha fechado,
+exceto quando a execução local foi explicitamente escolhida (`--local` ou modo
+`off`) ou quando o worker executa o subprocesso local do job remoto.
+
+### Reserva da frota e identidade do run (USR-583)
+
+`fleet_dispatcher` cria um `run_id` antes de adquirir a reserva do host e
+propaga esse identificador ao processo filho. A consulta de reservas pode
+reutilizar a reserva do próprio run somente quando o `run_id` da reserva é
+idêntico ao `DARKFAC_RUN_ID` propagado. A comparação não deve ser reduzida a
+`host_id`: isso permitiria que um segundo job no mesmo host atravessasse a
+reserva ativa do primeiro. Reservas sem identidade (incluindo leases legados)
+e reservas de qualquer outro run continuam ocupando o host; concorrentes
+continuam sujeitos à exclusão mútua de `admission.sqlite3`.
 
 ### Protocolo (job assíncrono, nunca um HTTP preso por minutos)
 
@@ -404,8 +417,10 @@ tailnet).
 
 `--local` (flag do `runner.py`) força execução local, ignorando qualquer
 worker configurado — útil para depurar o próprio harness sem envolver a
-rede. `--remote-required` exige que o despacho remoto tenha sucesso (ver
-tabela acima). Nenhum dos dois altera `harness.config.json`.
+rede. `--remote-required` exige que o despacho remoto tenha sucesso em todo
+perfil, inclusive `pr`; worker ocupado, indisponível, inelegível ou job perdido
+resulta em falha explícita, nunca em fallback local silencioso. Nenhum dos dois
+altera `harness.config.json`.
 
 ## Deploy pós-merge (Dokploy)
 

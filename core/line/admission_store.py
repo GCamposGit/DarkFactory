@@ -149,7 +149,8 @@ class AdmissionStore:
                                        (hold["project_id"], hold["ticket_id"]))
                     db.execute("""CREATE TABLE IF NOT EXISTS reservations (
                         scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL,
-                        host_id TEXT NOT NULL DEFAULT ''
+                        host_id TEXT NOT NULL DEFAULT '',
+                        run_id TEXT NOT NULL DEFAULT ''
                     )""")
                     db.execute("""CREATE TABLE IF NOT EXISTS ticket_budget (
                         project TEXT NOT NULL, ticket TEXT NOT NULL,
@@ -165,6 +166,9 @@ class AdmissionStore:
                     reservation_columns = {row[1] for row in db.execute("PRAGMA table_info(reservations)")}
                     if "host_id" not in reservation_columns:
                         db.execute("ALTER TABLE reservations ADD COLUMN host_id TEXT NOT NULL DEFAULT ''")
+                    # Additive owner identity. Existing leases stay valid and keep blocking with run_id ''.
+                    if "run_id" not in reservation_columns:
+                        db.execute("ALTER TABLE reservations ADD COLUMN run_id TEXT NOT NULL DEFAULT ''")
                     db.execute("""CREATE TABLE IF NOT EXISTS dispatcher_recovery (
                         singleton INTEGER PRIMARY KEY CHECK(singleton=1), active INTEGER NOT NULL,
                         cause TEXT NOT NULL, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -457,11 +461,17 @@ class AdmissionStore:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
     def reserve(self, *, project_id: str, ticket_id: str, candidate_digest: str,
-                context_digest: str, resource_version: str, host_id: str = "") -> Optional[str]:
-        """Acquire one durable attempt reservation, or return None if another process owns it."""
+                context_digest: str, resource_version: str, host_id: str = "",
+                run_id: str = "") -> Optional[str]:
+        """Acquire one durable attempt reservation, or return None if the scope or host is taken.
+
+        ``run_id`` is the fleet run that owns the claim. Callers that omit it stay compatible
+        with older reservations. A blank identity still blocks: an unnamed lease is not free capacity.
+        """
         scope = self._scope(project_id, ticket_id, candidate_digest, context_digest, resource_version)
         now = self.clock().astimezone(timezone.utc)
         token = uuid.uuid4().hex
+        owner = str(run_id or "").strip()
         try:
             with self._connection() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -470,9 +480,16 @@ class AdmissionStore:
                 if row:
                     db.rollback()
                     return None
+                if host_id and db.execute(
+                    "SELECT token FROM reservations WHERE host_id=? LIMIT 1", (host_id,),
+                ).fetchone():
+                    db.rollback()
+                    return None
                 expiry = now + timedelta(seconds=self.reservation_ttl_sec)
-                db.execute("INSERT INTO reservations(scope, token, expires_at, host_id) VALUES (?, ?, ?, ?)",
-                           (scope, token, expiry.isoformat(), host_id))
+                db.execute(
+                    "INSERT INTO reservations(scope, token, expires_at, host_id, run_id) VALUES (?, ?, ?, ?, ?)",
+                    (scope, token, expiry.isoformat(), host_id, owner),
+                )
                 db.commit()
                 return token
         except (sqlite3.Error, OSError) as exc:
@@ -491,8 +508,10 @@ class AdmissionStore:
                     db.rollback()
                     return None
                 expiry = now + timedelta(seconds=max(1, int(lease_duration_sec)))
-                db.execute("INSERT INTO reservations(scope, token, expires_at, host_id) VALUES (?, ?, ?, '')",
-                           (scope, token, expiry.isoformat()))
+                db.execute(
+                    "INSERT INTO reservations(scope, token, expires_at, host_id, run_id) VALUES (?, ?, ?, '', '')",
+                    (scope, token, expiry.isoformat()),
+                )
                 db.commit()
                 return token
         except (sqlite3.Error, OSError) as exc:
@@ -678,10 +697,15 @@ class AdmissionStore:
         try:
             with self._connection() as db:
                 rows = db.execute(
-                    "SELECT host_id, expires_at FROM reservations WHERE host_id<>'' AND expires_at>? ORDER BY host_id",
+                    """SELECT host_id, expires_at, COALESCE(run_id, '') AS run_id
+                       FROM reservations WHERE host_id<>'' AND expires_at>? ORDER BY host_id""",
                     (now,),
                 ).fetchall()
-                return [dict(row) for row in rows]
+                return [
+                    {"host_id": str(row["host_id"]), "expires_at": str(row["expires_at"]),
+                     "run_id": str(row["run_id"] or "")}
+                    for row in rows
+                ]
         except sqlite3.Error as exc:
             raise AdmissionStoreError("admission_store_unavailable") from exc
 
