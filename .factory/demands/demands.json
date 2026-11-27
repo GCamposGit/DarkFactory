@@ -15279,7 +15279,7 @@
     "title": "Learning pack vazio quando o ticket nao pode commitar na worktree",
     "origin": "user",
     "status": "planned",
-    "delivery_evidence": "candidate:8fec1ca6fcb80daacc41422059aa54d4cabdd523",
+    "delivery_evidence": "candidate:afad1bb0dc08d4f21d7b4a76f3c1e7b071280bdf",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -15300,6 +15300,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-15T12:26:38.868911Z",
-    "updated_at": "2026-11-27T00:49:02.954770Z"
+    "updated_at": "2026-11-27T00:49:58.332630Z"
   }
 ]
