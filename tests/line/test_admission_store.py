@@ -221,3 +221,105 @@ def test_recovery_receipt_cause_and_completion_are_durable_and_idempotent(tmp_pa
     assert reused["active"] == 1 and reused["successes"] == 1
 
 
+def test_legacy_database_gains_owner_run_id_without_dropping_reservations(tmp_path):
+    path = tmp_path / "admission.sqlite3"
+    now = datetime(2026, 11, 26, tzinfo=timezone.utc)
+    scope = AdmissionStore._scope("darkfac", "USR-583", "candidate", "context", "desktop-v1")
+    expires = (now + timedelta(hours=1)).isoformat()
+    with sqlite3.connect(path) as db:
+        db.execute("""CREATE TABLE reservations (
+            scope TEXT PRIMARY KEY, token TEXT NOT NULL, expires_at TEXT NOT NULL,
+            host_id TEXT NOT NULL DEFAULT ''
+        )""")
+        db.execute(
+            "INSERT INTO reservations(scope, token, expires_at, host_id) VALUES (?, ?, ?, ?)",
+            (scope, "legacy-token", expires, "desktop"),
+        )
+    def clock():
+        return now
+
+    first = AdmissionStore(path, clock=clock)
+    second = AdmissionStore(path, clock=clock)
+    with sqlite3.connect(path) as db:
+        columns = [row[1] for row in db.execute("PRAGMA table_info(reservations)")]
+    assert columns.count("run_id") == 1
+    assert first.active_host_reservations() == second.active_host_reservations() == [{
+        "host_id": "desktop", "expires_at": expires, "run_id": "",
+    }]
+    assert second.reserve(
+        project_id="darkfac", ticket_id="USR-583", candidate_digest="candidate",
+        context_digest="context", resource_version="desktop-v1", host_id="notebook",
+        run_id="fleet-same-scope",
+    ) is None
+    assert second.reserve(
+        project_id="darkfac", ticket_id="USR-584", candidate_digest="other",
+        context_digest="context", resource_version="desktop-v1", host_id="desktop",
+        run_id="fleet-same-host",
+    ) is None
+    owned = second.reserve(
+        project_id="darkfac", ticket_id="USR-584", candidate_digest="other",
+        context_digest="context", resource_version="notebook-v1", host_id="notebook",
+        run_id="  fleet-usr-584  ",
+    )
+    assert owned
+    assert {row["host_id"]: row["run_id"] for row in second.active_host_reservations()} == {
+        "desktop": "",
+        "notebook": "fleet-usr-584",
+    }
+
+
+def test_legacy_reserve_call_stays_compatible_and_blank_identity_still_blocks(tmp_path):
+    store = AdmissionStore(tmp_path / "admission.sqlite3")
+    token = store.reserve(
+        project_id="darkfac", ticket_id="USR-1", candidate_digest="candidate",
+        context_digest="context", resource_version="host-v1", host_id="grokbox",
+    )
+    assert token
+    assert store.active_host_reservations() == [{
+        "host_id": "grokbox",
+        "expires_at": store.active_host_reservations()[0]["expires_at"],
+        "run_id": "",
+    }]
+    assert store.reserve(
+        project_id="darkfac", ticket_id="USR-1", candidate_digest="candidate",
+        context_digest="context", resource_version="host-v1", host_id="notebook",
+        run_id="other-run",
+    ) is None
+    assert store.reserve(
+        project_id="darkfac", ticket_id="USR-2", candidate_digest="other",
+        context_digest="context", resource_version="host-v2", host_id="grokbox",
+        run_id="fleet-usr-2",
+    ) is None
+
+
+def test_concurrent_attempts_take_at_most_one_reservation_per_scope_or_host(tmp_path):
+    path = tmp_path / "admission.sqlite3"
+    stores = [AdmissionStore(path), AdmissionStore(path)]
+
+    def claim_scope(store):
+        return store.reserve(
+            project_id="darkfac", ticket_id="USR-2", candidate_digest="candidate",
+            context_digest="context", resource_version="host-v1", host_id=f"host-{id(store)}",
+            run_id=f"run-{id(store)}",
+        )
+
+    def claim_host(index_store):
+        index, store = index_store
+        return store.reserve(
+            project_id="darkfac", ticket_id=f"USR-{index}", candidate_digest=f"candidate-{index}",
+            context_digest="context", resource_version=f"resource-{index}", host_id="desktop",
+            run_id=f"fleet-{index}",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        scope_claims = list(pool.map(claim_scope, stores))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        host_claims = list(pool.map(claim_host, list(enumerate(stores))))
+
+    assert sum(token is not None for token in scope_claims) == 1
+    assert sum(token is not None for token in host_claims) == 1
+    rows = {row["host_id"]: row["run_id"] for row in AdmissionStore(path).active_host_reservations()}
+    assert rows["desktop"] in {"fleet-0", "fleet-1"}
+    assert sum(run_id.startswith("run-") for run_id in rows.values()) == 1
+
+

@@ -1611,6 +1611,7 @@ class FleetDispatcher:
             return
         recovery_token = None
         token = None
+        run_id = ""
         try:
             from core.line.admission_store import normalize_error, safe_digest
 
@@ -1630,9 +1631,12 @@ class FleetDispatcher:
                     skipped[tid] = "recovery_delivery_reserved"
                     queue.insert(0, tid)
                     return
+            # Same id the child receives as DARKFAC_RUN_ID, so the gate can recognize this lease.
+            run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
             token = self.admission_store.reserve(
                 project_id=project_id, ticket_id=tid, candidate_digest=candidate_key,
                 context_digest=context_key, resource_version=resource_key, host_id=host.id,
+                run_id=run_id,
             )
             if token is None:
                 if recovery_token:
@@ -1661,7 +1665,6 @@ class FleetDispatcher:
             logger.error("admission store recusou %s (%s)", tid, type(exc).__name__)
             return
         try:
-            run_id = f"fleet-{tid.lower()}-{uuid.uuid4().hex}"
             try:
                 current_reservations = self._read_canonical_reservations(self.clock())
             except Exception as exc:  # noqa: BLE001 - never launch with unknown canonical capacity
@@ -2019,7 +2022,10 @@ class FleetDispatcher:
         try:
             for reservation in self.admission_store.active_host_reservations():
                 active_reservations.setdefault(reservation["host_id"], {
-                    "active": True, "expires_at": reservation["expires_at"], "source": "admission_store",
+                    "active": True,
+                    "expires_at": reservation["expires_at"],
+                    "source": "admission_store",
+                    "run_id": str(reservation.get("run_id") or ""),
                 })
         except Exception as exc:  # an unavailable canonical reservation ledger must fail closed
             policy_reservation_state = "unavailable"

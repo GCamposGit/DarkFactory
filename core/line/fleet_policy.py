@@ -16,14 +16,19 @@ Key contracts:
 6. Decoupled from model routing: chooses host machines only; harness/model selection
    remains the sole responsibility of `core.line.routing.pick`.
 
-``effective_host_policy`` above is the pure evaluator (contract 1: no I/O). USR-471 adds the one
-impure entry point every caller outside the fleet dispatcher uses instead of re-deriving it:
+``effective_host_policy`` above is the pure evaluator (contract 1: no I/O). A live host
+reservation blocks that host unless ``owner_run_id`` matches the lease's ``run_id``. A lease
+with a blank owner, or any other run's lease, stays blocking. USR-471 adds the one impure
+entry point every caller outside the fleet dispatcher uses instead of re-deriving it:
 ``effective_policy_snapshot`` gathers live resource readings (``measure_resource_readings``),
 combines them with ``line_fleet.json`` and ``DARKFAC_FLEET_DISABLED_HOSTS`` through
-``effective_host_policy``, and persists the result. A host excluded by configuration or by
-environment is never eligible regardless of health (exclusion precedes the health/resource
-checks in ``effective_host_policy`` itself). The persisted snapshot is regenerated on every
-read -- it is audit visibility, never a run's state.
+``effective_host_policy``, and persists the result. ``build_effective_policy_report`` passes
+``DARKFAC_RUN_ID`` as the owner so the gate that holds the lease can still use that host.
+Callers that omit the owner, including the dispatcher admitting a new ticket, keep every
+live lease blocking. A host excluded by configuration or by environment is never eligible
+regardless of health (exclusion precedes the health/resource checks in
+``effective_host_policy`` itself). The persisted snapshot is regenerated on every read --
+it is audit visibility, never a run's state.
 """
 
 from __future__ import annotations
@@ -212,6 +217,32 @@ def load_fleet_config(path: Optional[Path] = None, *, strict: bool = False) -> F
     )
 
 
+def _reservation_claim(
+    reservation: Optional[dict[str, Any]],
+    *,
+    now: datetime,
+    owner_run_id: Optional[str] = None,
+) -> tuple[bool, bool]:
+    """Return whether a host lease is still live and whether this run owns it.
+
+    An expired timestamp is not live. A live lease belongs to the caller only when both
+    sides carry the same non-empty ``run_id``. A blank owner is not verifiable, so the
+    lease stays blocking for everyone, including the process that thinks it holds it.
+    """
+    active = bool(reservation and reservation.get("active"))
+    if active and reservation and reservation.get("expires_at"):
+        try:
+            expiry = datetime.fromisoformat(str(reservation["expires_at"]).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            active = expiry.astimezone(timezone.utc) > now.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            active = True
+    owner = str((reservation or {}).get("run_id") or "").strip()
+    current = str(owner_run_id or "").strip()
+    return active, bool(active and owner and current and owner == current)
+
+
 def effective_host_policy(
     config: FleetConfig,
     *,
@@ -221,8 +252,14 @@ def effective_host_policy(
     reservations: Optional[dict[str, dict[str, Any]]] = None,
     now: Optional[datetime] = None,
     max_reading_age: timedelta = timedelta(seconds=90),
+    owner_run_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Build the single auditable eligibility decision for every configured host."""
+    """Build the single auditable eligibility decision for every configured host.
+
+    ``owner_run_id`` is the fleet run evaluating the policy. Its own live lease does not
+    make that host ineligible. Omitting it, or passing a blank id, keeps every live lease
+    blocking, which is what admission of a new ticket must do.
+    """
     instant = now or datetime.now(timezone.utc)
     readings, occupied, reservations = readings or {}, occupied or {}, reservations or {}
     configured_exclusions = {host.casefold() for host in config.disabled_hosts}
@@ -232,15 +269,9 @@ def effective_host_policy(
     for host in config.sorted_hosts():
         reading = readings.get(host.id) or {}
         reservation = reservations.get(host.id)
-        reservation_active = bool(reservation and reservation.get("active"))
-        if reservation_active and reservation and reservation.get("expires_at"):
-            try:
-                expiry = datetime.fromisoformat(str(reservation["expires_at"]).replace("Z", "+00:00"))
-                if expiry.tzinfo is None:
-                    expiry = expiry.replace(tzinfo=timezone.utc)
-                reservation_active = expiry.astimezone(timezone.utc) > instant.astimezone(timezone.utc)
-            except (TypeError, ValueError):
-                reservation_active = True
+        reservation_active, owned_by_current_run = _reservation_claim(
+            reservation, now=instant, owner_run_id=owner_run_id,
+        )
         excluded = host.id.casefold() in exclusions
         observed = reading.get("observed_at")
         age_seconds: Optional[float] = None
@@ -265,7 +296,7 @@ def effective_host_policy(
             reason = "disabled_by_config"
         elif host.id in occupied:
             reason = "occupied"
-        elif reservation_active:
+        elif reservation_active and not owned_by_current_run:
             reason = "reservation_active"
         elif age_seconds is None or age_seconds > max_reading_age.total_seconds():
             reason = "resource_reading_missing_or_stale"
@@ -282,7 +313,10 @@ def effective_host_policy(
             "resource_reading": _safe_resource_reading(reading),
             "resource_age_seconds": age_seconds,
             "workers_calculated": workers,
-            "canonical_reservation": {**reservation, "active": reservation_active} if reservation else None,
+            "canonical_reservation": (
+                {**reservation, "active": reservation_active, "owned_by_current_run": owned_by_current_run}
+                if reservation else None
+            ),
             "occupied_by": occupied.get(host.id),
             "eligible": reason == "eligible",
             "reason": reason,
@@ -562,11 +596,18 @@ def build_effective_policy_report(
     readings: Optional[dict[str, dict[str, Any]]] = None,
     now: Optional[datetime] = None,
     config_source: Optional[str | Path] = None,
+    owner_run_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """The single auditable effective fleet policy report: host config, live resource readings,
-    exclusions (config + environment) and the resulting eligibility, one entry per host."""
+    exclusions (config + environment) and the resulting eligibility, one entry per host.
+
+    When ``owner_run_id`` is omitted, the process ``DARKFAC_RUN_ID`` is the owner. Pass an
+    empty string to evaluate as a caller that cannot prove a lease, which keeps every live
+    reservation blocking.
+    """
     cfg = config if config is not None else load_fleet_config(strict=True)
     instant = now or datetime.now(timezone.utc)
+    resolved_owner = os.environ.get("DARKFAC_RUN_ID", "") if owner_run_id is None else owner_run_id
     env_disabled = (
         list(disabled_from_environment)
         if disabled_from_environment is not None
@@ -597,6 +638,7 @@ def build_effective_policy_report(
     hosts = effective_host_policy(
         cfg, disabled_from_environment=env_disabled, readings=measured,
         occupied=occupied, reservations=reservations, now=instant,
+        owner_run_id=resolved_owner,
     )
     if not reservation_store_available:
         for host in hosts:

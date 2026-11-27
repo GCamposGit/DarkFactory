@@ -273,6 +273,29 @@ def test_effective_policy_rejects_zero_workers_and_active_canonical_reservation(
     assert by_id["desktop"]["reason"] == "reservation_active"
 
 
+@pytest.mark.parametrize(
+    ("owner", "lease_owner", "eligible"),
+    [("run-a", "run-a", True), ("run-a", "run-b", False), ("run-a", "", False), ("", "", False), (None, "run-a", False)],
+)
+def test_effective_policy_ignores_only_the_current_runs_own_reservation(
+    default_fleet: FleetConfig, owner, lease_owner: str, eligible: bool,
+):
+    now = datetime.now(timezone.utc)
+    rows = effective_host_policy(
+        default_fleet,
+        readings={"desktop": {"workers": 1, "available_gib": 16, "observed_at": now.isoformat()}},
+        reservations={"desktop": {
+            "active": True, "run_id": lease_owner, "expires_at": (now + timedelta(seconds=20)).isoformat(),
+        }},
+        now=now,
+        owner_run_id=owner,
+    )
+    desktop = next(row for row in rows if row["host_id"] == "desktop")
+    assert desktop["eligible"] is eligible
+    assert desktop["reason"] == ("eligible" if eligible else "reservation_active")
+    assert desktop["canonical_reservation"]["owned_by_current_run"] is eligible
+
+
 def test_config_disabled_host_is_exposed_as_exclusion_even_when_not_in_disabled_hosts():
     now = datetime.now(timezone.utc)
     config = FleetConfig(hosts=[

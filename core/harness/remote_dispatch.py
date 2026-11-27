@@ -18,19 +18,23 @@ Topology and fallback rules (owner decision, not re-litigated here):
 - Worker offline -> next worker, or local immediately.
 - Worker busy -> poll its ``/health`` for up to
   ``DARKFAC_REMOTE_BUSY_WAIT_SEC`` (default 300s), then move on.
-- Nothing usable -> local, UNLESS ``--remote-required``/
-  ``DARKFAC_REMOTE_HARNESS=required`` was set, in which case
+- Nothing usable -> local, UNLESS ``--remote-required`` (any gate scope,
+  including the ``pr`` profile) or ``DARKFAC_REMOTE_HARNESS=required`` under
+  ``DARKFAC_GATE_SCOPE=full`` was set, in which case
   :class:`RemoteRequiredError` is raised (a ``RuntimeError``, so
   ``core.harness.runner.main`` reports it exactly like any other harness
-  configuration error).
+  configuration error). A fleet reservation held by this run
+  (``DARKFAC_RUN_ID``) does not make its own host ineligible.
 
 Remote is disabled automatically -- silently, never raising even under
 ``--remote-required`` -- when: ``CI`` is truthy; the runner is itself
 executing inside a worker job (``DARKFAC_HARNESS_WORKER_JOB=1``, set by the
-worker for the ``runner.py --local`` subprocess it launches); or a
-candidate worker resolves to this same machine (self-dispatch loop guard).
-``DARKFAC_REMOTE_HARNESS=off`` / ``--local`` also disable it, but as an
-explicit user choice rather than a safety invariant.
+worker for the ``runner.py --local`` subprocess it launches).
+``DARKFAC_REMOTE_HARNESS=off`` (without ``--remote-required``) / ``--local``
+also disable it, but as an explicit user choice rather than a safety invariant.
+A candidate worker that resolves to this same machine (self-dispatch loop
+guard) is merely ineligible: in required mode, if no other worker serves,
+:class:`RemoteRequiredError` is raised.
 
 Trust model: this module never forwards the worker's own supervisor
 markers. It parses the worker's structured ``HarnessResult`` JSON, verifies
@@ -541,11 +545,10 @@ def _worker_supports_profile(health: dict[str, Any], profile: str) -> bool:
 
 
 def _effective_mode(*, remote_required: bool) -> str:
-    full = os.environ.get("DARKFAC_GATE_SCOPE") == "full"
     if remote_required:
-        return "required" if full else "auto"
+        return "required"  # USR-583: the explicit flag is never downgraded, whatever the gate scope
     raw = os.environ.get(ENV_REMOTE_HARNESS, "auto").strip().lower()
-    if raw == "required" and not full:
+    if raw == "required" and os.environ.get("DARKFAC_GATE_SCOPE") != "full":
         return "auto"
     return raw if raw in ("auto", "off", "required") else "auto"
 
@@ -1832,6 +1835,8 @@ def maybe_dispatch_remote(
             try:
                 candidate_sha = _local_candidate_sha(project_root)
             except RuntimeError:
+                if remote_required:
+                    raise  # same canonical error, without ever starting the local suite
                 return None  # let the existing local path produce the canonical error
             for prior_attempt in DISPATCH_ATTEMPTS:
                 if prior_attempt.get("candidate_sha") == "unresolved":
