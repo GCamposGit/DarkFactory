@@ -303,6 +303,14 @@ candidato. O launcher agenda `pending_delivery` e sai com o código 75. Uma alte
 política descarta a exclusão anterior e exige uma nova revisão independente. Sem aprovação ligada ao
 mesmo `candidate_digest`, a retomada da DarkFac não chega ao merge.
 
+Uma resposta intermediária do Grok (`structured_output_incomplete`) não é veredito. O padrão é
+incompleto: só é final a resposta cujo `text` traz um objeto JSON semanticamente igual a
+`structuredOutput`; texto de progresso, `text` ausente ou veredito divergente ficam incompletos. REVIEW grava o diagnóstico em
+`review_invalid_response.json`, exclui o par harness/modelo em `incomplete_response_routes` para o
+mesmo `candidate_digest` e `policy_digest` e retorna `review_incomplete_response` com a próxima rota
+(ou `no_route_available`). Não consome rodada, não cria `review-N.md` nem `review_verdict.json` e não
+volta ao BUILD. Veredito final `changes_required` com achados segue bloqueante.
+
 ### Reabertura da espera de revisão (USR-512 T3)
 
 Uma espera de REVIEW em `blocked` com causa retomável volta a ser consultada quando o `next_check` vence.

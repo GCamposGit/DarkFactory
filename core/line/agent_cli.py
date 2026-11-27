@@ -206,6 +206,9 @@ class AgentResult(BaseModel):
     usage: Optional[dict[str, Any]] = None
     # OpenRouter ``finish_reason``. ``length`` means the completion hit the token cap.
     finish_reason: Optional[str] = None
+    # A structured Grok response can contain an interim `text` update alongside a
+    # schema-shaped but not yet final `structuredOutput` (USR-537).
+    structured_output_incomplete: bool = False
     # True when that reason is ``length`` or ``completion_tokens`` reached the paid ceiling.
     truncated: bool = False
     cost_usd: Optional[float] = None
@@ -1725,6 +1728,28 @@ def _build_grok_read_argv(executable: str, req: AgentRequest) -> list[str]:
     return argv
 
 
+def _grok_structured_output_is_incomplete(parsed: dict[str, Any], structured: Any) -> bool:
+    """Fail closed unless the envelope's `text` confirms `structuredOutput` (USR-537).
+
+    Grok's JSON envelope has both a user-facing `text` and `structuredOutput`, and
+    the latter can validate while the agent is still reading. The only evidence of
+    a completed response is a JSON object in `text` semantically equal to it;
+    progress prose, a missing `text` or a divergent verdict is not final.
+    """
+    text = parsed.get("text")
+    if not isinstance(text, str):
+        return True
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        try:
+            candidate, _end = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        if candidate == structured:
+            return False
+    return True
+
+
 def _parse_grok_structured_read(
     req: AgentRequest,
     output_text: str,
@@ -1747,6 +1772,10 @@ def _parse_grok_structured_read(
 
     is_error = parsed.get("type") == "error"
     structured = parsed.get("structuredOutput") if "structuredOutput" in parsed else parsed.get("structured_output")
+    structured_incomplete = (
+        _grok_structured_output_is_incomplete(parsed, structured)
+        if structured is not None and not is_error else False
+    )
     if structured is not None and not is_error:
         result_text = json.dumps(structured, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     else:
@@ -1769,7 +1798,8 @@ def _parse_grok_structured_read(
     return AgentResult(
         ok=True, text=redact_secrets(result_text), harness="grok",
         model=model, model_source=model_source, effort=effort,
-        duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
+        duration_s=duration, usage=usage, cost_usd=cost_usd,
+        structured_output_incomplete=structured_incomplete, **diag,
     )
 
 
