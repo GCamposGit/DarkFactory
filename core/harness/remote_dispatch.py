@@ -29,10 +29,12 @@ Topology and fallback rules (owner decision, not re-litigated here):
 Remote is disabled automatically -- silently, never raising even under
 ``--remote-required`` -- when: ``CI`` is truthy; the runner is itself
 executing inside a worker job (``DARKFAC_HARNESS_WORKER_JOB=1``, set by the
-worker for the ``runner.py --local`` subprocess it launches); or a
-candidate worker resolves to this same machine (self-dispatch loop guard).
-``DARKFAC_REMOTE_HARNESS=off`` / ``--local`` also disable it, but as an
-explicit user choice rather than a safety invariant.
+worker for the ``runner.py --local`` subprocess it launches).
+``DARKFAC_REMOTE_HARNESS=off`` (without ``--remote-required``) / ``--local``
+also disable it, but as an explicit user choice rather than a safety invariant.
+A candidate worker that resolves to this same machine (self-dispatch loop
+guard) is merely ineligible: in required mode, if no other worker serves,
+:class:`RemoteRequiredError` is raised.
 
 Trust model: this module never forwards the worker's own supervisor
 markers. It parses the worker's structured ``HarnessResult`` JSON, verifies

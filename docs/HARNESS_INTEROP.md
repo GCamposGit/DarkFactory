@@ -279,7 +279,9 @@ precisa mudar. Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
    silenciosamente (comportamento padrão, `auto`).
 4. Nenhum worker utilizável e `--remote-required`/`DARKFAC_REMOTE_HARNESS=
    required` foi passado → falha com `[HARNESS_FAIL]` em vez de rodar
-   localmente sem avisar, em qualquer perfil, inclusive `pr`.
+   localmente sem avisar, em qualquer perfil, inclusive `pr` (exceções: as
+   guardas de `CI` e de job do worker, abaixo). A variável sozinha só é estrita
+   com `DARKFAC_GATE_SCOPE=full`; fora desse escopo vale como `auto`.
 
 5. **Job despachado que nunca entrega veredito (USR-162)** → o cliente não
    desiste mais de forma anônima. Causa raiz do incidente de 2026-10-08
@@ -311,13 +313,19 @@ precisa mudar. Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
      `worker_internal_error`, `worker_setup_failed`) nunca é reportado como
      falha de teste.
 
-`CI` truthy e um processo já rodando **dentro** de um job do worker
-(`DARKFAC_HARNESS_WORKER_JOB=1`, setado pelo próprio worker) desabilitam o
-despacho remoto. O self-dispatch também impede um loop worker→worker: o próprio
-host não é tratado como worker remoto elegível. Essas condições não autorizam
-o modo `required` a executar localmente em silêncio; o portão falha fechado,
-exceto quando a execução local foi explicitamente escolhida (`--local` ou modo
-`off`) ou quando o worker executa o subprocesso local do job remoto.
+Duas guardas de segurança desligam o despacho remoto **incondicionalmente**,
+mesmo com `--remote-required`, sem lançar `RemoteRequiredError`: o portão segue
+pelo caminho local.
+
+- `CI` truthy;
+- o processo já está rodando **dentro** de um job do worker
+  (`DARKFAC_HARNESS_WORKER_JOB=1`, setado pelo próprio worker).
+
+O self-dispatch é diferente: a URL que resolve para a própria máquina (comparada
+por IP local e pelo `hostname` que o `/health` reporta) torna só aquele
+candidato inelegível, o que impede um loop worker→worker. Se nenhum outro worker
+servir, o modo `required` falha com `RemoteRequiredError` e o modo `auto` roda
+localmente.
 
 ### Reserva da frota e identidade do run (USR-583)
 
@@ -359,8 +367,8 @@ continuam sujeitos à exclusão mútua de `admission.sqlite3`.
    remoto jamais consiga injetar um marcador `[HARNESS_PASS]`/
    `[HARNESS_RESULT]`/etc. forjado na saída do supervisor local. `DELETE
    /harness/jobs/{id}` cancela (Ctrl+C do cliente, timeout do cliente, ou
-   worker que some por >60s durante a execução — nesses casos o cliente
-   cai para execução local).
+   worker que some por >60s durante a execução — se o worker some, o cliente
+   no modo `auto` cai para execução local e no modo `required` falha).
 6. **Confiança**: o cliente nunca repassa os marcadores do worker. Ele
    parseia o `HarnessResult` estruturado (`result_json` do job concluído),
    confere `candidate_sha` == HEAD local e `config_hash` == local — qualquer
@@ -419,8 +427,10 @@ tailnet).
 worker configurado — útil para depurar o próprio harness sem envolver a
 rede. `--remote-required` exige que o despacho remoto tenha sucesso em todo
 perfil, inclusive `pr`; worker ocupado, indisponível, inelegível ou job perdido
-resulta em falha explícita, nunca em fallback local silencioso. Nenhum dos dois
-altera `harness.config.json`.
+resulta em falha explícita, sem fallback local. Ele prevalece sobre
+`DARKFAC_REMOTE_HARNESS=off`, mas não sobre `--local` nem sobre as guardas de
+`CI` e de job do worker, que seguem localmente. Nenhum dos dois altera
+`harness.config.json`.
 
 ## Deploy pós-merge (Dokploy)
 
