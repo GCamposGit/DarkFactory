@@ -15404,7 +15404,7 @@
     "title": "Despachante nao deve redespachar ticket com PR ativo; adotar o PR na entrega",
     "origin": "user",
     "status": "planned",
-    "delivery_evidence": null,
+    "delivery_evidence": "candidate:70f9f99d6fdaff8e1a3b8ad36649f0bcacb20b64",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -15425,6 +15425,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-23T09:49:34.151889Z",
-    "updated_at": "2026-11-23T09:49:34.151889Z"
+    "updated_at": "2026-11-27T11:29:46.533418Z"
   }
 ]
