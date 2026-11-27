@@ -15342,7 +15342,7 @@
     "title": "Expor a recusa do launcher na via expressa do owner",
     "origin": "user",
     "status": "planned",
-    "delivery_evidence": null,
+    "delivery_evidence": "candidate:46d6ec0a52a4528c72d23184e18fc60603b62690",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -15363,6 +15363,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-11-15T09:26:24.926860Z",
-    "updated_at": "2026-11-15T09:26:24.926860Z"
+    "updated_at": "2026-11-27T08:54:52.530297Z"
   }
 ]
