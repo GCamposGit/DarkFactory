@@ -39,6 +39,8 @@ def test_head_igual_base_com_arvore_suja_gera_pack_nao_vazio(repo_single_commit:
         assert changes[path].added > 0 and changes[path].removed == 0
     assert "soma" in art.symbols
     assert "test_soma" in art.tests_changed
+    # simbolos ainda nao commitados nao sao rejeitados pela verificacao
+    assert "`soma`" in art.dev and art.rejected_claims == []
 
 
 def test_untracked_binario_nao_quebra_a_coleta(repo_single_commit: Path) -> None:
@@ -49,3 +51,24 @@ def test_untracked_binario_nao_quebra_a_coleta(repo_single_commit: Path) -> None
 
     blob_change = next(f for f in art.files if f.path == "core/blob.bin")
     assert blob_change.added == 0 and blob_change.removed == 0
+
+
+@pytest.mark.parametrize("estado", ["commit_a_frente", "somente_staged", "anulado_na_arvore"])
+def test_coleta_commit_staged_e_unstaged_separadamente(repo_single_commit: Path, estado: str) -> None:
+    repo = repo_single_commit
+    calc = repo / "core" / "calc.py"
+    calc.write_text("X = 2\n\ndef dobro(a):\n    return a * 2\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    base = "HEAD"
+    if estado != "somente_staged":
+        _git(repo, "commit", "-qm", "head")
+        base = "HEAD~1"
+    if estado == "anulado_na_arvore":
+        calc.write_text("X = 1\n", encoding="utf-8")  # arvore final igual a base
+
+    art = build_for_delivery(repo, base, "HEAD", "USR-522")
+
+    assert [f.path for f in art.files] == ["core/calc.py"]
+    assert art.files[0].added > 0
+    assert "dobro" in art.symbols
+    assert art.rejected_claims == []

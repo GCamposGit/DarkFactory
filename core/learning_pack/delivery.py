@@ -116,40 +116,56 @@ def _scan_untracked_symbols_tests(repo: Path, rel_path: str, symbols: list[str],
 
 
 def _collect(repo: Path, base: str, head: str) -> tuple[list[FileChange], list[str], list[str]]:
+    """Coleta base..head e, no HEAD atual, tambem staged, unstaged e untracked.
+
+    Cada diff e lido separadamente: comparar so a arvore final esconderia mudancas que se anulam.
+    """
     working_tree = _targets_working_tree(repo, head)
-    diff_refs = (base,) if working_tree else (base, head)
-    files: list[FileChange] = []
-    for line in _git(repo, "diff", "--numstat", *diff_refs).splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3:
-            a, r, p = parts
-            files.append(
-                FileChange(path=p, added=int(a) if a.isdigit() else 0, removed=int(r) if r.isdigit() else 0)
-            )
+    diffs: list[tuple[str, ...]] = [(base, head)]
+    if working_tree:
+        diffs += [("--cached",), ()]
+    changes: dict[str, FileChange] = {}
     symbols: list[str] = []
     tests: list[str] = []
-    for line in _git(repo, "diff", "-U0", *diff_refs).splitlines():
-        m = _TEST_RE.match(line)
-        if m:
-            tests.append(m.group(1))
-        m = _DEF_RE.match(line)
-        if m and m.group(1) not in symbols:
-            symbols.append(m.group(1))
+
+    def add_change(path: str, added: int, removed: int) -> None:
+        change = changes.setdefault(path, FileChange(path=path))
+        change.added += added
+        change.removed += removed
+
+    for refs in diffs:
+        for line in _git(repo, "diff", "--numstat", *refs).splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                a, r, p = parts
+                add_change(p, int(a) if a.isdigit() else 0, int(r) if r.isdigit() else 0)
+        for line in _git(repo, "diff", "-U0", *refs).splitlines():
+            m = _TEST_RE.match(line)
+            if m:
+                tests.append(m.group(1))
+            m = _DEF_RE.match(line)
+            if m and m.group(1) not in symbols:
+                symbols.append(m.group(1))
     if working_tree:
         for rel in _git(repo, "ls-files", "--others", "--exclude-standard").splitlines():
             rel = rel.strip()
             if not rel:
                 continue
-            added, removed = _numstat_untracked(repo, rel)
-            files.append(FileChange(path=rel, added=added, removed=removed))
+            add_change(rel, *_numstat_untracked(repo, rel))
             _scan_untracked_symbols_tests(repo, rel, symbols, tests)
-    return files, symbols, sorted(set(tests))
+    return list(changes.values()), symbols, sorted(set(tests))
 
 
 def _symbol_exists(repo: Path, head: str, symbol: str) -> bool:
+    """Procura na arvore do head; no HEAD atual, tambem no indice e na worktree (com untracked)."""
     last = symbol.split(".")[-1]
-    res = subprocess.run(["git", "grep", "-qwF", last, head], cwd=repo, capture_output=True, text=True)
-    return res.returncode == 0
+    searches: list[list[str]] = [["-qwF", last, head]]
+    if _targets_working_tree(repo, head):
+        searches += [["--cached", "-qwF", last], ["--untracked", "-qwF", last]]
+    return any(
+        subprocess.run(["git", "grep", *args], cwd=repo, capture_output=True).returncode == 0
+        for args in searches
+    )
 
 
 def verify_text(
