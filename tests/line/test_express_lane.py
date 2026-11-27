@@ -677,12 +677,28 @@ def _owner_store(tmp_path: Path) -> OwnerActionStore:
     return OwnerActionStore(tmp_path / "owner_actions.json", remote_ref=None, control=False)
 
 
-def _spawn_recorder() -> tuple[list[list[str]], Any]:
+def _spawn_recorder(*, receipt_dir: Path | None = None, ticket_id: str = _TICKET) -> tuple[list[list[str]], Any]:
     spawned: list[list[str]] = []
 
-    def spawn(argv: list[str]) -> int:
+    class Process:
+        pid = 734
+        _express_log_path: str | None = None
+
+        def poll(self) -> None:
+            return None
+
+    def spawn(argv: list[str], launch_id: str) -> Process:
         spawned.append(list(argv))
-        return 0
+        process = Process()
+        if receipt_dir is not None:
+            receipt_dir.mkdir(parents=True, exist_ok=True)
+            (receipt_dir / f"{launch_id}.json").write_text(json.dumps({
+                "ticket": ticket_id,
+                "pid": process.pid,
+                "worktree": str(receipt_dir / "worktree"),
+                "launch_id": launch_id,
+            }), encoding="utf-8")
+        return process
 
     return spawned, spawn
 
@@ -794,7 +810,7 @@ def test_a_broken_probe_does_not_hide_the_quota_floor(capsys: pytest.CaptureFixt
 def test_valid_host_launches_run_ticket_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     script = tmp_path / "run_ticket.py"
     script.write_text("# launcher\n", encoding="utf-8")
-    spawned, spawn = _spawn_recorder()
+    spawned, spawn = _spawn_recorder(receipt_dir=tmp_path)
     code = run_express(
         _TICKET,
         port=_MemoryPort(_ticket()),
@@ -803,17 +819,18 @@ def test_valid_host_launches_run_ticket_once(tmp_path: Path, capsys: pytest.Capt
         running=set(),
         spawn=spawn,
         run_ticket=script,
+        receipt_dir=tmp_path,
     )
     out = capsys.readouterr().out
 
     assert code == 0
     assert spawned == [[sys.executable, str(script), _TICKET, "--fleet", "--host-id", "notebook"]]
-    assert f"lancado: run_ticket.py {_TICKET} --fleet --host-id notebook" in out
+    assert f"admitido: {_TICKET}; worktree:" in out
 
 
-def test_valid_host_uses_this_host_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_valid_host_uses_this_host_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("core.line.line_lock.resolve_host_id", lambda host_id=None: "desktop")
-    spawned, spawn = _spawn_recorder()
+    spawned, spawn = _spawn_recorder(receipt_dir=tmp_path)
     code = run_express(
         _TICKET,
         port=_MemoryPort(_ticket()),
@@ -821,12 +838,100 @@ def test_valid_host_uses_this_host_id(monkeypatch: pytest.MonkeyPatch) -> None:
         running=set(),
         spawn=spawn,
         run_ticket=Path("run_ticket.py"),
+        receipt_dir=tmp_path,
     )
 
     assert code == 0
     assert spawned[0][2:] == [_TICKET, "--fleet", "--host-id", "desktop"]
     assert len(spawned) == 1
     assert len(spawned[0]) == 6
+
+
+def test_child_exit_reports_sanitized_cause_without_claiming_admission(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The child log is what the real launcher prints when its workspace stage refuses a dirty checkout.
+    def refuse(_args: Any, _ticket: Any) -> None:
+        raise run_ticket.SharedCheckoutDirty(["\x1b[31mREADME.md\x1b[0m"])
+
+    monkeypatch.setattr(run_ticket, "_prepare_workspace", refuse)
+    workspace, exit_code = run_ticket._stage_workspace(
+        run_ticket.build_parser().parse_args([_TICKET]), _ticket(), SimpleNamespace(phase=lambda *_a, **_k: None),
+    )
+    child_stderr = capsys.readouterr().err
+    assert workspace is None
+
+    class Failed:
+        pid = 735
+        _express_log_path = str(tmp_path / "child.log")
+
+        def poll(self) -> int:
+            return exit_code
+
+    log = Path(Failed._express_log_path)
+    log.write_text(child_stderr + "[ESTEIRA] progresso mudo - sem Hub; fases_nao_publicadas=1\n", encoding="utf-8")
+    code = run_express(
+        _TICKET, port=_MemoryPort(_ticket()), checks=[], running=set(),
+        spawn=lambda _argv, _launch_id: Failed(), receipt_dir=tmp_path,
+    )
+    out = capsys.readouterr().out
+
+    assert code == 1
+    assert "recusado:" in out
+    assert "causa: shared_checkout_dirty" in out
+    assert "\x1b" not in out
+    assert "lancado" not in out and "admitido" not in out
+
+
+@pytest.mark.parametrize("receipt", [
+    {"ticket": _OTHER, "pid": 736, "worktree": "x", "launch_id": "{id}"},
+    {"ticket": _TICKET, "pid": 999, "worktree": "x", "launch_id": "{id}"},
+    {"ticket": _TICKET, "pid": 736, "worktree": "x", "launch_id": "wrong"},
+    {"ticket": _TICKET, "pid": 736, "worktree": "x"},
+])
+def test_invalid_receipt_is_not_admission(
+    receipt: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    class Failed:
+        pid = 736
+        _express_log_path: str | None = None
+
+        def poll(self) -> int:
+            return 0
+
+    def spawn(_argv: list[str], launch_id: str) -> Failed:
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        content = {key: value.format(id=launch_id) if isinstance(value, str) else value for key, value in receipt.items()}
+        (tmp_path / f"{launch_id}.json").write_text(json.dumps(content), encoding="utf-8")
+        return Failed()
+
+    code = run_express(
+        _TICKET, port=_MemoryPort(_ticket()), checks=[], running=set(),
+        spawn=spawn, receipt_dir=tmp_path,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "recusado:" in out
+    assert "admitido" not in out and "lancado" not in out
+
+
+def test_stale_receipt_is_not_admission(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _spawned, fresh = _spawn_recorder(receipt_dir=tmp_path)
+
+    def spawn(argv: list[str], launch_id: str) -> Any:
+        process = fresh(argv, launch_id)
+        process.poll = lambda: 1
+        os.utime(tmp_path / f"{launch_id}.json", (1_000_000, 1_000_000))
+        return process
+
+    code = run_express(
+        _TICKET, port=_MemoryPort(_ticket()), checks=[], running=set(),
+        spawn=spawn, receipt_dir=tmp_path,
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "recusado:" in out
+    assert "admitido" not in out
 
 
 @pytest.mark.parametrize("status", ["implementing", "validating"])

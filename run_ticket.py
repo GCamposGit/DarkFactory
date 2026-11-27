@@ -22,7 +22,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -545,6 +547,15 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         # External repositories do not carry DarkFac's central demand ledger.
         return workspace
 
+    # A prior attempt's eligible worktree is already isolated from the shared checkout. Resume it
+    # before checking the checkout: the latter may have unrelated user edits that must remain intact.
+    workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
+    if workspace is not None:
+        ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
+        if ledger.get_ticket(ticket.id) is None:
+            ledger.save_ticket(ticket)
+        return workspace
+
     if not args.allow_dirty_shared_checkout:
         dirty = [
             p
@@ -553,10 +564,8 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         ]
         if dirty:
             raise SharedCheckoutDirty(dirty)
-    workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
-    is_new_workspace = workspace is None
-    if workspace is None:
-        workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
+    workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
+    is_new_workspace = True
     ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     generated_discard_hashes: dict[str, str] = {}
     if ledger.get_ticket(ticket.id) is None:
@@ -565,6 +574,33 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
             ledger_path = workspace.path / LEDGER_RELATIVE
             generated_discard_hashes[LEDGER_RELATIVE] = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
     return replace(workspace, discard_path_hashes=generated_discard_hashes)
+
+
+def _publish_admission_receipt(ticket: UserTicket, workspace: TicketWorkspace) -> Path:
+    """Atomically publish this launch's admission after routing and worktree selection (USR-520 T1)."""
+    receipt_dir = PROJECT_ROOT / ".factory" / "tmp" / "launch_receipts"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    receipt_id = os.environ.get("DARKFAC_LAUNCH_RECEIPT_ID") or uuid.uuid4().hex
+    receipt_path = receipt_dir / f"{receipt_id}.json"
+    payload = {
+        "ticket": ticket.id,
+        "pid": os.getpid(),
+        "worktree": str(workspace.path.resolve()),
+        "launch_id": receipt_id,
+    }
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{receipt_id}-", suffix=".tmp", dir=receipt_dir)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as receipt_file:
+            json.dump(payload, receipt_file, ensure_ascii=False, sort_keys=True)
+            receipt_file.write("\n")
+            receipt_file.flush()
+            os.fsync(receipt_file.fileno())
+        # Hard-link creation is atomic and fails if a same-name receipt already exists.
+        os.link(temporary_path, receipt_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return receipt_path
 
 
 def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
@@ -3439,6 +3475,20 @@ def _resume_delivery_target(args: argparse.Namespace) -> Optional[str]:
     )
 
 
+def _report_pre_receipt_refusal(args: argparse.Namespace, cause: str, error: str) -> None:
+    """Official cause line for a run that stops before publishing its admission receipt (USR-520 T2).
+
+    The owner express lane reads this line from the child log. ``--json`` runs keep their structured
+    payload as the only machine output.
+    """
+    if args.json:
+        return
+    from core.line.agent_cli import redact_secrets
+
+    detail = redact_secrets(" ".join(str(error).split()))[:500]
+    print(f"[ERRO NA ENTREGA] causa: {cause}; erro: {detail}", file=sys.stderr)
+
+
 def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resume_target: Optional[str]) -> Optional[int]:
     """Line lock (USR-250): one run_ticket at a time per shared checkout. Returns an exit code on refusal."""
     # 000. Line lock (USR-250): one run_ticket (this main flow, or a standalone --resume-delivery) at a
@@ -3465,6 +3515,7 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
                                   "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
             else:
                 print(f"[WAIT] gate_busy: {exc}", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "gate_busy", str(exc))
             return EXIT_ROUTE_WAIT
         except Exception as exc:  # noqa: BLE001 - unknown probe state is a structured wait
             cause = f"gate_probe_failed:{type(exc).__name__}"
@@ -3473,6 +3524,7 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
                                  ensure_ascii=False), file=sys.stderr)
             else:
                 print(f"[WAIT] {cause}", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "gate_probe_failed", cause)
             return EXIT_ROUTE_WAIT
     lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
     fleet_mode = getattr(args, "fleet", False) or line_lock.is_fleet_mode()
@@ -3502,6 +3554,7 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
             }, ensure_ascii=False), file=sys.stderr)
         else:
             print(f"\n{exc}\n", file=sys.stderr)
+        _report_pre_receipt_refusal(args, "canonical_ownership_conflict", str(exc))
         return 2
     except line_lock.ReservationConflictError as exc:
         if args.json:
@@ -3513,6 +3566,7 @@ def _stage_line_lock(args: argparse.Namespace, stack: contextlib.ExitStack, resu
             }, ensure_ascii=False), file=sys.stderr)
         else:
             print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
+        _report_pre_receipt_refusal(args, "canonical_ownership_conflict", str(exc))
         return 2
     return None
 
@@ -3540,6 +3594,7 @@ def _stage_check_harness(args: argparse.Namespace) -> Optional[int]:
         requested = args.harness.lower().strip()
         if _execution_context(args) == "headless" and requested == "antigravity":
             print("[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "headless_context", "antigravity indisponivel em contexto headless")
             return 2
     # Fail before any side effect (quota probe, ticket creation, agent call) when the requested harness
     # cannot do what development needs: capabilities are declared, never assumed.
@@ -3553,6 +3608,7 @@ def _stage_check_harness(args: argparse.Namespace) -> Optional[int]:
             f"Harnesses com escrita: {writers}. Nenhum agente foi consumido.",
             file=sys.stderr,
         )
+        _report_pre_receipt_refusal(args, "harness_unsupported", f"harness {requested} sem modo de escrita")
         return 2
     return None
 
@@ -3593,6 +3649,7 @@ def _stage_intake(args: argparse.Namespace) -> tuple[Optional[UserTicket], int]:
             ticket = _ticket_from_origin_main(args.ticket_id, PROJECT_ROOT)
         if ticket is None:
             print(f"[ERRO] Ticket {args.ticket_id} não encontrado no backlog.", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "ticket_not_found", f"ticket {args.ticket_id} ausente no backlog")
             return None, 1
         if not args.json:
             print(f"\n[+] Ticket carregado: {ticket.id} - '{ticket.title}'")
@@ -3623,6 +3680,7 @@ def _stage_route(
         if execution_context == "headless" and target_harness == "antigravity":
             print("[ERRO] Antigravity nao e elegivel para desenvolvimento headless/frota.", file=sys.stderr)
             progress.phase("preflight", "failed", "antigravity indisponivel em contexto headless", cause="headless_context")
+            _report_pre_receipt_refusal(args, "headless_context", "antigravity indisponivel em contexto headless")
             return 2
         harness_info = quotas.get(target_harness)
         if harness_info and harness_info["is_critical"] and not override_granted:
@@ -3645,6 +3703,7 @@ def _stage_route(
             )
             if rec_route:
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "quota_critical", f"harness {target_harness} recusado: {quota_reason}")
             return 2
 
         if not args.json:
@@ -3669,6 +3728,7 @@ def _stage_route(
             "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
             file=sys.stderr,
         )
+        _report_pre_receipt_refusal(args, "no_route", "nenhuma rota disponivel (cotas <= 15%)")
         return 2
     selected_harness, selected_model = route
     preferred_operating = effective_operating is not None and selected_harness == effective_operating
@@ -3693,10 +3753,12 @@ def _stage_workspace(
     except SharedCheckoutDirty as exc:
         progress.phase("workspace", "failed", "checkout compartilhado sujo", cause="shared_checkout_dirty")
         print(f"[ERRO] {exc}", file=sys.stderr)
+        _report_pre_receipt_refusal(args, "shared_checkout_dirty", ", ".join(exc.paths[:15]))
         return None, 3
     except (WorkspaceError, RuntimeError) as exc:
         progress.phase("workspace", "failed", str(exc), cause="workspace_error")
         print(f"[ERRO] Não foi possível criar a worktree do ticket {ticket.id}: {exc}", file=sys.stderr)
+        _report_pre_receipt_refusal(args, "workspace_error", str(exc))
         return None, 1
     progress.phase("workspace", "succeeded", _describe_workspace(workspace))
     if not args.json:
@@ -4027,6 +4089,7 @@ def _stage_admission(
         "exit_code": EXIT_ROUTE_WAIT,
     }
     print(json.dumps(payload, ensure_ascii=False))
+    _report_pre_receipt_refusal(args, "route_wait", message)
     return EXIT_ROUTE_WAIT
 
 
@@ -5171,12 +5234,14 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             refusal = {"status": "refused", "reason": "pull_request_lookup_unavailable", "ticket_id": ticket.id,
                        "project_id": ticket.project_id, "message": str(exc)}
             print(json.dumps(refusal, ensure_ascii=False) if args.json else f"[RECUSA] {exc}", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "pull_request_lookup_unavailable", str(exc))
             return 2
         if active_pr is not None:
             refusal = {"status": "refused", "reason": "active_pull_request", "ticket_id": ticket.id,
                        "project_id": ticket.project_id, "existing_execution": active_pr.to_dict()}
             print(json.dumps(refusal, ensure_ascii=False) if args.json else
                   f"[RECUSA] Ticket {ticket.id} ja possui PR ativo #{active_pr.number}: {active_pr.url}", file=sys.stderr)
+            _report_pre_receipt_refusal(args, "active_pull_request", f"PR ativo #{active_pr.number}")
             return 2
 
     # Live line board (USR-140): best-effort phase events. Held until the run is known not to be a dry
@@ -5211,12 +5276,19 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         )
     )
     if _cancelled():
+        _report_pre_receipt_refusal(args, "cancelled", _cancel_message())
         return _abort_cancelled(progress, ticket.id, args.json)
 
     # 3. Own worktree (USR-69)
     workspace, ws_exit = _stage_workspace(args, ticket, progress)
     if workspace is None:
         return ws_exit
+    try:
+        _publish_admission_receipt(ticket, workspace)
+    except OSError as exc:
+        # The receipt is an internal hand-off for the owner express lane. Keep execution behavior
+        # intact if local runtime storage is unavailable, while making the loss observable.
+        logger.warning("Could not publish admission receipt for %s: %s", ticket.id, exc)
     if _cancelled():
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 

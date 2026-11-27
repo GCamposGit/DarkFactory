@@ -15334,5 +15334,35 @@
     "dependencies": [],
     "created_at": "2026-11-26T19:19:18.476463Z",
     "updated_at": "2026-11-27T01:37:36.541383Z"
+  },
+  {
+    "id": "USR-520",
+    "project_id": "darkfac",
+    "priority": 0,
+    "title": "Expor a recusa do launcher na via expressa do owner",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": "candidate:1231c1900fe890460b4b8f04d7fcfbfc2489addd",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "express_causes": [],
+    "problem_statement": "OA-092 em 15/11/2026: express_lane informou lancado para USR-513, depois o processo terminou sem trabalho ativo. A mesma chamada com stdout capturado mostrou shared_checkout_dirty. express_lane abre subprocesso com stdout e stderr em DEVNULL, de modo que a acao nao distingue disparo de admissao, nem mostra a causa. A worktree anterior do ticket pode ser reaproveitada quando o launcher parte de uma worktree limpa.",
+    "core_journey": [
+      "OA-092 em 15/11/2026: express_lane informou lancado para USR-513, depois o processo terminou sem trabalho ativo. A mesma chamada com stdout capturado mostrou shared_checkout_dirty. express_lane abre subprocesso com stdout e stderr em DEVNULL, de modo que a acao nao distingue disparo de admissao, nem mostra a causa. A worktree anterior do ticket pode ser reaproveitada quando o launcher parte de uma worktree limpa."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Checkout principal com mudancas do usuario fica preservado e a retomada usa o caminho seguro de worktree, respeitando piso de cota e deduplicacao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-11-15T09:26:24.926860Z",
+    "updated_at": "2026-11-27T08:55:14.077345Z"
   }
 ]

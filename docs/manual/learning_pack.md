@@ -145,3 +145,32 @@ comprovado limpa o orçamento. O sentinela relata fila integralmente bloqueada c
 Perguntas de revisão: trocar de host devolve uma tentativa? Não. Timeout reduz o limite do
 candidato? Não. CI/revisão esgotados contam? Sim, uma vez por tentativa, mesmo após relançamento.
 Estes contratos têm validação focal local; não representam evidência de CI, merge ou deploy.
+
+## Aprendizado da entrega USR-520
+
+A OA-092 mostrou o problema: `express_lane` imprimia "lançado" ao disparar o processo
+filho, mas o filho podia terminar logo depois sem nenhum trabalho ativo (no caso real,
+`shared_checkout_dirty`), porque `stdout`/`stderr` do filho iam para `DEVNULL` — a via
+expressa não tinha como distinguir disparo de admissão nem mostrar a causa. A correção
+separa as duas coisas: o `run_ticket.py` só publica um **recibo de admissão**
+(`.factory/tmp/launch_receipts/<launch_id>.json`, escrito em arquivo temporário com
+`fsync` e promovido por hard link atômico) depois que a worktree da entrega já foi
+escolhida, e o `express_lane` só imprime `admitido: <ticket>; worktree: <caminho>` depois
+de ler esse recibo e confirmar que `ticket`, `pid` e `launch_id` combinam exatamente com o
+lançamento em curso. Sem recibo e com o filho já terminado, a saída é `recusado: <ticket>;
+processo terminou (<código>); causa: <causa>`, lida da última linha `[ERRO NA ENTREGA]
+causa: ...` ou `requisito ausente: ...:` do log do filho (agora gravado em
+`.factory/tmp/express_lane/<launch_id>.log`, nunca mais `DEVNULL`, com sequências ANSI e
+caracteres de controle removidos antes da leitura). Sem recibo e com o filho ainda vivo, a
+saída é `recibo de admissao ausente`, um terceiro estado que não é sucesso nem recusa.
+
+A segunda parte do problema era a causa `shared_checkout_dirty` em si: um checkout
+principal com mudanças do usuário não deveria impedir a retomada de uma worktree que já
+existia, isolada, de uma tentativa anterior do mesmo ticket. `_prepare_workspace` passou a
+chamar `_resume_preserved_workspace` (a busca já usada na retomada pós-timeout, USR-225)
+antes de checar o checkout compartilhado; só na ausência de worktree elegível é que a
+sujeira do checkout principal é avaliada e pode recusar o lançamento. A worktree
+reaproveitada é um diretório isolado — a retomada nunca lê, move nem incorpora as
+mudanças do usuário no checkout principal para decidir ou executar o reaproveitamento.
+Piso de cota (15%) e deduplicação (ticket já em voo ou terminal não gera segundo
+processo) continuam intactos; esta lição não afirma CI, merge ou deploy.

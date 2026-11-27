@@ -90,7 +90,34 @@ Quando a causa é `self_modification`, a fábrica abre uma ação do owner com u
 Set-Location C:\dev\DarkFac; python -m core.line.express_lane run --ticket USR-494
 ```
 
-Troque `USR-494` pelo id do ticket (o comando já inclui `Set-Location <checkout>; ` para funcionar a partir de qualquer diretorio). O comando percorre todos os requisitos do host e imprime cada falha, inclusive o piso de cota de 15%. Com qualquer requisito ausente, não lança o ticket. Com o host válido, lança exatamente `run_ticket.py <ID> --fleet --host-id <host deste host>`, uma vez. Ticket já em voo (`implementing`, `validating` ou processo vivo) ou terminal (`completed`, `cancelled`) termina com sucesso e não cria outro processo. Portão, revisão e o piso de cota do `run_ticket.py` continuam valendo.
+Troque `USR-494` pelo id do ticket (o comando já inclui `Set-Location <checkout>; ` para funcionar a partir de qualquer diretorio). O comando percorre todos os requisitos do host e imprime cada falha, inclusive o piso de cota de 15%. Com qualquer requisito ausente, não lança o ticket. Com o host válido, dispara exatamente `run_ticket.py <ID> --fleet --host-id <host deste host>`, uma vez, e espera a admissão (ver abaixo) antes de anunciar sucesso. Ticket já em voo (`implementing`, `validating` ou processo vivo) ou terminal (`completed`, `cancelled`) termina com sucesso e não cria outro processo. Portão, revisão e o piso de cota do `run_ticket.py` continuam valendo.
+
+### Disparo, admissão e recusa (USR-520)
+
+Disparar o processo filho não é o mesmo que ele ter sido admitido. O `express_lane` só imprime
+`admitido: <ticket>; worktree: <caminho>` depois de ler um **recibo de admissão**: um JSON que o
+próprio `run_ticket.py` publica (`_publish_admission_receipt`) em
+`.factory/tmp/launch_receipts/<launch_id>.json` assim que a worktree da entrega já está escolhida
+(preservada reaproveitada ou nova), antes de iniciar PLAN/BUILD. A publicação usa um arquivo
+temporário com `fsync` e depois um hard link atômico para o nome final: dois lançamentos nunca
+sobrescrevem o recibo um do outro, e um recibo parcial nunca aparece pronto. O recibo só conta
+como admissão quando `ticket`, `pid` e `launch_id` no conteúdo coincidem exatamente com o que o
+`express_lane` esperava; qualquer divergência (outro ticket, outro pid, `launch_id` trocado, chave
+ausente) é tratada como "ainda não admitido", nunca como admissão de outro processo.
+
+O filho não herda mais `stdout`/`stderr` em `DEVNULL`: a saída vai para
+`.factory/tmp/express_lane/<launch_id>.log`. Se o processo terminar antes de publicar o recibo
+(por exemplo `shared_checkout_dirty`, piso de cota ou qualquer outra causa classificada do
+launcher), o `express_lane` imprime `recusado: <ticket>; processo terminou (<código>); causa:
+<causa>`, lendo a última linha `[ERRO NA ENTREGA] causa: ...` ou `requisito ausente: ...:` do log
+(sequências ANSI e caracteres de controle são removidos antes de procurar a causa). Fora do modo
+`--json`, o `run_ticket.py` imprime essa linha oficial nas recusas anteriores ao recibo (trava de
+linha, intake, PR ativo, admissão, roteamento, cancelamento e worktree, como
+`shared_checkout_dirty`). Se o processo continuar vivo sem publicar o recibo dentro do prazo de
+espera (180 s, para cobrir a sonda de cotas e a criação da worktree), a saída é `recibo de admissao
+ausente: <ticket>; processo continua ativo; log: <caminho>` — nem sucesso nem recusa definitiva, só
+ausência de prova. Nenhum desses três textos (`admitido`, `recusado`, `recibo de admissao
+ausente`) é intercambiável; só o primeiro autoriza tratar a via expressa como concluída.
 
 A segunda ocorrência da mesma causa `self_modification` alerta o owner uma vez (USR-494 T4). A primeira só grava o episódio em `express_episodes.json`, ao lado do estado do despachante, e fica em silêncio. O alerta sai pelo `NotificationService` no canal ALL, com a causa `self_modification` e o comando único `Set-Location <checkout>; python -m core.line.express_lane run --ticket <ID>` como próximo passo. Outra ocorrência desse episódio não gera outro alerta. A chave é o ticket e a causa classificada: o texto da cauda do log não abre episódio nem muda a chave. Entrega com `[DELIVERY_MERGED]` ou `merged_awaiting_deploy`, ou uma causa classificada diferente no mesmo ticket, apaga o episódio; duas falhas novas da mesma causa podem alertar outra vez. O alerta não liga `recovery.active`. Causas de classe `owner` entram em hold imediato, sem consumir o orçamento do candidato; a ação existente do owner continua sendo a via de resolução.
 
@@ -269,6 +296,24 @@ houver `run_ticket.py` da frota em voo (`running_fleet_runs`), com `logger.warni
 `main_sha` colocam o ticket em hold com causa `gate_timeout_repeated`. Uma worktree preservada só é
 reaproveitada se a base registrada em `branch.<ticket>.darkfacbase` for a base atual do projeto, e o
 `progress.json` órfão só é arquivado pelo host que o gravou (`host`). Worktree legada sem `darkfacbase` só é reaproveitada se todos os commits após a base citarem o ID do ticket. O despachante entrega ao filho o registro selecionado em `STATE_ROOT/runs/<ID>.dispatch_ticket.json` (`DARKFAC_DISPATCH_TICKET`), que o intake prefere ao ledger local.
+
+### Checkout principal sujo e retomada de worktree elegível (USR-520)
+
+`run_ticket.py` só recusa o lançamento com `SharedCheckoutDirty` quando **não existe** uma
+worktree elegível preservada de uma tentativa anterior do mesmo ticket. A ordem em
+`_prepare_workspace` verifica primeiro `_resume_preserved_workspace` (a mesma busca da
+retomada pós-timeout, USR-225): se houver uma worktree preservada daquele ticket, com
+comentário no ledger ignorado, ela é reaproveitada e a checagem de checkout sujo nem roda.
+Só quando não há worktree elegível para reaproveitar é que o checkout compartilhado é
+inspecionado; alterações pendentes de outra sessão ou ticket nesse momento continuam
+bloqueando o lançamento (ou exigem `--allow-dirty-shared-checkout` explícito, sob risco do
+próprio owner).
+
+Isso significa que uma mudança não commitada do usuário no checkout principal (`C:\dev\DarkFac`)
+nunca é lida, movida nem incorporada por essa retomada: a worktree reaproveitada já é um
+diretório isolado, criado por uma tentativa anterior do mesmo ticket, e o código não toca o
+checkout compartilhado para decidir se reaproveita. `_prepare_workspace` só volta a olhar o
+checkout principal quando não há nada elegível para retomar.
 
 ## Pin de execução e admissão (USR-510)
 

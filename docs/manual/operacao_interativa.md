@@ -68,6 +68,12 @@ Antes dessa worktree e do PLAN, a admissao (`core.line.admission`) confirma rota
 
 Se a política de dados do host remover as rotas, `cause` continua sendo `route_wait` e `policy_cause` informa `data_policy`, os provedores bloqueados e `source_file`. Quando o host divergir, `policy_cause.host_diagnostics` mostra `data_policy_host_divergence` e os caminhos compartilhado e local. Compare a fonte efetiva com `.factory/config/data_policies.json`; um arquivo legado divergente em `.factory/enterprise/configs.json` permanece ativo.
 
+### Worktree preservada e recibo de admissao (USR-520)
+
+No projeto `darkfac`, antes de examinar o checkout compartilhado, o launcher procura uma worktree preservada elegivel do mesmo ticket e a reaproveita; alteracoes pendentes em `C:\dev\DarkFac` nao bloqueiam essa retomada. Sem worktree elegivel, checkout sujo continua encerrando como `shared_checkout_dirty`, salvo `--allow-dirty-shared-checkout`.
+
+Escolhida a worktree, e antes do PLAN, o `run_ticket.py` publica o recibo de admissao em `.factory/tmp/launch_receipts/<launch_id>.json` (o id vem de `DARKFAC_LAUNCH_RECEIPT_ID`, quando definido). Falha ao gravar o recibo gera um aviso no log e a execucao segue. Na via expressa do owner (`python -m core.line.express_lane run --ticket <ID>`), so a linha `admitido: <ticket>; worktree: <caminho>` indica sucesso; `recusado: ...` e `recibo de admissao ausente: ...` encerram com exit 1. O contrato completo esta em [frota.md](frota.md).
+
 ### Wake do grokbox e comunicacao externa (USR-456)
 
 No preflight, o launcher consulta a saude do grokbox. Se estiver indisponivel, registra a supressao com a causa `external_communication_not_authorized` e continua a execucao sem enviar email. Prompt, variavel de ambiente e outras opcoes nao concedem autorizacao. O envio exige o opt-in dedicado na propria chamada:

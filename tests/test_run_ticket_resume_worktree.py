@@ -727,7 +727,6 @@ def test_build_resume_fails_closed_when_candidate_evidence_diverges(
     assert progress_path.read_text(encoding="utf-8") == progress_before  # canonical artifact untouched
     assert ticket_workspace.list_worktrees(repo.local)  # sanity: still a healthy repo
 
-
 # ---------------------------------------------------------------------------
 # USR-447: a relaunch resumes at the right stage (plan and finished slices are kept)
 # ---------------------------------------------------------------------------
@@ -1020,7 +1019,6 @@ def test_intake_prefers_the_ticket_the_dispatcher_handed_over(
     ticket, code = run_ticket._stage_intake(args)
     assert code == 0 and ticket.title == "versao velha"
 
-
 def test_external_ticket_resume_and_candidate_digest_ignore_demands_ledger(
     repo: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
@@ -1116,3 +1114,96 @@ def test_delivery_success_result_preserves_awaiting_commercial_acceptance(tmp_pa
         ticket, report, tmp_path, "ticket/mdl-99", "a" * 40, [], False, True, FakeProgress(), awaiting_deploy=False,
     )
     assert payload["status"] == "awaiting_commercial_acceptance"
+
+def test_prepare_workspace_resumes_preserved_worktree_before_dirty_checkout_guard(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(run_ticket, "PROJECT_ROOT", repo.local)
+    monkeypatch.setattr(run_ticket, "DemandsStore", _Store)
+    workspace = create_workspace("USR-205", cwd=repo.local)
+    (workspace.path / "partial.py").write_bytes(b"partial = True\r\n")
+
+    user_file = repo.local / "README.md"
+    user_file.write_bytes(b"user change\r\n\x00preserved")
+    untracked = repo.local / "user-notes.bin"
+    untracked.write_bytes(b"\x00\xffuser data\r\n")
+    before = {user_file: user_file.read_bytes(), untracked: untracked.read_bytes()}
+    args = run_ticket.build_parser().parse_args(["USR-205"])
+
+    resumed = run_ticket._prepare_workspace(args, _TICKET)
+
+    assert resumed.path == workspace.path
+    assert _worktree_names(repo) == [workspace.path.name]
+    assert {path: path.read_bytes() for path in before} == before
+    assert (workspace.path / "partial.py").read_bytes() == b"partial = True\r\n"
+    assert "Reaproveitando a worktree preservada" in capsys.readouterr().err
+
+
+def test_dirty_checkout_without_preserved_worktree_is_still_refused(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(run_ticket, "PROJECT_ROOT", repo.local)
+    monkeypatch.setattr(run_ticket, "DemandsStore", _Store)
+    user_file = repo.local / "README.md"
+    user_file.write_bytes(b"user change\r\n")
+    args = run_ticket.build_parser().parse_args(["USR-205"])
+
+    with pytest.raises(run_ticket.SharedCheckoutDirty) as refused:
+        run_ticket._prepare_workspace(args, _TICKET)
+
+    assert "README.md" in refused.value.paths
+    assert user_file.read_bytes() == b"user change\r\n"
+    assert _worktree_names(repo) == []
+
+
+def test_admission_receipt_is_unique_atomic_and_names_the_selected_worktree(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(run_ticket, "PROJECT_ROOT", repo.local)
+    workspace = create_workspace("USR-205", cwd=repo.local)
+
+    first = run_ticket._publish_admission_receipt(_TICKET, workspace)
+    second = run_ticket._publish_admission_receipt(_TICKET, workspace)
+
+    assert first != second and first.is_file() and second.is_file()
+    for receipt_path in (first, second):
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert receipt == {
+            "pid": os.getpid(),
+            "ticket": _TICKET.id,
+            "worktree": str(workspace.path.resolve()),
+            "launch_id": receipt_path.stem,
+        }
+    assert list(first.parent.glob("*.tmp")) == []
+
+
+def test_admission_receipt_appears_only_after_the_worktree_is_selected(
+    repo: SimpleNamespace, launcher: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipts = repo.local / ".factory" / "tmp" / "launch_receipts"
+    monkeypatch.setenv("DARKFAC_LAUNCH_RECEIPT_ID", "attempt-1")
+    seen: dict[str, bool] = {}
+    admission_stage = run_ticket._stage_admission
+    workspace_stage = run_ticket._stage_workspace
+
+    def admitted(*args, **kwargs):
+        result = admission_stage(*args, **kwargs)
+        seen["after_admission"] = (receipts / "attempt-1.json").exists()
+        return result
+
+    def selected(*args, **kwargs):
+        result = workspace_stage(*args, **kwargs)
+        seen["after_workspace"] = (receipts / "attempt-1.json").exists()
+        return result
+
+    def planning(args, ticket, workspace, route, progress) -> int:
+        receipt = json.loads((receipts / "attempt-1.json").read_text(encoding="utf-8"))
+        seen["before_plan"] = receipt["worktree"] == str(workspace.path.resolve())
+        return 1
+
+    monkeypatch.setattr(run_ticket, "_stage_admission", admitted)
+    monkeypatch.setattr(run_ticket, "_stage_workspace", selected)
+    monkeypatch.setattr(run_ticket, "_stage_plan", planning)
+
+    assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1
+    assert seen == {"after_admission": False, "after_workspace": False, "before_plan": True}
