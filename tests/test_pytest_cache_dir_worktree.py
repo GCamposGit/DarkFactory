@@ -43,6 +43,7 @@ def _run(
         args,
         cwd=cwd,
         env=env,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         encoding="utf-8",

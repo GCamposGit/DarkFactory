@@ -49,8 +49,9 @@ def run_streaming(
 ) -> subprocess.CompletedProcess[str]:
     """Run a command echoing its output line by line (flushed) while still capturing it."""
     sink = out or sys.stdout
+    # stdin explicito: um handle herdado invalido (portao headless no Windows) quebra todo subprocess do filho.
     process = subprocess.Popen(
-        command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     chunks: list[str] = []
@@ -59,7 +60,11 @@ def run_streaming(
         assert process.stdout is not None
         for line in process.stdout:
             chunks.append(line)
-            sink.write(line)
+            try:
+                sink.write(line)
+            except UnicodeEncodeError:
+                # Console sem UTF-8: sem isto a thread morre, o pipe enche e o filho trava.
+                sink.write(line.encode("ascii", "backslashreplace").decode("ascii"))
             sink.flush()
 
     reader = threading.Thread(target=pump, daemon=True)
