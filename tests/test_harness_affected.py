@@ -969,6 +969,7 @@ def test_run_pytest_memory_budget_and_parallel_split(monkeypatch, tmp_path, gib,
         output = "\n".join(f"tests/test_a.py::test_x[{i}]" for i in range(4)) if "--collect-only" in cmd else "4 passed in 0.1s"
         return subprocess.CompletedProcess(cmd, 0, stdout=output)
     monkeypatch.setattr(affected.subprocess, "run", run)
+    monkeypatch.setattr(affected, "_stream_run", run)
     selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(31)], {}, [], ["x"])
     assert affected.run_pytest(tmp_path, selection, []) == expected_code
     if expected_code:
@@ -996,6 +997,7 @@ def test_affected_collection_and_execution_share_the_parent_deadline(monkeypatch
         raise subprocess.TimeoutExpired(cmd, 7, output=b"test_probe started")
 
     monkeypatch.setattr(affected.subprocess, "run", run)
+    monkeypatch.setattr(affected, "_stream_run", run)
     selection = affected.Selection("subset", ["tests/test_probe.py"], {}, [], ["probe.py"])
 
     assert affected.run_pytest(tmp_path, selection, [], deadline=12) == 124
@@ -1027,6 +1029,7 @@ def test_affected_collection_reports_scaled_timeout_for_23_files(monkeypatch, tm
         return subprocess.CompletedProcess(cmd, 0, stdout="1 passed")
 
     monkeypatch.setattr(affected.subprocess, "run", run)
+    monkeypatch.setattr(affected, "_stream_run", run)
     selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(23)], {}, [], ["probe.py"])
 
     assert affected.run_pytest(tmp_path, selection, [], deadline=1000) == 0
@@ -1047,6 +1050,7 @@ def test_affected_collection_timeout_returns_124_with_phase(monkeypatch, tmp_pat
         raise subprocess.TimeoutExpired(cmd, kwargs["timeout"], output=b"collection started")
 
     monkeypatch.setattr(affected.subprocess, "run", run)
+    monkeypatch.setattr(affected, "_stream_run", run)
     selection = affected.Selection("subset", [f"tests/test_{i}.py" for i in range(23)], {}, [], ["probe.py"])
 
     assert affected.run_pytest(tmp_path, selection, [], deadline=1000) == 124
@@ -1178,3 +1182,89 @@ def test_pr_fallback_caps_hot_module_cited_explosion_while_keeping_changed_tests
     assert any(item.startswith("fallback_cited_capped:") for item in selection.escalations)
     hot_selected = [t for t in selection.tests if t.startswith("tests/test_hot_")]
     assert len(hot_selected) == affected.PR_FALLBACK_MAX_CITED_FILES - 1
+
+
+def test_affected_time_cap_default_and_override(monkeypatch):
+    monkeypatch.delenv(affected.AFFECTED_TIME_CAP_ENV, raising=False)
+    assert affected.affected_time_cap_seconds() == 900
+    monkeypatch.setenv(affected.AFFECTED_TIME_CAP_ENV, "60")
+    assert affected.affected_time_cap_seconds() == 60
+    monkeypatch.setenv(affected.AFFECTED_TIME_CAP_ENV, "lixo")
+    assert affected.affected_time_cap_seconds() == 900
+
+
+def test_affected_time_cap_exceeded_returns_structured_error(monkeypatch, tmp_path, capsys):
+    from core.line import gate_ram
+
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    monkeypatch.setattr(affected, "_xdist_available", lambda: False)
+    monkeypatch.setattr(affected.time, "monotonic", lambda: 0.0)
+    monkeypatch.setenv(affected.AFFECTED_TIME_CAP_ENV, "100")
+
+    def run(cmd, **kwargs):
+        if "--collect-only" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="tests/test_probe.py::test_probe")
+        assert kwargs["timeout"] == 100
+        raise subprocess.TimeoutExpired(cmd, 100, output=b"slow")
+
+    monkeypatch.setattr(affected.subprocess, "run", run)
+    monkeypatch.setattr(affected, "_stream_run", run)
+    selection = affected.Selection("subset", ["tests/test_probe.py"], {}, [], ["probe.py"])
+
+    assert affected.run_pytest(tmp_path, selection, []) == 124
+    output = capsys.readouterr().out
+    line = next(item for item in output.splitlines() if item.startswith("[AFFECTED_TIME_CAP]"))
+    payload = json.loads(line.split(" ", 1)[1])
+    assert payload["error"] == "affected_time_cap_exceeded"
+    assert payload["phase"] == "execution" and payload["cap_sec"] == 100
+    assert "Linux" in payload["action"] and "CI" in payload["action"]
+    assert "[STEP_TIMEOUT] affected tests phase=execution" in output
+
+
+def test_affected_run_streams_progress_before_pytest_finishes(tmp_path, monkeypatch):
+    """test_b only passes if the parent echoed test_a's progress while pytest was still running."""
+    import io
+    import sys
+
+    from core.line import gate_ram
+
+    seen = tmp_path / "seen"
+    _write(tmp_path, "tests/test_a.py", "def test_a(): assert True\n")
+    _write(tmp_path, "tests/test_b.py", (
+        "import pathlib, time\n"
+        "def test_b():\n"
+        "    deadline = time.monotonic() + 20\n"
+        f"    while not pathlib.Path({str(seen)!r}).exists():\n"
+        "        assert time.monotonic() < deadline, 'progress not echoed live'\n"
+        "        time.sleep(0.05)\n"
+    ))
+
+    class Sink(io.StringIO):
+        def write(self, text: str) -> int:
+            # Collection lines carry node ids ("::"); only the execution line releases test_b.
+            if "test_a.py" in text and "::" not in text:
+                seen.touch()
+            return super().write(text)
+
+    sink = Sink()
+    monkeypatch.setattr(sys, "stdout", sink)
+    monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
+    selection = affected.Selection("subset", ["tests/test_a.py", "tests/test_b.py"], {}, [], ["x.py"])
+
+    assert affected.run_pytest(tmp_path, selection, ["-p", "no:cacheprovider"]) == 0, sink.getvalue()
+    output = sink.getvalue().replace("\\", "/")
+    assert "tests/test_a.py::test_a" in output  # collection is echoed too
+    assert output.count("2 passed") == 1
+
+
+def test_run_streaming_emits_heartbeat_and_kills_on_timeout(tmp_path, capsys):
+    import sys
+
+    from core.harness.pytest_runtime import StreamedTimeout, run_streaming
+
+    command = [sys.executable, "-c", "import time; print('inicio', flush=True); time.sleep(30)"]
+    with pytest.raises(StreamedTimeout) as caught:
+        run_streaming(command, cwd=tmp_path, timeout=2.5, heartbeat_s=1.0)
+    out = capsys.readouterr().out
+    assert "inicio" in out and "[TEST_PROGRESS] running" in out
+    assert "inicio" in caught.value.output

@@ -380,6 +380,8 @@ class GitAutonomyManager:
         staged_show_sleep_fn: Optional[Callable[[float], None]] = None,
     ) -> None:
         self.root = root
+        # Worktrees whose demands ledger was not versioned when first seen (USR-577).
+        self._standalone_ledgers: set[Path] = set()
         # Pause between retries of a failed index read (USR-264); injectable so tests never sleep.
         self.staged_show_sleep_fn = staged_show_sleep_fn or time.sleep
         # Optional best-effort progress hook (USR-140): called as (phase, status, message, cause) on
@@ -554,11 +556,16 @@ class GitAutonomyManager:
         cwd: Optional[Path] = None,
         custom_message: Optional[str] = None,
         kind: Literal["queue", "implementation", "registry"] = "implementation",
+        *,
+        exclude_ledger: bool = False,
     ) -> Optional[str]:
         """Stage changes and produce a deterministic atomic commit bound to the ticket.
 
         Without ``paths`` only the paths changed IN ``cwd`` are staged (see
         :meth:`changed_paths`); a bare ``git add -A`` is never issued (USR-69).
+        ``exclude_ledger`` keeps a versioned ``.factory/demands/demands.json`` out of the commit
+        and out of the index (USR-577): delivery commits never carry the ledger, the
+        control store holds the ticket status.
         Repository-root ``.tmp`` delivery scratch is never staged. Paths already
         in the index are removed from it and left on disk with the same bytes
         (USR-429). When that scratch is the only change, the current HEAD is
@@ -568,6 +575,7 @@ class GitAutonomyManager:
         Returns the new commit SHA, or the current HEAD if working tree is clean.
         """
         target_dir = cwd or self.root
+        exclude_ledger = exclude_ledger and self._ledger_versioned(target_dir)
 
         # 1. Stage product changes. Drop harness scratch before the ignore check so a
         # force-added ``.tmp`` file cannot block the product commit, and again after
@@ -576,11 +584,17 @@ class GitAutonomyManager:
         self._check_ignored_staged_additions(target_dir)
         if paths:
             stageable = ticket_workspace.without_delivery_scratch(str(p) for p in paths)
+            if exclude_ledger:
+                stageable = ticket_workspace.without_ledger_projection(stageable)
             _stage_ticket_paths(stageable, target_dir, update=False)
         else:
             changed = ticket_workspace.without_delivery_scratch(self.changed_paths(target_dir))
+            if exclude_ledger:
+                changed = ticket_workspace.without_ledger_projection(changed)
             _stage_ticket_paths(changed, target_dir, update=True)
         self._drop_delivery_scratch(target_dir)
+        if exclude_ledger:
+            _run_git(["reset", "-q", "--", _LEDGER_RELATIVE], cwd=target_dir)
 
         # 2. Check if anything is staged
         staged_check = _run_git(["diff", "--cached", "--quiet"], cwd=target_dir)
@@ -1021,6 +1035,10 @@ class GitAutonomyManager:
         The canonical row is the worktree ledger or, when that id is missing, the
         durable queue (USR-424). A missing ledger file with no queue row keeps the
         standalone-repo path: commit the tree and do not invent a ticket.
+
+        The delivery commit never carries ``demands.json`` (USR-577): the candidate
+        evidence lives in the control store and the worktree ledger goes back to HEAD,
+        so a merge or rebase over origin/main cannot conflict on the ledger.
         """
         ledger = cwd / _LEDGER_RELATIVE
         is_explicit_external = project_id is not None and project_id != "darkfac"
@@ -1038,7 +1056,7 @@ class GitAutonomyManager:
             return self.get_current_sha(cwd)
         if not ledger.is_file() and queued is None:
             if self.is_dirty(cwd):
-                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message, exclude_ledger=True)
             return self.get_current_sha(cwd)
         store = DemandsStore(ledger)
         ticket = store.resolve_for_delivery(ticket_id)
@@ -1051,10 +1069,11 @@ class GitAutonomyManager:
             not ticket.is_live_deploy or has_live_proof
         ):
             if self.is_dirty(cwd):
-                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message, exclude_ledger=True)
+            self.settle_ledger_projection(ticket, cwd)
             return self.get_current_sha(cwd)
         if self.is_dirty(cwd):
-            self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+            self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message, exclude_ledger=True)
         implementation_sha = self.get_current_sha(cwd)
         if ticket.status == DeliveryStatus.COMPLETED:
             # A legacy terminal row without merge/deploy proof is not canonical completion.
@@ -1062,7 +1081,56 @@ class GitAutonomyManager:
         ticket.delivery_evidence = f"candidate:{implementation_sha}"
         ticket.updated_at = datetime.now(timezone.utc)
         store.save_ticket(ticket)
-        return self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message) or implementation_sha
+        if not self._ledger_versioned(cwd):
+            return self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message) or implementation_sha
+        self.settle_ledger_projection(ticket, cwd)
+        return implementation_sha
+
+    def _ledger_versioned(self, cwd: Path) -> bool:
+        """True when the ledger was already in HEAD before this manager committed anything in ``cwd``.
+
+        A "no" is remembered: the standalone delivery commits the ledger itself, and a later call
+        must not mistake that commit for a versioned ledger and revert the candidate evidence.
+        """
+        key = cwd.resolve()
+        if key in self._standalone_ledgers:
+            return False
+        if _run_git(["cat-file", "-e", f"HEAD:{_LEDGER_RELATIVE}"], cwd=cwd).returncode == 0:
+            return True
+        self._standalone_ledgers.add(key)
+        return False
+
+    def settle_ledger_projection(self, ticket: UserTicket, cwd: Path) -> None:
+        """Move the ticket row to the control store and return a tracked ledger to HEAD (USR-577).
+
+        The row is always upserted before the file is discarded. Among the file row, ``ticket``
+        and the stored row, a terminal one wins, then one with evidence, then the newest.
+
+        A ledger absent from HEAD (a standalone repository with no versioned ledger) is left
+        alone and still ships with its delivery commit. When the control store cannot take the row the file is kept
+        modified rather than losing the evidence.
+        """
+        if not self._ledger_versioned(cwd):
+            return
+        from core.demands import queue_store
+
+        try:
+            rows = [
+                row for row in (
+                    DemandsStore(cwd / _LEDGER_RELATIVE)._file_ticket(ticket.id),
+                    ticket,
+                    queue_store.get_ticket(ticket.id),
+                ) if row is not None
+            ]
+            queue_store.register_ticket(max(rows, key=lambda row: (
+                queue_store.is_terminal_ticket(row), bool((row.delivery_evidence or "").strip()), row.updated_at,
+            )))
+        except Exception as exc:  # noqa: BLE001 - keep the file projection instead of losing the row
+            logger.warning("Control store did not take %s; ledger projection kept in %s: %s", ticket.id, cwd, exc)
+            return
+        restored = _run_git(["checkout", "HEAD", "--", _LEDGER_RELATIVE], cwd=cwd)
+        if restored.returncode != 0:
+            logger.warning("Could not restore the ledger projection in %s: %s", cwd, restored.stderr.strip())
 
     def _ci_gate(
         self, number: int, pr_url: str, branch: str, base: str, cwd: Path, runner: GhRunner,

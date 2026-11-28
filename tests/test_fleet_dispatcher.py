@@ -2092,6 +2092,73 @@ def test_recovery_latches_persistently_and_serializes_one_evidenced_delivery(tmp
     assert normal.d.failures[-1]["kind"] == "no_delivery_evidence"
 
 
+def test_external_delivered_is_accepted_and_internal_without_marker_still_fails(tmp_path: Path):
+    external = Env(tmp_path / "ext", [{**_d("USR-01"), "project_id": "acme"}], free=("grokbox",))
+    external.d.run_cycle()
+    job = external.d.in_flight["grokbox"]
+    log = tmp_path / "ext.log"
+    log.write_text("[SUCESSO] Ticket USR-01: PR branch:x; deploy not_run", encoding="utf-8")
+    job.log_path = log
+    external.handles["USR-01"].rc = 0
+    external.d.run_cycle()
+    assert not external.d.failures
+    assert external.d.accepted_deliveries[-1]["evidence"] == "external_delivered"
+    assert external.d.last_cycle["recent_deliveries"][-1]["ticket"] == "USR-01"
+    assert not external.d.pending_deploy
+
+    internal = Env(tmp_path / "int", [_d("USR-02")], free=("grokbox",))
+    internal.d.run_cycle()
+    internal.d.in_flight["grokbox"].log_path = log
+    internal.handles["USR-02"].rc = 0
+    internal.d.run_cycle()
+    assert internal.d.failures[-1]["kind"] == "no_delivery_evidence"
+    assert not internal.d.accepted_deliveries
+
+
+def test_pause_file_blocks_new_dispatch_keeps_in_flight_and_resumes(tmp_path: Path, caplog):
+    env = Env(tmp_path, [_d("USR-01"), _d("USR-02")], free=("grokbox",))
+    env.d.run_cycle()
+    assert [t for t, _ in env.launched] == ["USR-01"]
+    pause_file = tmp_path / fd.PAUSE_PATH.name
+
+    fd.set_pause("manutencao do host", pause_file)
+    env.free = {"grokbox", "notebook"}
+    with caplog.at_level(logging.WARNING, logger="darkfac.line.fleet_dispatcher"):
+        cycle = env.d.run_cycle()
+    assert cycle["paused"]["reason"] == "manutencao do host" and cycle["paused"]["paused_at"]
+    assert cycle["dispatched"] == [] and [t for t, _ in env.launched] == ["USR-01"]
+    assert "manutencao do host" in caplog.text and "pausa operacional" in caplog.text
+    assert env.d.in_flight["grokbox"].ticket_id == "USR-01"
+
+    env.handles["USR-01"].rc = 0
+    assert env.d.run_cycle()["paused"] and [t for t, _ in env.launched] == ["USR-01"]
+
+    assert fd.clear_pause(pause_file) is True and fd.clear_pause(pause_file) is False
+    cycle = env.d.run_cycle()
+    assert "paused" not in cycle and "USR-02" in [t for t, _ in env.launched]
+
+
+def test_pause_status_reads_legacy_empty_flag_and_cli_roundtrip(tmp_path: Path, monkeypatch, capsys):
+    flag = tmp_path / "pause.json"
+    assert fd.read_pause(flag) is None
+    flag.write_text("", encoding="utf-8")
+    pause = fd.read_pause(flag)
+    assert pause and pause["reason"] == "sem motivo informado" and pause["paused_at"]
+
+    import json
+
+    def cli(*argv):
+        assert fd.main(list(argv)) == 0
+        return json.loads(capsys.readouterr().out)["paused"]
+
+    monkeypatch.setattr(fd, "PAUSE_PATH", tmp_path / "cli_pause.json")
+    assert cli("--pause-status") is None
+    assert cli("--pause", "janela de manutencao")["reason"] == "janela de manutencao"
+    assert cli("--pause-status")["reason"] == "janela de manutencao"
+    assert cli("--resume") is None
+    assert not (tmp_path / "cli_pause.json").exists()
+
+
 def test_recovery_success_requires_merge_receipt(tmp_path: Path, monkeypatch):
     import io
     import json

@@ -66,10 +66,37 @@ def _call_name(func: ast.expr) -> str:
     return func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
 
 
-def _surface(source: str) -> list[str]:
-    """Multiconjunto ordenado de chamadas de superficie e decorators de rota (``SyntaxError`` sobe)."""
+def _is_contract_name(name: str) -> bool:
+    """Constante de contrato: caixa alta exportada, ou ``*_ENV``/``*ROUTE*``/``*PATH*`` mesmo privada."""
+    if not name.isupper():
+        return False
+    return not name.startswith("_") or name.endswith("_ENV") or "ROUTE" in name or "PATH" in name
+
+
+def _contract_constants(body: list[ast.stmt], scope: str = "") -> list[str]:
+    """Atribuicoes de constantes de contrato em modulo e classe (inclui blocos ``if``/``try``/``with``)."""
     out: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
+            out += [f"{scope}{name}={ast.dump(node.value)}" for name in names if _is_contract_name(name)]
+        elif isinstance(node, ast.ClassDef):
+            out += _contract_constants(node.body, f"{scope}{node.name}.")
+        elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.stmt):
+                    out += _contract_constants([child], scope)
+                elif isinstance(child, (ast.excepthandler, ast.match_case)):
+                    out += _contract_constants(child.body, scope)
+    return out
+
+
+def _surface(source: str) -> list[str]:
+    """Multiconjunto ordenado de chamadas de superficie, rotas e constantes de contrato (``SyntaxError`` sobe)."""
+    tree = ast.parse(source)
+    out = _contract_constants(tree.body)
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call) and _call_name(node.func) in _SURFACE_CALLS:
             out.append(ast.dump(node))
         decorators = getattr(node, "decorator_list", [])

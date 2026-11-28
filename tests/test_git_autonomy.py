@@ -604,6 +604,7 @@ def _cli(old: str, new: str) -> str:
     return _BASE_CLI.replace(old, new)
 
 
+_ENV_MOD = 'MODE_ENV = "DARKFAC_A"\nROUTE: str = "/api/a"\n\ndef f():\n    return 1\n'
 _CASES = {
     "internal": ({"mod.py": _INTERNAL}, None, False, 1),
     "flag_rename_continuation_line": ({"mod.py": _cli("--resume-delivery", "--continue-delivery")}, None, False, 0),
@@ -615,6 +616,10 @@ _CASES = {
     "router_prefix": ({"mod.py": "router = APIRouter(prefix='/a')\n" + _INTERNAL}, None, False, 0),
     "non_py_covered": ({"ext.ps1": "Write-Host 2\n"}, None, False, 0),
     "deleted_covered": ({"gone.py": None}, None, False, 0),
+    "env_constant_value": ({"env.py": _ENV_MOD.replace("DARKFAC_A", "DARKFAC_B")}, None, False, 0),
+    "env_constant_rename": ({"env.py": _ENV_MOD.replace("MODE_ENV", "OTHER_ENV")}, None, False, 0),
+    "route_constant_value": ({"env.py": _ENV_MOD.replace("/api/a", "/api/b")}, None, False, 0),
+    "constant_module_internal_edit": ({"env.py": _ENV_MOD.replace("return 1", "return 2")}, None, False, 1),
     "lowercase_trailer_not_duplicated": ({"mod.py": _INTERNAL}, "feat: x\n\ndocs-unchanged: motivo proprio\n", False, 1),
     "helper_raises": ({"mod.py": _INTERNAL}, None, True, 0),
 }
@@ -627,8 +632,9 @@ def test_commit_ticket_docs_trailer_only_for_internal_change(
 ) -> None:
     (test_git_repo / "docs" / "manual").mkdir(parents=True)
     (test_git_repo / "docs" / "manual" / "x.md").write_text(
-        "<!-- covers: mod.py, ext.ps1, gone.py -->\n# X\n", encoding="utf-8")
-    for name, content in {"mod.py": _BASE_CLI, "ext.ps1": "Write-Host 1\n", "gone.py": "X = 1\n"}.items():
+        "<!-- covers: mod.py, ext.ps1, gone.py, env.py -->\n# X\n", encoding="utf-8")
+    for name, content in {"mod.py": _BASE_CLI, "ext.ps1": "Write-Host 1\n", "gone.py": "X = 1\n",
+                          "env.py": _ENV_MOD}.items():
         (test_git_repo / name).write_text(content, encoding="utf-8")
     _git(test_git_repo, "add", "-A")
     _git(test_git_repo, "commit", "--quiet", "-m", "chore: base")

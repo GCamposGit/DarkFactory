@@ -1566,6 +1566,7 @@ def _commit_fix_agent_changes(target_worktree: Path, ticket: UserTicket, stage: 
             f"DarkFac-Ticket: {ticket.id}\n"
             f"DarkFac-Autonomy: zero-human-touch\n"
         ),
+        exclude_ledger=True,
     )
     return True
 
@@ -2648,7 +2649,10 @@ def _deliver_sync(
             title=ticket.title,
             scope="core" if not ticket.tags else ticket.tags[0].replace("user-", ""),
             cwd=target_worktree,
+            exclude_ledger=not external_project,
         )
+    if not external_project and not no_commit:
+        git_mgr.settle_ledger_projection(ticket, target_worktree)
 
     current_sha = git_mgr.get_current_sha(target_worktree)
 

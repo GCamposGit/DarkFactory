@@ -18,6 +18,8 @@ positiva ou sem leitura válida permanece fora da admissão. Workers remotos ace
 `profile="full"` (`--quick --local`) ou `profile="pr"` (`--profile pr --local`) nos
 metadados do job. Na colheita (`_reap`), entregas externas que emitem `[DELIVERY_EXTERNAL]`
 limpam o orçamento e a reserva sem acionar o deploy da fábrica nem `no_delivery_evidence`.
+Sem o marcador, um projeto externo também é aceito pelo status `"delivered"` ou pela linha
+`[SUCESSO] Ticket` no log (USR-577); a evidência aceita aparece em `recent_deliveries` no estado.
 
 Na elegibilidade local, um worker com memória suficiente é aceito (USR-452).
 Zero workers permanece indisponível. O gate ajusta seu prazo ao paralelismo real,
@@ -429,6 +431,43 @@ A variável é gravada antes da substituição. Com ela igual ao HEAD atual, uma
 ocorrência só registra a causa no ciclo e o loop dorme: não há segundo exec nessa
 geração. Se o exec falha, o erro fica no log e essa geração também não tenta outro
 exec. `--once`, `--dry-run` e um `launch` presente não disparam esse reinício.
+
+## Pausa operacional do despachante (USR-577)
+
+Pausa o despacho sem parar nem reinstalar a tarefa agendada. A cada ciclo o despachante lê
+`C:\dev\DarkFac\.factory\runs\fleet_dispatcher_pause.json` (ao lado do estado, respeita
+`DARKFAC_STATE_ROOT`). Com o arquivo presente o ciclo não admite run novo, não retoma
+esperas nem faz deploy, registra em log (`WARNING`) o motivo, o instante da pausa e quantos runs
+estão em voo, publica `paused` no estado do ciclo e termina com sucesso (código 0, a tarefa
+agendada não acusa erro). Runs já em voo continuam e são colhidos normalmente. Remover o arquivo
+retoma o despacho no ciclo seguinte. Arquivo vazio ou sem JSON também pausa; o instante vem do
+arquivo.
+
+Pausar (motivo obrigatório para o registro; rode a partir do checkout principal):
+
+```powershell
+Set-Location C:\dev\DarkFac
+python -m core.line.fleet_dispatcher --pause "manutencao do host"
+```
+
+Verificar (`"paused": null` significa ativo):
+
+```powershell
+Set-Location C:\dev\DarkFac
+python -m core.line.fleet_dispatcher --pause-status
+Get-Content C:\dev\DarkFac\.factory\runs\fleet_dispatcher_state.json | Select-String '"paused"' -Context 0,3
+```
+
+Retomar:
+
+```powershell
+Set-Location C:\dev\DarkFac
+python -m core.line.fleet_dispatcher --resume
+```
+
+Sem Python, `Remove-Item C:\dev\DarkFac\.factory\runs\fleet_dispatcher_pause.json` retoma e
+`Set-Content -Encoding utf8 C:\dev\DarkFac\.factory\runs\fleet_dispatcher_pause.json '{"reason":"motivo","paused_at":"2026-11-26T00:00:00Z"}'`
+pausa.
 
 ## Notebook e Desktop (Windows)
 

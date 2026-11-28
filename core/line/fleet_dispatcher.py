@@ -91,6 +91,44 @@ def _checkout_sha_changed(startup: str | None, current: str | None) -> bool:
     return bool(startup and current and startup != current)
 
 
+PAUSE_PATH = STATE_PATH.with_name("fleet_dispatcher_pause.json")
+
+
+def read_pause(path: Path = PAUSE_PATH) -> Optional[dict[str, str]]:
+    """Pausa operacional ativa (motivo e instante) ou None; arquivo ilegivel ou vazio tambem pausa."""
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return {"reason": "arquivo de pausa ilegivel", "paused_at": ""}
+    try:
+        data = json.loads(raw) if raw else {}
+    except ValueError:
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    return {"reason": str(data.get("reason") or "sem motivo informado"),
+            "paused_at": str(data.get("paused_at") or datetime.fromtimestamp(mtime, timezone.utc).isoformat())}
+
+
+def set_pause(reason: str, path: Path = PAUSE_PATH) -> dict[str, str]:
+    pause = {"reason": reason.strip() or "sem motivo informado", "paused_at": datetime.now(timezone.utc).isoformat()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(pause, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return pause
+
+
+def clear_pause(path: Path = PAUSE_PATH) -> bool:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 IMPORT_RESTART_SHA_ENV = "DARKFAC_DISPATCHER_IMPORT_RESTART_SHA"
 LOG_DIR = state_root() / "runs" / "fleet_dispatcher_logs"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -757,14 +795,23 @@ def _tail(path: Optional[Path], n: int = 6000) -> str:
     return ""
 
 
-def _delivery_evidence(log_tail: str) -> bool:
-    """Legacy merge marker used to schedule the ordinary post-merge deploy."""
-    return "merged_awaiting_deploy" in log_tail or "[DELIVERY_MERGED]" in log_tail
+_EXTERNAL_DELIVERED = re.compile(r'"status"\s*:\s*"delivered"|\[SUCESSO\]\s+Ticket\s')
 
 
-def _external_delivery_evidence(log_tail: str) -> bool:
-    """Delivery marker emitted by external projects that do not schedule DarkFac redeploy."""
-    return "[DELIVERY_EXTERNAL]" in log_tail
+def _delivery_evidence(log_tail: str, project_id: str = "darkfac") -> str:
+    """Accepted evidence name ("" when none): merge marker (deploy follows) or an external delivery.
+
+    External projects never schedule the DarkFac redeploy for their explicit ``[DELIVERY_EXTERNAL]``
+    marker, even when the same log also carries a merge status.
+    """
+    external = project_id != "darkfac"
+    if external and "[DELIVERY_EXTERNAL]" in log_tail:
+        return "external_delivered"
+    if "merged_awaiting_deploy" in log_tail or "[DELIVERY_MERGED]" in log_tail:
+        return "merge_marker"
+    if external and _EXTERNAL_DELIVERED.search(log_tail):
+        return "external_delivered"
+    return ""
 
 
 def _reconcile_failure(exc: BaseException) -> dict[str, Any]:
@@ -1017,6 +1064,7 @@ class FleetDispatcher:
         self.deploys = 0
         self.last_cycle: dict[str, Any] = self._previous_cycle()
         self.failures: list[dict[str, Any]] = []  # ultimas falhas: ticket, host, exit_code, motivo, classe
+        self.accepted_deliveries: list[dict[str, Any]] = []  # entregas aceitas e a evidencia que valeu
         self.resource_readings: dict[str, dict[str, Any]] = {}
         self.recovery = self.admission_store.recovery_state() if self.admission_store is not None and hasattr(self.admission_store, "recovery_state") else {
             "active": True, "cause": "admission_store_unavailable", "fingerprint": ""}
@@ -1200,6 +1248,12 @@ class FleetDispatcher:
         except Exception:  # noqa: BLE001 - o encerramento do episodio nao desfaz a entrega
             logger.exception("falha ao encerrar episodio da via expressa de %s", ticket_id)
 
+    def _record_accepted_delivery(self, job: InFlight, evidence: str) -> None:
+        self.accepted_deliveries = (self.accepted_deliveries + [{
+            "ts": datetime.now(timezone.utc).isoformat(), "ticket": job.ticket_id, "host": job.host_id,
+            "run_id": job.run_id, "project_id": job.project_id, "evidence": evidence,
+        }])[-FAILURE_HISTORY_LIMIT:]
+
     def _release_reservation(self, job: InFlight) -> None:
         if not job.admission_token:
             return
@@ -1233,11 +1287,14 @@ class FleetDispatcher:
             if rc == 0:
                 tail = _tail(job.log_path)
                 in_recovery = bool(self.admission_store and self.admission_store.recovery_state().get("active"))
-                if job.project_id != "darkfac" and _external_delivery_evidence(tail):
+                evidence = _delivery_evidence(tail, job.project_id)
+                if evidence:
+                    self._record_accepted_delivery(job, evidence)
+                if evidence == "external_delivered":
                     self.admission_store.reset_budget(job.project_id, job.ticket_id)
                     self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
-                elif _delivery_evidence(tail):
+                elif evidence:
                     self.admission_store.reset_budget(job.project_id, job.ticket_id)
                     self._close_express_episode(job.ticket_id)
                     self._release_reservation(job)
@@ -2211,6 +2268,12 @@ class FleetDispatcher:
         self.resource_readings = {}
         self._pr_cache, self._pr_deliveries = {}, []
         self._reap()
+        pause = read_pause(self.config.state_path.with_name(PAUSE_PATH.name))
+        if pause:
+            logger.warning("despachante em pausa operacional desde %s: %s (em voo preservados: %d)",
+                           pause["paused_at"], pause["reason"], len(self.in_flight))
+            return self._finish_cycle({"ts": datetime.now(timezone.utc).isoformat(), "paused": pause,
+                                       "dispatched": [], "deployed": False})
         from core.line.pending_delivery import acknowledge_deploy
         resumptions = self._resumptions()
         if any(r.get("status") == "dispatcher_busy" for r in resumptions):
@@ -2327,6 +2390,7 @@ class FleetDispatcher:
             "deployed_this_cycle": deployed or deployed_resume,
             "demands_error": load_error,
             "recent_failures": self.failures,
+            "recent_deliveries": self.accepted_deliveries,
             "deploy_deferral": self.deploy_deferral_snapshot(),
             "ticket_holds": self._ticket_holds(),
             "pr_waits": list(self._pr_waits.values()),
@@ -2533,6 +2597,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--recovery-tickets", metavar="ID1,ID2", action="append", default=[],
                     help="Um unico valor CSV (IDs separados por virgulas); processa na ordem, uma correcao por vez")
     ap.add_argument("--cycle-sec", type=float, default=30.0)
+    ap.add_argument("--pause", metavar="MOTIVO", help="Cria a pausa operacional e sai (nao inicia ciclo)")
+    ap.add_argument("--resume", action="store_true", help="Remove a pausa operacional e sai")
+    ap.add_argument("--pause-status", action="store_true", help="Mostra a pausa operacional (JSON) e sai")
     try:
         progress_window_default = max(
             0.0, float(os.environ.get("DARKFAC_FLEET_PROGRESS_WINDOW_SEC", DEFAULT_PROGRESS_WINDOW_SEC)),
@@ -2548,6 +2615,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         ap.error("informe --recovery-tickets uma unica vez com todos os IDs em um valor CSV")
     if args.unexpected_args:
         ap.error("argumentos posicionais inesperados; passe --recovery-tickets como um unico valor separado por virgulas")
+    if args.pause is not None or args.resume or args.pause_status:
+        if args.pause is not None:
+            set_pause(args.pause, PAUSE_PATH)
+        elif args.resume:
+            clear_pause(PAUSE_PATH)
+        print(json.dumps({"paused": read_pause(PAUSE_PATH)}, ensure_ascii=False, indent=2))
+        return 0
     log_dir = Path(os.environ.get("DARKFAC_FLEET_LOG_DIR", str(LOG_DIR)))
     configure_logging(log_dir)
     from core.line.sentinel import maybe_run_sentinel
