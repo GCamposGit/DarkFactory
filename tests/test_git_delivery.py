@@ -752,6 +752,33 @@ def test_complete_ticket_records_in_control_store_and_leaves_worktree_clean(
     assert [row["status"] for row in _queue_rows(state)] == ["completed"]
 
 
+@pytest.mark.parametrize("stored_status", [DeliveryStatus.IMPLEMENTING, DeliveryStatus.COMPLETED])
+def test_settle_ledger_projection_upserts_queued_row_without_downgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stored_status: DeliveryStatus,
+) -> None:
+    """USR-577: candidate evidence reaches an already queued row; a terminal row is never reopened."""
+    local, _gh = _gitfile_env(tmp_path)
+    _state, queue = _isolate_queue(monkeypatch, tmp_path)
+    _seed_ticket(local, "USR-76")
+    _git(local, "add", "-A")
+    _git(local, "commit", "--quiet", "-m", "chore: seed ledger")
+    closed = stored_status == DeliveryStatus.COMPLETED
+    queue.register_ticket(UserTicket(
+        id="USR-76", project_id="darkfac", title="Ticket de teste", status=stored_status,
+        delivery_evidence="abc:merged" if closed else None,
+    ))
+    candidate = UserTicket(
+        id="USR-76", project_id="darkfac", title="Ticket de teste", status=DeliveryStatus.PLANNED,
+        delivery_evidence="candidate:abc",
+    )
+    (local / LEDGER).write_text("[]\n", encoding="utf-8")
+
+    GitAutonomyManager(local).settle_ledger_projection(candidate, local)
+
+    assert queue.get_ticket("USR-76").delivery_evidence == ("abc:merged" if closed else "candidate:abc")
+    assert _git(local, "status", "--porcelain") == ""
+
+
 def test_complete_ticket_rebases_over_origin_ledger_change_without_conflict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

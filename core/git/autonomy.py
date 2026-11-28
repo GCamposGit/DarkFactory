@@ -1103,6 +1103,9 @@ class GitAutonomyManager:
     def settle_ledger_projection(self, ticket: UserTicket, cwd: Path) -> None:
         """Move the ticket row to the control store and return a tracked ledger to HEAD (USR-577).
 
+        The row is always upserted before the file is discarded. Among the file row, ``ticket``
+        and the stored row, a terminal one wins, then one with evidence, then the newest.
+
         A ledger absent from HEAD (a standalone repository with no versioned ledger) is left
         alone and still ships with its delivery commit. When the control store cannot take the row the file is kept
         modified rather than losing the evidence.
@@ -1112,8 +1115,16 @@ class GitAutonomyManager:
         from core.demands import queue_store
 
         try:
-            if queue_store.get_ticket(ticket.id) is None:
-                queue_store.register_ticket(ticket)
+            rows = [
+                row for row in (
+                    DemandsStore(cwd / _LEDGER_RELATIVE)._file_ticket(ticket.id),
+                    ticket,
+                    queue_store.get_ticket(ticket.id),
+                ) if row is not None
+            ]
+            queue_store.register_ticket(max(rows, key=lambda row: (
+                queue_store.is_terminal_ticket(row), bool((row.delivery_evidence or "").strip()), row.updated_at,
+            )))
         except Exception as exc:  # noqa: BLE001 - keep the file projection instead of losing the row
             logger.warning("Control store did not take %s; ledger projection kept in %s: %s", ticket.id, cwd, exc)
             return

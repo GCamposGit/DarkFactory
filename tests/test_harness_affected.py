@@ -1221,16 +1221,39 @@ def test_affected_time_cap_exceeded_returns_structured_error(monkeypatch, tmp_pa
     assert "[STEP_TIMEOUT] affected tests phase=execution" in output
 
 
-def test_affected_run_streams_progress_before_pytest_finishes(tmp_path, capfd, monkeypatch):
+def test_affected_run_streams_progress_before_pytest_finishes(tmp_path, monkeypatch):
+    """test_b only passes if the parent echoed test_a's progress while pytest was still running."""
+    import io
+    import sys
+
     from core.line import gate_ram
 
+    seen = tmp_path / "seen"
     _write(tmp_path, "tests/test_a.py", "def test_a(): assert True\n")
-    _write(tmp_path, "tests/test_b.py", "def test_b(): assert True\n")
+    _write(tmp_path, "tests/test_b.py", (
+        "import pathlib, time\n"
+        "def test_b():\n"
+        "    deadline = time.monotonic() + 20\n"
+        f"    while not pathlib.Path({str(seen)!r}).exists():\n"
+        "        assert time.monotonic() < deadline, 'progress not echoed live'\n"
+        "        time.sleep(0.05)\n"
+    ))
+
+    class Sink(io.StringIO):
+        def write(self, text: str) -> int:
+            # Collection lines carry node ids ("::"); only the execution line releases test_b.
+            if "test_a.py" in text and "::" not in text:
+                seen.touch()
+            return super().write(text)
+
+    sink = Sink()
+    monkeypatch.setattr(sys, "stdout", sink)
     monkeypatch.setattr(gate_ram, "measure_workers", lambda scope="full": gate_ram.RamReading(2.0, 1))
     selection = affected.Selection("subset", ["tests/test_a.py", "tests/test_b.py"], {}, [], ["x.py"])
-    assert affected.run_pytest(tmp_path, selection, ["-p", "no:cacheprovider"]) == 0
-    output = capfd.readouterr().out.replace("\\", "/")
-    assert "tests/test_a.py" in output and "tests/test_b.py" in output and "2 passed" in output
+
+    assert affected.run_pytest(tmp_path, selection, ["-p", "no:cacheprovider"]) == 0, sink.getvalue()
+    output = sink.getvalue().replace("\\", "/")
+    assert "tests/test_a.py::test_a" in output  # collection is echoed too
     assert output.count("2 passed") == 1
 
 

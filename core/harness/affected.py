@@ -1057,12 +1057,13 @@ def _print_time_cap_error(phase: str, cap_s: float, elapsed_s: float, selected: 
 
 
 def _collect_test_count(repo_root: Path, command: list[str], timeout: float) -> tuple[int, int]:
-    result = subprocess.run(
+    result = _stream_run(
         [*command, "--collect-only"], cwd=repo_root, timeout=timeout,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
     )
     if result.returncode:
-        print(result.stdout or "")
+        if not getattr(result, "streamed", False):
+            print(result.stdout or "")
         return result.returncode, 0
     # Quiet collection lists one node id per parametrized test case.
     count = sum("::" in line and not line.startswith(" ") for line in (result.stdout or "").splitlines())
